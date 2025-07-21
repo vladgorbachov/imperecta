@@ -170,8 +170,7 @@ export function AssignedToMe() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 animate-pulse" />
+        <CardTitle className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           Assigned to Me
         </CardTitle>
         <CardDescription className="text-muted-foreground">

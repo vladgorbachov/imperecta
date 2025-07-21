@@ -134,8 +134,7 @@ export function RecentActivity() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
-          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 animate-pulse" />
+        <CardTitle className="text-xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">
           {t("dashboard", "recentActivity")}
         </CardTitle>
         <CardDescription className="text-muted-foreground">
@@ -158,18 +157,11 @@ export function RecentActivity() {
                   <p className="font-medium leading-tight text-foreground group-hover:text-primary transition-colors">
                     {activity.description}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-full">
-                      {activity.time}
-                    </span>
-                    <div className={`
-                      w-2 h-2 rounded-full
-                      ${activity.type === 'task' ? 'bg-blue-500' :
-                        activity.type === 'update' ? 'bg-yellow-500' :
-                        activity.type === 'user' ? 'bg-green-500' :
-                        'bg-purple-500'}
-                    `} />
-                  </div>
+                                     <div className="flex items-center gap-2">
+                     <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-full">
+                       {activity.time}
+                     </span>
+                   </div>
                 </div>
               </div>
             </div>

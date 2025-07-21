@@ -10,19 +10,13 @@ export default function HomePage() {
       <div className="space-y-6">
         {/* Welcome Section */}
         <div className="glass-card">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
-                Welcome to Imperecta
-              </h1>
-              <p className="text-muted-foreground mt-2">
-                Your modern enterprise management dashboard with glass morphism design
-              </p>
-            </div>
-            <div className="hidden md:flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-sm text-muted-foreground">System Online</span>
-            </div>
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
+              Welcome to Imperecta
+            </h1>
+            <p className="text-muted-foreground mt-2">
+              Your modern enterprise management dashboard with glass morphism design
+            </p>
           </div>
         </div>
 

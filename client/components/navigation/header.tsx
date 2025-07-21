@@ -51,7 +51,7 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
             height={32}
             className="dark:invert"
           />
-          <span className="ml-2 font-semibold text-lg bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
+          <span className="ml-2 font-semibold text-lg text-foreground dark:text-white">
             Imperecta
           </span>
         </div>
@@ -99,9 +99,8 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
           </DropdownMenuContent>
         </DropdownMenu>
         
-        <Button variant="ghost" size="icon" className="btn-glass relative">
+        <Button variant="ghost" size="icon" className="btn-glass">
           <Bell className="h-5 w-5" />
-          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-gradient-to-r from-red-500 to-pink-500 animate-pulse" />
         </Button>
         
         <DropdownMenu>

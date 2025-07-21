@@ -44,8 +44,7 @@ export function QuickActions() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
-          <Zap className="h-5 w-5 text-orange-500" />
+        <CardTitle className="text-xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
           {t("dashboard", "quickActions")}
         </CardTitle>
         <CardDescription className="text-muted-foreground">

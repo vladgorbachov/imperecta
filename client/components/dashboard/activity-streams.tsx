@@ -166,8 +166,7 @@ export function ActivityStreams() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-purple-600 to-cyan-600 bg-clip-text text-transparent">
-          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-purple-500 to-cyan-600 animate-pulse" />
+        <CardTitle className="text-xl font-bold bg-gradient-to-r from-purple-600 to-cyan-600 bg-clip-text text-transparent">
           Activity Streams
         </CardTitle>
         <CardDescription className="text-muted-foreground">
@@ -196,18 +195,11 @@ export function ActivityStreams() {
                       {activity.item}
                     </span>
                   </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-full">
-                      {activity.time}
-                    </span>
-                    <div className={`
-                      w-2 h-2 rounded-full
-                      ${activity.type === 'comment' ? 'bg-blue-500' :
-                        activity.type === 'task' ? 'bg-green-500' :
-                        activity.type === 'code' ? 'bg-purple-500' :
-                        'bg-yellow-500'}
-                    `} />
-                  </div>
+                                     <div className="flex items-center gap-2">
+                     <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-full">
+                       {activity.time}
+                     </span>
+                   </div>
                 </div>
               </div>
             </div>

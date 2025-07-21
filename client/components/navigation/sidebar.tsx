@@ -110,7 +110,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 height={32}
                 className="dark:invert"
               />
-              <span className="ml-2 font-bold text-xl bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
+              <span className="ml-2 font-bold text-xl text-foreground dark:text-white">
                 Imperecta
               </span>
             </div>
@@ -126,7 +126,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 key={route.href}
                 href={route.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-300 group",
+                  "flex items-center gap-3 rounded-xl px-4 py-3 text-base font-medium transition-all duration-300 group",
                   pathname === route.href 
                     ? "glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-primary-foreground shadow-lg" 
                     : "hover:glass-card hover:bg-muted/50 hover:scale-105",
@@ -141,9 +141,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 <span className="transition-colors">
                   {route.label}
                 </span>
-                {pathname === route.href && (
-                  <div className="ml-auto w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 animate-pulse" />
-                )}
               </Link>
             ))}
           </nav>

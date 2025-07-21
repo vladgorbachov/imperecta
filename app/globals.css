@@ -216,7 +216,7 @@ body {
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .dashboard-grid-item {
@@ -246,9 +246,7 @@ body {
 
 /* Logo integration */
 .logo-container {
-  @apply glass rounded-xl p-4;
-  background: hsl(var(--glass-bg) / 0.8);
-  border: 1px solid hsl(var(--glass-border) / 0.2);
+  @apply p-4;
   display: flex;
   align-items: center;
   justify-content: center;
