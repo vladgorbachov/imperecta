@@ -16,7 +16,7 @@ import { useLanguage } from "@/client/i18n/language-context"
 import type { Language } from "@/client/i18n/translations"
 import { useTheme } from "next-themes"
 import { useSession, signOut } from "next-auth/react"
-// import type { User } from "@/types/user" // This is no longer needed
+import Image from "next/image"
 
 interface HeaderProps {
   onMenuButtonClick: () => void
@@ -26,7 +26,7 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
   const { language, setLanguage, t } = useLanguage()
   const { theme, setTheme } = useTheme()
   const { data: session } = useSession()
-  const user = session?.user // The user object is now correctly typed from useSession
+  const user = session?.user
 
   const languages = [
     { code: "en", name: t("common", "english") },
@@ -36,31 +36,55 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
   ]
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card px-4 md:px-6">
-      <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuButtonClick}>
-        <Menu className="h-5 w-5" />
-      </Button>
-      <div className="hidden w-full max-w-sm md:flex">
+    <header className="header-glass sticky top-0 z-30 flex h-16 items-center justify-between px-4 md:px-6">
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" size="icon" className="lg:hidden btn-glass" onClick={onMenuButtonClick}>
+          <Menu className="h-5 w-5" />
+        </Button>
+        
+        {/* Logo */}
+        <div className="logo-container">
+          <Image 
+            src="/logo.png" 
+            alt="Imperecta" 
+            width={32} 
+            height={32}
+            className="dark:invert"
+          />
+          <span className="ml-2 font-semibold text-lg bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
+            Imperecta
+          </span>
+        </div>
+      </div>
+
+      <div className="hidden w-full max-w-sm md:flex mx-4">
         <div className="relative w-full">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
             placeholder={t("common", "search")}
-            className="w-full rounded-md border bg-background pl-8"
+            className="input-glass w-full pl-10 focus-glass"
           />
         </div>
       </div>
+
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="btn-glass"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        >
           {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </Button>
+        
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
+            <Button variant="ghost" size="icon" className="btn-glass">
               <Globe className="h-5 w-5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="glass">
             <DropdownMenuLabel>{t("common", "language")}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             {languages.map((lang) => (
@@ -74,35 +98,46 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="icon" className="relative">
+        
+        <Button variant="ghost" size="icon" className="btn-glass relative">
           <Bell className="h-5 w-5" />
-          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
+          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-gradient-to-r from-red-500 to-pink-500 animate-pulse" />
         </Button>
+        
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full">
-              <Avatar className="h-8 w-8">
-                <AvatarImage src={user?.avatar || "/placeholder.svg"} alt={user?.name || ""} />
-                <AvatarFallback>
+            <Button variant="ghost" size="icon" className="btn-glass rounded-full">
+              <Avatar className="h-8 w-8 ring-2 ring-primary/20">
+                <AvatarImage src={user?.image || "/placeholder-user.jpg"} alt={user?.name || ""} />
+                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
                   {user?.name
-                    .split(" ")
+                    ?.split(" ")
                     .map((n) => n[0])
-                    .join("")}
+                    .join("") || "U"}
                 </AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>{user?.name}</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="glass">
+            <DropdownMenuLabel className="font-semibold">{user?.name}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <a href="/profile">{t("common", "profile")}</a>
+              <a href="/profile" className="flex items-center gap-2">
+                <span>{t("common", "profile")}</span>
+              </a>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <a href="/settings">{t("common", "settings")}</a>
+              <a href="/settings" className="flex items-center gap-2">
+                <span>{t("common", "settings")}</span>
+              </a>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => signOut()}>{t("common", "logout")}</DropdownMenuItem>
+            <DropdownMenuItem 
+              onClick={() => signOut()}
+              className="text-red-600 focus:text-red-600"
+            >
+              {t("common", "logout")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

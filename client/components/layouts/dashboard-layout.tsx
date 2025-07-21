@@ -25,18 +25,30 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   if (status === "loading") {
     return (
-      <div className="flex h-screen w-full items-center justify-center">
-        <Skeleton className="h-12 w-12 rounded-full" />
+      <div className="flex h-screen w-full items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950">
+        <div className="glass-card">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-12 w-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-blue-950 dark:via-slate-900 dark:to-purple-950">
       <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onMenuButtonClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto p-6">
+          <div className="mx-auto max-w-7xl">
+            {children}
+          </div>
+        </main>
       </div>
     </div>
   )

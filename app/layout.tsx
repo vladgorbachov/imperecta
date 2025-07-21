@@ -7,7 +7,7 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: "Imperecta - Enterprise Management System",
-  description: "Administration platform for small and medium businesses",
+  description: "Modern administration platform with glass morphism design for small and medium businesses",
   icons: {
     icon: [
       {
@@ -15,13 +15,14 @@ export const metadata: Metadata = {
         sizes: "any",
       },
       {
-        url: "/icon.svg",
-        type: "image/svg+xml",
+        url: "/icon.png",
+        sizes: "32x32",
+        type: "image/png",
       },
     ],
-    apple: "/apple-touch-icon.png",
+    apple: "/icon.png",
   },
-    generator: 'v0.dev'
+  generator: 'Imperecta v1.0'
 }
 
 export default function RootLayout({
@@ -30,10 +31,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning className="dark">
+    <html lang="en" suppressHydrationWarning>
       <head />
       <body>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem={true} disableTransitionOnChange>
           <SessionProvider>
             <LanguageProvider>{children}</LanguageProvider>
           </SessionProvider>

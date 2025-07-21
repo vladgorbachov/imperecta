@@ -164,22 +164,51 @@ export function ActivityStreams() {
   }
 
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle>Activity Streams</CardTitle>
-        <CardDescription>Recent activity across your projects</CardDescription>
+    <Card className="glass-card h-full">
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-purple-600 to-cyan-600 bg-clip-text text-transparent">
+          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-purple-500 to-cyan-600 animate-pulse" />
+          Activity Streams
+        </CardTitle>
+        <CardDescription className="text-muted-foreground">
+          Recent activity across your projects
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4 overflow-y-auto max-h-96">
-          {currentActivities.map((activity) => (
-            <div key={activity.id} className="flex items-start gap-4 rounded-md border p-3 hover:bg-muted/50">
-              <div className="mt-0.5">{getActivityIcon(activity.type)}</div>
-              <div className="space-y-1">
-                <p className="font-medium leading-none">
-                  <span className="text-primary">{activity.user}</span> {activity.action}{" "}
-                  <span className="font-semibold">{activity.item}</span>
-                </p>
-                <p className="text-sm text-muted-foreground">{activity.time}</p>
+        <div className="space-y-3 overflow-y-auto max-h-96 pr-2">
+          {currentActivities.map((activity, index) => (
+            <div 
+              key={activity.id} 
+              className="glass rounded-xl p-4 hover:scale-105 transition-all duration-300 cursor-pointer group"
+              style={{ animationDelay: `${index * 100}ms` }}
+            >
+              <div className="flex items-start gap-3">
+                <div className="mt-1 p-2 rounded-full bg-muted/50 group-hover:bg-primary/10 transition-colors">
+                  {getActivityIcon(activity.type)}
+                </div>
+                <div className="space-y-2 flex-1">
+                  <p className="font-medium leading-tight">
+                    <span className="text-primary font-semibold hover:text-primary/80 transition-colors">
+                      {activity.user}
+                    </span>{" "}
+                    <span className="text-muted-foreground">{activity.action}</span>{" "}
+                    <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                      {activity.item}
+                    </span>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-full">
+                      {activity.time}
+                    </span>
+                    <div className={`
+                      w-2 h-2 rounded-full
+                      ${activity.type === 'comment' ? 'bg-blue-500' :
+                        activity.type === 'task' ? 'bg-green-500' :
+                        activity.type === 'code' ? 'bg-purple-500' :
+                        'bg-yellow-500'}
+                    `} />
+                  </div>
+                </div>
               </div>
             </div>
           ))}

@@ -168,22 +168,49 @@ export function AssignedToMe() {
   }
 
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle>Assigned to Me</CardTitle>
-        <CardDescription>Tasks that require your attention</CardDescription>
+    <Card className="glass-card h-full">
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 animate-pulse" />
+          Assigned to Me
+        </CardTitle>
+        <CardDescription className="text-muted-foreground">
+          Tasks that require your attention
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4 overflow-y-auto max-h-96">
+        <div className="space-y-3 overflow-y-auto max-h-96 pr-2">
           {currentTasks.map((task) => (
-            <div key={task.id} className="flex items-start gap-4 rounded-md border p-3 hover:bg-muted/50">
-              <div className="mt-0.5">{getStatusIcon(task.status)}</div>
-              <div className="space-y-1">
-                <p className="font-medium leading-none">{task.title}</p>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span>{task.project}</span>
-                  <span>•</span>
-                  <span>{task.dueDate}</span>
+            <div 
+              key={task.id} 
+              className="glass rounded-xl p-4 hover:scale-105 transition-all duration-300 cursor-pointer group"
+            >
+              <div className="flex items-start gap-3">
+                <div className="mt-1 p-1 rounded-full bg-muted/50 group-hover:bg-primary/10 transition-colors">
+                  {getStatusIcon(task.status)}
+                </div>
+                <div className="space-y-2 flex-1">
+                  <p className="font-semibold leading-tight text-foreground group-hover:text-primary transition-colors">
+                    {task.title}
+                  </p>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span className="px-2 py-1 rounded-full bg-muted/50 text-xs font-medium">
+                      {task.project}
+                    </span>
+                    <span className="text-muted-foreground/50">•</span>
+                    <span className="text-xs">{task.dueDate}</span>
+                  </div>
+                </div>
+                <div className={`
+                  px-2 py-1 rounded-full text-xs font-medium
+                  ${task.priority === 'High' || task.priority === 'Высокий' || task.priority === 'Високий' || task.priority === 'Ridicată' 
+                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' 
+                    : task.priority === 'Medium' || task.priority === 'Средний' || task.priority === 'Середній' || task.priority === 'Medie'
+                    ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                    : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  }
+                `}>
+                  {task.priority}
                 </div>
               </div>
             </div>

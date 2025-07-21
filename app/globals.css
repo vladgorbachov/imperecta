@@ -4,66 +4,91 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Light theme - Modern glass design */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 222 47% 11%;
 
     --primary: 210 100% 35%;
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 47% 11%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
+    
+    /* Glass effect colors */
+    --glass-bg: 0 0% 100%;
+    --glass-border: 214 32% 91%;
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    --glass-blur: blur(20px);
+    
+    /* Accent colors from logo */
+    --accent-blue: 210 100% 50%;
+    --accent-purple: 270 100% 60%;
+    --accent-cyan: 180 100% 50%;
   }
 
   .dark {
-    /* Very dark cobalt blue - 50% darker than previous */
-    --background: 220 70% 7.5%;
+    /* Dark theme - Deep glass design */
+    --background: 220 70% 8%;
     --foreground: 210 40% 98%;
 
-    --card: 220 70% 7.5%;
+    --card: 220 70% 10%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 220 70% 7.5%;
+    --popover: 220 70% 10%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 45 100% 70%; /* Gold */
+    --primary: 45 100% 70%;
     --primary-foreground: 222 47% 11%;
 
     --secondary: 217 32% 17%;
     --secondary-foreground: 210 40% 98%;
 
     --muted: 217 32% 17%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted-foreground: 215 20% 65%;
 
     --accent: 217 32% 17%;
     --accent-foreground: 210 40% 98%;
 
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 63% 31%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 45 100% 70%; /* Gold */
+    --border: 45 100% 70%;
     --input: 217 32% 17%;
-    --ring: 45 100% 70%; /* Gold */
+    --ring: 45 100% 70%;
+
+    --radius: 0.75rem;
+    
+    /* Glass effect colors for dark theme */
+    --glass-bg: 220 70% 12%;
+    --glass-border: 45 100% 70%;
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --glass-blur: blur(20px);
+    
+    /* Accent colors from logo */
+    --accent-blue: 210 100% 60%;
+    --accent-purple: 270 100% 70%;
+    --accent-cyan: 180 100% 60%;
   }
 }
 
@@ -73,16 +98,41 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
-/* Create brushed metal texture effect with very dark cobalt blue */
-.dark body {
-  position: relative;
-  background-color: hsl(220, 70%, 7.5%); /* Very dark cobalt blue */
+/* Modern glass morphism effects */
+.glass {
+  background: hsl(var(--glass-bg) / 0.8);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+  box-shadow: var(--glass-shadow);
 }
 
-/* Add the brushed texture effect using CSS */
+.glass-card {
+  @apply glass rounded-xl p-6;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* Light theme background with subtle gradient */
+body {
+  background: linear-gradient(135deg, hsl(210, 40%, 98%) 0%, hsl(210, 40%, 95%) 100%);
+  min-height: 100vh;
+}
+
+/* Dark theme background with sophisticated texture */
+.dark body {
+  background: linear-gradient(135deg, hsl(220, 70%, 8%) 0%, hsl(220, 70%, 6%) 100%);
+  position: relative;
+}
+
 .dark body::before {
   content: "";
   position: fixed;
@@ -90,80 +140,176 @@
   left: 0;
   width: 100%;
   height: 100%;
-  /* Subtle vertical lines */
-  background-image: repeating-linear-gradient(
-      90deg,
-      hsla(220, 70%, 10%, 0.1) 0px,
-      hsla(220, 70%, 8%, 0.1) 1px,
-      transparent 1px,
-      transparent 2px
-    ), /* Finer vertical lines */
-    repeating-linear-gradient(
-      180deg,
-      hsla(220, 70%, 10%, 0.05) 0px,
-      hsla(220, 70%, 8%, 0.05) 1px,
-      transparent 1px,
-      transparent 2px
-    ), /* Noise texture */
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+  background-image: 
+    radial-gradient(circle at 20% 80%, hsl(45, 100%, 70%, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, hsl(210, 100%, 60%, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, hsl(270, 100%, 70%, 0.02) 0%, transparent 50%);
   z-index: -1;
   pointer-events: none;
-  opacity: 0.8;
 }
 
-/* Add a subtle gradient overlay */
-.dark body::after {
+/* Enhanced card styles */
+.card {
+  @apply glass-card;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
   content: "";
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    135deg,
-    hsla(220, 70%, 5%, 0.7) 0%,
-    hsla(220, 70%, 7%, 0.5) 50%,
-    hsla(220, 70%, 9%, 0.3) 100%
-  );
-  z-index: -1;
-  pointer-events: none;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
 }
 
-/* Adjust card backgrounds to be slightly transparent to show texture */
-.dark .bg-card {
-  background-color: hsla(220, 70%, 9%, 0.7);
-  backdrop-filter: blur(5px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+/* Button glass effects */
+.btn-glass {
+  @apply glass rounded-lg px-4 py-2 font-medium transition-all duration-300;
+  background: hsl(var(--glass-bg) / 0.9);
+  border: 1px solid hsl(var(--glass-border) / 0.3);
 }
 
-/* Add subtle inner shadow to cards */
-.dark .card {
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05), 0 2px 8px rgba(0, 0, 0, 0.2);
+.btn-glass:hover {
+  background: hsl(var(--glass-bg) / 0.95);
+  border-color: hsl(var(--glass-border) / 0.5);
+  transform: translateY(-1px);
 }
 
-/* Dashboard grid styles */
+/* Input glass effects */
+.input-glass {
+  @apply glass rounded-lg px-3 py-2 transition-all duration-300;
+  background: hsl(var(--glass-bg) / 0.8);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+.input-glass:focus {
+  background: hsl(var(--glass-bg) / 0.95);
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1);
+}
+
+/* Navigation glass effects */
+.nav-glass {
+  @apply glass rounded-xl;
+  background: hsl(var(--glass-bg) / 0.9);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Sidebar glass effects */
+.sidebar-glass {
+  @apply glass;
+  background: hsl(var(--glass-bg) / 0.95);
+  border-right: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Header glass effects */
+.header-glass {
+  @apply glass;
+  background: hsl(var(--glass-bg) / 0.9);
+  border-bottom: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Dashboard grid with glass spacing */
 .dashboard-grid {
-  display: flex;
-  flex-wrap: wrap;
-  margin: -15px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
 }
 
 .dashboard-grid-item {
-  flex: 0 0 100%;
-  max-width: 100%;
-  padding: 15px;
+  min-height: 200px;
 }
 
+.dashboard-grid-item.col-span-full {
+  grid-column: 1 / -1;
+}
+
+/* Responsive adjustments */
 @media (min-width: 768px) {
-  .dashboard-grid-item {
-    flex: 0 0 50%;
-    max-width: 50%;
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (min-width: 1024px) {
-  .dashboard-grid-item {
-    flex: 0 0 33.333333%;
-    max-width: 33.333333%;
+  .dashboard-grid {
+    grid-template-columns: repeat(3, 1fr);
   }
+  
+  .dashboard-grid-item.lg\:col-span-1 {
+    grid-column: span 1;
+  }
+}
+
+/* Logo integration */
+.logo-container {
+  @apply glass rounded-xl p-4;
+  background: hsl(var(--glass-bg) / 0.8);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Accent gradients */
+.accent-gradient {
+  background: linear-gradient(135deg, 
+    hsl(var(--accent-blue) / 0.1) 0%, 
+    hsl(var(--accent-purple) / 0.1) 50%, 
+    hsl(var(--accent-cyan) / 0.1) 100%);
+}
+
+.accent-border {
+  border: 1px solid;
+  border-image: linear-gradient(135deg, 
+    hsl(var(--accent-blue)), 
+    hsl(var(--accent-purple)), 
+    hsl(var(--accent-cyan))) 1;
+}
+
+/* Enhanced focus states */
+.focus-glass:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.2);
+  background: hsl(var(--glass-bg) / 0.95);
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Dark theme scrollbar */
+.dark ::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.3);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.6);
 }
