@@ -8,18 +8,6 @@ export default function HomePage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Welcome Section */}
-        <div className="glass-card">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent">
-              Welcome to Imperecta
-            </h1>
-            <p className="text-muted-foreground mt-2">
-              Your modern enterprise management dashboard with glass morphism design
-            </p>
-          </div>
-        </div>
-
         {/* Dashboard grid with glass spacing */}
         <div className="dashboard-grid">
           {/* Row 1: Main dashboard components - 3 in a row */}

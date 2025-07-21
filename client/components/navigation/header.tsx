@@ -16,7 +16,6 @@ import { useLanguage } from "@/client/i18n/language-context"
 import type { Language } from "@/client/i18n/translations"
 import { useTheme } from "next-themes"
 import { useSession, signOut } from "next-auth/react"
-import Image from "next/image"
 
 interface HeaderProps {
   onMenuButtonClick: () => void
@@ -36,39 +35,22 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
   ]
 
   return (
-    <header className="header-glass sticky top-0 z-30 flex h-16 items-center justify-between px-4 md:px-6">
-      <div className="flex items-center gap-4">
+    <header className="header-glass sticky top-0 z-30 flex h-16 items-center justify-end px-4 md:px-6">
+      <div className="flex items-center gap-2">
+        <div className="hidden md:flex">
+          <div className="relative w-48">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder={t("common", "search")}
+              className="input-glass w-full pl-10 focus-glass"
+            />
+          </div>
+        </div>
+        
         <Button variant="ghost" size="icon" className="lg:hidden btn-glass" onClick={onMenuButtonClick}>
           <Menu className="h-5 w-5" />
         </Button>
-        
-        {/* Logo */}
-        <div className="logo-container">
-          <Image 
-            src="/logo.png" 
-            alt="Imperecta" 
-            width={32} 
-            height={32}
-            className="dark:invert"
-          />
-          <span className="ml-2 font-semibold text-lg text-foreground dark:text-white">
-            Imperecta
-          </span>
-        </div>
-      </div>
-
-      <div className="hidden w-full max-w-sm md:flex mx-4">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder={t("common", "search")}
-            className="input-glass w-full pl-10 focus-glass"
-          />
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
         <Button 
           variant="ghost" 
           size="icon" 

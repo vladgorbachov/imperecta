@@ -110,7 +110,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 height={32}
                 className="dark:invert"
               />
-              <span className="ml-2 font-bold text-xl text-foreground dark:text-white">
+              <span className="ml-2 font-bold text-xl !text-black dark:!text-white">
                 Imperecta
               </span>
             </div>
@@ -128,7 +128,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-4 py-3 text-base font-medium transition-all duration-300 group",
                   pathname === route.href 
-                    ? "glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-primary-foreground shadow-lg" 
+                    ? "glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-black dark:text-white shadow-lg" 
                     : "hover:glass-card hover:bg-muted/50 hover:scale-105",
                 )}
               >

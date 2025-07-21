@@ -50,13 +50,13 @@
   .dark {
     /* Dark theme - Deep glass design */
     --background: 220 70% 8%;
-    --foreground: 210 40% 98%;
+    --foreground: 0 0% 100%;
 
     --card: 220 70% 10%;
-    --card-foreground: 210 40% 98%;
+    --card-foreground: 0 0% 100%;
 
     --popover: 220 70% 10%;
-    --popover-foreground: 210 40% 98%;
+    --popover-foreground: 0 0% 100%;
 
     --primary: 45 100% 70%;
     --primary-foreground: 222 47% 11%;
@@ -217,10 +217,12 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1.25rem;
+  width: 100%;
 }
 
 .dashboard-grid-item {
   min-height: 200px;
+  width: 100%;
 }
 
 .dashboard-grid-item.col-span-full {
@@ -244,12 +246,33 @@ body {
   }
 }
 
+@media (min-width: 1280px) {
+  .dashboard-grid {
+    gap: 1.5rem; /* 24px for larger screens */
+  }
+}
+
+@media (min-width: 1536px) {
+  .dashboard-grid {
+    gap: 2rem; /* 32px for very large screens */
+  }
+}
+
 /* Logo integration */
 .logo-container {
   @apply p-4;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Logo text with forced colors */
+.logo-container span {
+  color: #000000 !important;
+}
+
+.dark .logo-container span {
+  color: #ffffff !important;
 }
 
 /* Accent gradients */
@@ -280,7 +303,18 @@ body {
   transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* Custom scrollbar */
+/* Hide scrollbars for all elements */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+::-webkit-scrollbar {
+  display: none; /* WebKit browsers (Chrome, Safari, Edge) */
+}
+
+/* Alternative: Custom scrollbar styling (uncomment if you want custom scrollbars) */
+/*
 ::-webkit-scrollbar {
   width: 8px;
 }
@@ -299,7 +333,6 @@ body {
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
-/* Dark theme scrollbar */
 .dark ::-webkit-scrollbar-track {
   background: hsl(var(--muted) / 0.3);
 }
@@ -311,3 +344,4 @@ body {
 .dark ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.6);
 }
+*/
