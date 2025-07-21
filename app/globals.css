@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 210 100% 35%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Very dark cobalt blue - 50% darker than previous */
+    --background: 220 70% 7.5%;
+    --foreground: 210 40% 98%;
+
+    --card: 220 70% 7.5%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 220 70% 7.5%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 45 100% 70%; /* Gold */
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 32% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 32% 17%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217 32% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 45 100% 70%; /* Gold */
+    --input: 217 32% 17%;
+    --ring: 45 100% 70%; /* Gold */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Create brushed metal texture effect with very dark cobalt blue */
+.dark body {
+  position: relative;
+  background-color: hsl(220, 70%, 7.5%); /* Very dark cobalt blue */
+}
+
+/* Add the brushed texture effect using CSS */
+.dark body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  /* Subtle vertical lines */
+  background-image: repeating-linear-gradient(
+      90deg,
+      hsla(220, 70%, 10%, 0.1) 0px,
+      hsla(220, 70%, 8%, 0.1) 1px,
+      transparent 1px,
+      transparent 2px
+    ), /* Finer vertical lines */
+    repeating-linear-gradient(
+      180deg,
+      hsla(220, 70%, 10%, 0.05) 0px,
+      hsla(220, 70%, 8%, 0.05) 1px,
+      transparent 1px,
+      transparent 2px
+    ), /* Noise texture */
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* Add a subtle gradient overlay */
+.dark body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    hsla(220, 70%, 5%, 0.7) 0%,
+    hsla(220, 70%, 7%, 0.5) 50%,
+    hsla(220, 70%, 9%, 0.3) 100%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Adjust card backgrounds to be slightly transparent to show texture */
+.dark .bg-card {
+  background-color: hsla(220, 70%, 9%, 0.7);
+  backdrop-filter: blur(5px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Add subtle inner shadow to cards */
+.dark .card {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05), 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Dashboard grid styles */
+.dashboard-grid {
+  display: flex;
+  flex-wrap: wrap;
+  margin: -15px;
+}
+
+.dashboard-grid-item {
+  flex: 0 0 100%;
+  max-width: 100%;
+  padding: 15px;
+}
+
+@media (min-width: 768px) {
+  .dashboard-grid-item {
+    flex: 0 0 50%;
+    max-width: 50%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-grid-item {
+    flex: 0 0 33.333333%;
+    max-width: 33.333333%;
+  }
+}
