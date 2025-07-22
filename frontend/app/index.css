@@ -1,0 +1,378 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme - Modern glass design */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 210 100% 35%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 47% 11%;
+
+    --radius: 0.75rem;
+    
+    /* Glass effect colors */
+    --glass-bg: 0 0% 100%;
+    --glass-border: 214 32% 91%;
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    --glass-blur: blur(20px);
+    
+    /* Accent colors from logo */
+    --accent-blue: 210 100% 50%;
+    --accent-purple: 270 100% 60%;
+    --accent-cyan: 180 100% 50%;
+  }
+
+  .dark {
+    /* Dark theme - Deep glass design */
+    --background: 220 70% 8%;
+    --foreground: 0 0% 100%;
+
+    --card: 220 70% 10%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 220 70% 10%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 45 100% 70%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 32% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 32% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 217 32% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 45 100% 70%;
+    --input: 217 32% 17%;
+    --ring: 45 100% 70%;
+
+    --radius: 0.75rem;
+    
+    /* Glass effect colors for dark theme */
+    --glass-bg: 220 70% 12%;
+    --glass-border: 45 100% 70%;
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --glass-blur: blur(20px);
+    
+    /* Accent colors from logo */
+    --accent-blue: 210 100% 60%;
+    --accent-purple: 270 100% 70%;
+    --accent-cyan: 180 100% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    /* Increase all fonts by 50% */
+    font-size: 1.5rem;
+    line-height: 1.6;
+  }
+  
+  /* Increase specific text sizes */
+  h1 { font-size: 2.25rem; }
+  h2 { font-size: 1.875rem; }
+  h3 { font-size: 1.5rem; }
+  h4 { font-size: 1.25rem; }
+  h5 { font-size: 1.125rem; }
+  h6 { font-size: 1rem; }
+  
+  /* Increase button and input text */
+  button, input, textarea, select {
+    font-size: 1.5rem;
+  }
+  
+  /* Header button styles - make them more visible */
+  .header-btn {
+    @apply bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border border-gray-200 dark:border-gray-700;
+    @apply hover:bg-white dark:hover:bg-gray-800;
+    @apply shadow-sm hover:shadow-md;
+    @apply transition-all duration-200;
+  }
+  
+  /* Header icon styles */
+  .header-icon {
+    @apply text-gray-700 dark:text-gray-300;
+    @apply hover:text-gray-900 dark:hover:text-white;
+    @apply transition-colors duration-200;
+  }
+}
+
+/* Modern glass morphism effects */
+.glass {
+  background: hsl(var(--glass-bg) / 0.8);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-card {
+  @apply glass rounded-xl p-6;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* Light theme background with subtle gradient */
+body {
+  background: linear-gradient(135deg, hsl(210, 40%, 98%) 0%, hsl(210, 40%, 95%) 100%);
+  min-height: 100vh;
+}
+
+/* Dark theme background with sophisticated texture */
+.dark body {
+  background: linear-gradient(135deg, hsl(220, 70%, 8%) 0%, hsl(220, 70%, 6%) 100%);
+  position: relative;
+}
+
+.dark body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    radial-gradient(circle at 20% 80%, hsl(45, 100%, 70%, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, hsl(210, 100%, 60%, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, hsl(270, 100%, 70%, 0.02) 0%, transparent 50%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Enhanced card styles */
+.card {
+  @apply glass-card;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
+}
+
+/* Button glass effects */
+.btn-glass {
+  @apply glass rounded-lg px-4 py-2 font-medium transition-all duration-300;
+  background: hsl(var(--glass-bg) / 0.9);
+  border: 1px solid hsl(var(--glass-border) / 0.3);
+}
+
+.btn-glass:hover {
+  background: hsl(var(--glass-bg) / 0.95);
+  border-color: hsl(var(--glass-border) / 0.5);
+  transform: translateY(-1px);
+}
+
+/* Input glass effects */
+.input-glass {
+  @apply glass rounded-lg px-3 py-2 transition-all duration-300;
+  background: hsl(var(--glass-bg) / 0.8);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+.input-glass:focus {
+  background: hsl(var(--glass-bg) / 0.95);
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1);
+}
+
+/* Navigation glass effects */
+.nav-glass {
+  @apply glass rounded-xl;
+  background: hsl(var(--glass-bg) / 0.9);
+  border: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Sidebar glass effects */
+.sidebar-glass {
+  @apply glass;
+  background: hsl(var(--glass-bg) / 0.95);
+  border-right: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Header glass effects */
+.header-glass {
+  @apply glass;
+  background: hsl(var(--glass-bg) / 0.9);
+  border-bottom: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Dashboard grid with glass spacing */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.dashboard-grid-item {
+  min-height: 200px;
+  width: 100%;
+}
+
+.dashboard-grid-item.col-span-full {
+  grid-column: 1 / -1;
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  .dashboard-grid-item.lg\:col-span-1 {
+    grid-column: span 1;
+  }
+}
+
+@media (min-width: 1280px) {
+  .dashboard-grid {
+    gap: 1.5rem; /* 24px for larger screens */
+  }
+}
+
+@media (min-width: 1536px) {
+  .dashboard-grid {
+    gap: 2rem; /* 32px for very large screens */
+  }
+}
+
+/* Logo integration */
+.logo-container {
+  @apply p-4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Logo text with forced colors */
+.logo-container span {
+  color: #000000 !important;
+}
+
+.dark .logo-container span {
+  color: #ffffff !important;
+}
+
+/* Accent gradients */
+.accent-gradient {
+  background: linear-gradient(135deg, 
+    hsl(var(--accent-blue) / 0.1) 0%, 
+    hsl(var(--accent-purple) / 0.1) 50%, 
+    hsl(var(--accent-cyan) / 0.1) 100%);
+}
+
+.accent-border {
+  border: 1px solid;
+  border-image: linear-gradient(135deg, 
+    hsl(var(--accent-blue)), 
+    hsl(var(--accent-purple)), 
+    hsl(var(--accent-cyan))) 1;
+}
+
+/* Enhanced focus states */
+.focus-glass:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.2);
+  background: hsl(var(--glass-bg) / 0.95);
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Hide scrollbars for all elements */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* Internet Explorer 10+ */
+}
+
+::-webkit-scrollbar {
+  display: none; /* WebKit browsers (Chrome, Safari, Edge) */
+}
+
+/* Alternative: Custom scrollbar styling (uncomment if you want custom scrollbars) */
+/*
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.3);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.6);
+}
+*/
