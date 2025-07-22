@@ -45,7 +45,7 @@ npm run db:migrate
 npm run dev
 ```
 
-Backend will be available at `http://localhost:3001`
+Backend will be available at `http://`
 
 ### Frontend Setup
 
@@ -68,7 +68,7 @@ npm install
 npm run dev
 ```
 
-Frontend will be available at `http://localhost:5173`
+Frontend will be available at `http://`
 
 ## Development
 
@@ -106,9 +106,9 @@ The project uses Drizzle ORM with PostgreSQL. Database schema is defined in `bac
 
 ### Backend (.env)
 ```
-APP_URL=http://localhost:3001
-PORT=3001
-DATABASE_URL=postgresql://user:password@localhost:5432/database
+APP_URL=http://
+PORT=
+DATABASE_URL=
 SUPABASE_URL=your-supabase-url
 SUPABASE_ANON_KEY=your-supabase-anon-key
 NODE_ENV=development
@@ -116,8 +116,8 @@ NODE_ENV=development
 
 ### Frontend (.env)
 ```
-VITE_APP_URL=http://localhost:5173
-VITE_API_URL=http://localhost:3001
+VITE_APP_URL=http://
+VITE_API_URL=http://
 VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 NODE_ENV=development
