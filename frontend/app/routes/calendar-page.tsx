@@ -166,7 +166,7 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
-
+      
       {/* Calendar Grid */}
       <div className="flex-1 flex">
         <div className="flex-1 p-6">
@@ -325,8 +325,8 @@ export default function CalendarPage() {
                           </Button>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
+        </CardContent>
+      </Card>
                 ))
                              ) : (
                  <div className="py-8">
