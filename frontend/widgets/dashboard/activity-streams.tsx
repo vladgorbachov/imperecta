@@ -42,14 +42,14 @@ export function ActivityStreams() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl">
+        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl dark:gradient-text">
           Activity Streams
         </CardTitle>
       </CardHeader>
       <CardContent className="overflow-y-auto max-h-96 pr-2">
         <div className="space-y-4">
           {activities.map((activity) => (
-            <div key={activity.id} className="glass rounded-xl p-4 hover:scale-105">
+            <div key={activity.id} className="glass rounded-xl p-4 hover:scale-105 dark:neon-glow">
               <div className="flex items-start gap-3">
                 <Avatar className="h-10 w-10">
                   <AvatarImage src={activity.avatar} alt={activity.user} />

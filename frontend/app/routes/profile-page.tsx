@@ -163,7 +163,7 @@ export default function ProfilePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Profile Settings</h1>
+          <h1 className="text-3xl font-bold dark:gradient-text">Profile Settings</h1>
           <p className="text-muted-foreground">Manage your account settings and preferences</p>
         </div>
       </div>
@@ -186,210 +186,216 @@ export default function ProfilePage() {
           <TabsTrigger value="preferences">Preferences</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="profile" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Personal Information</CardTitle>
-              <CardDescription>Update your personal details and profile picture</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Avatar Section */}
-              <div className="space-y-4">
-                <Label>Profile Picture</Label>
-                <ImageUpload
-                  value={formData.avatar_url}
-                  onChange={(value) => handleInputChange('avatar_url', value)}
-                  onRemove={() => handleInputChange('avatar_url', '')}
-                  placeholder="Upload profile picture"
-                  maxSize={5}
-                />
-              </div>
-
-              <Separator />
-
-              {/* Form Fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="first_name">First Name</Label>
-                  <Input
-                    id="first_name"
-                    value={formData.first_name}
-                    onChange={(e) => handleInputChange('first_name', e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="Enter your first name"
+        <TabsContent value="profile" className="page-grid">
+          <div className="page-grid-item col-span-full">
+            <Card className="dark:neon-glow h-full">
+              <CardHeader>
+                <CardTitle className="dark:gradient-text">Personal Information</CardTitle>
+                <CardDescription>Update your personal details and profile picture</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Avatar Section */}
+                <div className="space-y-4">
+                  <Label>Profile Picture</Label>
+                  <ImageUpload
+                    value={formData.avatar_url}
+                    onChange={(value) => handleInputChange('avatar_url', value)}
+                    onRemove={() => handleInputChange('avatar_url', '')}
+                    placeholder="Upload profile picture"
+                    maxSize={5}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="last_name">Last Name</Label>
-                  <Input
-                    id="last_name"
-                    value={formData.last_name}
-                    onChange={(e) => handleInputChange('last_name', e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="Enter your last name"
-                  />
-                </div>
+                <Separator />
 
-                <div className="space-y-2">
-                  <Label htmlFor="middle_name">Middle Name</Label>
-                  <Input
-                    id="middle_name"
-                    value={formData.middle_name}
-                    onChange={(e) => handleInputChange('middle_name', e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="Enter your middle name (optional)"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => handleInputChange('email', e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="Enter your email"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
-                    disabled={!isEditing}
-                    placeholder="Enter your phone number"
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end space-x-2">
-                {isEditing ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsEditing(false)
-                        // Reset form data
-                        if (databaseUser) {
-                          setFormData({
-                            first_name: databaseUser.first_name || "",
-                            last_name: databaseUser.last_name || "",
-                            middle_name: databaseUser.middle_name || "",
-                            email: databaseUser.email || "",
-                            phone: databaseUser.phone || "",
-                            avatar_url: databaseUser.avatar_url || ""
-                          })
-                        }
-                      }}
-                    >
-                      <X className="mr-2 h-4 w-4" />
-                      Cancel
-                    </Button>
-                    <Button onClick={handleSaveProfile} disabled={isLoading}>
-                      <Save className="mr-2 h-4 w-4" />
-                      {isLoading ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </>
-                ) : (
-                  <Button onClick={() => setIsEditing(true)}>
-                    <User className="mr-2 h-4 w-4" />
-                    Edit Profile
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="security" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Security Settings</CardTitle>
-              <CardDescription>Manage your password and security preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="new_password">New Password</Label>
-                  <div className="relative">
+                {/* Form Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="first_name">First Name</Label>
                     <Input
-                      id="new_password"
-                      type={showPassword ? "text" : "password"}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Enter new password"
+                      id="first_name"
+                      value={formData.first_name}
+                      onChange={(e) => handleInputChange('first_name', e.target.value)}
+                      disabled={!isEditing}
+                      placeholder="Enter your first name"
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="last_name">Last Name</Label>
+                    <Input
+                      id="last_name"
+                      value={formData.last_name}
+                      onChange={(e) => handleInputChange('last_name', e.target.value)}
+                      disabled={!isEditing}
+                      placeholder="Enter your last name"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="middle_name">Middle Name</Label>
+                    <Input
+                      id="middle_name"
+                      value={formData.middle_name}
+                      onChange={(e) => handleInputChange('middle_name', e.target.value)}
+                      disabled={!isEditing}
+                      placeholder="Enter your middle name (optional)"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => handleInputChange('email', e.target.value)}
+                      disabled={!isEditing}
+                      placeholder="Enter your email"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      value={formData.phone}
+                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      disabled={!isEditing}
+                      placeholder="Enter your phone number"
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="confirm_password">Confirm Password</Label>
-                  <Input
-                    id="confirm_password"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Confirm new password"
-                  />
+                {/* Action Buttons */}
+                <div className="flex justify-end space-x-2">
+                  {isEditing ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setIsEditing(false)
+                          // Reset form data
+                          if (databaseUser) {
+                            setFormData({
+                              first_name: databaseUser.first_name || "",
+                              last_name: databaseUser.last_name || "",
+                              middle_name: databaseUser.middle_name || "",
+                              email: databaseUser.email || "",
+                              phone: databaseUser.phone || "",
+                              avatar_url: databaseUser.avatar_url || ""
+                            })
+                          }
+                        }}
+                      >
+                        <X className="mr-2 h-4 w-4" />
+                        Cancel
+                      </Button>
+                      <Button onClick={handleSaveProfile} disabled={isLoading}>
+                        <Save className="mr-2 h-4 w-4" />
+                        {isLoading ? "Saving..." : "Save Changes"}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button onClick={() => setIsEditing(true)}>
+                      <User className="mr-2 h-4 w-4" />
+                      Edit Profile
+                    </Button>
+                  )}
                 </div>
-
-                <Button onClick={handleChangePassword} disabled={isLoading}>
-                  <Save className="mr-2 h-4 w-4" />
-                  {isLoading ? "Changing..." : "Change Password"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
-        <TabsContent value="preferences" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Preferences</CardTitle>
-              <CardDescription>Customize your application experience</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium">Email Notifications</h4>
-                    <p className="text-sm text-muted-foreground">Receive email notifications for important updates</p>
+        <TabsContent value="security" className="page-grid">
+          <div className="page-grid-item col-span-full">
+            <Card className="dark:neon-glow h-full">
+              <CardHeader>
+                <CardTitle className="dark:gradient-text">Security Settings</CardTitle>
+                <CardDescription>Manage your password and security preferences</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="new_password">New Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="new_password"
+                        type={showPassword ? "text" : "password"}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Enter new password"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
                   </div>
-                  <Badge variant="secondary">Coming Soon</Badge>
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium">Push Notifications</h4>
-                    <p className="text-sm text-muted-foreground">Receive push notifications in your browser</p>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm_password">Confirm Password</Label>
+                    <Input
+                      id="confirm_password"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm new password"
+                    />
                   </div>
-                  <Badge variant="secondary">Coming Soon</Badge>
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium">Two-Factor Authentication</h4>
-                    <p className="text-sm text-muted-foreground">Add an extra layer of security to your account</p>
-                  </div>
-                  <Badge variant="secondary">Coming Soon</Badge>
+                  <Button onClick={handleChangePassword} disabled={isLoading}>
+                    <Save className="mr-2 h-4 w-4" />
+                    {isLoading ? "Changing..." : "Change Password"}
+                  </Button>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="preferences" className="page-grid">
+          <div className="page-grid-item col-span-full">
+            <Card className="dark:neon-glow h-full">
+              <CardHeader>
+                <CardTitle className="dark:gradient-text">Preferences</CardTitle>
+                <CardDescription>Customize your application experience</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Email Notifications</h4>
+                      <p className="text-sm text-muted-foreground">Receive email notifications for important updates</p>
+                    </div>
+                    <Badge variant="secondary">Coming Soon</Badge>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Push Notifications</h4>
+                      <p className="text-sm text-muted-foreground">Receive push notifications in your browser</p>
+                    </div>
+                    <Badge variant="secondary">Coming Soon</Badge>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Two-Factor Authentication</h4>
+                      <p className="text-sm text-muted-foreground">Add an extra layer of security to your account</p>
+                    </div>
+                    <Badge variant="secondary">Coming Soon</Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

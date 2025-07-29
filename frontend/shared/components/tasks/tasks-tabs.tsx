@@ -83,27 +83,35 @@ export function TasksTabs() {
         <TabsTrigger value="done">Done</TabsTrigger>
       </TabsList>
       
-      <TabsContent value="all" className="space-y-4">
+      <TabsContent value="all" className="page-grid">
         {mockTasks.map((task) => (
-          <TaskCard key={task.id} task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          <div key={task.id} className="page-grid-item">
+            <TaskCard task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          </div>
         ))}
       </TabsContent>
       
-      <TabsContent value="todo" className="space-y-4">
+      <TabsContent value="todo" className="page-grid">
         {filterTasksByStatus('todo').map((task) => (
-          <TaskCard key={task.id} task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          <div key={task.id} className="page-grid-item">
+            <TaskCard task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          </div>
         ))}
       </TabsContent>
       
-      <TabsContent value="in-progress" className="space-y-4">
+      <TabsContent value="in-progress" className="page-grid">
         {filterTasksByStatus('in-progress').map((task) => (
-          <TaskCard key={task.id} task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          <div key={task.id} className="page-grid-item">
+            <TaskCard task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          </div>
         ))}
       </TabsContent>
       
-      <TabsContent value="done" className="space-y-4">
+      <TabsContent value="done" className="page-grid">
         {filterTasksByStatus('done').map((task) => (
-          <TaskCard key={task.id} task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          <div key={task.id} className="page-grid-item">
+            <TaskCard task={task} getPriorityColor={getPriorityColor} getStatusColor={getStatusColor} />
+          </div>
         ))}
       </TabsContent>
     </Tabs>
@@ -120,10 +128,10 @@ function TaskCard({
   getStatusColor: (status: Task['status']) => string
 }) {
   return (
-    <Card>
+    <Card className="dark:neon-glow h-full">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">{task.title}</CardTitle>
+          <CardTitle className="text-lg dark:gradient-text">{task.title}</CardTitle>
           <div className="flex gap-2">
             <Badge className={getPriorityColor(task.priority)}>
               {task.priority}
@@ -142,8 +150,8 @@ function TaskCard({
             <p>Due: {new Date(task.dueDate).toLocaleDateString()}</p>
           </div>
           <div className="flex gap-2">
-            <Button size="sm">Edit</Button>
-            <Button size="sm" variant="outline">View</Button>
+            <Button size="sm" className="dark:neon-glow">Edit</Button>
+            <Button size="sm" variant="outline" className="dark:neon-glow">View</Button>
           </div>
         </div>
       </CardContent>

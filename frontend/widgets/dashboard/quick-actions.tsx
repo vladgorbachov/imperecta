@@ -46,7 +46,7 @@ export function QuickActions() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl">
+        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl dark:gradient-text">
           Quick Actions
         </CardTitle>
       </CardHeader>
@@ -56,7 +56,7 @@ export function QuickActions() {
             <Button
               key={action.id}
               variant="ghost"
-              className="glass rounded-xl p-4 h-auto hover:scale-105 justify-start"
+              className="glass rounded-xl p-4 h-auto hover:scale-105 justify-start dark:neon-glow"
             >
               <div className={`w-12 h-12 rounded-lg ${action.color} flex items-center justify-center mr-3`}>
                 <action.icon className="h-6 w-6 text-white" />

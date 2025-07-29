@@ -47,14 +47,14 @@ export function AssignedToMe() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl">
+        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl dark:gradient-text">
           Assigned to Me
         </CardTitle>
       </CardHeader>
       <CardContent className="overflow-y-auto max-h-96 pr-2">
         <div className="space-y-4">
           {tasks.map((task) => (
-            <div key={task.id} className="glass rounded-xl p-4 hover:scale-105">
+            <div key={task.id} className="glass rounded-xl p-4 hover:scale-105 dark:neon-glow">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <h4 className="font-medium text-lg mb-2">{task.title}</h4>

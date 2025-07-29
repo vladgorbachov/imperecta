@@ -67,14 +67,14 @@ export function RecentActivity() {
   return (
     <Card className="glass-card h-full">
       <CardHeader className="pb-4">
-        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl">
+        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl dark:gradient-text">
           Recent Activity
         </CardTitle>
       </CardHeader>
       <CardContent className="overflow-y-auto max-h-96 pr-2">
         <div className="space-y-4">
           {activities.map((activity) => (
-            <div key={activity.id} className="glass rounded-xl p-4 hover:scale-105">
+            <div key={activity.id} className="glass rounded-xl p-4 hover:scale-105 dark:neon-glow">
               <div className="flex items-start gap-3">
                 <div className={`w-3 h-3 rounded-full mt-2 ${getTypeColor(activity.type)}`} />
                 <div className="flex-1 min-w-0">

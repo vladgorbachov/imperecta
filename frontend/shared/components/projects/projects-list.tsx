@@ -57,43 +57,45 @@ export function ProjectsList() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="page-grid">
       {mockProjects.map((project) => (
-        <Card key={project.id}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">{project.name}</CardTitle>
-                <CardDescription>{project.description}</CardDescription>
+        <div key={project.id} className="page-grid-item">
+          <Card className="dark:neon-glow h-full">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg dark:gradient-text">{project.name}</CardTitle>
+                  <CardDescription>{project.description}</CardDescription>
+                </div>
+                <Badge className={getStatusColor(project.status)}>
+                  {project.status}
+                </Badge>
               </div>
-              <Badge className={getStatusColor(project.status)}>
-                {project.status}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span>Progress</span>
-                <span>{project.progress}%</span>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Progress</span>
+                  <span>{project.progress}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full"
+                    style={{ width: `${project.progress}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span>Team: {project.team.join(', ')}</span>
+                  <span>Due: {new Date(project.dueDate).toLocaleDateString()}</span>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" className="dark:neon-glow">View Details</Button>
+                  <Button size="sm" variant="outline" className="dark:neon-glow">Edit</Button>
+                </div>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full"
-                  style={{ width: `${project.progress}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span>Team: {project.team.join(', ')}</span>
-                <span>Due: {new Date(project.dueDate).toLocaleDateString()}</span>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm">View Details</Button>
-                <Button size="sm" variant="outline">Edit</Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       ))}
     </div>
   )

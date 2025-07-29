@@ -48,47 +48,50 @@
   }
 
   .dark {
-    /* Dark theme - Deep glass design */
-    --background: 220 70% 8%;
+    /* Futuristic Dark theme - Neon cyberpunk design */
+    --background: 220 90% 4%;
     --foreground: 0 0% 100%;
 
-    --card: 220 70% 10%;
+    --card: 220 90% 6%;
     --card-foreground: 0 0% 100%;
 
-    --popover: 220 70% 10%;
+    --popover: 220 90% 6%;
     --popover-foreground: 0 0% 100%;
 
-    --primary: 45 100% 70%;
-    --primary-foreground: 222 47% 11%;
+    --primary: 180 100% 60%;
+    --primary-foreground: 220 90% 4%;
 
-    --secondary: 217 32% 17%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 220 90% 8%;
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 217 32% 17%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 220 90% 8%;
+    --muted-foreground: 220 20% 70%;
 
-    --accent: 217 32% 17%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 220 90% 8%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 45 100% 70%;
-    --input: 217 32% 17%;
-    --ring: 45 100% 70%;
+    --border: 180 100% 60%;
+    --input: 220 90% 8%;
+    --ring: 180 100% 60%;
 
     --radius: 0.75rem;
     
-    /* Glass effect colors for dark theme */
-    --glass-bg: 220 70% 12%;
-    --glass-border: 45 100% 70%;
-    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    /* Futuristic glass effect colors */
+    --glass-bg: 220 90% 8%;
+    --glass-border: 180 100% 60%;
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
     --glass-blur: blur(20px);
     
-    /* Accent colors from logo */
-    --accent-blue: 210 100% 60%;
+    /* Neon accent colors */
+    --accent-blue: 180 100% 60%;
     --accent-purple: 270 100% 70%;
     --accent-cyan: 180 100% 60%;
+    --accent-pink: 330 100% 70%;
+    --accent-green: 120 100% 60%;
+    --accent-orange: 30 100% 60%;
   }
 }
 
@@ -158,9 +161,9 @@ body {
   min-height: 100vh;
 }
 
-/* Dark theme background with sophisticated texture */
+/* Futuristic Dark theme background with cosmic texture */
 .dark body {
-  background: linear-gradient(135deg, hsl(220, 70%, 8%) 0%, hsl(220, 70%, 6%) 100%);
+  background: linear-gradient(135deg, hsl(220, 90%, 4%) 0%, hsl(220, 90%, 2%) 100%);
   position: relative;
 }
 
@@ -172,14 +175,15 @@ body {
   width: 100%;
   height: 100%;
   background-image: 
-    radial-gradient(circle at 20% 80%, hsl(45, 100%, 70%, 0.03) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, hsl(210, 100%, 60%, 0.03) 0%, transparent 50%),
-    radial-gradient(circle at 40% 40%, hsl(270, 100%, 70%, 0.02) 0%, transparent 50%);
+    radial-gradient(circle at 20% 80%, hsl(180, 100%, 60%, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, hsl(270, 100%, 70%, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, hsl(330, 100%, 70%, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 90% 90%, hsl(120, 100%, 60%, 0.04) 0%, transparent 50%);
   z-index: -1;
   pointer-events: none;
 }
 
-/* Enhanced card styles */
+/* Enhanced card styles with neon effects */
 .card {
   @apply glass-card;
   position: relative;
@@ -193,7 +197,22 @@ body {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.5), transparent);
+}
+
+/* Futuristic neon card effects for dark theme */
+.dark .card {
+  border: 1px solid hsl(var(--accent-blue) / 0.3);
+  box-shadow: 
+    0 0 20px hsl(var(--accent-blue) / 0.1),
+    0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.dark .card:hover {
+  border-color: hsl(var(--accent-blue) / 0.6);
+  box-shadow: 
+    0 0 30px hsl(var(--accent-blue) / 0.2),
+    0 12px 40px rgba(0, 0, 0, 0.8);
 }
 
 /* Button glass effects */
@@ -209,6 +228,18 @@ body {
   transform: translateY(-1px);
 }
 
+/* Futuristic button effects for dark theme */
+.dark .btn-glass {
+  border: 1px solid hsl(var(--accent-blue) / 0.4);
+  box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.1);
+}
+
+.dark .btn-glass:hover {
+  border-color: hsl(var(--accent-blue) / 0.8);
+  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.3);
+  transform: translateY(-2px);
+}
+
 /* Input glass effects */
 .input-glass {
   @apply glass rounded-lg px-3 py-2 transition-all duration-300;
@@ -222,11 +253,30 @@ body {
   box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1);
 }
 
+/* Futuristic input effects for dark theme */
+.dark .input-glass {
+  border: 1px solid hsl(var(--accent-blue) / 0.3);
+  box-shadow: 0 0 5px hsl(var(--accent-blue) / 0.1);
+}
+
+.dark .input-glass:focus {
+  border-color: hsl(var(--accent-blue) / 0.8);
+  box-shadow: 
+    0 0 0 3px hsl(var(--accent-blue) / 0.1),
+    0 0 15px hsl(var(--accent-blue) / 0.2);
+}
+
 /* Navigation glass effects */
 .nav-glass {
   @apply glass rounded-xl;
   background: hsl(var(--glass-bg) / 0.9);
   border: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Futuristic navigation effects for dark theme */
+.dark .nav-glass {
+  border: 1px solid hsl(var(--accent-blue) / 0.3);
+  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
 }
 
 /* Sidebar glass effects */
@@ -236,11 +286,23 @@ body {
   border-right: 1px solid hsl(var(--glass-border) / 0.2);
 }
 
+/* Futuristic sidebar effects for dark theme */
+.dark .sidebar-glass {
+  border-right: 1px solid hsl(var(--accent-blue) / 0.3);
+  box-shadow: 0 0 30px hsl(var(--accent-blue) / 0.1);
+}
+
 /* Header glass effects */
 .header-glass {
   @apply glass;
   background: hsl(var(--glass-bg) / 0.9);
   border-bottom: 1px solid hsl(var(--glass-border) / 0.2);
+}
+
+/* Futuristic header effects for dark theme */
+.dark .header-glass {
+  border-bottom: 1px solid hsl(var(--accent-blue) / 0.3);
+  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
 }
 
 /* Dashboard grid with glass spacing */
@@ -260,31 +322,53 @@ body {
   grid-column: 1 / -1;
 }
 
+/* Universal page grid layout */
+.page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.page-grid-item {
+  min-height: 200px;
+  width: 100%;
+}
+
+.page-grid-item.col-span-full {
+  grid-column: 1 / -1;
+}
+
 /* Responsive adjustments */
 @media (min-width: 768px) {
-  .dashboard-grid {
+  .dashboard-grid,
+  .page-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (min-width: 1024px) {
-  .dashboard-grid {
+  .dashboard-grid,
+  .page-grid {
     grid-template-columns: repeat(3, 1fr);
   }
   
-  .dashboard-grid-item.lg\:col-span-1 {
+  .dashboard-grid-item.lg\:col-span-1,
+  .page-grid-item.lg\:col-span-1 {
     grid-column: span 1;
   }
 }
 
 @media (min-width: 1280px) {
-  .dashboard-grid {
+  .dashboard-grid,
+  .page-grid {
     gap: 1.5rem; /* 24px for larger screens */
   }
 }
 
 @media (min-width: 1536px) {
-  .dashboard-grid {
+  .dashboard-grid,
+  .page-grid {
     gap: 2rem; /* 32px for very large screens */
   }
 }
@@ -314,6 +398,16 @@ body {
     hsl(var(--accent-cyan) / 0.1) 100%);
 }
 
+/* Futuristic accent gradients for dark theme */
+.dark .accent-gradient {
+  background: linear-gradient(135deg, 
+    hsl(var(--accent-blue) / 0.2) 0%, 
+    hsl(var(--accent-purple) / 0.2) 25%, 
+    hsl(var(--accent-pink) / 0.2) 50%,
+    hsl(var(--accent-green) / 0.2) 75%,
+    hsl(var(--accent-cyan) / 0.2) 100%);
+}
+
 .accent-border {
   border: 1px solid;
   border-image: linear-gradient(135deg, 
@@ -322,11 +416,28 @@ body {
     hsl(var(--accent-cyan))) 1;
 }
 
+/* Futuristic accent border for dark theme */
+.dark .accent-border {
+  border-image: linear-gradient(135deg, 
+    hsl(var(--accent-blue)), 
+    hsl(var(--accent-purple)), 
+    hsl(var(--accent-pink)),
+    hsl(var(--accent-green)),
+    hsl(var(--accent-cyan))) 1;
+}
+
 /* Enhanced focus states */
 .focus-glass:focus {
   outline: none;
   box-shadow: 0 0 0 3px hsl(var(--primary) / 0.2);
   background: hsl(var(--glass-bg) / 0.95);
+}
+
+/* Futuristic focus states for dark theme */
+.dark .focus-glass:focus {
+  box-shadow: 
+    0 0 0 3px hsl(var(--accent-blue) / 0.2),
+    0 0 15px hsl(var(--accent-blue) / 0.3);
 }
 
 /* Smooth transitions */
@@ -376,3 +487,260 @@ body {
   background: hsl(var(--muted-foreground) / 0.6);
 }
 */
+
+/* Futuristic neon glow effects for dark theme */
+.dark .neon-glow {
+  box-shadow: 
+    0 0 5px hsl(var(--accent-blue) / 0.5),
+    0 0 10px hsl(var(--accent-blue) / 0.3),
+    0 0 15px hsl(var(--accent-blue) / 0.1);
+}
+
+.dark .neon-glow:hover {
+  box-shadow: 
+    0 0 10px hsl(var(--accent-blue) / 0.7),
+    0 0 20px hsl(var(--accent-blue) / 0.5),
+    0 0 30px hsl(var(--accent-blue) / 0.3);
+}
+
+/* Futuristic text glow for dark theme */
+.dark .text-glow {
+  text-shadow: 
+    0 0 5px hsl(var(--accent-blue) / 0.5),
+    0 0 10px hsl(var(--accent-blue) / 0.3);
+}
+
+/* Futuristic border glow for dark theme */
+.dark .border-glow {
+  border: 1px solid hsl(var(--accent-blue) / 0.5);
+  box-shadow: 
+    0 0 5px hsl(var(--accent-blue) / 0.3),
+    inset 0 0 5px hsl(var(--accent-blue) / 0.1);
+}
+
+/* Futuristic gradient text for dark theme */
+.dark .gradient-text {
+  background: linear-gradient(135deg, 
+    hsl(var(--accent-blue)), 
+    hsl(var(--accent-purple)), 
+    hsl(var(--accent-pink)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Additional futuristic effects for dark theme */
+.dark .futuristic-border {
+  border: 1px solid;
+  border-image: linear-gradient(45deg, 
+    hsl(var(--accent-blue)), 
+    hsl(var(--accent-purple)), 
+    hsl(var(--accent-pink)), 
+    hsl(var(--accent-green)), 
+    hsl(var(--accent-blue))) 1;
+}
+
+.dark .futuristic-bg {
+  background: linear-gradient(135deg, 
+    hsl(var(--accent-blue) / 0.1) 0%, 
+    hsl(var(--accent-purple) / 0.1) 25%, 
+    hsl(var(--accent-pink) / 0.1) 50%,
+    hsl(var(--accent-green) / 0.1) 75%,
+    hsl(var(--accent-cyan) / 0.1) 100%);
+}
+
+.dark .futuristic-shadow {
+  box-shadow: 
+    0 0 20px hsl(var(--accent-blue) / 0.3),
+    0 0 40px hsl(var(--accent-purple) / 0.2),
+    0 0 60px hsl(var(--accent-pink) / 0.1);
+}
+
+.dark .futuristic-glow {
+  box-shadow: 
+    0 0 10px hsl(var(--accent-blue) / 0.5),
+    0 0 20px hsl(var(--accent-blue) / 0.3),
+    0 0 30px hsl(var(--accent-blue) / 0.1);
+}
+
+.dark .futuristic-glow:hover {
+  box-shadow: 
+    0 0 20px hsl(var(--accent-blue) / 0.7),
+    0 0 40px hsl(var(--accent-blue) / 0.5),
+    0 0 60px hsl(var(--accent-blue) / 0.3);
+}
+
+/* Futuristic animation keyframes */
+@keyframes neon-pulse {
+  0%, 100% {
+    box-shadow: 
+      0 0 5px hsl(var(--accent-blue) / 0.5),
+      0 0 10px hsl(var(--accent-blue) / 0.3);
+  }
+  50% {
+    box-shadow: 
+      0 0 10px hsl(var(--accent-blue) / 0.7),
+      0 0 20px hsl(var(--accent-blue) / 0.5),
+      0 0 30px hsl(var(--accent-blue) / 0.3);
+  }
+}
+
+.dark .neon-pulse {
+  animation: neon-pulse 2s ease-in-out infinite;
+}
+
+/* Futuristic text effects */
+.dark .text-neon {
+  text-shadow: 
+    0 0 5px hsl(var(--accent-blue) / 0.8),
+    0 0 10px hsl(var(--accent-blue) / 0.6),
+    0 0 15px hsl(var(--accent-blue) / 0.4);
+}
+
+.dark .text-neon:hover {
+  text-shadow: 
+    0 0 10px hsl(var(--accent-blue) / 1),
+    0 0 20px hsl(var(--accent-blue) / 0.8),
+    0 0 30px hsl(var(--accent-blue) / 0.6);
+}
+
+/* Calendar specific styles */
+.dark .calendar-container {
+  background: hsl(var(--glass-bg) / 0.8);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid hsl(var(--accent-blue) / 0.3);
+  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
+}
+
+.dark .calendar-day {
+  transition: all 0.2s ease;
+}
+
+.dark .calendar-day:hover {
+  background: hsl(var(--accent-blue) / 0.1);
+  border-color: hsl(var(--accent-blue) / 0.5);
+}
+
+.dark .calendar-day.selected {
+  background: hsl(var(--accent-blue) / 0.3);
+  border-color: hsl(var(--accent-blue) / 0.8);
+  box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.3);
+}
+
+.dark .calendar-day.today {
+  background: hsl(var(--accent-blue) / 0.2);
+  border-color: hsl(var(--accent-blue) / 0.6);
+  color: hsl(var(--accent-blue));
+}
+
+.dark .event-card {
+  background: hsl(var(--glass-bg) / 0.9);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid hsl(var(--accent-blue) / 0.2);
+  transition: all 0.3s ease;
+}
+
+.dark .event-card:hover {
+  border-color: hsl(var(--accent-blue) / 0.5);
+  box-shadow: 0 0 15px hsl(var(--accent-blue) / 0.2);
+  transform: translateY(-1px);
+}
+
+/* Modern Calendar Layout */
+.calendar-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.calendar-sidebar {
+  border-right: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  overflow-y: auto;
+}
+
+.calendar-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.calendar-header {
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  padding: 1.5rem;
+}
+
+.calendar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.calendar-events {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.event-item {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 1rem;
+  transition: all 0.2s ease;
+}
+
+.event-item:hover {
+  border-color: hsl(var(--accent-blue));
+  box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.2);
+}
+
+.event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.event-title {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: hsl(var(--foreground));
+}
+
+.event-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.event-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .calendar-layout {
+    grid-template-columns: 280px 1fr;
+  }
+  
+  .calendar-sidebar:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .calendar-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .calendar-sidebar {
+    display: none;
+  }
+}

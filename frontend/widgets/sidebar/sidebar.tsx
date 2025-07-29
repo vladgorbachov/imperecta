@@ -106,25 +106,25 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
           </Button>
         </div>
         <ScrollArea className="h-[calc(100vh-7rem)] py-6">
-          <nav className="flex flex-col gap-3 items-center">
+          <nav className="flex flex-col gap-3">
             {routes.map((route) => (
               <Link
                 key={route.href}
                 to={route.href}
                 className={cn(
-                  "flex items-center justify-center gap-3 rounded-xl px-6 py-3 text-lg font-medium transition-all duration-300 group w-full text-center",
+                  "flex items-center gap-3 rounded-xl px-6 py-3 text-lg font-medium transition-all duration-300 group w-full",
                   location.pathname === route.href 
-                    ? "glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-black dark:text-white shadow-lg" 
-                    : "hover:glass-card hover:bg-muted/50 hover:scale-105",
+                    ? "glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-black dark:text-white shadow-lg dark:neon-glow dark:border-glow" 
+                    : "hover:glass-card hover:bg-muted/50 hover:scale-105 dark:hover:neon-glow",
                 )}
               >
                 <route.icon className={cn(
                   "h-6 w-6 transition-colors",
                   location.pathname === route.href 
-                    ? "text-primary" 
+                    ? "text-primary dark:text-glow" 
                     : "text-muted-foreground group-hover:text-foreground"
                 )} />
-                <span className="transition-colors text-center">
+                <span className="transition-colors">
                   {route.label}
                 </span>
               </Link>

@@ -73,7 +73,7 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
             <Input
               type="search"
               placeholder="Search..."
-              className="input-glass w-full pl-10 focus-glass"
+              className="input-glass w-full pl-10 focus-glass dark:neon-glow"
             />
           </div>
         </div>
@@ -90,10 +90,10 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
         <Button 
           variant="ghost" 
           size="icon" 
-          className="header-btn"
+          className="header-btn dark:neon-glow"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
-          {theme === "dark" ? <Sun className="h-5 w-5 header-icon" /> : <Moon className="h-5 w-5 header-icon" />}
+          {theme === "dark" ? <Sun className="h-5 w-5 header-icon dark:text-glow" /> : <Moon className="h-5 w-5 header-icon" />}
         </Button>
         
         <DropdownMenu>
@@ -117,8 +117,8 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
           </DropdownMenuContent>
         </DropdownMenu>
         
-        <Button variant="ghost" size="icon" className="header-btn">
-          <Bell className="h-5 w-5 header-icon" />
+        <Button variant="ghost" size="icon" className="header-btn dark:neon-glow">
+          <Bell className="h-5 w-5 header-icon dark:text-glow" />
         </Button>
         
         <DropdownMenu>
