@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Hide scrollbars in custom areas */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Simple cat animations */
+.cat-wiggle { animation: catWiggle 2.5s ease-in-out infinite; }
+@keyframes catWiggle {
+  0%,100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-2px) rotate(2deg); }
+}
+.cat-blink { animation: catBlink 4s infinite; }
+@keyframes catBlink {
+  0%, 97%, 100% { r: 2; }
+  98%, 99% { r: 0.2; }
+}
+
 @layer base {
   :root {
     /* Light theme - Modern glass design */

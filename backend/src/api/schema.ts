@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, varchar, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, varchar, integer, numeric } from 'drizzle-orm/pg-core'
 import { createId } from '@paralleldrive/cuid2'
 
 // Users table
@@ -117,3 +117,81 @@ export const activityLogs = pgTable('activity_logs', {
   details: text('details'), // JSON string
   created_at: timestamp('created_at').defaultNow().notNull(),
 }) 
+
+// AI providers per organization (Dify / Flowise / SuperAGI)
+export const aiProviders = pgTable('ai_providers', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  organization_id: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
+  provider_type: varchar('provider_type', { length: 50 }).notNull(), // 'dify' | 'flowise' | 'superagi'
+  base_url: text('base_url').notNull(),
+  app_id: text('app_id'), // Dify app id
+  flow_id: text('flow_id'), // Flowise flow id
+  auth_type: varchar('auth_type', { length: 50 }).default('apiKey').notNull(),
+  api_key_encrypted: text('api_key_encrypted'),
+  prompt_version: varchar('prompt_version', { length: 50 }),
+  config: text('config'), // JSON string
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// AI agents per organization (Marketer / Accountant / Sales)
+export const aiAgents = pgTable('ai_agents', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  organization_id: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  type: varchar('type', { length: 50 }).notNull(), // 'MARKETER' | 'ACCOUNTANT' | 'SALES'
+  provider_id: text('provider_id').references(() => aiProviders.id, { onDelete: 'set null' }),
+  is_enabled: boolean('is_enabled').default(true).notNull(),
+  prompt_version: varchar('prompt_version', { length: 50 }),
+  config: text('config'), // JSON string
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// AI agent run history and usage
+export const aiAgentRuns = pgTable('ai_agent_runs', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  organization_id: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
+  agent_id: text('agent_id').references(() => aiAgents.id, { onDelete: 'cascade' }).notNull(),
+  user_id: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  status: varchar('status', { length: 50 }).default('running').notNull(), // running | succeeded | failed
+  input: text('input'), // JSON string
+  output: text('output'), // JSON string
+  usage_prompt_tokens: integer('usage_prompt_tokens'),
+  usage_completion_tokens: integer('usage_completion_tokens'),
+  cost_usd: numeric('cost_usd', { precision: 12, scale: 6 }),
+  error: text('error'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// Audit logs (security-relevant actions)
+export const auditLogs = pgTable('audit_logs', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  organization_id: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
+  user_id: text('user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: varchar('action', { length: 100 }).notNull(),
+  metadata: text('metadata'), // JSON string
+  created_at: timestamp('created_at').defaultNow().notNull(),
+})
+
+// Encrypted secrets per organization (GA, social, etc.)
+export const secrets = pgTable('secrets', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  organization_id: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
+  key: varchar('key', { length: 255 }).notNull(),
+  value_encrypted: text('value_encrypted').notNull(),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// Knowledge documents for RAG per organization
+export const aiDocuments = pgTable('ai_documents', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  organization_id: text('organization_id').references(() => organizations.id, { onDelete: 'cascade' }).notNull(),
+  source: varchar('source', { length: 50 }).notNull(), // upload | url | other
+  uri: text('uri').notNull(),
+  index_namespace: varchar('index_namespace', { length: 255 }),
+  metadata: text('metadata'), // JSON string
+  created_at: timestamp('created_at').defaultNow().notNull(),
+})
