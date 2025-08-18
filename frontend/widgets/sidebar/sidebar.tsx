@@ -1,11 +1,9 @@
 import { Link, useLocation } from "react-router-dom"
 import {
   BarChart3,
-  Users,
   ClipboardList,
   MessageSquare,
   Calendar,
-  Settings,
   X,
   Building2,
   FileText,
@@ -17,6 +15,7 @@ import { cn } from "@/shared/utils/cn"
 import { Button } from "@/shared/components/ui/button"
 import { ScrollArea } from "@/shared/components/ui/scroll-area"
 import { Logo } from "@/shared/components/ui/logo"
+import { usePermissions } from "@/shared/hooks/use-permissions"
 
 interface SidebarProps {
   open: boolean
@@ -25,6 +24,7 @@ interface SidebarProps {
 
 export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const location = useLocation()
+  const { isSuperuser } = usePermissions()
   // const { t } = useLanguage()
 
   const routes = [
@@ -43,11 +43,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       icon: FileText,
       href: "/tasks",
     },
-    {
-      label: "Team",
-      icon: Users,
-      href: "/team",
-    },
+    // Team removed
     {
       label: "Clients",
       icon: Building2,
@@ -64,9 +60,9 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       href: "/documents",
     },
     {
-      label: "Analytics",
+      label: "Marketing",
       icon: PieChart,
-      href: "/analytics",
+      href: "/marketing",
     },
     {
       label: "Messages",
@@ -78,11 +74,15 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
       icon: Calendar,
       href: "/calendar",
     },
-    {
-      label: "Settings",
-      icon: Settings,
-      href: "/settings",
-    },
+    // Settings removed
+    // Superuser-only entry to AI Workers hub
+    ...(isSuperuser ? [
+      {
+        label: "AI Workers",
+        icon: PieChart,
+        href: "/ai/workers",
+      },
+    ] : []),
   ]
 
   return (
@@ -105,7 +105,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
             <X className="h-5 w-5" />
           </Button>
         </div>
-        <ScrollArea className="h-[calc(100vh-7rem)] py-6">
+        <ScrollArea className="h-[calc(100vh-7rem)] py-6 overflow-y-auto no-scrollbar">
           <nav className="flex flex-col gap-3">
             {routes.map((route) => (
               <Link

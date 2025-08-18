@@ -5,19 +5,20 @@ import morgan from 'morgan'
 import { config } from 'dotenv'
 import { testConnection } from './api/database'
 import usersRouter from './api/routes/users'
+import aiRouter from './api/routes/ai'
 
 // Load environment variables
 config()
 
 const app = express()
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 3000
 
 // Middleware
 app.use(helmet())
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? ['https://your-domain.com'] 
-    : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5175', 'http://127.0.0.1:5175'],
   credentials: true
 }))
 app.use(morgan('combined'))
@@ -44,6 +45,7 @@ app.get('/api/health', async (req, res) => {
 
 // API routes
 app.use('/api/users', usersRouter)
+app.use('/api', aiRouter)
 
 app.get('/api', (req, res) => {
   res.json({
