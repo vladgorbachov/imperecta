@@ -4,6 +4,7 @@ import { Sidebar } from "@/widgets/sidebar/sidebar"
 import { Header } from "@/widgets/header/header"
 import { Skeleton } from "@/shared/components/ui/skeleton"
 import { useSupabase } from "@/shared/contexts/supabase-context"
+import FloatingCat from "@/shared/components/ui/floating-cat"
 
 export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -41,10 +42,11 @@ export default function DashboardLayout() {
       <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onMenuButtonClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-auto pr-5 pl-6 pt-6 pb-6">
+        <main className="flex-1 overflow-auto pr-5 pl-6 pt-6 pb-6 relative">
           <div className="w-full">
             <Outlet />
           </div>
+          <FloatingCat />
         </main>
       </div>
     </div>

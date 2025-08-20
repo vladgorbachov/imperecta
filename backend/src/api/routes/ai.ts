@@ -97,51 +97,31 @@ router.post('/agents/marketer/chat', async (req, res) => {
     let usage: { promptTokens?: number; completionTokens?: number; costUsd?: number } = {}
     try {
       if (provider.provider_type === 'flowise') {
-        const apiKey = provider.api_key_encrypted ? undefined : undefined
-        // Use env fallback if provider key is not set
         const key = process.env.FLOWISE_API_KEY || ''
         const baseUrl = provider.base_url || process.env.FLOWISE_BASE_URL || ''
         const flowId = provider.flow_id || ''
         const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v1/prediction/${flowId}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${key}`,
-          },
-          body: JSON.stringify({
-            question: message,
-            overrideConfig: { vars: { organizationId: String(orgId) } },
-          }),
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+          body: JSON.stringify({ question: message, overrideConfig: { vars: { organizationId: String(orgId) } } }),
         })
-        const data = await resp.json()
-        if (!resp.ok) throw new Error(data?.message || 'Flowise error')
-        // Flowise often returns { text: '...' } or similar
-        reply = data?.text || data?.answer || JSON.stringify(data)
+        const data: any = await resp.json().catch(() => ({}))
+        if (!resp.ok) throw new Error((data && data.message) || 'Flowise error')
+        reply = (data && (data.text || data.answer)) || JSON.stringify(data)
       } else if (provider.provider_type === 'dify') {
         const key = process.env.DIFY_API_KEY || ''
         const baseUrl = provider.base_url || process.env.DIFY_BASE_URL || ''
         const appId = provider.app_id || process.env.DIFY_APP_ID || ''
         const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/apps/${appId}/run`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${key}`,
-          },
-          body: JSON.stringify({
-            inputs: { query: message },
-            response_mode: 'blocking',
-            user: String(orgId),
-          }),
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+          body: JSON.stringify({ inputs: { query: message }, response_mode: 'blocking', user: String(orgId) }),
         })
-        const data = await resp.json()
-        if (!resp.ok) throw new Error(data?.message || 'Dify error')
-        // Dify returns output and metadata (usage)
-        reply = data?.output || data?.answer || JSON.stringify(data)
-        const u = data?.metadata?.usage
-        usage = {
-          promptTokens: u?.prompt_tokens,
-          completionTokens: u?.completion_tokens,
-        }
+        const data: any = await resp.json().catch(() => ({}))
+        if (!resp.ok) throw new Error((data && data.message) || 'Dify error')
+        reply = (data && (data.output || data.answer)) || JSON.stringify(data)
+        const u = data && data.metadata && data.metadata.usage
+        usage = { promptTokens: u?.prompt_tokens, completionTokens: u?.completion_tokens }
       }
     } catch (err: any) {
       reply = `Provider call failed: ${err.message}. Falling back to echo.`
@@ -169,6 +149,75 @@ router.post('/agents/marketer/chat', async (req, res) => {
   }
 })
 
+// Unified assistant chat endpoint (uses same provider/agent under ASSISTANT type)
+router.post('/assistant/chat', async (req, res) => {
+  const orgId = (req as any).organizationId || req.body.organizationId
+  const { message, agentId } = req.body || {}
+  if (!orgId) return res.status(400).json({ error: 'organizationId required' })
+  if (!message) return res.status(400).json({ error: 'message required' })
+  try {
+    let agentRecord = null as any
+    if (agentId) {
+      const [agent] = await db.select().from(aiAgents).where(eq(aiAgents.id, agentId))
+      agentRecord = agent
+    } else {
+      const [agent] = await db.select().from(aiAgents).where(eq(aiAgents.organization_id, orgId))
+      agentRecord = agent
+    }
+    if (!agentRecord) return res.status(404).json({ error: 'Agent not found' })
+    const [provider] = await db.select().from(aiProviders).where(eq(aiProviders.id, agentRecord.provider_id!))
+    if (!provider) return res.status(400).json({ error: 'Provider not configured' })
+
+    let reply: any = null
+    let usage: { promptTokens?: number; completionTokens?: number } = {}
+    try {
+      if (provider.provider_type === 'flowise') {
+        const key = process.env.FLOWISE_API_KEY || ''
+        const baseUrl = provider.base_url || process.env.FLOWISE_BASE_URL || ''
+        const flowId = provider.flow_id || ''
+        const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v1/prediction/${flowId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+          body: JSON.stringify({ question: message, overrideConfig: { vars: { organizationId: String(orgId) } } }),
+        })
+        const data: any = await resp.json().catch(() => ({}))
+        if (!resp.ok) throw new Error((data && data.message) || 'Flowise error')
+        reply = (data && (data.text || data.answer)) || JSON.stringify(data)
+      } else if (provider.provider_type === 'dify') {
+        const key = process.env.DIFY_API_KEY || ''
+        const baseUrl = provider.base_url || process.env.DIFY_BASE_URL || ''
+        const appId = provider.app_id || process.env.DIFY_APP_ID || ''
+        const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/apps/${appId}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+          body: JSON.stringify({ inputs: { query: message }, response_mode: 'blocking', user: String(orgId) }),
+        })
+        const data: any = await resp.json().catch(() => ({}))
+        if (!resp.ok) throw new Error((data && data.message) || 'Dify error')
+        reply = (data && (data.output || data.answer)) || JSON.stringify(data)
+        const u = data && data.metadata && data.metadata.usage
+        usage = { promptTokens: u?.prompt_tokens, completionTokens: u?.completion_tokens }
+      }
+    } catch (err: any) {
+      reply = `Provider call failed: ${err.message}.`
+    }
+
+    const output = { provider: provider.provider_type, reply }
+    const [run] = await db.insert(aiAgentRuns).values({
+      organization_id: orgId,
+      agent_id: agentRecord.id,
+      status: 'succeeded',
+      input: JSON.stringify({ message }),
+      output: JSON.stringify(output),
+      usage_prompt_tokens: usage.promptTokens ?? 0,
+      usage_completion_tokens: usage.completionTokens ?? 0,
+    }).returning()
+
+    res.json({ runId: run.id, output })
+  } catch {
+    res.status(500).json({ error: 'Failed to handle assistant chat' })
+  }
+})
 // DEV ONLY: quick seeding of organization, provider and marketer agent
 router.post('/dev/seed-flowise', async (req, res) => {
   const { organizationId = '1', base_url, flow_id, api_key } = req.body || {}

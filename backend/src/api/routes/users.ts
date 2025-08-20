@@ -1,5 +1,8 @@
 import { Router } from 'express'
 import { createUser, getUserById, getUserBySupabaseId, getAllUsers, updateUser, deleteUser } from '../database'
+import { db } from '../connection'
+import { and, eq } from 'drizzle-orm'
+import { calendarEvents, users as usersTable } from '../schema'
 
 const router = Router()
 
@@ -79,3 +82,72 @@ router.delete('/:id', async (req, res) => {
 })
 
 export default router 
+
+// Calendar events CRUD scoped to current user
+router.get('/:id/events', async (req, res) => {
+  try {
+    const userId = req.params.id
+    const events = await db.select().from(calendarEvents).where(eq(calendarEvents.user_id, userId))
+    res.json(events)
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch events' })
+  }
+})
+
+router.post('/:id/events', async (req, res) => {
+  try {
+    const userId = req.params.id
+    const { id, title, description, start_at, end_at, location, type, color, attendees } = req.body || {}
+    if (!title || !start_at) return res.status(400).json({ error: 'title and start_at required' })
+    const [created] = await db.insert(calendarEvents).values({
+      id,
+      user_id: userId,
+      title,
+      description,
+      start_at: new Date(start_at),
+      end_at: end_at ? new Date(end_at) : null,
+      location,
+      type,
+      color,
+      attendees: attendees ? JSON.stringify(attendees) : null,
+    }).returning()
+    res.status(201).json(created)
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to create event' })
+  }
+})
+
+router.put('/:id/events/:eventId', async (req, res) => {
+  try {
+    const userId = req.params.id
+    const eventId = req.params.eventId
+    const { title, description, start_at, end_at, location, type, color, attendees } = req.body || {}
+    const [updated] = await db.update(calendarEvents).set({
+      title,
+      description,
+      start_at: start_at ? new Date(start_at) : undefined,
+      end_at: end_at ? new Date(end_at) : undefined,
+      location,
+      type,
+      color,
+      attendees: attendees ? JSON.stringify(attendees) : undefined,
+      updated_at: new Date(),
+    }).where(and(eq(calendarEvents.id, eventId), eq(calendarEvents.user_id, userId))).returning()
+    if (!updated) return res.status(404).json({ error: 'Event not found' })
+    res.json(updated)
+  } catch {
+    res.status(500).json({ error: 'Failed to update event' })
+  }
+})
+
+router.delete('/:id/events/:eventId', async (req, res) => {
+  try {
+    const userId = req.params.id
+    const eventId = req.params.eventId
+    const deleted = await db.delete(calendarEvents).where(and(eq(calendarEvents.id, eventId), eq(calendarEvents.user_id, userId)))
+    if ((deleted as any).rowCount === 0) return res.status(404).json({ error: 'Event not found' })
+    res.status(204).send()
+  } catch {
+    res.status(500).json({ error: 'Failed to delete event' })
+  }
+})

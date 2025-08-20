@@ -3,11 +3,11 @@
  */
 
 export const env = {
-  NODE_ENV: import.meta.env.MODE,
-  VITE_APP_URL: import.meta.env.VITE_APP_URL || 'http://localhost:3000',
-  VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL || '',
-  VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  DATABASE_URL: import.meta.env.VITE_DATABASE_URL || '',
+  NODE_ENV: process.env.NODE_ENV || 'development',
+  VITE_APP_URL: process.env.APP_URL || 'http://localhost:3000',
+  VITE_SUPABASE_URL: process.env.SUPABASE_URL || '',
+  VITE_SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || '',
+  DATABASE_URL: process.env.DATABASE_URL || '',
 }
 
 /**
