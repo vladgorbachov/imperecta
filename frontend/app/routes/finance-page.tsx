@@ -1,135 +1,141 @@
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card"
+import { Button } from "@/shared/components/ui/button"
+import { Input } from "@/shared/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table"
-import { DollarSign, TrendingUp, TrendingDown, CreditCard } from "lucide-react"
+import { addCalendarEvent } from "@/shared/utils/calendar-bus"
+import { useLanguage } from "@/app/providers/language-provider"
 
 export default function Finance() {
+  const { t } = useLanguage()
+  const schedule = (title: string, dateStr?: string) => {
+    const date = dateStr ? new Date(dateStr) : new Date()
+    if (!dateStr) date.setDate(date.getDate() + 1)
+    addCalendarEvent({ title, date, time: '10:00', type: 'reminder', color: 'bg-rose-500' })
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="page-grid">
-        <div className="page-grid-item">
-          <Card className="dark:neon-glow h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium dark:gradient-text">Total Revenue</CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold dark:text-glow">$45,231.89</div>
-              <p className="text-xs text-muted-foreground">+20.1% from last month</p>
-            </CardContent>
+    <Tabs defaultValue="invoices" className="space-y-4">
+      <TabsList className="grid grid-cols-4 w-full text-sm h-9">
+        <TabsTrigger value="invoices">{t('', 'invoices')}</TabsTrigger>
+        <TabsTrigger value="budgets">{t('', 'budgets')}</TabsTrigger>
+        <TabsTrigger value="transactions">{t('', 'transactions')}</TabsTrigger>
+        <TabsTrigger value="sales">{t('', 'sales') || 'Sales'}</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="invoices">
+        <Card className="dark:neon-glow">
+          <CardHeader className="flex items-center justify-between py-3">
+            <CardTitle className="text-base dark:gradient-text">{t('', 'invoices')}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Input placeholder={t('', 'search')} className="h-8 text-sm" />
+              <Button size="sm" onClick={() => schedule(t('', 'invoices'))}>{t('', 'schedule')}</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="py-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('', 'number')}</TableHead>
+                  <TableHead>{t('', 'client')}</TableHead>
+                  <TableHead>{t('', 'status')}</TableHead>
+                  <TableHead>{t('', 'issuedOn')}</TableHead>
+                  <TableHead>{t('', 'dueDate')}</TableHead>
+                  <TableHead className="text-right">{t('', 'amount')}</TableHead>
+                  <TableHead className="text-right">{t('', 'balance')}</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* Empty state */}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="budgets">
+        <Card className="dark:neon-glow">
+          <CardHeader className="flex items-center justify-between py-3">
+            <CardTitle className="text-base dark:gradient-text">{t('', 'budgets')}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Input placeholder={t('', 'search')} className="h-8 text-sm" />
+              <Button size="sm" onClick={() => schedule(t('', 'review'))}>{t('', 'schedule')}</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="py-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('', 'name')}</TableHead>
+                  <TableHead>{t('', 'period')}</TableHead>
+                  <TableHead>{t('', 'dates')}</TableHead>
+                  <TableHead>{t('', 'status')}</TableHead>
+                  <TableHead className="text-right">{t('', 'total')}</TableHead>
+                  <TableHead className="text-right">{t('', 'allocated')}</TableHead>
+                  <TableHead className="text-right">{t('', 'spent')}</TableHead>
+                  <TableHead className="text-right">{t('', 'remaining')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* Empty state */}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="transactions">
+        <Card className="dark:neon-glow">
+          <CardHeader className="flex items-center justify-between py-3">
+            <CardTitle className="text-base dark:gradient-text">{t('', 'transactions')}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Input placeholder={t('', 'filter')} className="h-8 text-sm" />
+              <Button size="sm" onClick={() => schedule(t('', 'transactions'))}>{t('', 'schedule')}</Button>
+            </div>
+          </CardHeader>
+          <CardContent className="py-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('', 'date')}</TableHead>
+                  <TableHead>{t('', 'type')}</TableHead>
+                  <TableHead>{t('', 'status')}</TableHead>
+                  <TableHead className="text-right">{t('', 'amount')}</TableHead>
+                  <TableHead>{t('', 'currency')}</TableHead>
+                  <TableHead>{t('', 'from')}</TableHead>
+                  <TableHead>{t('', 'to')}</TableHead>
+                  <TableHead>{t('', 'reference')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* Empty state */}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="sales">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Card className="dark:neon-glow">
+            <CardHeader className="py-3"><CardTitle className="text-base">{t('', 'pipeline')}</CardTitle></CardHeader>
+            <CardContent className="py-2 text-sm text-muted-foreground">{/* Empty state */}</CardContent>
+          </Card>
+          <Card className="dark:neon-glow">
+            <CardHeader className="py-3"><CardTitle className="text-base">{t('', 'quotes')}</CardTitle></CardHeader>
+            <CardContent className="py-2 text-sm text-muted-foreground">{/* Empty state */}</CardContent>
+          </Card>
+          <Card className="dark:neon-glow">
+            <CardHeader className="py-3"><CardTitle className="text-base">{t('', 'proposals')}</CardTitle></CardHeader>
+            <CardContent className="py-2 text-sm text-muted-foreground">{/* Empty state */}</CardContent>
+          </Card>
+          <Card className="dark:neon-glow">
+            <CardHeader className="py-3"><CardTitle className="text-base">{t('', 'salesAnalytics')}</CardTitle></CardHeader>
+            <CardContent className="py-2 text-sm text-muted-foreground">{/* Empty state */}</CardContent>
           </Card>
         </div>
-        
-        <div className="page-grid-item">
-          <Card className="dark:neon-glow h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium dark:gradient-text">Total Expenses</CardTitle>
-              <TrendingDown className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold dark:text-glow">$12,234.56</div>
-              <p className="text-xs text-muted-foreground">+5.2% from last month</p>
-            </CardContent>
-          </Card>
-        </div>
-        
-        <div className="page-grid-item">
-          <Card className="dark:neon-glow h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium dark:gradient-text">Net Profit</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold dark:text-glow">$32,997.33</div>
-              <p className="text-xs text-muted-foreground">+15.3% from last month</p>
-            </CardContent>
-          </Card>
-        </div>
-        
-        <div className="page-grid-item">
-          <Card className="dark:neon-glow h-full">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium dark:gradient-text">Pending Invoices</CardTitle>
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold dark:text-glow">12</div>
-              <p className="text-xs text-muted-foreground">$8,234.00 total</p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-      
-      <div className="page-grid">
-        <div className="page-grid-item col-span-full">
-          <Card className="dark:neon-glow h-full">
-            <CardHeader>
-              <CardTitle className="dark:gradient-text">Recent Invoices</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Invoice</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow>
-                    <TableCell>INV-001</TableCell>
-                    <TableCell>Acme Corp</TableCell>
-                    <TableCell>$1,200.00</TableCell>
-                    <TableCell><div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-primary text-primary-foreground">Paid</div></TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>INV-002</TableCell>
-                    <TableCell>Tech Solutions</TableCell>
-                    <TableCell>$2,500.00</TableCell>
-                    <TableCell><div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-secondary text-secondary-foreground">Pending</div></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-      
-      <div className="page-grid">
-        <div className="page-grid-item col-span-full">
-          <Card className="dark:neon-glow h-full">
-            <CardHeader>
-              <CardTitle className="dark:gradient-text">Recent Transactions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Type</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow>
-                    <TableCell>2024-01-15</TableCell>
-                    <TableCell>Office Supplies</TableCell>
-                    <TableCell>-$150.00</TableCell>
-                    <TableCell><div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-destructive text-destructive-foreground">Expense</div></TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>2024-01-14</TableCell>
-                    <TableCell>Client Payment</TableCell>
-                    <TableCell>+$1,200.00</TableCell>
-                    <TableCell><div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-primary text-primary-foreground">Income</div></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
+      </TabsContent>
+    </Tabs>
   )
 }

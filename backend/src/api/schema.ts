@@ -195,3 +195,19 @@ export const aiDocuments = pgTable('ai_documents', {
   metadata: text('metadata'), // JSON string
   created_at: timestamp('created_at').defaultNow().notNull(),
 })
+
+// Calendar events per user
+export const calendarEvents = pgTable('calendar_events', {
+  id: text('id').primaryKey().$defaultFn(() => createId()),
+  user_id: text('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  start_at: timestamp('start_at', { withTimezone: false }).notNull(),
+  end_at: timestamp('end_at', { withTimezone: false }),
+  location: varchar('location', { length: 255 }),
+  type: varchar('type', { length: 30 }).default('event').notNull(), // meeting | deadline | reminder | event
+  color: varchar('color', { length: 30 }).default('bg-blue-500').notNull(),
+  attendees: text('attendees'), // JSON string of names/emails
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+})

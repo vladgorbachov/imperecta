@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/shared/utils/cn'
 import { Button } from '@/shared/components/ui/button'
+import { useLanguage } from '@/app/providers/language-provider'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
 export default function FloatingCat() {
+  const { t } = useLanguage()
   const [visible, setVisible] = useState<boolean>(() => {
     const v = localStorage.getItem('catWidgetVisible')
     return v ? v === 'true' : true
@@ -49,18 +51,14 @@ export default function FloatingCat() {
 
   const send = async () => {
     if (!input.trim()) return
-    const agentId = localStorage.getItem('marketerAgentId') || ''
-    if (!agentId) {
-      setMessages((m) => [...m, { role: 'assistant', content: 'No agent configured. Please create Marketer in Providers.' }])
-      return
-    }
+    const agentId = localStorage.getItem('assistantAgentId') || localStorage.getItem('marketerAgentId') || ''
     const organizationId = localStorage.getItem('orgId') || '1'
     const userMsg: Message = { role: 'user', content: input }
     setMessages((m) => [...m, userMsg])
     setInput('')
     setLoading(true)
     try {
-      const res = await fetch('/api/agents/marketer/chat', {
+      const res = await fetch('/api/assistant/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -89,7 +87,7 @@ export default function FloatingCat() {
     return (
       <button
         aria-label="Show cat"
-        className="fixed bottom-4 right-4 z-[60] rounded-full px-3 py-2 bg-primary text-primary-foreground shadow-lg animate-bounce"
+        className="fixed bottom-4 right-4 z-[60] rounded-full px-3 py-2 bg-zinc-300 text-black dark:bg-zinc-500 dark:text-white shadow-lg animate-bounce"
         onClick={() => setVisible(true)}
       >
         🐾
@@ -99,25 +97,21 @@ export default function FloatingCat() {
 
   return (
     <div className="fixed z-[60]" style={{ left: pos.x, top: pos.y }}>
-      {/* Chat box */}
       {chatOpen && (
         <div className="mb-2 w-[320px] rounded-xl border bg-background shadow-xl glass-card">
-          {/* Thin header */}
           <div className="flex items-center justify-between px-3 py-1 border-b text-xs">
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => setChatOpen(false)}>Hide</button>
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => setVisible(false)}>Close</button>
+            <button className="text-muted-foreground hover:text-foreground" onClick={() => setChatOpen(false)}>{t('', 'close')}</button>
+            <button className="text-muted-foreground hover:text-foreground" onClick={() => setVisible(false)}>{t('', 'hide') || 'Hide'}</button>
           </div>
-          {/* Body: big textarea (3/4 height) and a small messages strip */}
           <div className="p-3">
             <div className="relative">
               <textarea
                 className="w-full h-[210px] resize-none rounded-md border bg-background p-3 pr-9 text-sm leading-5"
-                placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+                placeholder={"Type a message... (" + t('', 'add') + ")"}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onTextKeyDown}
               />
-              {/* Tiny enter icon */}
               <div className="pointer-events-none absolute right-2 bottom-2 opacity-60 text-xs">↵</div>
             </div>
             <div className="mt-2 max-h-20 overflow-y-auto rounded-md bg-muted/20 p-2 space-y-1">
@@ -127,14 +121,13 @@ export default function FloatingCat() {
                 </div>
               ))}
               {messages.length === 0 && (
-                <div className="text-[12px] text-muted-foreground">Ask me anything about marketing content, plans and ideas.</div>
+                <div className="text-[12px] text-muted-foreground">{t('', 'aiAssistant')}</div>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Draggable Cat (drag handle only) */}
       <div
         className="relative h-20 w-20 cursor-grab active:cursor-grabbing select-none"
         onPointerDown={onPointerDown}
@@ -143,22 +136,16 @@ export default function FloatingCat() {
         onDoubleClick={() => setChatOpen((v) => !v)}
         title="Double‑click to chat. Drag to move."
       >
-        {/* Cat head with bigger ears */}
         <svg width="80" height="80" viewBox="0 0 80 80" className="cat-wiggle drop-shadow-lg">
-          {/* ears enlarged ~30% */}
           <path d="M16 30 L30 2 L38 32 Z" fill="#222" />
           <path d="M64 30 L50 2 L42 32 Z" fill="#222" />
-          {/* head */}
           <circle cx="40" cy="42" r="24" fill="#222" />
-          {/* eyes */}
           <circle cx="32" cy="42" r="6" fill="#fff" />
           <circle cx="48" cy="42" r="6" fill="#fff" />
           <circle cx="33" cy="42" r="2" fill="#111" className="cat-blink" />
           <circle cx="49" cy="42" r="2" fill="#111" className="cat-blink" />
-          {/* nose and smile */}
           <circle cx="40" cy="48" r="2" fill="#ffcf5b" />
           <path d="M34 52 Q40 56 46 52" stroke="#ffcf5b" strokeWidth="2" fill="none" />
-          {/* whiskers */}
           <path d="M14 46 H30" stroke="#ddd" strokeWidth="2" />
           <path d="M16 50 H30" stroke="#ddd" strokeWidth="2" />
           <path d="M50 46 H66" stroke="#ddd" strokeWidth="2" />
@@ -168,9 +155,9 @@ export default function FloatingCat() {
 
       <div className="mt-1 flex gap-2">
         <Button size="sm" variant="secondary" onClick={() => setChatOpen((v) => !v)}>
-          {chatOpen ? 'Hide chat' : 'Chat'}
+          {chatOpen ? (t('', 'close') + ' chat') : 'Chat'}
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setVisible(false)}>Hide</Button>
+        <Button size="sm" variant="ghost" onClick={() => setVisible(false)}>{t('', 'close')}</Button>
       </div>
     </div>
   )
