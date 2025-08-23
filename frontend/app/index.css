@@ -45,15 +45,15 @@
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
+    --border: 180 100% 60%;
+    --input: 180 100% 60%;
     --ring: 222 47% 11%;
 
     --radius: 0.75rem;
     
     /* Glass effect colors */
     --glass-bg: 0 0% 100%;
-    --glass-border: 214 32% 91%;
+    --glass-border: 180 100% 60%;
     --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
     --glass-blur: blur(20px);
     
@@ -89,9 +89,9 @@
     --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Keep cyan contours */
+    /* Cyan borders throughout */
     --border: 180 100% 60%;
-    --input: 220 10% 16%;
+    --input: 180 100% 60%;
     --ring: 180 100% 60%;
 
     --radius: 0.75rem;
@@ -115,6 +115,7 @@
 @layer base {
   * {
     @apply border-border;
+    border-color: hsl(var(--border));
   }
   body {
     @apply bg-background text-foreground;
