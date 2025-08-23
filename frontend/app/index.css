@@ -268,18 +268,11 @@ body {
 
 /* Futuristic neon card effects for dark theme */
 .dark .card {
-  border: 1px solid hsl(var(--accent-blue) / 0.3);
-  box-shadow: 
-    0 0 20px hsl(var(--accent-blue) / 0.1),
-    0 8px 32px rgba(0, 0, 0, 0.6);
+  border: 0;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
-.dark .card:hover {
-  border-color: hsl(var(--accent-blue) / 0.6);
-  box-shadow: 
-    0 0 30px hsl(var(--accent-blue) / 0.2),
-    0 12px 40px rgba(0, 0, 0, 0.8);
-}
+.dark .card:hover { box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8); }
 
 /* Button glass effects */
 .btn-glass {
@@ -340,10 +333,7 @@ body {
 }
 
 /* Futuristic navigation effects for dark theme */
-.dark .nav-glass {
-  border: 1px solid hsl(var(--accent-blue) / 0.3);
-  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
-}
+.dark .nav-glass { border: 0; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
 
 /* Sidebar glass effects */
 .sidebar-glass {
@@ -385,7 +375,11 @@ body {
 }
 
 /* Right cyan contour */
-.sidebar-contours::after { display: none; }
+.sidebar-contours::after {
+  right: 0;
+  background: linear-gradient(180deg, transparent, hsl(var(--accent-blue)), transparent);
+  box-shadow: 0 0 12px hsl(var(--accent-blue) / 0.6);
+}
 
 /* Header glass effects */
 .header-glass {
@@ -396,13 +390,24 @@ body {
   background-position: center;
   background-repeat: no-repeat;
   background-blend-mode: overlay;
-  border-bottom: 1px solid hsl(var(--glass-border) / 0.2);
+  border-bottom: 0;
 }
 
 /* Futuristic header effects for dark theme */
-.dark .header-glass {
-  border-bottom: 1px solid hsl(var(--accent-blue) / 0.3);
-  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
+.dark .header-glass { box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1); }
+
+/* Cyan glow along bottom edge of header */
+.header-glass { position: sticky; }
+.header-glass::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, hsl(var(--accent-blue)), transparent);
+  box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.6);
+  pointer-events: none;
 }
 
 /* Dashboard grid with glass spacing */
