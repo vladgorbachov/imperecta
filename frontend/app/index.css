@@ -358,6 +358,36 @@ body {
   box-shadow: 0 0 30px hsl(var(--accent-blue) / 0.1);
 }
 
+/* Cyan contour edges for sidebar (no honeycomb background) */
+.sidebar-contours {
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-contours::before,
+.sidebar-contours::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  pointer-events: none;
+}
+
+/* Left cyan contour */
+.sidebar-contours::before {
+  left: 0;
+  background: linear-gradient(180deg, transparent, hsl(var(--accent-blue)), transparent);
+  box-shadow: 0 0 12px hsl(var(--accent-blue) / 0.6);
+}
+
+/* Right cyan contour */
+.sidebar-contours::after {
+  right: 0;
+  background: linear-gradient(180deg, transparent, hsl(var(--accent-blue)), transparent);
+  box-shadow: 0 0 12px hsl(var(--accent-blue) / 0.6);
+}
+
 /* Header glass effects */
 .header-glass {
   @apply glass;
