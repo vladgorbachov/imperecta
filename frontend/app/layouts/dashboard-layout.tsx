@@ -38,11 +38,11 @@ export default function DashboardLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-blue-950 dark:via-slate-900 dark:to-purple-950">
+    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-[#1a1a1a] dark:via-[#0f172a] dark:to-[#0b1220]">
       <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onMenuButtonClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-auto pr-5 pl-6 pt-6 pb-6 relative">
+        <main className="flex-1 overflow-auto pr-5 pl-6 pt-6 pb-6 relative main-content-glass dark:main-content-glass">
           <div className="w-full">
             <Outlet />
           </div>
