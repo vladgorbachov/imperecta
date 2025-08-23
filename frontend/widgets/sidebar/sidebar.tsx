@@ -45,7 +45,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 	return (
 		<>
 			<div className={cn("fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden", open ? "block" : "hidden")} onClick={() => onOpenChange(false)} />
-			<div className={cn("sidebar-glass fixed inset-y-0 left-0 z-50 w-61 p-6 shadow-lg transition-transform duration-300 lg:static lg:z-auto flex flex-col", open ? "translate-x-0" : "-translate-x-full lg:translate-x-0")}> 
+			<div className={cn("sidebar-glass sidebar-contours fixed inset-y-0 left-0 z-50 w-61 p-6 shadow-lg transition-transform duration-300 lg:static lg:z-auto flex flex-col", open ? "translate-x-0" : "-translate-x-full lg:translate-x-0")}> 
 				<div className="flex items-center justify-center mb-8">
 					<Link to="/" className="flex items-center justify-center w-full"><Logo /></Link>
 					<Button variant="ghost" size="icon" className="lg:hidden header-btn absolute right-0" onClick={() => onOpenChange(false)}><X className="h-5 w-5" /></Button>
