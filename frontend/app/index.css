@@ -170,11 +170,31 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   border-radius: 12px;
+  position: relative;
+  overflow: hidden;
 }
 
 .dark .main-content-glass {
   background: rgba(0, 0, 0, 0.2);
   border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Background image for working area on all pages */
+.main-content-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url('/background_main.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.28; /* subtle image under glass */
+  z-index: -1;
+  pointer-events: none;
+}
+
+.dark .main-content-glass::before {
+  opacity: 0.22;
 }
 
 .glass-card {
