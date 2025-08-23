@@ -169,7 +169,7 @@
   -webkit-backdrop-filter: blur(15px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  border-radius: 12px;
+  border-radius: 0;
   position: relative;
   overflow: hidden;
 }
@@ -348,14 +348,17 @@ body {
 /* Sidebar glass effects */
 .sidebar-glass {
   @apply glass;
-  background: hsl(var(--glass-bg) / 0.95);
-  border-right: 1px solid hsl(var(--glass-border) / 0.2);
+  background-color: hsl(var(--glass-bg) / 0.92);
+  background-image: url('/sidebar_background.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-blend-mode: overlay;
 }
 
-/* Futuristic sidebar effects for dark theme */
+/* Futuristic sidebar effects for dark theme (no inner right border) */
 .dark .sidebar-glass {
-  border-right: 1px solid hsl(var(--accent-blue) / 0.3);
-  box-shadow: 0 0 30px hsl(var(--accent-blue) / 0.1);
+  box-shadow: 0 0 30px hsl(var(--accent-blue) / 0.08);
 }
 
 /* Cyan contour edges for sidebar (no honeycomb background) */
@@ -382,16 +385,17 @@ body {
 }
 
 /* Right cyan contour */
-.sidebar-contours::after {
-  right: 0;
-  background: linear-gradient(180deg, transparent, hsl(var(--accent-blue)), transparent);
-  box-shadow: 0 0 12px hsl(var(--accent-blue) / 0.6);
-}
+.sidebar-contours::after { display: none; }
 
 /* Header glass effects */
 .header-glass {
   @apply glass;
-  background: hsl(var(--glass-bg) / 0.9);
+  background-color: hsl(var(--glass-bg) / 0.9);
+  background-image: url('/sidebar_background.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-blend-mode: overlay;
   border-bottom: 1px solid hsl(var(--glass-border) / 0.2);
 }
 
