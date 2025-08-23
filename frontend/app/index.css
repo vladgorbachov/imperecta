@@ -164,7 +164,7 @@
 
 /* Main content glass surface (dark only) */
 .main-content-glass {
-  background: rgba(255, 255, 255, 0.05);
+  background: transparent;
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -175,7 +175,7 @@
 }
 
 .dark .main-content-glass {
-  background: rgba(0, 0, 0, 0.2);
+  background: transparent;
   border-color: rgba(255, 255, 255, 0.12);
 }
 
@@ -188,14 +188,12 @@
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  opacity: 0.28; /* subtle image under glass */
-  z-index: -1;
+  opacity: 1; /* show original image */
+  z-index: 0;
   pointer-events: none;
 }
 
-.dark .main-content-glass::before {
-  opacity: 0.22;
-}
+.dark .main-content-glass::before { opacity: 1; }
 
 .glass-card {
   @apply glass rounded-xl p-6;
