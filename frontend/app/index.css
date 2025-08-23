@@ -64,50 +64,51 @@
   }
 
   .dark {
-    /* Futuristic Dark theme - Neon cyberpunk design */
-    --background: 220 90% 4%;
-    --foreground: 0 0% 100%;
+    /* Dark theme — 80% neutral blacks/greys, cyan contours preserved */
+    --background: 220 12% 7%;   /* near #0b0f14 */
+    --foreground: 210 12% 96%;
 
-    --card: 220 90% 6%;
-    --card-foreground: 0 0% 100%;
+    --card: 220 12% 10%;        /* near #141922 */
+    --card-foreground: 210 12% 96%;
 
-    --popover: 220 90% 6%;
-    --popover-foreground: 0 0% 100%;
+    --popover: 220 12% 9%;
+    --popover-foreground: 210 12% 96%;
 
-    --primary: 180 100% 60%;
-    --primary-foreground: 220 90% 4%;
+    --primary: 210 100% 45%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 90% 8%;
-    --secondary-foreground: 0 0% 100%;
+    --secondary: 220 10% 13%;
+    --secondary-foreground: 210 12% 96%;
 
-    --muted: 220 90% 8%;
-    --muted-foreground: 220 20% 70%;
+    --muted: 220 10% 14%;
+    --muted-foreground: 215 14% 70%;
 
-    --accent: 220 90% 8%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 220 10% 13%;
+    --accent-foreground: 210 12% 96%;
 
-    --destructive: 0 84% 60%;
+    --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
 
+    /* Keep cyan contours */
     --border: 180 100% 60%;
-    --input: 220 90% 8%;
+    --input: 220 10% 16%;
     --ring: 180 100% 60%;
 
     --radius: 0.75rem;
     
-    /* Futuristic glass effect colors */
-    --glass-bg: 220 90% 8%;
+    /* Glass effect tuned to neutral blacks */
+    --glass-bg: 220 10% 12%;
     --glass-border: 180 100% 60%;
-    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-    --glass-blur: blur(20px);
-    
-    /* Neon accent colors */
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+    --glass-blur: blur(18px);
+
+    /* Accents (cyan preserved) */
     --accent-blue: 180 100% 60%;
-    --accent-purple: 270 100% 70%;
+    --accent-purple: 270 100% 65%;
     --accent-cyan: 180 100% 60%;
-    --accent-pink: 330 100% 70%;
-    --accent-green: 120 100% 60%;
-    --accent-orange: 30 100% 60%;
+    --accent-pink: 330 80% 65%;
+    --accent-green: 140 70% 55%;
+    --accent-orange: 28 85% 55%;
   }
 }
 

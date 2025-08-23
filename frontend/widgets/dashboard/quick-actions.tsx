@@ -44,26 +44,24 @@ export function QuickActions() {
   ]
 
   return (
-    <Card className="glass-card h-full">
+    <Card className="glass-card h-full border-cyan-400/50">
       <CardHeader className="pb-4">
-        <CardTitle className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent text-2xl dark:gradient-text">
-          Quick Actions
-        </CardTitle>
+        <CardTitle className="text-2xl dark:text-white">Quick actions</CardTitle>
       </CardHeader>
-      <CardContent className="overflow-y-auto max-h-96 pr-2">
-        <div className="grid grid-cols-1 gap-4">
+      <CardContent className="pr-2">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
           {actions.map((action) => (
             <Button
               key={action.id}
               variant="ghost"
-              className="glass rounded-xl p-4 h-auto hover:scale-105 justify-start dark:neon-glow"
+              className="glass rounded-xl h-16 px-3 hover:scale-[1.02] justify-start dark:neon-glow"
             >
-              <div className={`w-12 h-12 rounded-lg ${action.color} flex items-center justify-center mr-3`}>
-                <action.icon className="h-6 w-6 text-white" />
+              <div className={`w-8 h-8 md:w-9 md:h-9 rounded-md ${action.color} flex items-center justify-center mr-3`}>
+                <action.icon className="h-4 w-4 md:h-5 md:w-5 text-white" />
               </div>
-              <div className="text-left">
-                <div className="font-medium text-lg">{action.title}</div>
-                <div className="text-base text-muted-foreground">{action.description}</div>
+              <div className="text-left leading-tight">
+                <div className="font-medium text-sm md:text-base">{action.title}</div>
+                <div className="text-xs md:text-sm text-muted-foreground">{action.description}</div>
               </div>
             </Button>
           ))}
