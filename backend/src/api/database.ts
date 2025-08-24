@@ -90,7 +90,8 @@ export const updateUser = async (id: string, userData: UpdateUserRequest): Promi
         last_name: last_name || undefined,
         middle_name: middle_name || undefined,
         phone: phone || undefined,
-        avatar_url: avatar_url || undefined,
+        // Allow explicit clearing of avatar_url when empty string provided
+        avatar_url: avatar_url === '' ? null : (avatar_url || undefined),
         updated_at: new Date(),
       })
       .where(eq(users.id, id))

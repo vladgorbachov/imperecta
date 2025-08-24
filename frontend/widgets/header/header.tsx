@@ -96,7 +96,7 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="header-btn rounded-full">
               <Avatar className="h-8 w-8 ring-2 ring-primary/20">
-                <AvatarImage src={user?.user_metadata?.avatar_url || "/placeholder-user.jpg"} alt={user?.user_metadata?.full_name || ""} />
+                <AvatarImage src={(user?.user_metadata?.avatar_url && user?.user_metadata?.avatar_url !== '') ? user.user_metadata.avatar_url : "/placeholder-user.jpg"} alt={user?.user_metadata?.full_name || ""} />
                 <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
                   {user?.user_metadata?.full_name?.split(" ").map((n: string) => n[0]).join("") || user?.email?.charAt(0).toUpperCase() || "U"}
                 </AvatarFallback>

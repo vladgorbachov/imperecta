@@ -11,7 +11,7 @@ export default function CustomersPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('', 'customers')}</h1>
         <div className="flex gap-2">
-          <Input placeholder={t('', 'search')} />
+          <Input type="search" placeholder={t('', 'search')} className="search-input h-10 w-48" />
           <Button>{t('', 'newCustomer')}</Button>
         </div>
       </div>

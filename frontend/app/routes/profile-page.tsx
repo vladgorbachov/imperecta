@@ -53,6 +53,7 @@ export default function ProfilePage() {
   const [showPassword, setShowPassword] = useState(false)
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [resetKey, setResetKey] = useState(0)
 
   // Load user data when component mounts
   useEffect(() => {
@@ -80,10 +81,25 @@ export default function ProfilePage() {
     setMessage(null)
 
     try {
-      // Update profile in Supabase
+      // 1) Persist avatar (and fields) to our backend DB, bound to current database user ID
+      if (databaseUser?.id) {
+        await fetch(`/api/users/${databaseUser.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            first_name: formData.first_name || undefined,
+            last_name: formData.last_name || undefined,
+            middle_name: formData.middle_name || undefined,
+            phone: formData.phone || undefined,
+            avatar_url: formData.avatar_url === '' ? '' : formData.avatar_url,
+          })
+        })
+      }
+
+      // 2) Mirror avatar URL to Supabase auth metadata for immediate header/avatar usage
       const { error } = await updateProfile({
         name: `${formData.first_name} ${formData.last_name}`.trim(),
-        avatar_url: formData.avatar_url
+        avatar_url: formData.avatar_url === '' ? '' : formData.avatar_url
       })
 
       if (error) {
@@ -96,7 +112,21 @@ export default function ProfilePage() {
           type: 'success',
           text: 'Profile updated successfully!'
         })
+        // Refresh current database user state so cleared avatar sticks
+        try {
+          if (databaseUser?.id) {
+            const refreshed = await fetch(`/api/users/${databaseUser.id}`).then(r => r.ok ? r.json() : null)
+            if (refreshed) {
+              setFormData(prev => ({
+                ...prev,
+                avatar_url: refreshed.avatar_url || ''
+              }))
+            }
+          }
+        } catch {}
         setIsEditing(false)
+        // reset upload UI
+        setResetKey(k => k + 1)
       }
     } catch (error) {
       setMessage({
@@ -186,9 +216,9 @@ export default function ProfilePage() {
           <TabsTrigger value="preferences">Preferences</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="profile" className="page-grid">
-          <div className="page-grid-item col-span-full">
-            <Card className="dark:neon-glow h-full">
+        <TabsContent value="profile" className="page-grid pb-[30vh] pt-6">
+          <div className="page-grid-item col-span-full flex justify-center">
+            <Card className="dark:neon-glow h-full w-full md:w-1/2">
               <CardHeader>
                 <CardTitle className="dark:gradient-text">Personal Information</CardTitle>
                 <CardDescription>Update your personal details and profile picture</CardDescription>
@@ -203,6 +233,8 @@ export default function ProfilePage() {
                     onRemove={() => handleInputChange('avatar_url', '')}
                     placeholder="Upload profile picture"
                     maxSize={5}
+                    resetKey={resetKey}
+                    disabled={!isEditing}
                   />
                 </div>
 
@@ -308,9 +340,9 @@ export default function ProfilePage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="security" className="page-grid">
-          <div className="page-grid-item col-span-full">
-            <Card className="dark:neon-glow h-full">
+        <TabsContent value="security" className="page-grid pt-6">
+          <div className="page-grid-item col-span-full flex justify-center">
+            <Card className="dark:neon-glow h-full w-full md:w-1/2">
               <CardHeader>
                 <CardTitle className="dark:gradient-text">Security Settings</CardTitle>
                 <CardDescription>Manage your password and security preferences</CardDescription>
@@ -360,9 +392,9 @@ export default function ProfilePage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="preferences" className="page-grid">
-          <div className="page-grid-item col-span-full">
-            <Card className="dark:neon-glow h-full">
+        <TabsContent value="preferences" className="page-grid pt-6">
+          <div className="page-grid-item col-span-full flex justify-center">
+            <Card className="dark:neon-glow h-full w-full md:w-1/2">
               <CardHeader>
                 <CardTitle className="dark:gradient-text">Preferences</CardTitle>
                 <CardDescription>Customize your application experience</CardDescription>
@@ -398,6 +430,8 @@ export default function ProfilePage() {
           </div>
         </TabsContent>
       </Tabs>
+      {/* Extra bottom spacer to allow scrolling past the bottom of the card */}
+      <div className="h-[40vh]" aria-hidden="true" />
     </div>
   )
 } 

@@ -1,8 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card"
 import { Button } from "@/shared/components/ui/button"
 import { useLanguage } from "@/app/providers/language-provider"
-import { ChartContainer, ChartTooltipContent } from "@/shared/components/ui/chart"
-import { Area, AreaChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts"
 import { cn } from "@/shared/utils/cn"
 import { DollarSign, Users, CheckCircle, Star, Plus, FileText, BarChart as BarChartIcon, UserPlus } from "lucide-react"
 import * as React from "react"
@@ -18,9 +16,10 @@ export default function DashboardPage() {
 		{ id: 'satisfaction', title: t('', 'satisfaction'), value: '', icon: Star, color: 'text-yellow-600' },
 	]
 
-	const revenueData: Array<{ date: string; current?: number; previous?: number }> = []
+	// Revenue (week) widget removed
 
-	const [activities, setActivities] = React.useState<Array<{ id: string; title: string; priority: 'low'|'medium'|'high'; time: string }>>([])
+	type Activity = { id: string; title: string; priority: 'low' | 'medium' | 'high'; time: string }
+	const [activities, setActivities] = React.useState<Activity[]>([])
 
 	const { databaseUser } = useSupabase()
 
@@ -31,19 +30,20 @@ export default function DashboardPage() {
 			const list = await fetch(`/api/users/${databaseUser.id}/events`).then(r => r.json())
 			const now = Date.now()
 			const windowMs = 48 * 60 * 60 * 1000
-			const items = (list || [])
-				.map((e: any) => ({
-					id: e.id as string,
-					title: `${e.title}`,
+			type SimpleEvent = { id: string; title: string; start: number }
+			const items: Activity[] = ((list || []) as Array<any>)
+				.map((e: any): SimpleEvent => ({
+					id: String(e.id),
+					title: String(e.title),
 					start: new Date(e.start_at).getTime(),
 				}))
-				.filter((x) => Math.abs(x.start - now) <= windowMs)
-				.sort((a,b) => b.start - a.start)
+				.filter((x: SimpleEvent) => Math.abs(x.start - now) <= windowMs)
+				.sort((a: SimpleEvent, b: SimpleEvent) => b.start - a.start)
 				.slice(0, 10)
-				.map((x) => ({
+				.map((x: SimpleEvent): Activity => ({
 					id: x.id,
 					title: `${t('', 'addEvent')}: ${x.title}`,
-					priority: 'medium' as const,
+					priority: 'medium',
 					time: new Date(x.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 				}))
 			setActivities(items)
@@ -59,8 +59,8 @@ export default function DashboardPage() {
 			const dt = new Date(d.date)
 			const hh = String(dt.getHours()).padStart(2, '0')
 			const mm = String(dt.getMinutes()).padStart(2, '0')
-			setActivities(prev => ([
-				{ id: d.id, title: `${t('', 'addEvent')}: ${d.title}`, priority: 'medium', time: `${hh}:${mm}` },
+			setActivities((prev): Activity[] => ([
+				{ id: String(d.id), title: `${t('', 'addEvent')}: ${String(d.title)}`, priority: 'medium' as const, time: `${hh}:${mm}` },
 				...prev,
 			]).slice(0, 10))
 		}
@@ -86,7 +86,7 @@ export default function DashboardPage() {
 						{kpis.map(k => (
 							<Card key={k.id} className="dark:neon-glow">
 								<CardHeader className="flex flex-row items-center justify-between pb-2">
-									<CardTitle className="text-sm font-medium">{k.title}</CardTitle>
+									<CardTitle className="text-xxl font-semibold">{k.title}</CardTitle>
 									<k.icon className={cn("h-5 w-5 opacity-70", k.color)} />
 								</CardHeader>
 								<CardContent>
@@ -95,25 +95,7 @@ export default function DashboardPage() {
 							</Card>
 						))}
 					</div>
-					{/* Revenue chart */}
-					<Card className="dark:neon-glow">
-						<CardHeader className="py-3">
-							<CardTitle>{t('', 'revenueWeek')}</CardTitle>
-						</CardHeader>
-						<CardContent className="p-3">
-							<ChartContainer id="revenue" config={{ current: { label: 'Текущая', color: 'hsl(221.2 83.2% 53.3%)' }, previous: { label: 'Прошлая', color: 'hsl(142.1 70.6% 45.3%)' } }}>
-								<AreaChart data={revenueData} height={150} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
-									<CartesianGrid strokeDasharray="3 3" />
-									<XAxis dataKey="date" />
-									<YAxis />
-									<Tooltip content={<ChartTooltipContent />} />
-									<Legend />
-									<Area type="monotone" dataKey="current" stroke="var(--color-current)" fill="var(--color-current)" fillOpacity={0.3} />
-									<Area type="monotone" dataKey="previous" stroke="var(--color-previous)" fill="var(--color-previous)" fillOpacity={0.15} />
-								</AreaChart>
-							</ChartContainer>
-						</CardContent>
-					</Card>
+					{/* Revenue (week) widget removed */}
 				</div>
 
 				{/* Right side: 1 column stack */}

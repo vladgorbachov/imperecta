@@ -37,7 +37,8 @@
     --secondary-foreground: 222 47% 11%;
 
     --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    /* Make muted-foreground dark in light theme to ensure black icons/text */
+    --muted-foreground: 0 0% 0%;
 
     --accent: 210 40% 96%;
     --accent-foreground: 222 47% 11%;
@@ -45,46 +46,49 @@
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 180 100% 60%;
-    --input: 180 100% 60%;
-    --ring: 222 47% 11%;
+    /* Light theme borders use MediumSlateBlue */
+    --border: 249 80% 67%;
+    --input: 249 80% 67%;
+    --ring: 249 80% 67%;
 
     --radius: 0.75rem;
     
     /* Glass effect colors */
     --glass-bg: 0 0% 100%;
-    --glass-border: 180 100% 60%;
+    --glass-border: 249 80% 67%;
     --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
     --glass-blur: blur(20px);
+    /* Light theme contour color (bright cyan like image facets) */
+    --contour-light: 195 100% 60%;
     
-    /* Accent colors from logo */
-    --accent-blue: 210 100% 50%;
+    /* Accent colors (light) — use MediumSlateBlue for borders/glow */
+    --accent-blue: 249 80% 67%;
     --accent-purple: 270 100% 60%;
     --accent-cyan: 180 100% 50%;
   }
 
   .dark {
-    /* Dark theme — 80% neutral blacks/greys, cyan contours preserved */
+    /* Dark theme — neutral blacks, white text, cyan borders */
     --background: 220 12% 7%;   /* near #0b0f14 */
-    --foreground: 210 12% 96%;
+    --foreground: 0 0% 100%;
 
     --card: 220 12% 10%;        /* near #141922 */
-    --card-foreground: 210 12% 96%;
+    --card-foreground: 0 0% 100%;
 
     --popover: 220 12% 9%;
-    --popover-foreground: 210 12% 96%;
+    --popover-foreground: 0 0% 100%;
 
     --primary: 210 100% 45%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 10% 13%;
-    --secondary-foreground: 210 12% 96%;
+    --secondary-foreground: 0 0% 100%;
 
     --muted: 220 10% 14%;
-    --muted-foreground: 215 14% 70%;
+    --muted-foreground: 0 0% 100%;
 
     --accent: 220 10% 13%;
-    --accent-foreground: 210 12% 96%;
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
@@ -146,12 +150,9 @@
     @apply transition-all duration-200;
   }
   
-  /* Header icon styles */
-  .header-icon {
-    @apply text-gray-700 dark:text-gray-300;
-    @apply hover:text-gray-900 dark:hover:text-white;
-    @apply transition-colors duration-200;
-  }
+  /* Header icon styles: black in light theme, white in dark */
+  .header-icon { color: #000000; }
+  .dark .header-icon { color: #ffffff; }
 }
 
 /* Modern glass morphism effects */
@@ -165,14 +166,19 @@
 
 /* Main content glass surface (dark only) */
 .main-content-glass {
-  background: transparent;
+  /* Apply background directly to container so it paints for entire scrollable area */
+  background-image: url('/background_main_light_theme.jpg');
+  background-size: cover; /* fill available area */
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: local;
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   border-radius: 0;
   position: relative;
-  overflow: hidden;
+  overflow: auto; /* allow vertical scrolling of page content */
 }
 
 .dark .main-content-glass {
@@ -180,21 +186,14 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
-/* Background image for working area on all pages */
-.main-content-glass::before {
-  content: "";
-  position: absolute;
-  inset: 0;
+/* Dark theme working area */
+.dark .main-content-glass {
   background-image: url('/background_main.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  opacity: 1; /* show original image */
-  z-index: 0;
-  pointer-events: none;
+  background-attachment: local;
 }
-
-.dark .main-content-glass::before { opacity: 1; }
 
 .glass-card {
   @apply glass rounded-xl p-6;
@@ -241,15 +240,7 @@ body {
   overflow: hidden;
 }
 
-.card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.5), transparent);
-}
+.card::before { display: none; }
 
 /* Modal glass card */
 .modal-card {
@@ -267,11 +258,48 @@ body {
 
 /* Futuristic neon card effects for dark theme */
 .dark .card {
-  border: 0;
+  border: 1px solid hsl(var(--border));
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  background-image: url('/widget_background_dark_theme.png');
+  background-size: cover;
+  background-position: center;
 }
 
 .dark .card:hover { box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8); }
+
+/* Ensure glass components have visible cyan borders in dark theme */
+.dark .glass,
+.dark .glass-card { 
+  border-color: hsl(var(--border) / 0.6) !important; 
+  border-width: 1px; 
+  background-image: url('/widget_background_dark_theme.png');
+  background-size: cover;
+  background-position: center;
+}
+
+/* Do not apply widget background inside calendar page */
+.dark .calendar-page .card,
+.dark .calendar-page .glass-card {
+  background-image: none !important;
+}
+
+/* Light theme: widget background image across all pages (except calendar) */
+:root:not(.dark) .card {
+  background-image: url('/widget_background_light_theme.jpg');
+  background-size: cover;
+  background-position: center;
+}
+
+:root:not(.dark) .glass-card {
+  background-image: url('/widget_background_light_theme.jpg');
+  background-size: cover;
+  background-position: center;
+}
+
+:root:not(.dark) .calendar-page .card,
+:root:not(.dark) .calendar-page .glass-card {
+  background-image: none !important;
+}
 
 /* Button glass effects */
 .btn-glass {
@@ -312,16 +340,40 @@ body {
 }
 
 /* Futuristic input effects for dark theme */
-.dark .input-glass {
-  border: 1px solid hsl(var(--accent-blue) / 0.3);
-  box-shadow: 0 0 5px hsl(var(--accent-blue) / 0.1);
-}
+.dark .input-glass { border: 1px solid hsl(var(--border) / 0.6); box-shadow: 0 0 5px hsl(var(--accent-blue) / 0.1); }
 
 .dark .input-glass:focus {
   border-color: hsl(var(--accent-blue) / 0.8);
   box-shadow: 
     0 0 0 3px hsl(var(--accent-blue) / 0.1),
     0 0 15px hsl(var(--accent-blue) / 0.2);
+}
+
+/* Standardize Search inputs across app */
+input[type="search"],
+.input-search,
+.header-glass input[type="search"] {
+  height: 2.5rem !important; /* h-10 */
+  line-height: 2.5rem !important;
+  width: 12rem !important; /* w-48 */
+}
+
+/* Light theme: keep white background, set new contour color */
+:root:not(.dark) input[type="search"],
+:root:not(.dark) .input-search,
+:root:not(.dark) .header-glass input[type="search"] {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border-color: hsl(var(--border)) !important; /* MediumSlateBlue from vars */
+}
+
+/* Dark theme: unified dark gray background for all Search inputs */
+.dark input[type="search"],
+.dark .input-search,
+.dark .header-glass input[type="search"] {
+  background-color: rgba(20, 24, 31, 0.9) !important; /* consistent dark gray */
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
 }
 
 /* Navigation glass effects */
@@ -338,7 +390,8 @@ body {
 .sidebar-glass {
   @apply glass;
   background-color: hsl(var(--glass-bg) / 0.92);
-  background-image: url('/sidebar_background.png');
+  /* Light theme sidebar/header background */
+  background-image: url('/background_sidebar_light_theme.jpg');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -346,9 +399,11 @@ body {
 }
 
 /* Futuristic sidebar effects for dark theme (no inner right border) */
-.dark .sidebar-glass {
-  box-shadow: 0 0 30px hsl(var(--accent-blue) / 0.08);
-}
+.dark .sidebar-glass { box-shadow: none !important; border-bottom: 0 !important; background-image: url('/sidebar_background.png'); }
+
+/* Remove seam between sidebar and header/main where they touch */
+.sidebar-glass { border-right: 0 !important; }
+.main-content-glass { border-left: 0 !important; }
 
 /* Cyan contour edges for sidebar (no honeycomb background) */
 .sidebar-contours {
@@ -364,6 +419,7 @@ body {
   bottom: 10px;
   width: 2px;
   pointer-events: none;
+  z-index: 1;
 }
 
 /* Left cyan contour */
@@ -378,22 +434,92 @@ body {
   right: 0;
   background: linear-gradient(180deg, transparent, hsl(var(--accent-blue)), transparent);
   box-shadow: 0 0 12px hsl(var(--accent-blue) / 0.6);
+  /* Remove the vertical seam where header touches the sidebar */
+  top: 4rem; /* header height (h-16); body font-size increased, so use rem */
+}
+
+/* Light theme: sidebar contours use new light contour color */
+:root:not(.dark) .sidebar-contours::before,
+:root:not(.dark) .sidebar-contours::after {
+  background: linear-gradient(180deg, transparent, hsl(var(--contour-light)), transparent);
+  box-shadow: 0 0 12px hsl(var(--contour-light) / 0.6);
 }
 
 /* Header glass effects */
 .header-glass {
   @apply glass;
   background-color: hsl(var(--glass-bg) / 0.9);
-  background-image: url('/sidebar_background.png');
-  background-size: cover;
-  background-position: center;
+  background-image: url('/background_sidebar_light_theme.jpg');
+  /* Use only the top area of the image across header width */
+  background-size: 100% 300%;
+  background-position: top center;
   background-repeat: no-repeat;
   background-blend-mode: overlay;
   border-bottom: 0;
 }
 
 /* Futuristic header effects for dark theme */
-.dark .header-glass { box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1); }
+.dark .header-glass {
+  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
+  background-image: url('/sidebar_background.png');
+  /* Use only the top 20% of the image across header width in dark theme */
+  background-size: 100% 800%;
+  background-position: top center;
+  background-repeat: no-repeat;
+  background-blend-mode: overlay;
+}
+
+/* Right screen contour (mirror of left), applied to the main app container */
+.app-right-contour::after {
+  content: "";
+  position: fixed;
+  top: 4rem; /* align with header bottom */
+  bottom: 10px;
+  right: 0;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, hsl(var(--accent-blue)), transparent);
+  box-shadow: 0 0 12px hsl(var(--accent-blue) / 0.6);
+  pointer-events: none;
+  z-index: 9999;
+}
+:root:not(.dark) .app-right-contour::after {
+  background: linear-gradient(180deg, transparent, hsl(var(--contour-light)), transparent);
+  box-shadow: 0 0 12px hsl(var(--contour-light) / 0.6);
+}
+
+/* Dark theme: fixed bottom contour at viewport edge (independent of scrolling) */
+/* Removed bottom contour */
+
+/* Active nav link background uses the same image as sidebar/header */
+:root:not(.dark) .active-nav-link {
+  background-image: url('/background_sidebar_light_theme.jpg') !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+.dark .active-nav-link {
+  background-image: url('/sidebar_background.png') !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+
+/* Force light theme images for sidebar and header */
+:root:not(.dark) .sidebar-glass {
+  background: transparent url('/background_sidebar_light_theme.jpg') no-repeat center center !important;
+  background-size: cover !important;
+}
+:root:not(.dark) .header-glass {
+  background: transparent url('/background_sidebar_light_theme.jpg') no-repeat top center !important;
+  background-size: 100% 800% !important;
+}
+
+/* Remove white overlay/blur on light theme for crisp images */
+:root:not(.dark) .sidebar-glass,
+:root:not(.dark) .header-glass {
+  background-color: transparent !important;
+  background-blend-mode: normal !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 
 /* Cyan glow along bottom edge of header */
 .header-glass { position: sticky; }
@@ -407,6 +533,64 @@ body {
   background: linear-gradient(90deg, transparent, hsl(var(--accent-blue)), transparent);
   box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.6);
   pointer-events: none;
+  z-index: 1;
+}
+
+/* Remove left border on header to avoid seam with sidebar */
+.header-glass { border-left: 0 !important; }
+
+/* Light theme: full contour (2px) with glow on all sides for widgets */
+:root:not(.dark) .card,
+:root:not(.dark) .glass-card {
+  position: relative;
+  border: 0 !important;
+}
+
+:root:not(.dark) .card::after,
+:root:not(.dark) .glass-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* uniform 2px inner stroke + soft glow */
+  box-shadow:
+    inset 0 0 0 2px hsl(var(--contour-light)),
+    0 0 10px hsl(var(--contour-light) / 0.25),
+    0 0 20px hsl(var(--contour-light) / 0.15);
+}
+
+/* Light theme: restore header bottom line with new contour color */
+:root:not(.dark) .header-glass::after {
+  display: block;
+  background: linear-gradient(90deg, transparent, hsl(var(--contour-light)), transparent);
+  box-shadow: 0 0 10px hsl(var(--contour-light) / 0.6);
+}
+
+/* Light theme: calendar grid lines thicker and recolored */
+:root:not(.dark) .calendar-page .grid > div {
+  border-color: hsl(var(--contour-light)) !important;
+  border-right-width: 2px !important;
+  border-bottom-width: 2px !important;
+}
+
+/* Light theme: calendar external frame and events panel separators */
+:root:not(.dark) .calendar-page .calendar-frame {
+  border-color: hsl(var(--contour-light)) !important;
+  border-width: 2px !important;
+}
+
+/* Dark theme: ensure calendar outer frame has uniform thickness */
+.dark .calendar-page .calendar-frame { border-width: 2px !important; }
+
+:root:not(.dark) .calendar-page .events-panel {
+  border-left-color: hsl(var(--contour-light)) !important;
+  border-left-width: 2px !important;
+}
+
+:root:not(.dark) .calendar-page .events-divider {
+  border-color: hsl(var(--contour-light)) !important;
+  border-bottom-width: 2px !important;
 }
 
 /* Dashboard grid with glass spacing */
@@ -710,26 +894,23 @@ body {
 
 /* Calendar specific styles */
 .dark .calendar-container {
-  background: hsl(var(--glass-bg) / 0.8);
+  background: transparent;
   backdrop-filter: var(--glass-blur);
-  border: 1px solid hsl(var(--accent-blue) / 0.3);
-  box-shadow: 0 0 20px hsl(var(--accent-blue) / 0.1);
+  border: 1px solid hsl(var(--border));
+  box-shadow: none;
 }
 
 .dark .calendar-day {
   transition: all 0.2s ease;
+  border: 1px solid hsl(var(--border));
 }
 
-.dark .calendar-day:hover {
-  background: hsl(var(--accent-blue) / 0.1);
-  border-color: hsl(var(--accent-blue) / 0.5);
-}
+.dark .calendar-day:hover { background: hsl(var(--accent-blue) / 0.05); border-color: hsl(var(--border)); }
 
-.dark .calendar-day.selected {
-  background: hsl(var(--accent-blue) / 0.3);
-  border-color: hsl(var(--accent-blue) / 0.8);
-  box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.3);
-}
+.dark .calendar-day.selected { background: hsl(var(--accent-blue) / 0.15); border-color: hsl(var(--border)); box-shadow: none; }
+
+/* Remove bottom border for 7th (hidden) row if it appears due to grid rounding */
+.calendar-grid-hide-extra-row { border-bottom: 0 !important; }
 
 .dark .calendar-day.today {
   background: hsl(var(--accent-blue) / 0.2);
@@ -737,24 +918,15 @@ body {
   color: hsl(var(--accent-blue));
 }
 
-.dark .event-card {
-  background: hsl(var(--glass-bg) / 0.9);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid hsl(var(--accent-blue) / 0.2);
-  transition: all 0.3s ease;
-}
+.dark .event-card { background: transparent; border: 1px solid hsl(var(--border)); transition: all 0.3s ease; }
 
-.dark .event-card:hover {
-  border-color: hsl(var(--accent-blue) / 0.5);
-  box-shadow: 0 0 15px hsl(var(--accent-blue) / 0.2);
-  transform: translateY(-1px);
-}
+.dark .event-card:hover { border-color: hsl(var(--border)); transform: translateY(-1px); }
 
 /* Modern Calendar Layout */
 .calendar-layout {
   display: grid;
   grid-template-columns: 320px 1fr 320px;
-  height: 100vh;
+  height: calc(95vh - 64px);
   overflow: hidden;
 }
 
@@ -848,3 +1020,13 @@ body {
     display: none;
   }
 }
+
+/* Ensure header search never inherits widget background */
+.header-glass input[type="search"] {
+  background-image: none !important;
+}
+
+/* Global alias class to target search inputs uniformly */
+.search-input { height: 2.5rem !important; line-height: 2.5rem !important; width: 12rem !important; }
+:root:not(.dark) .search-input { background-color: #ffffff !important; color: #000000 !important; border-color: hsl(var(--border)) !important; }
+.dark .search-input { background-color: rgba(20, 24, 31, 0.9) !important; color: #ffffff !important; border-color: rgba(255,255,255,0.18) !important; }

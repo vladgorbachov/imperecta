@@ -22,7 +22,7 @@ export default function DashboardLayout() {
       <div className="flex h-screen w-full items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950">
         <div className="glass-card">
           <div className="flex items-center gap-4">
-            <Skeleton className="h-12 w-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-600" />
+            <Skeleton className="h-22 w-22 rounded-full bg-gradient-to-r from-blue-500 to-purple-600" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-32" />
               <Skeleton className="h-3 w-24" />
@@ -38,7 +38,7 @@ export default function DashboardLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-[#1a1a1a] dark:via-[#0f172a] dark:to-[#0b1220]">
+    <div className="app-right-contour flex h-screen overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-[#1a1a1a] dark:via-[#0f172a] dark:to-[#0b1220]">
       <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onMenuButtonClick={() => setSidebarOpen(true)} />
