@@ -72,13 +72,22 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
             <Input type="search" placeholder="Search..." className="input-glass w-full pl-10 focus-glass dark:neon-glow" />
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="lg:hidden header-btn" onClick={onMenuButtonClick}><Menu className="h-5 w-5 header-icon" /></Button>
-        <Button variant="ghost" size="icon" className="header-btn dark:neon-glow" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-          {theme === "dark" ? <Sun className="h-5 w-5 header-icon dark:text-glow" /> : <Moon className="h-5 w-5 header-icon" />}
+        <Button variant="ghost" size="icon" className="header-btn header-icon-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Toggle theme">
+          <span className="header-icon-svg">
+            {theme === "dark" ? (
+              <svg viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            )}
+          </span>
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="header-btn"><Globe className="h-5 w-5 header-icon" /></Button>
+            <Button variant="ghost" size="icon" className="header-btn header-icon-btn">
+              <span className="header-icon-svg">
+                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              </span>
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="glass">
             <DropdownMenuLabel>Language</DropdownMenuLabel>
@@ -91,7 +100,11 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="icon" className="header-btn dark:neon-glow"><Bell className="h-5 w-5 header-icon dark:text-glow" /></Button>
+        <Button variant="ghost" size="icon" className="header-btn header-icon-btn">
+          <span className="header-icon-svg">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </span>
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="header-btn rounded-full">
@@ -109,9 +122,9 @@ export function Header({ onMenuButtonClick }: HeaderProps) {
               <span className="opacity-80">{flagByLang[language] || '🏳️'}</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/profile")}><User className="mr-2 h-4 w-4" />Profile</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate("/profile")}>Profile</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleSignOut} className="text-red-600 focus:text-red-600"><LogOut className="mr-2 h-4 w-4" />Logout</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { handleSignOut().catch(console.error) }} className="text-red-600 focus:text-red-600">Logout</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
