@@ -65,6 +65,11 @@
     --accent-blue: 249 80% 67%;
     --accent-purple: 270 100% 60%;
     --accent-cyan: 180 100% 50%;
+
+    /* Uniform button sizing */
+    --btn-height: 2.5rem; /* equals h-10 */
+    --btn-padding-x: 1.25rem; /* equals px-5 */
+    --btn-radius: 12px;
   }
 
   .dark {
@@ -113,6 +118,16 @@
     --accent-pink: 330 80% 65%;
     --accent-green: 140 70% 55%;
     --accent-orange: 28 85% 55%;
+    
+    /* Unified widget background settings (dark theme) */
+    --widget-bg-image: url('/widget_background_dark_theme.png');
+    /* Fixed pixel size ensures consistent scale across different widget sizes */
+    --widget-bg-size: 1200px auto;
+
+    /* Keep the same button sizing variables in dark theme */
+    --btn-height: 2.5rem;
+    --btn-padding-x: 1.25rem;
+    --btn-radius: 12px;
   }
 }
 
@@ -142,17 +157,28 @@
     font-size: 1.5rem;
   }
   
-  /* Header button styles - make them more visible */
+  /* Header button styles - simplified, transparent */
   .header-btn {
-    @apply bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border border-gray-200 dark:border-gray-700;
-    @apply hover:bg-white dark:hover:bg-gray-800;
-    @apply shadow-sm hover:shadow-md;
-    @apply transition-all duration-200;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: inherit;
+    position: relative;
   }
   
   /* Header icon styles: black in light theme, white in dark */
   .header-icon { color: #000000; }
   .dark .header-icon { color: #ffffff; }
+  .dark .header-btn { color: #ffffff; }
+  /* Ensure visibility of svg icons */
+  .header-btn svg { width: 1.25rem; height: 1.25rem; stroke: currentColor !important; fill: none !important; display: inline-block; position: relative; z-index: 1; }
+  .header-btn svg path,
+  .header-btn svg circle,
+  .header-btn svg rect,
+  .header-btn svg line,
+  .header-btn svg polyline,
+  .header-btn svg polygon { stroke: currentColor !important; fill: none !important; stroke-width: 2 !important; stroke-linecap: round !important; stroke-linejoin: round !important; }
+  .dark .header-btn svg { color: currentColor !important; }
 }
 
 /* Modern glass morphism effects */
@@ -260,9 +286,10 @@ body {
 .dark .card {
   border: 1px solid hsl(var(--border));
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  background-image: url('/widget_background_dark_theme.png');
-  background-size: cover;
+  background-image: var(--widget-bg-image);
+  background-size: var(--widget-bg-size);
   background-position: center;
+  background-repeat: no-repeat;
 }
 
 .dark .card:hover { box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8); }
@@ -272,9 +299,10 @@ body {
 .dark .glass-card { 
   border-color: hsl(var(--border) / 0.6) !important; 
   border-width: 1px; 
-  background-image: url('/widget_background_dark_theme.png');
-  background-size: cover;
+  background-image: var(--widget-bg-image);
+  background-size: var(--widget-bg-size);
   background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* Do not apply widget background inside calendar page */
@@ -332,6 +360,125 @@ body {
   background: hsl(var(--glass-bg) / 0.8);
   border: 1px solid hsl(var(--glass-border) / 0.2);
 }
+
+/* Uniform button sizing */
+.btn-uniform {
+  height: var(--btn-height) !important;
+  min-height: var(--btn-height) !important;
+  padding-left: var(--btn-padding-x) !important;
+  padding-right: var(--btn-padding-x) !important;
+  border-radius: var(--btn-radius) !important;
+}
+
+/* For icon-sized buttons ensure square sizing */
+.btn-uniform[data-size="icon"] {
+  width: var(--btn-height) !important;
+}
+
+/* Light theme glossy look inspired by the provided design */
+:root:not(.dark) .btn-glossy {
+  position: relative;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.85) 60%, rgba(255,255,255,0.90) 100%);
+  color: hsl(200 90% 40%);
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.12), 0 6px 16px rgba(0,0,0,0.12);
+}
+
+/* top glossy reflection */
+:root:not(.dark) .btn-glossy::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 6px;
+  height: 30%;
+  border-radius: calc(var(--btn-radius) - 4px);
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.25));
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* vertical separator near the right side */
+:root:not(.dark) .btn-glossy::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 28%;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.02));
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Dark theme: ensure glossy styles do not leak */
+.dark .btn-glossy { background: transparent; color: inherit; border: 0; box-shadow: none; }
+.dark .btn-glossy::before, .dark .btn-glossy::after { display: none; }
+
+/* Header round icon buttons (unified size/style) */
+.header-icon-btn {
+  width: var(--btn-height);
+  height: var(--btn-height);
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #000000 !important; /* pure black by default (dark theme) */
+  color: #ffffff !important;      /* white icons */
+  border: 1px solid rgba(255,255,255,0.25) !important;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -2px 0 rgba(0,0,0,0.6) !important;
+}
+:root:not(.dark) .header-icon-btn {
+  /* Silver glossy style for light theme */
+  background: linear-gradient(180deg, #f6f7f9 0%, #e5e8ec 55%, #d3d7dc 100%) !important;
+  color: #1f2937 !important; /* dark graphite icons */
+  border: 1px solid #c3c8cf !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -2px 0 rgba(0,0,0,0.08) !important;
+}
+.dark .header-icon-btn {
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+/* Glossy highlight on top */
+.header-icon-btn::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  height: 28%;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.45), rgba(255,255,255,0));
+  pointer-events: none;
+  z-index: 0;
+}
+.header-icon-btn svg { width: 1.25rem; height: 1.25rem; stroke: currentColor !important; fill: none !important; display: block; position: relative; z-index: 1; }
+
+/* Theme toggle control */
+.theme-toggle { display: inline-flex; align-items: center; height: var(--btn-height); padding: 0 0.5rem; border-radius: 9999px; width: calc(var(--btn-height) * 2.4); justify-content: flex-end; }
+
+/* Light mode appearance */
+:root:not(.dark) .theme-toggle { background: #d9dde2; color: #111827; border: 4px solid #9ca3af; }
+:root:not(.dark) .theme-toggle__knob { width: calc(var(--btn-height) - 0.25rem); height: calc(var(--btn-height) - 0.25rem); border-radius: 9999px; margin-left: auto; background: #e5e7eb; border: 4px solid #9ca3af; display: inline-flex; align-items: center; justify-content: center; }
+:root:not(.dark) .theme-toggle__knob svg { color: #111827; }
+
+/* Dark mode appearance */
+.dark .theme-toggle { background: #000000; color: #ffffff; border: 4px solid #6b7280; justify-content: flex-start; }
+.dark .theme-toggle__knob { width: calc(var(--btn-height) - 0.25rem); height: calc(var(--btn-height) - 0.25rem); border-radius: 9999px; background: #9ca3af; border: 4px solid #6b7280; display: inline-flex; align-items: center; justify-content: center; order: -1; }
+.dark .theme-toggle__knob svg { color: #0b0f14; }
+
+/* Unified header icon buttons */
+.icon-btn { border-radius: 9999px !important; display: inline-flex; align-items: center; justify-content: center; }
+:root:not(.dark) .icon-btn { /* use glossy light style */ }
+.dark .icon-btn {
+  background: linear-gradient(180deg, #3b3f45 0%, #202225 100%);
+  color: #e5e7eb !important;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.8);
+}
+.dark .icon-btn:hover { filter: brightness(1.05); }
+.dark .icon-btn:active { filter: brightness(0.95); }
 
 .input-glass:focus {
   background: hsl(var(--glass-bg) / 0.95);
@@ -399,7 +546,17 @@ input[type="search"],
 }
 
 /* Futuristic sidebar effects for dark theme (no inner right border) */
-.dark .sidebar-glass { box-shadow: none !important; border-bottom: 0 !important; background-image: url('/sidebar_background.png'); }
+.dark .sidebar-glass {
+  box-shadow: none !important;
+  border-bottom: 0 !important;
+  background-image: url('/sidebar_background.png');
+  /* Restore original scaling behavior for sidebar background */
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  /* Ensure background visually fills the sidebar vertically */
+  min-height: 100vh;
+}
 
 /* Remove seam between sidebar and header/main where they touch */
 .sidebar-glass { border-right: 0 !important; }
@@ -533,11 +690,15 @@ input[type="search"],
   background: linear-gradient(90deg, transparent, hsl(var(--accent-blue)), transparent);
   box-shadow: 0 0 10px hsl(var(--accent-blue) / 0.6);
   pointer-events: none;
-  z-index: 1;
+  z-index: 0;
 }
 
 /* Remove left border on header to avoid seam with sidebar */
 .header-glass { border-left: 0 !important; }
+
+/* Keep header buttons above any header overlays */
+.header-glass .header-btn { position: relative; z-index: 2; color: #111827 !important; }
+.dark .header-glass .header-btn { color: #ffffff !important; }
 
 /* Light theme: full contour (2px) with glow on all sides for widgets */
 :root:not(.dark) .card,
@@ -1030,3 +1191,7 @@ input[type="search"],
 .search-input { height: 2.5rem !important; line-height: 2.5rem !important; width: 12rem !important; }
 :root:not(.dark) .search-input { background-color: #ffffff !important; color: #000000 !important; border-color: hsl(var(--border)) !important; }
 .dark .search-input { background-color: rgba(20, 24, 31, 0.9) !important; color: #ffffff !important; border-color: rgba(255,255,255,0.18) !important; }
+
+/* Inline icon helper for header buttons */
+.header-icon-svg { position: absolute; width: 1.25rem; height: 1.25rem; color: currentColor; z-index: 2; pointer-events: none; }
+.header-icon-svg svg { width: 100%; height: 100%; stroke: currentColor; fill: none; }
