@@ -53,7 +53,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 				<div className="flex-1 min-h-0 py-6 overflow-y-auto no-scrollbar">
 					<nav className="flex flex-col gap-3">
 						{routes.map((route) => (
-							<Link key={route.href} to={route.href} className={cn("flex items-center gap-3 rounded-xl px-6 py-3 text-lg font-medium transition-all duration-300 group w-full", location.pathname === route.href ? "glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-black dark:text-white shadow-lg dark:neon-glow dark:border-glow" : "hover:glass-card hover:bg-muted/50 hover:scale-105 dark:hover:neon-glow")}> 
+							<Link key={route.href} to={route.href} className={cn("flex items-center gap-3 rounded-xl px-6 py-3 text-lg font-medium transition-all duration-300 group w-full", location.pathname === route.href ? "active-nav-link glass-card bg-gradient-to-r from-primary/20 to-primary/10 border-primary/30 text-black dark:text-white shadow-lg dark:neon-glow dark:border-glow" : "hover:glass-card hover:bg-muted/50 hover:scale-105 dark:hover:neon-glow")}> 
 								<route.icon className={cn("h-6 w-6 transition-colors", location.pathname === route.href ? "text-primary dark:text-glow" : "text-muted-foreground group-hover:text-foreground")} />
 								<span className="transition-colors">{route.label}</span>
 							</Link>

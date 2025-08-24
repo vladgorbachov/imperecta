@@ -28,7 +28,7 @@ export default function Finance() {
           <CardHeader className="flex items-center justify-between py-3">
             <CardTitle className="text-base dark:gradient-text">{t('', 'invoices')}</CardTitle>
             <div className="flex items-center gap-2">
-              <Input placeholder={t('', 'search')} className="h-8 text-sm" />
+              <Input type="search" placeholder={t('', 'search')} className="search-input h-10 w-48 text-sm" />
               <Button size="sm" onClick={() => schedule(t('', 'invoices'))}>{t('', 'schedule')}</Button>
             </div>
           </CardHeader>
@@ -59,7 +59,7 @@ export default function Finance() {
           <CardHeader className="flex items-center justify-between py-3">
             <CardTitle className="text-base dark:gradient-text">{t('', 'budgets')}</CardTitle>
             <div className="flex items-center gap-2">
-              <Input placeholder={t('', 'search')} className="h-8 text-sm" />
+              <Input type="search" placeholder={t('', 'search')} className="search-input h-10 w-48 text-sm" />
               <Button size="sm" onClick={() => schedule(t('', 'review'))}>{t('', 'schedule')}</Button>
             </div>
           </CardHeader>
@@ -90,7 +90,7 @@ export default function Finance() {
           <CardHeader className="flex items-center justify-between py-3">
             <CardTitle className="text-base dark:gradient-text">{t('', 'transactions')}</CardTitle>
             <div className="flex items-center gap-2">
-              <Input placeholder={t('', 'filter')} className="h-8 text-sm" />
+              <Input type="search" placeholder={t('', 'filter')} className="search-input h-10 w-48 text-sm" />
               <Button size="sm" onClick={() => schedule(t('', 'transactions'))}>{t('', 'schedule')}</Button>
             </div>
           </CardHeader>

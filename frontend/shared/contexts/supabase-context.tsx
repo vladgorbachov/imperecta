@@ -181,6 +181,13 @@ export function SupabaseProvider({ children }: SupabaseProviderProps) {
       const { error } = await supabase.auth.updateUser({
         data: updates
       })
+      // also refresh local databaseUser copy if avatar_url changed
+      if (!error && updates.avatar_url && user) {
+        try {
+          const refreshed = await fetch(`/api/users/supabase/${user.id}`).then(r => r.ok ? r.json() : null)
+          if (refreshed) setDatabaseUser(refreshed)
+        } catch {}
+      }
       return { error }
     } catch (error) {
       console.error('Update profile error:', error)

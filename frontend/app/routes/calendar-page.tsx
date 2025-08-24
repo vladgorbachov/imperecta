@@ -1,21 +1,19 @@
-import { useState, useEffect } from "react"
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek, addMonths, subMonths } from "date-fns"
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card"
+import { useState, useEffect, useRef, useMemo } from "react"
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek, addMonths, subMonths, getWeek } from "date-fns"
+import { Card, CardContent } from "@/shared/components/ui/card"
 import { Button } from "@/shared/components/ui/button"
 import { Badge } from "@/shared/components/ui/badge"
 import { Input } from "@/shared/components/ui/input"
 import { 
   ChevronLeft, 
   ChevronRight, 
-  Plus, 
   Calendar as CalendarIcon,
   Clock,
   MapPin,
   Users,
   Edit,
   Trash2,
-  Search,
-  Filter
+  Search
 } from "lucide-react"
 import { cn } from "@/shared/utils/cn"
 import { useLanguage } from "@/app/providers/language-provider"
@@ -39,14 +37,14 @@ interface Event {
 const mockEvents: Event[] = []
 
 export default function CalendarPage() {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const { databaseUser } = useSupabase()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date())
   const [events, setEvents] = useState<Event[]>(mockEvents)
   const [isEventModalOpen, setIsEventModalOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
-  const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month')
+  // Using month view only for now
 
   useEffect(() => {
     // Load user events from API
@@ -74,28 +72,30 @@ export default function CalendarPage() {
       const ce = e as CustomEvent<CalendarBusEvent>
       if (!ce.detail) return
       const incoming = ce.detail
-      const exists = events.some(ev => ev.id === incoming.id)
-      if (exists) return
-      setEvents(prev => [
-        ...prev,
-        {
-          id: incoming.id || `${Date.now()}`,
-          title: incoming.title,
-          description: incoming.description,
-          date: incoming.date instanceof Date ? incoming.date : new Date(incoming.date),
-          time: incoming.time || '09:00',
-          endTime: incoming.endTime,
-          location: incoming.location,
-          attendees: incoming.attendees,
-          type: incoming.type || 'event',
-          color: incoming.color || 'bg-blue-500',
-        },
-      ])
+      setEvents(prev => {
+        const exists = prev.some(ev => ev.id === (incoming.id || ""))
+        if (exists) return prev
+        return [
+          ...prev,
+          {
+            id: incoming.id || `${Date.now()}`,
+            title: incoming.title,
+            description: incoming.description,
+            date: incoming.date instanceof Date ? incoming.date : new Date(incoming.date),
+            time: incoming.time || '09:00',
+            endTime: incoming.endTime,
+            location: incoming.location,
+            attendees: incoming.attendees,
+            type: incoming.type || 'event',
+            color: incoming.color || 'bg-blue-500',
+          },
+        ]
+      })
     }
     window.addEventListener('imperecta:calendar:add', handler as EventListener)
     return () => window.removeEventListener('imperecta:calendar:add', handler as EventListener)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events])
+  }, [databaseUser?.id])
 
   const monthStart = startOfMonth(currentDate)
   const monthEnd = endOfMonth(currentDate)
@@ -176,10 +176,39 @@ export default function CalendarPage() {
 
   const weekDays = [t('', 'sun'), t('', 'mon'), t('', 'tue'), t('', 'wed'), t('', 'thu'), t('', 'fri'), t('', 'sat')]
 
+  // Grid sizing in a Google Calendar-like layout with shared borders
+  const gridAreaRef = useRef<HTMLDivElement | null>(null)
+  const WEEK_COL_WIDTH = 44 // px
+  const HEADER_ROW_HEIGHT = 44 // px
+  const [dayCellWidth, setDayCellWidth] = useState<number>(0)
+  const [dayCellHeight, setDayCellHeight] = useState<number>(0)
+
+  const gridDimensions = useMemo(() => {
+    const width = WEEK_COL_WIDTH + dayCellWidth * 7
+    const height = HEADER_ROW_HEIGHT + dayCellHeight * 6
+    return { width, height }
+  }, [dayCellWidth, dayCellHeight])
+
+  useEffect(() => {
+    const computeSizes = () => {
+      const el = gridAreaRef.current
+      if (!el) return
+      const availableWidth = el.clientWidth
+      const availableHeight = Math.max(0, el.clientHeight - 2) // 3px bottom offset
+      const computedDayWidth = Math.floor((availableWidth - WEEK_COL_WIDTH) / 7)
+      const computedDayHeight = Math.floor((availableHeight - HEADER_ROW_HEIGHT) / 2.2)
+      setDayCellWidth(computedDayWidth > 0 ? computedDayWidth : 0)
+      setDayCellHeight(computedDayHeight > 0 ? computedDayHeight : 0)
+    }
+    computeSizes()
+    window.addEventListener('resize', computeSizes)
+    return () => window.removeEventListener('resize', computeSizes)
+  }, [])
+
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col bg-background">
+    <div className="calendar-page flex h-full min-h-0 flex-col bg-transparent">
       {/* Header */}
-      <div className="border-b bg-card/50 backdrop-blur-sm">
+      <div className="bg-transparent">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-bold dark:gradient-text">
@@ -217,78 +246,106 @@ export default function CalendarPage() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder={t('', 'searchEvents')}
-              className="w-64 pl-9 dark:neon-glow"
+              type="search"
+              className="search-input w-48 h-10 pl-9 dark:neon-glow"
             />
           </div>
         </div>
       </div>
       
-      {/* Calendar Grid */}
-      <div className="flex-1 flex">
-        <div className="flex-1 p-6">
-          <div className="h-full bg-card rounded-lg border dark:neon-glow">
-            {/* Week Days Header */}
-            <div className="grid grid-cols-7 border-b">
-              {weekDays.map(day => (
-                <div key={day} className="p-4 text-center text-sm font-medium text-muted-foreground">
-                  {day}
-                </div>
-              ))}
-            </div>
-            {/* Calendar Days */}
-            <div className="grid grid-cols-7 flex-1">
-              {days.map((day, idx) => {
-                const dayEvents = getEventsForDate(day)
-                const isToday = isSameDay(day, new Date())
-                const isSelected = selectedDate && isSameDay(day, selectedDate)
-                const isCurrentMonth = isSameMonth(day, currentDate)
-                return (
+      {/* Calendar Grid (Google Calendar-like) */}
+      <div className="flex-1 flex min-h-0">
+        <div className="flex-1 px-3 pt-3 pb-1 min-h-0">
+          <div ref={gridAreaRef} className="h-full min-h-0 w-full">
+            {/* Outer calendar frame with its own borders and exact fit to the area */}
+            <div
+              className="calendar-frame border rounded-none overflow-hidden bg-transparent"
+              style={{ width: gridDimensions.width > 0 ? `${gridDimensions.width}px` : undefined, height: gridDimensions.height > 0 ? `${gridDimensions.height}px` : undefined }}
+            >
+              {/* Unified 8x7 grid: 1 header row + 6 week rows; first column is week numbers */}
+              <div
+                className="grid"
+                style={{ gridTemplateColumns: `${WEEK_COL_WIDTH}px repeat(7, ${dayCellWidth}px)`, gridTemplateRows: `${HEADER_ROW_HEIGHT}px repeat(6, ${dayCellHeight}px)` }}
+              >
+                {/* Header row */}
+                <div className={cn("flex items-center justify-center text-xs font-medium text-muted-foreground border-b-2 border-r-2")}>{t('', 'week')}</div>
+                {weekDays.map((day, i) => (
                   <div
-                    key={idx}
-                    onClick={() => setSelectedDate(day)}
-                    className={cn(
-                      "min-h-[120px] p-2 border-r border-b cursor-pointer transition-colors",
-                      !isCurrentMonth && "bg-muted/30",
-                      isSelected && "bg-primary/10 dark:bg-accent-blue/10",
-                      "hover:bg-muted/50 dark:hover:bg-accent-blue/5"
-                    )}
+                    key={`hdr-${i}`}
+                    className={cn("flex items-center justify-center text-sm font-medium text-muted-foreground border-b-2", i < 6 && "border-r-2")}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={cn(
-                        "text-sm font-medium",
-                        !isCurrentMonth && "text-muted-foreground",
-                        isToday && "bg-primary text-primary-foreground rounded-full w-7 h-7 flex items-center justify-center dark:bg-accent-blue"
-                      )}>
-                        {format(day, 'd')}
-                      </span>
-                      {dayEvents.length > 0 && (
-                        <Badge variant="secondary" className="text-xs">
-                          {dayEvents.length}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      {dayEvents.slice(0, 3).map(event => (
-                        <div
-                          key={event.id}
-                          onClick={(e) => { e.stopPropagation(); handleEditEvent(event) }}
-                          className={cn("text-xs p-1 rounded truncate cursor-pointer transition-opacity hover:opacity-80", event.color || "bg-blue-500", "text-white")}
-                        >
-                          {event.time} {event.title}
-                        </div>
-                      ))}
-                      {dayEvents.length > 3 && (
-                        <div className="text-xs text-muted-foreground">+{dayEvents.length - 3} {t('', 'more')}</div>
-                      )}
-                    </div>
+                    {day}
                   </div>
-                )
-              })}
+                ))}
+
+                {/* 6 weeks */}
+                {[0, 1, 2, 3, 4, 5].map(weekIdx => {
+                  const weekStart = days[weekIdx * 7]
+                  const weekNumber = getWeek(weekStart, { weekStartsOn: 0 })
+                  const isLastRow = weekIdx === 5
+                  return (
+                    <>
+                      {/* Week number cell */}
+                      <div key={`wk-${weekIdx}`} className={cn("flex items-center justify-center text-muted-foreground text-sm font-medium border-r-2", !isLastRow && "border-b-2")}>{weekNumber}</div>
+                      {/* Day cells */}
+                      {days.slice(weekIdx * 7, (weekIdx + 1) * 7).map((day, dayIdx) => {
+                        const idx = weekIdx * 7 + dayIdx
+                        const dayEvents = getEventsForDate(day)
+                        const isToday = isSameDay(day, new Date())
+                        const isSelected = selectedDate && isSameDay(day, selectedDate)
+                        const isCurrentMonth = isSameMonth(day, currentDate)
+                        const isLastColumn = dayIdx === 6
+                        return (
+                          <div
+                            key={`d-${idx}`}
+                            onClick={() => setSelectedDate(day)}
+                            className={cn(
+                              "h-full min-h-0 p-2 cursor-pointer transition-colors bg-transparent",
+                              !isLastColumn && "border-r-2",
+                              !isLastRow && "border-b-2",
+                              isSelected && "ring-1 ring-[hsl(var(--border))] dark:ring-[hsl(var(--accent-blue))]"
+                            )}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className={cn(
+                                "text-lg font-medium",
+                                !isCurrentMonth && "text-muted-foreground",
+                                isToday && "bg-primary text-primary-foreground rounded-full w-8 h-8 flex items-center justify-center dark:bg-accent-blue"
+                              )}>
+                                {format(day, 'd')}
+                              </span>
+                              {dayEvents.length > 0 && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {dayEvents.length}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              {dayEvents.slice(0, 2).map(event => (
+                                <div
+                                  key={event.id}
+                                  onClick={(e) => { e.stopPropagation(); handleEditEvent(event) }}
+                                  className={cn("text-xs p-1 rounded truncate cursor-pointer transition-opacity hover:opacity-80", event.color || "bg-blue-500", "text-white")}
+                                >
+                                  {event.time} {event.title}
+                                </div>
+                              ))}
+                              {dayEvents.length > 2 && (
+                                <div className="text-xs text-muted-foreground">+{dayEvents.length - 2} {t('', 'more')}</div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </>
+                  )
+                })}
+              </div>
             </div>
           </div>
         </div>
         {selectedDate && (
-          <div className="w-96 border-l p-6 bg-card/50">
+          <div className="events-panel min-w-[260px] w-[420px] p-6 bg-transparent flex flex-col border-l">
             <div className="mb-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -300,7 +357,7 @@ export default function CalendarPage() {
                 </Button>
               </div>
             </div>
-            <div className="space-y-3">
+            <div className="flex-1 overflow-auto no-scrollbar space-y-3">
               {getEventsForDate(selectedDate).length > 0 ? (
                 getEventsForDate(selectedDate).map(event => (
                   <Card key={event.id} className="dark:neon-glow"><CardContent className="p-4">
@@ -330,6 +387,9 @@ export default function CalendarPage() {
                   <p className="text-muted-foreground mb-3">{t('', 'noEvents')}</p>
                 </div>
               )}
+              {/* Dynamic bottom border positioned 10px below last line/content */}
+              <div className="h-2.5" />
+              <div className="events-divider border-b" />
             </div>
           </div>
         )}
