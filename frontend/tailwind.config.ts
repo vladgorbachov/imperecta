@@ -3,11 +3,10 @@ import type { Config } from "tailwindcss"
 const config = {
   darkMode: ["class"],
   content: [
-    './index.html',
+    './pages/**/*.{ts,tsx}',
+    './components/**/*.{ts,tsx}',
     './app/**/*.{ts,tsx}',
-    './features/**/*.{ts,tsx}',
-    './shared/**/*.{ts,tsx}',
-    './widgets/**/*.{ts,tsx}',
+    './src/**/*.{ts,tsx}',
   ],
   prefix: "",
   theme: {
@@ -79,3 +78,4 @@ const config = {
 } satisfies Config
 
 export default config
+
