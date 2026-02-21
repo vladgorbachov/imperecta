@@ -1,0 +1,16 @@
+{
+  "common": {
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "delete": "Удалить"
+  },
+  "nav": {
+    "dashboard": "Дашборд",
+    "products": "Товары",
+    "competitors": "Конкуренты",
+    "alerts": "Уведомления",
+    "digests": "Дайджесты",
+    "import": "Импорт",
+    "settings": "Настройки"
+  }
+}

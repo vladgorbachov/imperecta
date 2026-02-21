@@ -1,0 +1,1 @@
+"""PriceRadar backend application."""
