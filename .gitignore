@@ -1,24 +1,25 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
 # Dependencies
 node_modules/
-target/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
 
-# Build outputs
+# Build
 dist/
 build/
-.next/
-out/
+*.egg-info/
+
+# Environment
+.env
 
 # IDE
-.vscode/
 .idea/
+.vscode/
+.cursor/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
@@ -26,28 +27,4 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
-
-# Testing
-coverage/
-.nyc_output/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*old/
-# Rust
-Cargo.lock
-**/*.rs.bk
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Supabase
-.branches
-.temp
-.cursor/
-
+npm-debug.log*
