@@ -50,10 +50,18 @@ class ProductResponse(BaseModel):
         from_attributes = True
 
 
+class ProductListItem(ProductResponse):
+    """Product list item with competitor price aggregates."""
+
+    min_competitor_price: Decimal | None = None
+    max_competitor_price: Decimal | None = None
+    last_checked_at: datetime | None = None
+
+
 class ProductListResponse(BaseModel):
     """Schema for paginated product list."""
 
-    items: list[ProductResponse]
+    items: list[ProductListItem]
     total: int
 
 
@@ -66,6 +74,8 @@ class CompetitorProductBrief(BaseModel):
     url: str
     name: str | None
     last_price: Decimal | None
+    last_promo_label: str | None = None
+    last_in_stock: bool | None = None
     last_checked_at: datetime | None
 
     class Config:

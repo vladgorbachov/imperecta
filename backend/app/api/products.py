@@ -12,12 +12,27 @@ from app.models import CompetitorProduct, Product
 from app.schemas.product import (
     ProductCreate,
     ProductDetailResponse,
+    ProductListItem,
     ProductListResponse,
     ProductResponse,
     ProductUpdate,
 )
 
 router = APIRouter()
+
+
+@router.get("/categories")
+async def list_categories(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[str]:
+    """List distinct categories for current user's products."""
+    result = await db.execute(
+        select(Product.category)
+        .where(Product.user_id == current_user.id, Product.category.isnot(None))
+        .distinct()
+    )
+    return [r[0] for r in result.all() if r[0]]
 
 
 @router.get("/", response_model=ProductListResponse)
@@ -54,31 +69,42 @@ async def list_products(
     result = await db.execute(query)
     products = result.scalars().all()
 
-    competitor_counts = await db.execute(
-        select(Product.id, func.count(CompetitorProduct.id).label("cnt"))
+    agg_result = await db.execute(
+        select(
+            Product.id,
+            func.count(CompetitorProduct.id).label("cnt"),
+            func.min(CompetitorProduct.last_price).label("min_price"),
+            func.max(CompetitorProduct.last_price).label("max_price"),
+            func.max(CompetitorProduct.last_checked_at).label("last_checked"),
+        )
         .outerjoin(CompetitorProduct, CompetitorProduct.product_id == Product.id)
         .where(Product.id.in_(p.id for p in products))
         .group_by(Product.id)
     )
-    count_map = {row.id: row.cnt for row in competitor_counts}
+    agg_map = {row.id: row for row in agg_result}
 
-    items = [
-        ProductResponse(
-            id=p.id,
-            user_id=p.user_id,
-            name=p.name,
-            sku=p.sku,
-            current_price=p.current_price,
-            currency=p.currency,
-            url=p.url,
-            category=p.category,
-            is_active=p.is_active,
-            competitor_count=count_map.get(p.id, 0),
-            created_at=p.created_at,
-            updated_at=p.updated_at,
+    items = []
+    for p in products:
+        agg = agg_map.get(p.id)
+        items.append(
+            ProductListItem(
+                id=p.id,
+                user_id=p.user_id,
+                name=p.name,
+                sku=p.sku,
+                current_price=p.current_price,
+                currency=p.currency,
+                url=p.url,
+                category=p.category,
+                is_active=p.is_active,
+                competitor_count=agg.cnt if agg else 0,
+                created_at=p.created_at,
+                updated_at=p.updated_at,
+                min_competitor_price=agg.min_price if agg else None,
+                max_competitor_price=agg.max_price if agg else None,
+                last_checked_at=agg.last_checked if agg else None,
+            )
         )
-        for p in products
-    ]
 
     return ProductListResponse(items=items, total=total)
 
@@ -109,6 +135,8 @@ async def get_product(
                 "url": cp.url,
                 "name": cp.name,
                 "last_price": cp.last_price,
+                "last_promo_label": cp.last_promo_label,
+                "last_in_stock": cp.last_in_stock,
                 "last_checked_at": cp.last_checked_at,
             }
         )

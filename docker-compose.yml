@@ -1,6 +1,10 @@
+# PriceRadar - Local development
+# Run: docker compose up
+# Uses .env for defaults (optional override)
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -9,45 +13,84 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/priceradar
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      - postgres
-      - redis
-
-  celery:
-    build: ./backend
-    command: celery -A app.workers.celery_app worker -l info
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/priceradar
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      - postgres
-      - redis
-      - backend
-
-  frontend:
+    env_file: .env
     build:
-      context: ./frontend
+      context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/priceradar
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-in-production
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - ./backend/app:/app/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    env_file: .env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.workers.celery_app worker -l info
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/priceradar
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-in-production
+    volumes:
+      - ./backend/app:/app/app
     depends_on:
       - backend
+      - redis
+
+  celery-beat:
+    env_file: .env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.workers.celery_app beat -l info
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/priceradar
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-in-production
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - backend
+      - redis
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    command: sh -c "npm install && npm run dev -- --host"
+    volumes:
+      - ./frontend:/app
+    environment:
+      - NODE_ENV=development
 
 volumes:
   postgres_data:

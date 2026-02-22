@@ -2,7 +2,36 @@ import { apiClient } from "./client";
 
 export const authApi = {
   login: (email: string, password: string) =>
-    apiClient.post("/auth/login", { email, password }),
-  register: (email: string, password: string) =>
-    apiClient.post("/auth/register", { email, password }),
+    apiClient.post<{ access_token: string; refresh_token: string }>(
+      "/auth/login",
+      { email, password }
+    ),
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    companyName?: string
+  ) =>
+    apiClient.post<{ access_token: string; refresh_token: string }>(
+      "/auth/register",
+      { email, password, name, company_name: companyName ?? null }
+    ),
+  getMe: () =>
+    apiClient.get<{
+      id: string;
+      email: string;
+      name: string;
+      company_name: string | null;
+      plan: string;
+      trial_ends_at: string | null;
+      language: string;
+      created_at: string;
+    }>("/auth/me"),
+  updateMe: (data: {
+    name?: string;
+    company_name?: string;
+    language?: string;
+  }) => apiClient.put("/auth/me", data),
+  getTelegramLink: () =>
+    apiClient.post<{ code: string; bot_url: string }>("/auth/telegram-link"),
 };

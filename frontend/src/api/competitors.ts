@@ -1,9 +1,52 @@
 import { apiClient } from "./client";
 
+export interface Competitor {
+  id: string;
+  user_id: string;
+  name: string;
+  website_url: string | null;
+  marketplace: string;
+  notes: string | null;
+  created_at: string;
+  product_count: number;
+}
+
+export interface CompetitorProduct {
+  id: string;
+  product_id: string;
+  competitor_id: string;
+  competitor_name: string;
+  url: string;
+  name: string | null;
+  last_price: number | null;
+  last_promo_label: string | null;
+  last_in_stock: boolean | null;
+  last_checked_at: string | null;
+  scraper_type: string;
+  css_selector_price: string | null;
+  is_active: boolean;
+  created_at: string;
+  price_diff: number | null;
+}
+
 export const competitorsApi = {
-  list: (productId?: number) =>
-    apiClient.get("/competitors", productId ? { params: { product_id: productId } } : {}),
-  create: (data: { product_id: number; url: string; marketplace: string }) =>
-    apiClient.post("/competitors", data),
-  delete: (id: number) => apiClient.delete(`/competitors/${id}`),
+  list: () => apiClient.get<Competitor[]>("/competitors"),
+  create: (data: {
+    name: string;
+    website_url?: string;
+    marketplace: string;
+    notes?: string;
+  }) => apiClient.post<Competitor>("/competitors", data),
+  getProducts: (competitorId: string) =>
+    apiClient.get<CompetitorProduct[]>(`/competitors/${competitorId}/products`),
+  addProduct: (data: {
+    product_id: string;
+    competitor_id: string;
+    url: string;
+    name?: string;
+    scraper_type?: string;
+  }) => apiClient.post<CompetitorProduct>("/competitors/products", data),
+  deleteProduct: (id: string) =>
+    apiClient.delete(`/competitors/products/${id}`),
+  delete: (id: string) => apiClient.delete(`/competitors/${id}`),
 };
