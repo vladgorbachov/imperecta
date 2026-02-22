@@ -1,15 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi } from "../api/competitors";
 
-export function useCompetitors(productId?: number) {
+export function useCompetitors() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
-    queryKey: ["competitors", productId],
-    queryFn: () => competitorsApi.list(productId),
+    queryKey: ["competitors"],
+    queryFn: () => competitorsApi.list(),
   });
   const createMutation = useMutation({
     mutationFn: competitorsApi.create,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["competitors"] }),
   });
-  return { competitors: data?.data, isLoading, createMutation };
+  return { competitors: data?.data ?? [], isLoading, createMutation };
 }

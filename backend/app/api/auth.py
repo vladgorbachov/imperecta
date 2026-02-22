@@ -20,6 +20,7 @@ from app.schemas.user import (
     UserLogin,
     UserRegister,
     UserResponse,
+    UserUpdate,
 )
 from app.services.auth_service import (
     create_access_token,
@@ -151,6 +152,29 @@ async def generate_telegram_link(
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: CurrentUser) -> UserResponse:
     """Return current authenticated user."""
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        name=current_user.name,
+        company_name=current_user.company_name,
+        plan=current_user.plan.value,
+        trial_ends_at=current_user.trial_ends_at,
+        language=current_user.language,
+        created_at=current_user.created_at,
+    )
+
+
+@router.put("/me", response_model=UserResponse)
+async def update_me(
+    data: UserUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UserResponse:
+    """Update current user profile."""
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(current_user, key, value)
+    await db.flush()
     return UserResponse(
         id=current_user.id,
         email=current_user.email,

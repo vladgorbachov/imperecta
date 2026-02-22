@@ -1,7 +1,74 @@
 import { apiClient } from "./client";
 
+export interface DashboardSummary {
+  total_products: number;
+  total_competitors: number;
+  total_tracked_items: number;
+  last_scrape_at: string | null;
+  alerts_triggered_today: number;
+  price_changes_today: { drops: number; increases: number };
+  top_changes: TopChange[];
+  active_promos: ActivePromo[];
+}
+
+export interface TopChange {
+  product_name: string;
+  competitor_name: string;
+  old_price: number;
+  new_price: number;
+  change_percent: number;
+}
+
+export interface ActivePromo {
+  competitor_name: string;
+  product_name: string;
+  promo_label: string;
+}
+
+export interface PriceHistoryDataPoint {
+  date: string;
+  price: number;
+  promo_label: string | null;
+  in_stock: boolean;
+}
+
+export interface PriceHistoryCompetitor {
+  competitor_name: string;
+  competitor_product_id: string;
+  data_points: PriceHistoryDataPoint[];
+}
+
+export interface PriceHistoryResponse {
+  product_name: string;
+  my_price: number;
+  competitors: PriceHistoryCompetitor[];
+}
+
+export interface ComparisonCompetitor {
+  name: string;
+  price: number | null;
+  diff_amount: number | null;
+  diff_percent: number | null;
+  promo_label: string | null;
+  in_stock: boolean | null;
+  trend: "up" | "down" | "stable";
+}
+
+export interface ComparisonResponse {
+  my_price: number;
+  competitors: ComparisonCompetitor[];
+}
+
 export const analyticsApi = {
-  priceHistory: (productId: number, period?: string) =>
-    apiClient.get(`/analytics/price-history/${productId}`, { params: { period } }),
-  trends: (productId: number) => apiClient.get(`/analytics/trends/${productId}`),
+  getDashboardSummary: () =>
+    apiClient.get<DashboardSummary>("/analytics/dashboard/summary"),
+  getPriceHistory: (productId: string, period: "7d" | "30d" | "90d") =>
+    apiClient.get<PriceHistoryResponse>(
+      `/analytics/products/${productId}/price-history`,
+      { params: { period } }
+    ),
+  getComparison: (productId: string) =>
+    apiClient.get<ComparisonResponse>(
+      `/analytics/products/${productId}/comparison`
+    ),
 };

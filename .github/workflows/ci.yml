@@ -1,3 +1,5 @@
+# PriceRadar CI - lint and test on push/PR to main
+
 name: CI
 
 on:
@@ -7,8 +9,41 @@ on:
     branches: [main]
 
 jobs:
-  backend:
+  backend-lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint
+        run: |
+          cd backend
+          ruff check .
+
+  backend-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: priceradar_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,14 +56,18 @@ jobs:
         run: |
           cd backend
           pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
 
-      - name: Lint
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/priceradar_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: test-secret
         run: |
           cd backend
-          pip install ruff
-          ruff check app
+          pytest tests -v
 
-  frontend:
+  frontend-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +88,23 @@ jobs:
         run: |
           cd frontend
           npm run lint
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
 
       - name: Build
         run: |

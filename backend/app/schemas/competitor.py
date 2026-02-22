@@ -38,6 +38,7 @@ class CompetitorResponse(BaseModel):
     marketplace: str
     notes: str | None
     created_at: datetime
+    product_count: int = 0
 
     class Config:
         from_attributes = True

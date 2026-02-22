@@ -5,9 +5,28 @@ from fastapi.responses import PlainTextResponse
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import Product
-from app.services.import_service import get_csv_template, parse_products_file
+from app.services.import_service import (
+    get_csv_template,
+    parse_products_file,
+    preview_products_file,
+)
 
 router = APIRouter()
+
+
+@router.post("/products/preview")
+async def preview_products_csv(
+    file: UploadFile,
+    current_user: CurrentUser,
+) -> dict:
+    """
+    Preview first 5 rows of CSV/Excel file.
+    Returns: { preview: [...], errors: [...] }
+    """
+    content = await file.read()
+    filename = file.filename or "upload.csv"
+    preview, errors = preview_products_file(content, filename, limit=5)
+    return {"preview": preview, "errors": errors}
 
 
 @router.post("/products/csv")

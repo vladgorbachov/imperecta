@@ -38,6 +38,14 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class UserUpdate(BaseModel):
+    """Schema for user profile update."""
+
+    name: str | None = Field(None, max_length=255)
+    company_name: str | None = Field(None, max_length=255)
+    language: str | None = Field(None, max_length=10)
+
+
 class TokenResponse(BaseModel):
     """Schema for token response."""
 

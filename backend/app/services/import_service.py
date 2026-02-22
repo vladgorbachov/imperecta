@@ -93,3 +93,54 @@ def _get_cell(row, column_map: dict, key: str):
 def get_csv_template() -> str:
     """Return CSV template content with headers."""
     return "name,sku,price,url,category\n"
+
+
+def preview_products_file(
+    content: bytes,
+    filename: str,
+    limit: int = 5,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Parse CSV or Excel and return first N rows as preview.
+    Returns (preview_rows, errors). Preview rows are dicts with keys: name, sku, price, url, category.
+    """
+    errors: list[dict] = []
+    preview: list[dict] = []
+
+    try:
+        if filename.lower().endswith(".csv"):
+            df = pd.read_csv(BytesIO(content))
+        elif filename.lower().endswith((".xlsx", ".xls")):
+            df = pd.read_excel(BytesIO(content))
+        else:
+            return [], [{"row": 0, "message": "Unsupported file format. Use CSV or Excel."}]
+    except Exception as e:
+        return [], [{"row": 0, "message": str(e)}]
+
+    required_columns = {"name", "price"}
+    df_columns = set(c.lower().strip() for c in df.columns)
+    if not required_columns.issubset(df_columns):
+        missing = required_columns - df_columns
+        return [], [{"row": 0, "message": f"Missing required columns: {', '.join(missing)}"}]
+
+    column_map = {c.lower().strip(): c for c in df.columns}
+
+    for idx, row in df.head(limit).iterrows():
+        try:
+            name = _get_cell(row, column_map, "name")
+            price_val = _get_cell(row, column_map, "price")
+            sku = _get_cell(row, column_map, "sku")
+            url = _get_cell(row, column_map, "url")
+            category = _get_cell(row, column_map, "category")
+
+            preview.append({
+                "name": str(name).strip() if name else "",
+                "sku": str(sku).strip() if sku else "",
+                "price": str(price_val) if price_val is not None else "",
+                "url": str(url).strip() if url else "",
+                "category": str(category).strip() if category else "",
+            })
+        except Exception:
+            preview.append({"name": "", "sku": "", "price": "", "url": "", "category": ""})
+
+    return preview, errors
