@@ -44,7 +44,7 @@ export function Sidebar({ collapsed, onToggle, isMobile = false, onNavigate }: S
     >
       <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
         {!collapsed && !isMobile && (
-          <span className="truncate font-semibold">PriceRadar</span>
+          <span className="truncate font-semibold">Imperecta</span>
         )}
         {!isMobile && (
           <Button

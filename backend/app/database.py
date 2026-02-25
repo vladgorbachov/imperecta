@@ -8,10 +8,25 @@ from sqlalchemy.orm import declarative_base
 from app.config import Settings
 
 settings = Settings()
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
-)
+
+# Supabase: add SSL and search_path for pooled connections
+_connect_args: dict = {}
+if "supabase.com" in settings.database_url:
+    _connect_args = {"ssl": True, "server_settings": {"search_path": "public"}}
+
+# Pool config: Supabase Pooler (PgBouncer) benefits from LIFO
+_engine_kwargs: dict = {
+    "echo": settings.debug,
+    "pool_size": 5,
+    "max_overflow": 10,
+    "pool_pre_ping": True,
+}
+if "supabase.com" in settings.database_url:
+    _engine_kwargs["pool_use_lifo"] = True
+if _connect_args:
+    _engine_kwargs["connect_args"] = _connect_args
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 async_session_maker = async_sessionmaker(
     engine,
     class_=AsyncSession,

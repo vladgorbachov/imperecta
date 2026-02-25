@@ -2,8 +2,12 @@ import axios from "axios";
 
 const TOKEN_KEY = "access_token";
 
+// VITE_API_URL: absolute URL for production (Cloudflare Pages); empty = Vite proxy in dev
+const API_URL = import.meta.env.VITE_API_URL || "";
+export const apiBaseUrl = API_URL ? `${API_URL}/api` : "/api";
+
 export const apiClient = axios.create({
-  baseURL: "/api",
+  baseURL: apiBaseUrl,
   headers: {
     "Content-Type": "application/json",
   },
