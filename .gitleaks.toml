@@ -1,0 +1,4 @@
+# Gitleaks config for secret detection
+[allowlist]
+description = "Allow .env.example files"
+paths = ['''\.env\.example$''', '''\.env\.local\.example$''']

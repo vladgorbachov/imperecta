@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "build:prod": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "audit": "npm audit --audit-level=high",
+    "lint:security": "eslint --plugin security src/"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",
@@ -47,6 +49,7 @@
     "eslint": "^9.15.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.14",
+    "eslint-plugin-security": "^4.0.0",
     "globals": "^15.11.0",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.6.0",
