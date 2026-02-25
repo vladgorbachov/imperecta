@@ -48,7 +48,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           </Button>
         )}
         <h1 className="text-lg font-semibold text-foreground">
-          {user?.company_name ?? "PriceRadar"}
+          {user?.company_name ?? "Imperecta"}
         </h1>
       </div>
       <DropdownMenu>

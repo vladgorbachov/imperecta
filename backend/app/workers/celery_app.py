@@ -1,10 +1,21 @@
 """Celery application configuration."""
 
+import ssl
+
 from celery import Celery
 
 from app.config import Settings
 
 settings = Settings()
+
+# Upstash Redis (rediss://) requires TLS config
+_broker_options: dict = {}
+if settings.redis_url.startswith("rediss://"):
+    _broker_options = {
+        "broker_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},
+        "result_backend_transport_options": {"global_keyprefix": "imperecta:"},
+    }
+
 celery_app = Celery(
     "priceradar",
     broker=settings.redis_url,
@@ -19,6 +30,8 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
+    broker_connection_retry_on_startup=True,
+    **_broker_options,
 )
 
 # Load beat schedule from scheduler module

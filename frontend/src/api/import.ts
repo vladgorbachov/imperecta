@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiBaseUrl, apiClient } from "./client";
 
 export interface ImportResult {
   imported: number;
@@ -25,5 +25,5 @@ export const importApi = {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
-  getProductsTemplateUrl: () => "/api/import/products/template",
+  getProductsTemplateUrl: () => `${apiBaseUrl}/import/products/template`,
 };
