@@ -21,6 +21,14 @@ from app.models import (
 )
 
 config = context.config
+
+# Override sqlalchemy.url from environment variable
+database_url = os.getenv("DATABASE_URL", "")
+if database_url:
+    # Alembic needs sync driver, replace asyncpg with psycopg2 or use raw postgresql
+    sync_url = database_url.replace("+asyncpg", "")
+    config.set_main_option("sqlalchemy.url", sync_url)
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
