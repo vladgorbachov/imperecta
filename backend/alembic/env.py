@@ -7,8 +7,6 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
-
 from app.database import Base
 from app.models import (
     User,
@@ -57,10 +55,18 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    url = database_url or config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise RuntimeError("DATABASE_URL or sqlalchemy.url must be set")
+
+    connect_args = {}
+    if "supabase.com" in url:
+        connect_args = {"ssl": True, "server_settings": {"search_path": "public"}}
+
+    connectable = create_async_engine(
+        url, poolclass=pool.NullPool, connect_args=connect_args
     )
 
     async with connectable.connect() as connection:
