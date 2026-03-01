@@ -1,4 +1,4 @@
-# PriceRadar - Local development
+# Imperecta - Local development
 # Run: docker compose up
 # Uses .env for defaults (optional override)
 
@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: priceradar
+      POSTGRES_DB: imperecta
     ports:
       - "5432:5432"
     volumes:
@@ -38,7 +38,7 @@ services:
       - "8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/priceradar
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/imperecta
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-change-in-production
     volumes:
@@ -54,9 +54,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A app.workers.celery_app worker -l info
+    command: celery -A app.workers.celery_app worker -l info -c 2
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/priceradar
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/imperecta
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-change-in-production
     volumes:
@@ -72,7 +72,7 @@ services:
       dockerfile: Dockerfile
     command: celery -A app.workers.celery_app beat -l info
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/priceradar
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/imperecta
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-change-in-production
     volumes:

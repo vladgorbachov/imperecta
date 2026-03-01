@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import ssl
 from logging.config import fileConfig
 
 from alembic import context
@@ -61,9 +62,13 @@ async def run_async_migrations() -> None:
     if not url:
         raise RuntimeError("DATABASE_URL or sqlalchemy.url must be set")
 
+    # Supabase pooler: same SSL context as app/database.py (skip verify for self-signed chain)
     connect_args = {}
     if "supabase.com" in url:
-        connect_args = {"ssl": True, "server_settings": {"search_path": "public"}}
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        connect_args = {"ssl": ssl_ctx, "server_settings": {"search_path": "public"}}
 
     connectable = create_async_engine(
         url, poolclass=pool.NullPool, connect_args=connect_args

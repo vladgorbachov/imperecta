@@ -1,5 +1,6 @@
 """SQLAlchemy async engine and session configuration."""
 
+import ssl
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -9,10 +10,14 @@ from app.config import Settings
 
 settings = Settings()
 
-# Supabase: add SSL and search_path for pooled connections
+# Supabase pooler often uses a cert that fails default verification (self-signed in chain).
+# Use SSL context that skips verify for Supabase; keep search_path for pooler.
 _connect_args: dict = {}
 if "supabase.com" in settings.database_url:
-    _connect_args = {"ssl": True, "server_settings": {"search_path": "public"}}
+    _ssl_ctx = ssl.create_default_context()
+    _ssl_ctx.check_hostname = False
+    _ssl_ctx.verify_mode = ssl.CERT_NONE
+    _connect_args = {"ssl": _ssl_ctx, "server_settings": {"search_path": "public"}}
 
 # Pool config: Supabase Pooler (PgBouncer) benefits from LIFO
 _engine_kwargs: dict = {

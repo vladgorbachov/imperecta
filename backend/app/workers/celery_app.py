@@ -17,7 +17,7 @@ if settings.redis_url.startswith("rediss://"):
     }
 
 celery_app = Celery(
-    "priceradar",
+    "imperecta",
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
