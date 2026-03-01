@@ -25,5 +25,5 @@ COPY . .
 ARG PORT=8000
 EXPOSE ${PORT}
 
-# Migrations + uvicorn; PORT from Railway
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start app only; tables created by lifespan (create_all). Run migrations separately if needed.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
