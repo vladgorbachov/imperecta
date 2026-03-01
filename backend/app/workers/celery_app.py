@@ -8,11 +8,12 @@ from app.config import Settings
 
 settings = Settings()
 
-# Upstash Redis (rediss://) requires TLS config
+# Upstash Redis (rediss://) requires ssl_cert_reqs for both broker and result backend
 _broker_options: dict = {}
 if settings.redis_url.startswith("rediss://"):
     _broker_options = {
         "broker_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},
+        "redis_backend_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},
         "result_backend_transport_options": {"global_keyprefix": "imperecta:"},
     }
 
