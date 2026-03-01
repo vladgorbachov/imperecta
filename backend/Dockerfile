@@ -1,22 +1,12 @@
 # Production-ready Dockerfile for Imperecta backend (Railway deploy)
-FROM python:3.12-slim
-
-# System dependencies for Playwright
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
-    gnupg \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Uses official Playwright Python image: browsers and system deps pre-installed (avoids install-deps failures on slim)
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
 
 WORKDIR /app
 
-# Python dependencies
+# Python dependencies (playwright version must match image browsers, see requirements.txt)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Playwright Chromium
-RUN playwright install chromium && playwright install-deps
 
 # Application code
 COPY . .
