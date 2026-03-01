@@ -48,23 +48,23 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-neutral-100 p-4">
+      <Card className="w-full max-w-md border border-neutral-200 bg-white text-neutral-900 shadow-md">
         <CardHeader>
-          <CardTitle className="text-2xl">{t("auth.register")}</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-2xl text-neutral-900">{t("auth.register")}</CardTitle>
+          <CardDescription className="text-neutral-600">
             Create an account to get started
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             {error && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
                 {error}
               </div>
             )}
             <div className="space-y-2">
-              <label htmlFor="name" className="text-sm font-medium">
+              <label htmlFor="name" className="text-sm font-medium text-neutral-700">
                 {t("auth.name")}
               </label>
               <Input
@@ -74,10 +74,11 @@ export function RegisterPage() {
                 onChange={(e) => setName(e.target.value)}
                 required
                 autoComplete="name"
+                className="border-neutral-300 bg-white text-neutral-900"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
+              <label htmlFor="email" className="text-sm font-medium text-neutral-700">
                 {t("auth.email")}
               </label>
               <Input
@@ -88,10 +89,11 @@ export function RegisterPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
+                className="border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-500"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">
+              <label htmlFor="password" className="text-sm font-medium text-neutral-700">
                 {t("auth.password")}
               </label>
               <Input
@@ -102,10 +104,11 @@ export function RegisterPage() {
                 required
                 minLength={8}
                 autoComplete="new-password"
+                className="border-neutral-300 bg-white text-neutral-900"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="companyName" className="text-sm font-medium">
+              <label htmlFor="companyName" className="text-sm font-medium text-neutral-700">
                 {t("auth.companyName")}
               </label>
               <Input
@@ -114,6 +117,7 @@ export function RegisterPage() {
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 autoComplete="organization"
+                className="border-neutral-300 bg-white text-neutral-900"
               />
             </div>
           </CardContent>
@@ -121,9 +125,9 @@ export function RegisterPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "..." : t("auth.submitRegister")}
             </Button>
-            <p className="text-center text-sm text-muted-foreground">
+            <p className="text-center text-sm text-neutral-600">
               {t("auth.hasAccount")}{" "}
-              <Link to="/login" className="font-medium text-primary hover:underline">
+              <Link to="/login" className="font-medium text-indigo-600 hover:underline">
                 {t("auth.login")}
               </Link>
             </p>

@@ -51,7 +51,13 @@
   * {
     @apply border-border;
   }
+  html {
+    background-color: #ffffff;
+    color: #171717;
+  }
   body {
     @apply bg-background text-foreground;
+    background-color: #ffffff;
+    color: #171717;
   }
 }

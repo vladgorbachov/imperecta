@@ -52,6 +52,7 @@ export function ProductsPage() {
     sku: "",
     current_price: "",
     category: "",
+    url: "",
   });
   const [importing, setImporting] = useState(false);
 
@@ -78,10 +79,11 @@ export function ProductsPage() {
         sku: addForm.sku || undefined,
         current_price: price,
         category: addForm.category || undefined,
+        url: addForm.url || undefined,
       });
       toast.success("Товар добавлен");
       setAddDialogOpen(false);
-      setAddForm({ name: "", sku: "", current_price: "", category: "" });
+      setAddForm({ name: "", sku: "", current_price: "", category: "", url: "" });
     } catch {
       toast.error("Ошибка при добавлении");
     }
@@ -107,9 +109,9 @@ export function ProductsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-neutral-900">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold">{t("nav.products")}</h1>
+        <h1 className="text-2xl font-bold text-neutral-900">{t("nav.products")}</h1>
         <div className="flex gap-2">
           <input
             ref={fileInputRef}
@@ -273,6 +275,17 @@ export function ProductsPage() {
                   value={addForm.category}
                   onChange={(e) =>
                     setAddForm((f) => ({ ...f, category: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">URL</label>
+                <Input
+                  type="url"
+                  placeholder="https://..."
+                  value={addForm.url}
+                  onChange={(e) =>
+                    setAddForm((f) => ({ ...f, url: e.target.value }))
                   }
                 />
               </div>

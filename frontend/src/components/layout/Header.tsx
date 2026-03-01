@@ -47,7 +47,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Menu className="size-5" />
           </Button>
         )}
-        <h1 className="text-lg font-semibold text-foreground">
+        <h1 className="text-lg font-semibold text-neutral-900">
           {user?.company_name ?? "Imperecta"}
         </h1>
       </div>

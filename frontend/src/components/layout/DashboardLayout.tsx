@@ -9,7 +9,7 @@ export function DashboardLayout() {
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-white text-neutral-900">
       {/* Desktop sidebar */}
       <div className="hidden md:block">
         <Sidebar
@@ -35,7 +35,7 @@ export function DashboardLayout() {
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onMenuClick={() => setMobileSheetOpen(true)} />
-        <main className="flex-1 overflow-auto bg-white p-4 md:p-6">
+        <main className="flex-1 overflow-auto bg-white p-4 md:p-6 text-neutral-900">
           <Outlet />
         </main>
       </div>
