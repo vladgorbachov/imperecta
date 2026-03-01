@@ -10,14 +10,18 @@ from app.config import Settings
 
 settings = Settings()
 
+# Disable asyncpg statement cache for PgBouncer (Supabase pooler) transaction mode.
+_connect_args: dict = {
+    "statement_cache_size": 0,
+    "prepared_statement_cache_size": 0,
+}
 # Supabase pooler often uses a cert that fails default verification (self-signed in chain).
-# Use SSL context that skips verify for Supabase; keep search_path for pooler.
-_connect_args: dict = {}
 if "supabase.com" in settings.database_url:
     _ssl_ctx = ssl.create_default_context()
     _ssl_ctx.check_hostname = False
     _ssl_ctx.verify_mode = ssl.CERT_NONE
-    _connect_args = {"ssl": _ssl_ctx, "server_settings": {"search_path": "public"}}
+    _connect_args["ssl"] = _ssl_ctx
+    _connect_args["server_settings"] = {"search_path": "public"}
 
 # Pool config: Supabase Pooler (PgBouncer) benefits from LIFO
 _engine_kwargs: dict = {
@@ -28,8 +32,7 @@ _engine_kwargs: dict = {
 }
 if "supabase.com" in settings.database_url:
     _engine_kwargs["pool_use_lifo"] = True
-if _connect_args:
-    _engine_kwargs["connect_args"] = _connect_args
+_engine_kwargs["connect_args"] = _connect_args
 
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
 async_session_maker = async_sessionmaker(
