@@ -1,1 +1,1 @@
-"""PriceRadar backend application."""
+"""Imperecta backend application."""

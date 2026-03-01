@@ -200,7 +200,7 @@ def _send_digest(user: "User", content_md: str, period: str) -> None:
         from app.notifications.email_sender import send_digest_email_to_user
         from app.notifications.telegram_bot import send_digest_telegram
 
-        subject = f"PriceRadar: {period.capitalize()} digest"
+        subject = f"Imperecta: {period.capitalize()} digest"
         send_digest_email_to_user(user.id, subject, content_md)
         if user.telegram_chat_id:
             send_digest_telegram(user.id, content_md)

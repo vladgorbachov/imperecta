@@ -66,7 +66,7 @@ def send_alert_email_to_user(user_id: UUID, message: str) -> None:
             user = result.scalar_one_or_none()
             if user:
                 body = f"<p>{message.replace('<', '&lt;').replace('>', '&gt;')}</p>"
-                await send_alert_email(user.email, "PriceRadar: Уведомление", body)
+                await send_alert_email(user.email, "Imperecta: Уведомление", body)
 
     asyncio.run(_do())
 

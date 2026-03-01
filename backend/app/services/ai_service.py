@@ -54,7 +54,7 @@ async def generate_digest(user_id: UUID, period_data: dict) -> str:
     try:
         client = anthropic.AsyncAnthropic(api_key=settings.claude_api_key)
         response = await client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model=settings.claude_model,
             max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],

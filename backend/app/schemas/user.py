@@ -64,4 +64,4 @@ class TelegramLinkResponse(BaseModel):
     """Schema for telegram link code response."""
 
     code: str
-    bot_url: str = "https://t.me/PriceRadarBot"
+    bot_url: str = "https://t.me/ImperectaBot"

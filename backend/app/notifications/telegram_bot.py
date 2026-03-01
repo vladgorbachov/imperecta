@@ -21,7 +21,7 @@ from app.models import CompetitorProduct, Digest, Product, User
 
 logger = logging.getLogger(__name__)
 settings = Settings()
-BOT_URL = "https://t.me/PriceRadarBot"
+BOT_URL = "https://t.me/ImperectaBot"
 MAX_MESSAGE_LENGTH = 4096
 RETRY_COUNT = 2
 
@@ -42,8 +42,8 @@ def _md_to_telegram_html(text: str) -> str:
 async def _start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
     await update.message.reply_text(
-        "Привет! Я бот PriceRadar — мониторинг цен конкурентов.\n\n"
-        "Введите код привязки из личного кабинета PriceRadar."
+        "Привет! Я бот Imperecta — мониторинг цен конкурентов.\n\n"
+        "Введите код привязки из личного кабинета Imperecta."
     )
 
 
@@ -135,7 +135,7 @@ async def send_telegram_alert(chat_id: int, message: str) -> None:
         logger.warning("TELEGRAM_BOT_TOKEN not set")
         return
 
-    html = f"<b>PriceRadar</b>\n\n{message.replace('<', '&lt;').replace('>', '&gt;')}"
+    html = f"<b>Imperecta</b>\n\n{message.replace('<', '&lt;').replace('>', '&gt;')}"
     last_error = None
     for attempt in range(RETRY_COUNT + 1):
         try:

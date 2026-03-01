@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application configuration for cloud deploy (Railway + Supabase + Upstash)."""
 
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/priceradar"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     jwt_refresh_expiration_days: int = 7
 
     claude_api_key: str | None = None
+    claude_model: str = "claude-sonnet-4-20250514"
     resend_api_key: str | None = None
     email_from: str = "noreply@imperecta.com"
     telegram_bot_token: str | None = None

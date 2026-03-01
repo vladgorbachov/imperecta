@@ -10,5 +10,5 @@ def test_database_url():
     """Use DATABASE_URL from env or default test DB."""
     return os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/priceradar_test",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta_test",
     )
