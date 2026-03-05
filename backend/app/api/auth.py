@@ -63,6 +63,7 @@ async def register(
         company_name=data.company_name,
         plan=UserPlan.trial,
         trial_ends_at=trial_ends_at,
+        language=data.language,
     )
     db.add(user)
     await db.flush()
@@ -149,6 +150,18 @@ async def generate_telegram_link(
     return TelegramLinkResponse(code=code, bot_url=BOT_URL)
 
 
+@router.post("/telegram-disconnect")
+async def disconnect_telegram(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Disconnect Telegram from user account."""
+    current_user.telegram_chat_id = None
+    current_user.telegram_link_code = None
+    await db.flush()
+    return {"ok": True}
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: CurrentUser) -> UserResponse:
     """Return current authenticated user."""
@@ -161,6 +174,7 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
         trial_ends_at=current_user.trial_ends_at,
         language=current_user.language,
         created_at=current_user.created_at,
+        telegram_chat_id=current_user.telegram_chat_id,
     )
 
 
@@ -184,4 +198,5 @@ async def update_me(
         trial_ends_at=current_user.trial_ends_at,
         language=current_user.language,
         created_at=current_user.created_at,
+        telegram_chat_id=current_user.telegram_chat_id,
     )

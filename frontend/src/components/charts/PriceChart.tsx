@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   LineChart,
   Line,
@@ -8,7 +9,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { format } from "date-fns";
+import { formatChartDate, formatDateTime, formatPrice } from "@/lib/formatters";
 import type { PriceHistoryResponse } from "@/api/analytics";
 
 const COMPETITOR_COLORS = [
@@ -28,6 +29,8 @@ interface PriceChartProps {
 }
 
 export function PriceChart({ data, isLoading }: PriceChartProps) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language;
   if (isLoading || !data) {
     return (
       <div className="h-80 animate-pulse rounded-lg border bg-muted" />
@@ -57,7 +60,7 @@ export function PriceChart({ data, isLoading }: PriceChartProps) {
   const sortedDates = Array.from(dateSet).sort();
   const chartData = sortedDates.map((d) => ({
     date: d,
-    dateLabel: format(new Date(d), "dd.MM"),
+    dateLabel: formatChartDate(d, locale),
     myPrice: Number(my_price),
     ...Object.fromEntries(
       competitors.map((c) => [
@@ -71,7 +74,7 @@ export function PriceChart({ data, isLoading }: PriceChartProps) {
   if (chartData.length === 0) {
     chartData.push({
       date: new Date().toISOString(),
-      dateLabel: format(new Date(), "dd.MM"),
+      dateLabel: formatChartDate(new Date(), locale),
       myPrice: Number(my_price),
       ...Object.fromEntries(competitors.map((c) => [c.competitor_name, null])),
     });
@@ -81,7 +84,7 @@ export function PriceChart({ data, isLoading }: PriceChartProps) {
     <div className="h-80 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+          <CartesianGrid strokeDasharray="3 3" className="stroke-muted dark:stroke-muted" />
           <XAxis
             dataKey="dateLabel"
             tick={{ fontSize: 12 }}
@@ -90,7 +93,7 @@ export function PriceChart({ data, isLoading }: PriceChartProps) {
           <YAxis
             tick={{ fontSize: 12 }}
             stroke="hsl(var(--muted-foreground))"
-            tickFormatter={(v) => `${v} ₽`}
+            tickFormatter={(v) => formatPrice(v, "RUB", locale)}
           />
           <Tooltip
             contentStyle={{
@@ -100,16 +103,16 @@ export function PriceChart({ data, isLoading }: PriceChartProps) {
             }}
             labelFormatter={(_, payload) =>
               payload?.[0]?.payload?.date
-                ? format(new Date(payload[0].payload.date), "dd.MM.yyyy HH:mm")
+                ? formatDateTime(payload[0].payload.date, locale)
                 : ""
             }
-            formatter={(value: number) => [value != null ? `${value} ₽` : "—", ""]}
+            formatter={(value: number) => [value != null ? formatPrice(value, "RUB", locale) : t("common.dash"), ""]}
           />
           <Legend />
           <Line
             type="monotone"
             dataKey="myPrice"
-            name="Моя цена"
+            name={t("productDetail.myPriceLegend")}
             stroke="hsl(99 102 241)"
             strokeWidth={2}
             strokeDasharray="5 5"

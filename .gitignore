@@ -12,11 +12,12 @@ dist/
 build/
 *.egg-info/
 
-# Environment
+# EnvironmentImperecta_Cursor_Project_Description.md
 .env
 
 # Project
 Imperecta_MVP_Plan.md
+Imperecta_Cursor_Project_Description.md
 
 # IDE
 .idea/

@@ -17,7 +17,7 @@ export function StubPage({ title }: StubPageProps) {
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground">
-            This page is under development.
+            {t("common.underDevelopment")}
           </p>
         </CardContent>
       </Card>

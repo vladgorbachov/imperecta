@@ -10,11 +10,12 @@ export const authApi = {
     email: string,
     password: string,
     name: string,
-    companyName?: string
+    companyName?: string,
+    language?: string
   ) =>
     apiClient.post<{ access_token: string; refresh_token: string }>(
       "/auth/register",
-      { email, password, name, company_name: companyName ?? null }
+      { email, password, name, company_name: companyName ?? null, language: language ?? "en" }
     ),
   getMe: () =>
     apiClient.get<{
@@ -26,6 +27,7 @@ export const authApi = {
       trial_ends_at: string | null;
       language: string;
       created_at: string;
+      telegram_chat_id: number | null;
     }>("/auth/me"),
   updateMe: (data: {
     name?: string;
@@ -34,4 +36,6 @@ export const authApi = {
   }) => apiClient.put("/auth/me", data),
   getTelegramLink: () =>
     apiClient.post<{ code: string; bot_url: string }>("/auth/telegram-link"),
+  disconnectTelegram: () =>
+    apiClient.post<{ ok: boolean }>("/auth/telegram-disconnect"),
 };

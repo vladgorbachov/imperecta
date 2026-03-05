@@ -25,12 +25,14 @@ Imperecta — SaaS-платформа конкурентной разведки 
 ### Frontend
 - **Vite 6** + **React 19** + **TypeScript**
 - **React Router 7** — маршрутизация (SPA)
-- **Tailwind CSS 4** + **shadcn/ui** — UI-компоненты
-- **Recharts** — графики цен
-- **TanStack Query** — серверное состояние и кеширование
-- **Zustand** — клиентское состояние (auth)
+- **Tailwind CSS 4** + **shadcn/ui** (Radix UI) — UI-компоненты
+- **Recharts** — графики цен (PriceChart, ComparisonChart, TrendBadge)
+- **TanStack Query v5** — серверное состояние и кеширование
+- **Zustand v5** — клиентское состояние (auth)
 - **Axios** — HTTP-клиент
-- **react-i18next** — локализация (русский по умолчанию)
+- **react-i18next** — локализация (ru.json, en.json)
+- **Sonner** — toast-уведомления
+- **next-themes** — переключение темы (light/dark)
 
 ### Безопасность
 - **Snyk** — сканирование зависимостей и кода
@@ -138,8 +140,8 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Что:** FastAPI сервер, обрабатывает все API-запросы
 - **URL:** `https://imperecta-production.up.railway.app`
 - **Root Directory:** `backend`
-- **Сборка:** в Dockerfile используется Python 3.12-slim; для стабильной сборки с Playwright на Railway можно использовать образ `mcr.microsoft.com/playwright/python:v1.58.0-noble`.
-- **Start Command:** `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- **Сборка:** Dockerfile на Python 3.12-slim, Playwright Chromium; для Railway можно использовать `mcr.microsoft.com/playwright/python:v1.58.0-noble` при проблемах со сборкой.
+- **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (таблицы создаются через `create_all` в lifespan; для миграций — `alembic upgrade head` отдельно)
 - **Связи:**
   - ← принимает запросы от Cloudflare Pages (CORS: `ALLOWED_ORIGINS`)
   - → подключается к Supabase PostgreSQL (`DATABASE_URL`)
@@ -236,6 +238,7 @@ REDIS_URL=rediss://default:PASSWORD@eu1-xxx.upstash.io:6379
 JWT_SECRET=<generated-secret-48-chars>
 JWT_ALGORITHM=HS256
 JWT_EXPIRATION_MINUTES=30
+JWT_REFRESH_EXPIRATION_DAYS=7
 CLAUDE_API_KEY=sk-ant-api03-xxx
 CLAUDE_MODEL=claude-sonnet-4-20250514
 RESEND_API_KEY=re_xxx
@@ -257,33 +260,88 @@ PORT=8000
 imperecta/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entrypoint, CORS, Sentry, routers
+│   │   ├── main.py              # FastAPI entrypoint, CORS, Sentry, lifespan (create_all)
 │   │   ├── config.py            # Pydantic Settings (env vars)
 │   │   ├── database.py          # SQLAlchemy async engine, session, Base
-│   │   ├── models/              # SQLAlchemy models (8 таблиц)
+│   │   ├── models/              # 9 моделей: User, Product, Competitor, CompetitorProduct,
+│   │   │                         # PriceSnapshot, Alert, AlertEvent, Digest
 │   │   ├── schemas/             # Pydantic request/response schemas
-│   │   ├── api/                 # FastAPI routers (auth, products, competitors, analytics, alerts, digests, import)
-│   │   ├── services/            # Business logic (auth, price, alert, digest, ai, import)
-│   │   ├── scrapers/            # Scraping engine (base, ozon, wildberries, generic, proxy_manager)
-│   │   ├── workers/             # Celery (celery_app, tasks, scheduler)
-│   │   └── notifications/       # Email (Resend) + Telegram bot
-│   ├── alembic/                 # DB migrations
+│   │   ├── api/                 # 7 роутеров: auth, products, competitors, analytics,
+│   │   │                         # alerts, digests, import_export
+│   │   ├── services/            # auth, price, alert, digest, ai, import
+│   │   ├── scrapers/            # base, ozon, wildberries, generic_web, proxy_manager
+│   │   ├── workers/             # celery_app, scrape_tasks, alert_tasks, digest_tasks, scheduler
+│   │   └── notifications/       # email_sender, telegram_bot
+│   ├── alembic/                 # migrations (001_initial_schema)
+│   ├── tests/                   # pytest (conftest, test_health)
 │   ├── requirements.txt
-│   └── Dockerfile
+│   ├── Dockerfile               # uvicorn only; tables via create_all in lifespan
+│   ├── pyproject.toml          # ruff, pytest config
+│   └── security.cfg             # Bandit config
 ├── frontend/
 │   ├── src/
-│   │   ├── api/                 # Axios client + API modules
-│   │   ├── hooks/               # TanStack Query hooks
-│   │   ├── components/          # UI (layout, charts, tables)
-│   │   ├── pages/               # Route pages (10 страниц)
-│   │   ├── stores/              # Zustand (auth)
-│   │   ├── i18n/                # ru.json, en.json
-│   │   └── lib/                 # Utilities
-│   ├── vite.config.ts
+│   │   ├── api/                 # client.ts + auth, products, competitors, analytics,
+│   │   │                         # alerts, digests, import
+│   │   ├── hooks/               # useAuth, useProducts, useCompetitors, useAnalytics, useAlerts
+│   │   ├── components/          # layout (Header, Sidebar, DashboardLayout), charts,
+│   │   │                         # tables, ui (shadcn), ProtectedRoute, StubPage
+│   │   ├── pages/               # 11 страниц: Login, Register, Dashboard, Products,
+│   │   │                         # ProductDetail, Competitors, Alerts, Digests, Import, Settings
+│   │   ├── stores/              # authStore (Zustand)
+│   │   ├── i18n/                # ru.json, en.json, index.ts
+│   │   └── lib/                 # utils.ts
+│   ├── vite.config.ts           # proxy /api → localhost:8000
 │   └── package.json
-├── .github/workflows/           # CI (ci.yml — lint, test, build, security)
+├── docker-compose.yml           # postgres, redis, backend, celery-worker, celery-beat, frontend
+├── docker-compose.prod.yml
+├── wrangler.jsonc               # Cloudflare (assets: frontend)
+├── .github/workflows/ci.yml     # ruff, pytest, eslint, build, security (bandit, safety, pip-audit, gitleaks, snyk)
 └── README.md
 ```
+
+---
+
+## Функционал
+
+### Backend API (REST)
+
+| Модуль | Endpoints |
+|--------|-----------|
+| **auth** | POST /register, /login, /refresh; POST /telegram-link; GET/PUT /me |
+| **products** | GET /categories, GET/POST /, GET/PUT/DELETE /{id} |
+| **competitors** | GET/POST /; PUT/DELETE /{id}; POST /products; GET /products/{product_id}, /{competitor_id}/products; DELETE /products/{id} |
+| **analytics** | GET /products/{id}/price-history, /products/{id}/comparison; GET /dashboard/summary, /dashboard/anomalies |
+| **alerts** | GET/POST /; PUT/DELETE /{id}; GET /events |
+| **digests** | GET /, /{id} |
+| **import** | POST /products/preview, /products/csv; GET /products/template |
+
+**Health:** GET /health (liveness), GET /api/health (DB + Redis check)
+
+### Frontend страницы
+
+| Маршрут | Страница | Функционал |
+|---------|----------|------------|
+| /login, /register | LoginPage, RegisterPage | Аутентификация, JWT |
+| /dashboard | DashboardPage | Сводка: товары, конкуренты, алерты, изменения цен; аномалии |
+| /products | ProductsPage | CRUD товаров, категории, поиск, пагинация, импорт CSV |
+| /products/:id | ProductDetailPage | График цен (7d/30d/90d), конкуренты, алерты |
+| /competitors | CompetitorsPage | CRUD конкурентов (Ozon, WB, Kaspi, Custom), привязка товаров |
+| /alerts | AlertsPage | CRUD алертов (price_drop, price_increase, out_of_stock, new_promo), каналы (email, telegram, both) |
+| /digests | DigestsPage | Список дайджестов, просмотр |
+| /import | ImportPage | Импорт товаров из CSV, preview, шаблон |
+| /settings | SettingsPage | Профиль (name, company_name), привязка Telegram |
+
+### Celery задачи
+
+| Задача | Триггер | Описание |
+|--------|---------|----------|
+| scrape_single | API / вручную | Парсинг одного competitor_product, проверка алертов |
+| scrape_user_products | API | Парсинг всех товаров пользователя |
+| scrape_all | Beat каждые 6 ч | Парсинг всех активных пользователей |
+| cleanup_old_snapshots | Beat вс 03:00 | Удаление данных старше 90 дней |
+| check_alerts | после scrape_single | Сравнение цен, отправка email/Telegram |
+| schedule_weekly_digests | Beat пт 18:00 | Генерация еженедельных дайджестов (Claude) |
+| schedule_daily_digests | Beat ежедневно 08:00 | Генерация ежедневных дайджестов (pro) |
 
 ---
 
@@ -296,9 +354,12 @@ imperecta/
 - [x] Railway: 3 сервиса созданы, переменные заданы
 - [x] Cloudflare Pages подключён
 - [x] Snyk подключён
+- [x] Backend: FastAPI, все API-роуты, Celery tasks, scrapers (Ozon, WB, generic)
+- [x] Frontend: 11 страниц с полным UI (Dashboard, Products, Competitors, Alerts, Digests, Import, Settings)
+- [x] Локальная разработка: docker-compose (postgres, redis, backend, celery-worker, celery-beat, frontend)
+- [x] CI: ruff, pytest, eslint, build, security (bandit, safety, pip-audit, gitleaks, snyk)
 - [ ] Успешный деплой backend (Railway)
 - [ ] Успешный деплой frontend (Cloudflare)
-- [ ] Миграции БД применены
 - [ ] E2E проверка (регистрация → добавление товара → парсинг)
 - [ ] Closed beta с 15 респондентами
 
