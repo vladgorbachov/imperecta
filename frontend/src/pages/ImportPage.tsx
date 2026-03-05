@@ -1,8 +1,22 @@
-import { useState, useRef } from "react";
+/**
+ * Import page: 3-step flow — upload zone, preview with column mapping, import + results.
+ *
+ * i18n keys used:
+ * - nav.import
+ * - import.dropzoneCsv, import.or, import.selectFile, import.changeFile
+ * - import.downloadTemplate, import.previewTitle
+ * - import.columnName, import.columnSku, import.columnPrice, import.columnUrl, import.columnCategory
+ * - import.ignore, import.importProducts, import.importMore
+ * - import.imported, import.errors, import.rowError
+ * - common.loading
+ */
+
+import { useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Upload, Download } from "lucide-react";
+import { Upload, Download, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { importApi } from "@/api/import";
+import { apiBaseUrl } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -12,8 +26,87 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { PageHeader } from "@/components/ui-custom/PageHeader";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+const KNOWN_COLUMNS = ["name", "sku", "price", "url", "category"] as const;
+const REQUIRED_COLUMNS = ["name", "price"] as const;
+const COLUMN_KEYS: Record<(typeof KNOWN_COLUMNS)[number], string> = {
+  name: "import.columnName",
+  sku: "import.columnSku",
+  price: "import.columnPrice",
+  url: "import.columnUrl",
+  category: "import.columnCategory",
+};
+
+function parseCsv(text: string): { headers: string[]; rows: string[][]; totalRows: number } {
+  const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length === 0) return { headers: [], rows: [], totalRows: 0 };
+  const parseRow = (line: string): string[] => {
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        inQuotes = !inQuotes;
+      } else if ((c === "," && !inQuotes) || (c === ";" && !inQuotes)) {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += c;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  };
+  const headers = parseRow(lines[0]);
+  const allRows = lines.slice(1).map(parseRow);
+  const rows = allRows.slice(0, 5);
+  return { headers, rows, totalRows: allRows.length };
+}
+
+function autoMapColumn(header: string): (typeof KNOWN_COLUMNS)[number] | null {
+  const lower = header.toLowerCase().trim();
+  const aliases: Record<string, (typeof KNOWN_COLUMNS)[number]> = {
+    name: "name",
+    nazvanie: "name",
+    название: "name",
+    product: "name",
+    title: "name",
+    product_name: "name",
+    sku: "sku",
+    артикул: "sku",
+    article: "sku",
+    price: "price",
+    цена: "price",
+    cost: "price",
+    url: "url",
+    link: "url",
+    ссылка: "url",
+    category: "category",
+    категория: "category",
+    marketplace: "category",
+  };
+  const normalized = lower.replace(/\s+/g, "_");
+  return aliases[normalized] ?? aliases[lower] ?? null;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function ImportPage() {
   const { t } = useTranslation();
@@ -21,189 +114,353 @@ export function ImportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<Record<string, string>[]>([]);
-  const [previewErrors, setPreviewErrors] = useState<{ row: number; message: string }[]>([]);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [totalRows, setTotalRows] = useState(0);
+  const [columnMap, setColumnMap] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [result, setResult] = useState<{
     imported: number;
     errors: { row: number; message: string }[];
   } | null>(null);
+  const [errorsExpanded, setErrorsExpanded] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
+  const handleFileSelect = useCallback(
+    async (selectedFile: File) => {
+      if (!selectedFile.name.toLowerCase().endsWith(".csv")) {
+        toast.error(t("import.fileFormatError"));
+        return;
+      }
+      setFile(selectedFile);
+      setResult(null);
+      const text = await selectedFile.text();
+      const { headers: h, rows: r, totalRows: tr } = parseCsv(text);
+      setHeaders(h);
+      setRows(r);
+      setTotalRows(tr);
+      const map: Record<string, string> = {};
+      h.forEach((header) => {
+        const mapped = autoMapColumn(header);
+        if (mapped) map[header] = mapped;
+        else map[header] = "";
+      });
+      setColumnMap(map);
+    },
+    [t]
+  );
 
-    setFile(selectedFile);
-    setResult(null);
-
-    const ext = selectedFile.name.toLowerCase().slice(-4);
-    if (!ext.endsWith(".csv") && !selectedFile.name.toLowerCase().endsWith(".xlsx") && !selectedFile.name.toLowerCase().endsWith(".xls")) {
-      setPreview([]);
-      setPreviewErrors([{ row: 0, message: "Use CSV or Excel file" }]);
-      return;
-    }
-
-    try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      const { data } = await importApi.previewProductsCsv(selectedFile);
-      setPreview(data.preview ?? []);
-      setPreviewErrors(data.errors ?? []);
-    } catch {
-      setPreview([]);
-      setPreviewErrors([{ row: 0, message: "Failed to parse file" }]);
-    }
-
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleFileSelect(f);
     e.target.value = "";
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) {
-      const input = fileInputRef.current;
-      if (input) {
-        const dt = new DataTransfer();
-        dt.items.add(droppedFile);
-        input.files = dt.files;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    }
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleFileSelect(f);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
+    setDragOver(true);
   };
 
+  const handleDragLeave = () => setDragOver(false);
+
+  const handleChangeFile = () => {
+    setFile(null);
+    setHeaders([]);
+    setRows([]);
+    setColumnMap({});
+    setResult(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleMappingChange = (header: string, value: string) => {
+    setColumnMap((prev) => ({ ...prev, [header]: value }));
+  };
+
+  const mappedColumns = Object.values(columnMap).filter(Boolean);
+  const requiredMapped = REQUIRED_COLUMNS.every((r) => mappedColumns.includes(r));
+  const productCount = totalRows;
+
   const handleImport = async () => {
-    if (!file) return;
+    if (!file || !requiredMapped) return;
     setImporting(true);
+    setImportProgress(0);
     setResult(null);
     try {
-      const { data } = await importApi.uploadProductsCsv(file);
+      setImportProgress(30);
+      const text = await file.text();
+      const { headers: h, rows: allRows } = parseCsv(text);
+      const revMap: Record<string, string> = {};
+      h.forEach((header) => {
+        const target = columnMap[header];
+        if (target) revMap[target] = header;
+      });
+      const csvLines: string[] = [KNOWN_COLUMNS.join(",")];
+      for (const row of allRows) {
+        const obj: Record<string, string> = {};
+        h.forEach((header, i) => {
+          obj[header] = row[i] ?? "";
+        });
+        const mappedRow = KNOWN_COLUMNS.map((col) => {
+          const src = revMap[col];
+          return src ? (obj[src] ?? "") : "";
+        });
+        csvLines.push(mappedRow.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
+      }
+      setImportProgress(60);
+      const blob = new Blob([csvLines.join("\n")], { type: "text/csv" });
+      const transformedFile = new File([blob], file.name, { type: "text/csv" });
+      const { data } = await importApi.uploadProductsCsv(transformedFile);
+      setImportProgress(100);
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setResult({ imported: data.imported, errors: data.errors ?? [] });
-      toast.success(`Imported: ${data.imported}`);
+      toast.success(t("import.success", { count: data.imported }));
       if (data.errors?.length) {
-        toast.error(`Errors: ${data.errors.length}`);
+        toast.error(t("import.errorsCount", { count: data.errors.length }));
       }
     } catch {
-      toast.error("Import failed");
+      toast.error(t("import.error"));
+      setResult({ imported: 0, errors: [{ row: 0, message: t("import.error") }] });
     } finally {
       setImporting(false);
+      setImportProgress(0);
     }
   };
 
-  const templateUrl = "/api/import/products/template";
+  const handleImportMore = () => {
+    setResult(null);
+    handleChangeFile();
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch(`${apiBaseUrl}/import/products/template`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "products_template.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t("import.error"));
+    }
+  };
+
+  const hasResult = result !== null;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">{t("nav.import")}</h1>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <PageHeader title="nav.import" />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Upload file</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            CSV or Excel. Columns: name, sku, price, url, category
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <div
-            className="flex min-h-32 flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/30 p-6 transition-colors hover:border-muted-foreground/50"
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="mb-2 size-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              Drag and drop or click to select
-            </p>
-            {file && (
-              <p className="mt-2 text-sm font-medium">{file.name}</p>
-            )}
-          </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        onChange={handleInputChange}
+      />
 
-          <a
-            href={templateUrl}
-            download="products_template.csv"
-            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-          >
-            <Download className="size-4" />
-            Download template
-          </a>
-        </CardContent>
-      </Card>
-
-      {preview.length > 0 && (
+      {!file && (
         <Card>
-          <CardHeader>
-            <CardTitle>Preview (first 5 rows)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>name</TableHead>
-                  <TableHead>sku</TableHead>
-                  <TableHead>price</TableHead>
-                  <TableHead>url</TableHead>
-                  <TableHead>category</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.map((row, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{row.name}</TableCell>
-                    <TableCell>{row.sku}</TableCell>
-                    <TableCell>{row.price}</TableCell>
-                    <TableCell className="max-w-32 truncate">{row.url}</TableCell>
-                    <TableCell>{row.category}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {previewErrors.length > 0 && (
-              <p className="mt-2 text-sm text-destructive">
-                Errors: {previewErrors.map((e) => `Row ${e.row}: ${e.message}`).join("; ")}
-              </p>
-            )}
-            <Button
-              className="mt-4"
-              onClick={handleImport}
-              disabled={importing || previewErrors.length > 0}
+          <CardContent className="p-0">
+            <div
+              className={cn(
+                "flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-all duration-200",
+                "border-accent/30 bg-accent/5 dark:border-accent/40 dark:bg-accent/10",
+                dragOver && "scale-[1.02] border-accent bg-accent/10 dark:bg-accent/20"
+              )}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
             >
-              {importing ? "Importing..." : "Import"}
-            </Button>
+              <Upload className="size-12 text-accent dark:text-accent" />
+              <p className="text-center text-sm font-medium">
+                {t("import.dropzoneCsv")}
+              </p>
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                {t("import.or")}
+              </p>
+              <Button
+                variant="default"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {t("import.selectFile")}
+              </Button>
+            </div>
+            <div className="flex justify-center border-t border-border p-4">
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                className="inline-flex items-center gap-2 text-sm text-primary hover:underline dark:text-primary"
+              >
+                <Download className="size-4" />
+                {t("import.downloadTemplate")}
+              </button>
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {result && (
+      {file && !hasResult && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-4 py-3 dark:bg-muted/20">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{file.name}</span>
+              <span className="text-xs text-muted-foreground dark:text-muted-foreground">
+                {formatFileSize(file.size)}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleChangeFile}
+              className="text-sm text-primary hover:underline dark:text-primary"
+            >
+              {t("import.changeFile")}
+            </button>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {headers.map((header) => {
+                        const mapped = columnMap[header];
+                        const requiredUnmapped = !requiredMapped;
+                        return (
+                          <TableHead
+                            key={header}
+                            className={cn(
+                              requiredUnmapped && "bg-amber-500/15 dark:bg-amber-500/20"
+                            )}
+                          >
+                            <div className="flex flex-col gap-1">
+                              <span>{header}</span>
+                              <Select
+                                value={mapped || "ignore"}
+                                onValueChange={(v) =>
+                                  handleMappingChange(header, v === "ignore" ? "" : v)
+                                }
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue placeholder={t("import.ignore")} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="ignore">
+                                    {t("import.ignore")}
+                                  </SelectItem>
+                                  {KNOWN_COLUMNS.map((col) => (
+                                    <SelectItem key={col} value={col}>
+                                      <span className="flex items-center gap-2">
+                                        {t(COLUMN_KEYS[col])}
+                                        {autoMapColumn(header) === col && (
+                                          <CheckCircle className="size-3.5 text-green-600 dark:text-green-500" />
+                                        )}
+                                      </span>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </TableHead>
+                        );
+                      })}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((row, i) => (
+                      <TableRow key={i}>
+                        {headers.map((header, j) => (
+                          <TableCell
+                            key={header}
+                            className="max-w-32 truncate text-sm"
+                          >
+                            {row[j] ?? ""}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {importing && (
+            <div className="space-y-2">
+              <Progress value={importProgress} />
+              <p className="text-center text-sm text-muted-foreground dark:text-muted-foreground">
+                {t("import.importing")} {Math.round(importProgress)}%
+              </p>
+            </div>
+          )}
+
+          {!importing && (
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={handleImport}
+              disabled={!requiredMapped || productCount === 0}
+            >
+              {t("import.importProducts", { count: productCount })}
+            </Button>
+          )}
+        </>
+      )}
+
+      {hasResult && result && (
         <Card>
-          <CardHeader>
-            <CardTitle>Result</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="font-medium">
-              Imported: {result.imported} · Errors: {result.errors.length}
-            </p>
+          <CardContent className="space-y-4 pt-6">
+            <div className="flex items-center gap-2 text-green-600 dark:text-green-500">
+              <CheckCircle className="size-5 shrink-0" />
+              <span className="font-medium">
+                {t("import.imported")}: {result.imported}
+              </span>
+            </div>
+
             {result.errors.length > 0 && (
-              <ul className="mt-2 list-inside list-disc text-sm text-destructive">
-                {result.errors.map((e, i) => (
-                  <li key={i}>
-                    Row {e.row}: {e.message}
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2 text-left text-sm font-medium hover:bg-muted/50 dark:bg-muted/20 dark:hover:bg-muted/30"
+                  onClick={() => setErrorsExpanded((e) => !e)}
+                >
+                  <span className="text-destructive dark:text-destructive">
+                    {t("import.errors")}: {result.errors.length}
+                  </span>
+                  {errorsExpanded ? (
+                    <ChevronUp className="size-4" />
+                  ) : (
+                    <ChevronDown className="size-4" />
+                  )}
+                </button>
+                {errorsExpanded && (
+                  <ul className="list-inside list-disc space-y-1 text-sm text-destructive dark:text-destructive">
+                    {result.errors.map((e, i) => (
+                      <li key={i}>
+                        {t("import.rowError", { row: e.row, message: e.message })}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
+
+            <Button variant="outline" className="w-full" onClick={handleImportMore}>
+              {t("import.importMore")}
+            </Button>
           </CardContent>
         </Card>
       )}

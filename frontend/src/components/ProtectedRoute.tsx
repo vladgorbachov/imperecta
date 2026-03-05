@@ -1,4 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
+import { getAuthToken } from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 
 interface ProtectedRouteProps {
@@ -6,8 +7,9 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { accessToken, isInitialized } = useAuthStore();
   const location = useLocation();
+  const { isInitialized } = useAuthStore();
+  const token = getAuthToken();
 
   if (!isInitialized) {
     return (
@@ -17,7 +19,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     );
   }
 
-  if (!accessToken) {
+  if (!token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

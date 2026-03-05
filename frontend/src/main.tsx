@@ -1,16 +1,12 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
-import { AppRoutes } from "@/routes";
-import { Toaster } from "sonner";
+import { App } from "@/App";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import "@/i18n";
 import "./index.css";
 
-const queryClient = new QueryClient();
-
-function AppWithAuth() {
+function AppWithInit() {
   const init = useAuthStore((s) => s.init);
   const isInitialized = useAuthStore((s) => s.isInitialized);
 
@@ -19,25 +15,14 @@ function AppWithAuth() {
   }, [init]);
 
   if (!isInitialized) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="size-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
-  return (
-    <BrowserRouter>
-      <AppRoutes />
-      <Toaster position="top-right" />
-    </BrowserRouter>
-  );
+  return <App />;
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AppWithAuth />
-    </QueryClientProvider>
+    <AppWithInit />
   </StrictMode>
 );

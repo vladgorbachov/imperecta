@@ -25,8 +25,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem("refresh_token");
+      clearStoredTokens();
       window.location.href = "/login";
     }
     return Promise.reject(error);
@@ -37,11 +36,26 @@ export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+const AUTH_TOKEN_KEY = "auth_token";
+
 export function setStoredToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
 }
 
 export function clearStoredTokens(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem("refresh_token");
+}
+
+export function getAuthToken(): string | null {
+  const auth = localStorage.getItem(AUTH_TOKEN_KEY);
+  const access = localStorage.getItem(TOKEN_KEY);
+  if (auth) return auth;
+  if (access) {
+    localStorage.setItem(AUTH_TOKEN_KEY, access);
+    return access;
+  }
+  return null;
 }

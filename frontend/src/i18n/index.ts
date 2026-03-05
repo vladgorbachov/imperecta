@@ -1,164 +1,94 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import HttpBackend from "i18next-http-backend";
+import LanguageDetector from "i18next-browser-languagedetector";
 
-const resources = {
-  ru: {
-    translation: {
-      nav: {
-        dashboard: "Дашборд",
-        products: "Товары",
-        competitors: "Конкуренты",
-        alerts: "Алерты",
-        digests: "Дайджесты",
-        import: "Импорт",
-        settings: "Настройки",
-      },
-      auth: {
-        login: "Вход",
-        register: "Регистрация",
-        logout: "Выход",
-        profile: "Профиль",
-        email: "Email",
-        password: "Пароль",
-        name: "Имя",
-        companyName: "Название компании",
-        submitLogin: "Войти",
-        submitRegister: "Зарегистрироваться",
-        noAccount: "Нет аккаунта?",
-        hasAccount: "Уже есть аккаунт?",
-      },
-      common: {
-        comingSoon: "Скоро",
-      },
-      dashboard: {
-        products: "Товаров",
-        competitors: "Конкурентов",
-        alertsToday: "Алертов сегодня",
-        priceChanges: "Изменений цен",
-        topChanges: "Топ-5 изменений",
-        activePromos: "Активные акции конкурентов",
-        product: "Товар",
-        competitor: "Конкурент",
-        was: "Было",
-        became: "Стало",
-        change: "Изменение",
-        noData: "Нет данных",
-      },
-      products: {
-        search: "Поиск",
-        category: "Категория",
-        addProduct: "Добавить товар",
-        importCsv: "Импорт CSV",
-        name: "Название",
-        sku: "SKU",
-        myPrice: "Моя цена",
-        minCompetitorPrice: "Мин. цена конкурентов",
-        maxPrice: "Макс. цена",
-        competitorCount: "Конкуренты",
-        lastParsing: "Последний парсинг",
-        overpriced: "Дороже конкурентов",
-        allCategories: "Все категории",
-      },
-      productDetail: {
-        priceChart: "График цен",
-        competitors: "Конкуренты",
-        alerts: "Алерты",
-        createAlert: "Создать алерт",
-        period7d: "7 дн",
-        period30d: "30 дн",
-        period90d: "90 дн",
-        myPrice: "Моя цена",
-        trendUp: "Рост",
-        trendDown: "Снижение",
-        trendStable: "Без изменений",
-        inStock: "В наличии",
-        outOfStock: "Нет в наличии",
-      },
+export const SUPPORTED_LANGUAGES = [
+  { code: "ru", name: "Русский", flag: "🇷🇺", region: "cis" },
+  { code: "uk", name: "Українська", flag: "🇺🇦", region: "cis" },
+  { code: "be", name: "Беларуская", flag: "🇧🇾", region: "cis" },
+  { code: "kk", name: "Қазақша", flag: "🇰🇿", region: "cis" },
+  { code: "uz", name: "Oʻzbekcha", flag: "🇺🇿", region: "cis" },
+  { code: "ky", name: "Кыргызча", flag: "🇰🇬", region: "cis" },
+  { code: "tg", name: "Тоҷикӣ", flag: "🇹🇯", region: "cis" },
+  { code: "tk", name: "Türkmençe", flag: "🇹🇲", region: "cis" },
+  { code: "az", name: "Azərbaycanca", flag: "🇦🇿", region: "cis" },
+  { code: "hy", name: "Հայերեն", flag: "🇦🇲", region: "cis" },
+  { code: "ka", name: "ქართული", flag: "🇬🇪", region: "cis" },
+  { code: "ro", name: "Română", flag: "🇷🇴", region: "cis" },
+  { code: "en", name: "English", flag: "🇬🇧", region: "europe" },
+  { code: "de", name: "Deutsch", flag: "🇩🇪", region: "europe" },
+  { code: "fr", name: "Français", flag: "🇫🇷", region: "europe" },
+  { code: "es", name: "Español", flag: "🇪🇸", region: "europe" },
+  { code: "it", name: "Italiano", flag: "🇮🇹", region: "europe" },
+  { code: "pt", name: "Português", flag: "🇵🇹", region: "europe" },
+  { code: "nl", name: "Nederlands", flag: "🇳🇱", region: "europe" },
+  { code: "pl", name: "Polski", flag: "🇵🇱", region: "europe" },
+  { code: "cs", name: "Čeština", flag: "🇨🇿", region: "europe" },
+  { code: "sk", name: "Slovenčina", flag: "🇸🇰", region: "europe" },
+  { code: "hu", name: "Magyar", flag: "🇭🇺", region: "europe" },
+  { code: "bg", name: "Български", flag: "🇧🇬", region: "europe" },
+  { code: "hr", name: "Hrvatski", flag: "🇭🇷", region: "europe" },
+  { code: "sr", name: "Српски", flag: "🇷🇸", region: "europe" },
+  { code: "sl", name: "Slovenščina", flag: "🇸🇮", region: "europe" },
+  { code: "mk", name: "Македонски", flag: "🇲🇰", region: "europe" },
+  { code: "sq", name: "Shqip", flag: "🇦🇱", region: "europe" },
+  { code: "el", name: "Ελληνικά", flag: "🇬🇷", region: "europe" },
+  { code: "tr", name: "Türkçe", flag: "🇹🇷", region: "europe" },
+  { code: "fi", name: "Suomi", flag: "🇫🇮", region: "europe" },
+  { code: "sv", name: "Svenska", flag: "🇸🇪", region: "europe" },
+  { code: "no", name: "Norsk", flag: "🇳🇴", region: "europe" },
+  { code: "da", name: "Dansk", flag: "🇩🇰", region: "europe" },
+  { code: "et", name: "Eesti", flag: "🇪🇪", region: "europe" },
+  { code: "lv", name: "Latviešu", flag: "🇱🇻", region: "europe" },
+  { code: "lt", name: "Lietuvių", flag: "🇱🇹", region: "europe" },
+  { code: "ga", name: "Gaeilge", flag: "🇮🇪", region: "europe" },
+  { code: "is", name: "Íslenska", flag: "🇮🇸", region: "europe" },
+  { code: "mt", name: "Malti", flag: "🇲🇹", region: "europe" },
+  { code: "bs", name: "Bosanski", flag: "🇧🇦", region: "europe" },
+] as const;
+
+export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]["code"];
+
+export const SUPPORTED_LANGUAGE_CODES = SUPPORTED_LANGUAGES.map((l) => l.code);
+
+const STORAGE_KEY = "imperecta_language";
+
+i18n
+  .use(HttpBackend)
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    fallbackLng: "en",
+    supportedLngs: SUPPORTED_LANGUAGE_CODES,
+    nonExplicitSupportedLngs: false,
+
+    detection: {
+      order: ["localStorage", "navigator", "htmlTag"],
+      lookupLocalStorage: STORAGE_KEY,
+      caches: ["localStorage"],
     },
-  },
-  en: {
-    translation: {
-      nav: {
-        dashboard: "Dashboard",
-        products: "Products",
-        competitors: "Competitors",
-        alerts: "Alerts",
-        digests: "Digests",
-        import: "Import",
-        settings: "Settings",
-      },
-      auth: {
-        login: "Login",
-        register: "Register",
-        logout: "Logout",
-        profile: "Profile",
-        email: "Email",
-        password: "Password",
-        name: "Name",
-        companyName: "Company name",
-        submitLogin: "Sign in",
-        submitRegister: "Register",
-        noAccount: "Don't have an account?",
-        hasAccount: "Already have an account?",
-      },
-      common: {
-        comingSoon: "Coming soon",
-      },
-      dashboard: {
-        products: "Products",
-        competitors: "Competitors",
-        alertsToday: "Alerts today",
-        priceChanges: "Price changes",
-        topChanges: "Top 5 changes",
-        activePromos: "Active competitor promotions",
-        product: "Product",
-        competitor: "Competitor",
-        was: "Was",
-        became: "Became",
-        change: "Change",
-        noData: "No data",
-      },
-      products: {
-        search: "Search",
-        category: "Category",
-        addProduct: "Add product",
-        importCsv: "Import CSV",
-        name: "Name",
-        sku: "SKU",
-        myPrice: "My price",
-        minCompetitorPrice: "Min competitor price",
-        maxPrice: "Max price",
-        competitorCount: "Competitors",
-        lastParsing: "Last parsing",
-        overpriced: "Overpriced",
-        allCategories: "All categories",
-      },
-      productDetail: {
-        priceChart: "Price chart",
-        competitors: "Competitors",
-        alerts: "Alerts",
-        createAlert: "Create alert",
-        period7d: "7d",
-        period30d: "30d",
-        period90d: "90d",
-        myPrice: "My price",
-        trendUp: "Up",
-        trendDown: "Down",
-        trendStable: "Stable",
-        inStock: "In stock",
-        outOfStock: "Out of stock",
-      },
+
+    backend: {
+      loadPath: "/locales/{{lng}}/translation.json",
     },
-  },
+
+    interpolation: {
+      escapeValue: false,
+    },
+
+    react: {
+      useSuspense: true,
+    },
+  });
+
+const setHtmlLang = (lng: string) => {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = lng || "en";
+  }
 };
 
-i18n.use(initReactI18next).init({
-  resources,
-  lng: "ru",
-  fallbackLng: "ru",
-  interpolation: {
-    escapeValue: false,
-  },
-});
+i18n.on("languageChanged", setHtmlLang);
+i18n.on("initialized", () => setHtmlLang(i18n.language));
 
 export default i18n;

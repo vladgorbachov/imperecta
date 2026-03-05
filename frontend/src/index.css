@@ -1,28 +1,153 @@
+@import url("https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
 :root {
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(222.2 84% 4.9%);
+  /* Brand accent — deep teal/cyan (competitive intelligence: sharp, analytical) */
+  --color-accent: hsl(185 80% 40%);
+  --color-accent-foreground: hsl(0 0% 100%);
+
+  /* Backgrounds — light mode, slight warm tint */
+  --background: hsl(40 20% 98%);
+  --foreground: hsl(220 15% 12%);
   --card: hsl(0 0% 100%);
-  --card-foreground: hsl(222.2 84% 4.9%);
-  --primary: 99 102 241;
-  --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(210 40% 96.1%);
-  --secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --muted: hsl(210 40% 96.1%);
-  --muted-foreground: hsl(215.4 16.3% 46.9%);
-  --accent: hsl(210 40% 96.1%);
-  --accent-foreground: hsl(222.2 47.4% 11.2%);
-  --border: hsl(214.3 31.8% 91.4%);
-  --input: hsl(214.3 31.8% 91.4%);
-  --ring: 99 102 241;
-  --sidebar: #1a1a2e;
-  --sidebar-foreground: hsl(0 0% 98%);
+  --card-foreground: hsl(220 15% 12%);
   --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(222.2 84% 4.9%);
-  --destructive: 0 84.2% 60.2%;
+  --popover-foreground: hsl(220 15% 12%);
+
+  /* Muted */
+  --muted: hsl(40 15% 95%);
+  --muted-foreground: hsl(220 10% 45%);
+
+  /* Borders and inputs */
+  --border: hsl(220 15% 90%);
+  --input: hsl(220 15% 90%);
+  --ring: 185 80% 40%;
+
+  /* Primary (brand accent) */
+  --primary: 185 80% 40%;
+  --primary-foreground: hsl(0 0% 100%);
+
+  /* Secondary */
+  --secondary: hsl(40 15% 93%);
+  --secondary-foreground: hsl(220 15% 15%);
+
+  /* Accent (interactive hover states) */
+  --accent: hsl(185 60% 95%);
+  --accent-foreground: hsl(185 80% 25%);
+
+  /* Semantic colors */
+  --color-price-up: hsl(0 72% 51%);
+  --color-price-down: hsl(160 84% 39%);
+  --color-out-of-stock: hsl(220 10% 55%);
+  --color-promo: hsl(38 92% 50%);
+  --color-stable: hsl(220 10% 45%);
+
+  /* Destructive */
+  --destructive: 0 72% 51%;
   --destructive-foreground: hsl(0 0% 98%);
+
+  /* Sidebar */
+  --sidebar: hsl(220 25% 12%);
+  --sidebar-foreground: hsl(0 0% 95%);
+
+  /* Marketplace badge colors (task spec: Ozon blue, WB purple, Kaspi yellow, Custom slate) */
+  --color-marketplace-ozon: hsl(217 91% 60%);
+  --color-marketplace-wildberries: hsl(263 70% 58%);
+  --color-marketplace-kaspi: hsl(45 93% 47%);
+  --color-marketplace-custom: hsl(215 16% 47%);
+
+  /* Chart line colors (for reference; Recharts uses design-tokens.ts) */
+  --chart-1: hsl(187 85% 43%);
+  --chart-2: hsl(217 91% 60%);
+  --chart-3: hsl(263 70% 58%);
+  --chart-4: hsl(38 92% 50%);
+  --chart-5: hsl(330 81% 60%);
+  --chart-6: hsl(174 72% 40%);
+  --chart-7: hsl(199 89% 48%);
+
+  /* Typography */
+  --font-display: "Unbounded", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, sans-serif;
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+}
+
+.dark {
+  /* Backgrounds — deep slate */
+  --background: hsl(220 25% 8%);
+  --foreground: hsl(0 0% 95%);
+  --card: hsl(220 20% 11%);
+  --card-foreground: hsl(0 0% 95%);
+  --popover: hsl(220 20% 11%);
+  --popover-foreground: hsl(0 0% 95%);
+
+  /* Muted */
+  --muted: hsl(220 15% 15%);
+  --muted-foreground: hsl(220 10% 60%);
+
+  /* Borders and inputs */
+  --border: hsl(220 15% 18%);
+  --input: hsl(220 15% 18%);
+  --ring: 185 70% 45%;
+
+  /* Primary */
+  --primary: 185 70% 45%;
+  --primary-foreground: hsl(0 0% 100%);
+
+  /* Secondary */
+  --secondary: hsl(220 15% 18%);
+  --secondary-foreground: hsl(0 0% 95%);
+
+  /* Accent */
+  --accent: hsl(185 40% 18%);
+  --accent-foreground: hsl(185 70% 70%);
+
+  /* Semantic colors — dark variants */
+  --color-price-up: hsl(0 72% 55%);
+  --color-price-down: hsl(160 70% 45%);
+  --color-out-of-stock: hsl(220 10% 50%);
+  --color-promo: hsl(38 92% 55%);
+  --color-stable: hsl(220 10% 60%);
+
+  /* Destructive */
+  --destructive: 0 72% 55%;
+  --destructive-foreground: hsl(0 0% 98%);
+
+  /* Sidebar */
+  --sidebar: hsl(220 25% 10%);
+  --sidebar-foreground: hsl(0 0% 95%);
+
+  /* Marketplace badge colors — dark variants */
+  --color-marketplace-ozon: hsl(217 91% 65%);
+  --color-marketplace-wildberries: hsl(263 70% 65%);
+  --color-marketplace-kaspi: hsl(45 93% 55%);
+  --color-marketplace-custom: hsl(215 16% 55%);
+
+  /* Chart colors */
+  --chart-1: hsl(187 85% 50%);
+  --chart-2: hsl(217 91% 65%);
+  --chart-3: hsl(263 70% 65%);
+  --chart-4: hsl(38 92% 55%);
+  --chart-5: hsl(330 81% 65%);
+  --chart-6: hsl(174 72% 48%);
+  --chart-7: hsl(199 89% 55%);
 }
 
 @theme inline {
@@ -45,6 +170,37 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-price-up: var(--color-price-up);
+  --color-price-down: var(--color-price-down);
+  --color-out-of-stock: var(--color-out-of-stock);
+  --color-promo: var(--color-promo);
+  --color-stable: var(--color-stable);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-marketplace-ozon: var(--color-marketplace-ozon);
+  --color-marketplace-wildberries: var(--color-marketplace-wildberries);
+  --color-marketplace-kaspi: var(--color-marketplace-kaspi);
+  --color-marketplace-custom: var(--color-marketplace-custom);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-sans: var(--font-body);
+  --font-mono: ui-monospace, monospace;
+  --text-xs: var(--text-xs);
+  --text-xs--line-height: var(--text-xs--line-height);
+  --text-sm: var(--text-sm);
+  --text-sm--line-height: var(--text-sm--line-height);
+  --text-base: var(--text-base);
+  --text-base--line-height: var(--text-base--line-height);
+  --text-lg: var(--text-lg);
+  --text-lg--line-height: var(--text-lg--line-height);
+  --text-xl: var(--text-xl);
+  --text-xl--line-height: var(--text-xl--line-height);
+  --text-2xl: var(--text-2xl);
+  --text-2xl--line-height: var(--text-2xl--line-height);
+  --text-3xl: var(--text-3xl);
+  --text-3xl--line-height: var(--text-3xl--line-height);
+  --text-4xl: var(--text-4xl);
+  --text-4xl--line-height: var(--text-4xl--line-height);
 }
 
 @layer base {
@@ -52,12 +208,76 @@
     @apply border-border;
   }
   html {
-    background-color: #ffffff;
-    color: #171717;
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body);
   }
   body {
     @apply bg-background text-foreground;
-    background-color: #ffffff;
-    color: #171717;
   }
+}
+
+/* Digest modal markdown styles */
+.digest-content h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--color-accent);
+  margin-bottom: 0.75rem;
+}
+.digest-content h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+.digest-content h3 {
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.digest-content ul {
+  margin-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.digest-content li {
+  margin-bottom: 0.25rem;
+}
+.digest-content strong {
+  font-weight: 600;
+}
+.digest-content code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.875em;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  background: var(--muted);
+}
+.digest-content p {
+  margin-bottom: 0.5rem;
+}
+
+@keyframes grid-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-grid-pulse {
+  animation: grid-pulse 4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
 }
