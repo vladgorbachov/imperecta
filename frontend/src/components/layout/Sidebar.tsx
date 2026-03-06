@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   Package,
@@ -51,6 +52,7 @@ export function Sidebar({
   onNavigate,
 }: SidebarProps) {
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
   const location = useLocation();
   const showLabels = !collapsed || isMobile;
   const progressPercent = ((TRIAL_TOTAL_DAYS - TRIAL_DAYS_LEFT) / TRIAL_TOTAL_DAYS) * 100;
@@ -68,11 +70,18 @@ export function Sidebar({
           showLabels ? "justify-between" : "justify-center"
         )}
       >
-        {showLabels && (
-          <span className="truncate font-display text-lg font-semibold text-primary dark:text-primary">
-            {t("nav.logo")}
-          </span>
-        )}
+        <img
+          src={
+            (resolvedTheme ?? "light") === "dark"
+              ? "/images/logo-dark.png"
+              : "/images/logo-light.png"
+          }
+          alt="Imperecta"
+          className={cn(
+            "object-contain object-left transition-opacity duration-200",
+            showLabels ? "h-10 w-auto" : "h-8 w-8"
+          )}
+        />
         {!isMobile && (
           <Button
             variant="ghost"

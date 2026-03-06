@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Menu, LogOut, User, Settings, Bell, Sun, Moon } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -14,22 +14,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-
-const PATH_TO_NAV_KEY: Record<string, string> = {
-  "/dashboard": "nav.dashboard",
-  "/products": "nav.products",
-  "/competitors": "nav.competitors",
-  "/alerts": "nav.alerts",
-  "/digests": "nav.digests",
-  "/import": "nav.import",
-  "/settings": "nav.settings",
-};
-
-function getBreadcrumbKey(pathname: string): string {
-  const base = pathname.split("/").filter(Boolean)[0] ?? "";
-  const path = base ? `/${base}` : "/dashboard";
-  return PATH_TO_NAV_KEY[path] ?? "nav.dashboard";
-}
 
 const NOTIFICATION_COUNT = 3;
 
@@ -45,8 +29,6 @@ export function Header({ onMenuClick }: HeaderProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const { user, logout, updateLanguage } = useAuthStore();
   const navigate = useNavigate();
-  const location = useLocation();
-  const breadcrumbKey = getBreadcrumbKey(location.pathname);
 
   const handleLogout = () => {
     logout();
@@ -78,9 +60,6 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Menu className="size-5" />
           </Button>
         )}
-        <span className="truncate text-sm font-medium text-foreground dark:text-foreground">
-          {t(breadcrumbKey)}
-        </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Button
