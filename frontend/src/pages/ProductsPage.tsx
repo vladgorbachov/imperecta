@@ -1,25 +1,27 @@
 /**
- * Products page with toolbar, sortable table, pagination.
+ * Products page with filters panel, toolbar, sortable table, pagination.
  *
  * i18n keys used:
- * - nav.products
- * - products.search, products.category, products.allCategories
- * - products.importCsv, products.addProduct
- * - products.name, products.sku, products.myPrice
- * - products.minCompetitorPrice, products.maxPrice, products.competitorCount
- * - products.position, products.overpricedBy, products.cheaperBy
- * - products.lastParsing, products.noProducts, products.noProductsHint
- * - products.noResults, products.clearFilters
- * - products.paginationShown
- * - common.dash
+ * - nav.products, products.*, filters.*, common.*
  */
 
 import { useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Plus, Upload, Search, ArrowUpDown, ArrowUp, ArrowDown, Package } from "lucide-react";
+import {
+  Plus,
+  Upload,
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Package,
+  SlidersHorizontal,
+} from "lucide-react";
 import { formatPrice, formatRelativeTime } from "@/lib/formatters";
 import { useDebounce } from "@/hooks/useDebounce";
+import { MOCK_FILTERS_BY_CATEGORY } from "@/data/mockFilters";
+import { FiltersPanel } from "@/components/products/FiltersPanel";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -41,13 +43,24 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+
+const CATEGORY_TO_PRODUCT: Record<string, string> = {
+  all: "",
+  electronics: "Электроника",
+  appliances: "Бытовая техника",
+  gadgets: "Гаджеты",
+  accessories: "Аксессуары",
+};
 
 interface ProductRow {
   id: string;
   name: string;
   sku: string | null;
   category: string | null;
+  brand: string;
+  marketplaces: string[];
   current_price: number;
   min_competitor_price: number | null;
   max_competitor_price: number | null;
@@ -55,31 +68,35 @@ interface ProductRow {
   last_checked_at: string | null;
 }
 
-type SortKey = "name" | "current_price" | "min_competitor_price" | "max_competitor_price" | "competitor_count" | "last_checked_at";
+type SortKey =
+  | "name"
+  | "current_price"
+  | "min_competitor_price"
+  | "max_competitor_price"
+  | "competitor_count"
+  | "last_checked_at";
 type SortDir = "asc" | "desc";
+
+const PAGE_SIZES = [20, 50, 100] as const;
 
 // TODO: API — replace with useProducts() / productsApi.list()
 const MOCK_PRODUCTS: ProductRow[] = [
-  { id: "1", name: "Смартфон Galaxy A55", sku: "GAL-A55-128", category: "Электроника", current_price: 32490, min_competitor_price: 28990, max_competitor_price: 32990, competitor_count: 5, last_checked_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-  { id: "2", name: "Наушники Sony WH-1000XM5", sku: "SNY-XM5", category: "Электроника", current_price: 28900, min_competitor_price: 27500, max_competitor_price: 31500, competitor_count: 4, last_checked_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
-  { id: "3", name: "Пылесос Dyson V15", sku: "DYS-V15", category: "Бытовая техника", current_price: 79990, min_competitor_price: 75990, max_competitor_price: 89990, competitor_count: 3, last_checked_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() },
-  { id: "4", name: "Кофемашина DeLonghi Magnifica", sku: "DLG-MAG", category: "Бытовая техника", current_price: 42900, min_competitor_price: 45900, max_competitor_price: 49900, competitor_count: 2, last_checked_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() },
-  { id: "5", name: "Умные часы Apple Watch SE", sku: "APL-WSE", category: "Гаджеты", current_price: 32990, min_competitor_price: 29990, max_competitor_price: 35990, competitor_count: 6, last_checked_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
-  { id: "6", name: "Телевизор Samsung 55 QLED", sku: "SAM-55Q", category: "Электроника", current_price: 89990, min_competitor_price: 84990, max_competitor_price: 94990, competitor_count: 4, last_checked_at: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString() },
-  { id: "7", name: "Ноутбук Lenovo IdeaPad", sku: "LNV-IDP", category: "Электроника", current_price: 54990, min_competitor_price: 52990, max_competitor_price: 59990, competitor_count: 5, last_checked_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString() },
-  { id: "8", name: "Микроволновка LG NeoChef", sku: "LG-NC", category: "Бытовая техника", current_price: 12990, min_competitor_price: 11990, max_competitor_price: 13990, competitor_count: 3, last_checked_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString() },
-  { id: "9", name: "Блендер Braun Multiquick", sku: "BRN-MQ", category: "Бытовая техника", current_price: 8990, min_competitor_price: 8490, max_competitor_price: 9990, competitor_count: 2, last_checked_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString() },
-  { id: "10", name: "Робот-пылесос Xiaomi S10", sku: "XMI-S10", category: "Бытовая техника", current_price: 34990, min_competitor_price: 32990, max_competitor_price: 37990, competitor_count: 4, last_checked_at: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString() },
-  { id: "11", name: "Клавиатура Logitech MX Keys", sku: "LOG-MXK", category: "Аксессуары", current_price: 12990, min_competitor_price: 11990, max_competitor_price: 13990, competitor_count: 3, last_checked_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
-  { id: "12", name: "Монитор Dell 27 S2722QC", sku: "DEL-27S", category: "Электроника", current_price: 32990, min_competitor_price: 30990, max_competitor_price: 35990, competitor_count: 2, last_checked_at: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString() },
-  { id: "13", name: "Колонка JBL Charge 5", sku: "JBL-CH5", category: "Электроника", current_price: 14990, min_competitor_price: 13990, max_competitor_price: 16990, competitor_count: 5, last_checked_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-  { id: "14", name: "Планшет Samsung Tab S9", sku: "SAM-TS9", category: "Гаджеты", current_price: 49990, min_competitor_price: 46990, max_competitor_price: 54990, competitor_count: 4, last_checked_at: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString() },
-  { id: "15", name: "Фитнес-браслет Xiaomi Band 8", sku: "XMI-B8", category: "Гаджеты", current_price: 3990, min_competitor_price: 3690, max_competitor_price: 4490, competitor_count: 6, last_checked_at: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() },
+  { id: "1", name: "Смартфон Galaxy A55", sku: "GAL-A55-128", category: "Электроника", brand: "samsung", marketplaces: ["ozon", "wildberries"], current_price: 32490, min_competitor_price: 28990, max_competitor_price: 32990, competitor_count: 5, last_checked_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+  { id: "2", name: "Наушники Sony WH-1000XM5", sku: "SNY-XM5", category: "Электроника", brand: "sony", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 28900, min_competitor_price: 27500, max_competitor_price: 31500, competitor_count: 4, last_checked_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
+  { id: "3", name: "Пылесос Dyson V15", sku: "DYS-V15", category: "Бытовая техника", brand: "philips", marketplaces: ["ozon"], current_price: 79990, min_competitor_price: 75990, max_competitor_price: 89990, competitor_count: 3, last_checked_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() },
+  { id: "4", name: "Кофемашина DeLonghi Magnifica", sku: "DLG-MAG", category: "Бытовая техника", brand: "bosch", marketplaces: ["ozon", "wildberries"], current_price: 42900, min_competitor_price: 45900, max_competitor_price: 49900, competitor_count: 2, last_checked_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() },
+  { id: "5", name: "Умные часы Apple Watch SE", sku: "APL-WSE", category: "Гаджеты", brand: "asus", marketplaces: ["ozon", "kaspi"], current_price: 32990, min_competitor_price: 29990, max_competitor_price: 35990, competitor_count: 6, last_checked_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
+  { id: "6", name: "Телевизор Samsung 55 QLED", sku: "SAM-55Q", category: "Электроника", brand: "samsung", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 89990, min_competitor_price: 84990, max_competitor_price: 94990, competitor_count: 4, last_checked_at: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString() },
+  { id: "7", name: "Ноутбук Lenovo IdeaPad", sku: "LNV-IDP", category: "Электроника", brand: "asus", marketplaces: ["ozon"], current_price: 54990, min_competitor_price: 52990, max_competitor_price: 59990, competitor_count: 5, last_checked_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString() },
+  { id: "8", name: "Микроволновка LG NeoChef", sku: "LG-NC", category: "Бытовая техника", brand: "lg", marketplaces: ["ozon", "wildberries"], current_price: 12990, min_competitor_price: 11990, max_competitor_price: 13990, competitor_count: 3, last_checked_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString() },
+  { id: "9", name: "Блендер Braun Multiquick", sku: "BRN-MQ", category: "Бытовая техника", brand: "bosch", marketplaces: ["wildberries"], current_price: 8990, min_competitor_price: 8490, max_competitor_price: 9990, competitor_count: 2, last_checked_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString() },
+  { id: "10", name: "Робот-пылесос Xiaomi S10", sku: "XMI-S10", category: "Бытовая техника", brand: "xiaomi", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 34990, min_competitor_price: 32990, max_competitor_price: 37990, competitor_count: 4, last_checked_at: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString() },
+  { id: "11", name: "Клавиатура Logitech MX Keys", sku: "LOG-MXK", category: "Аксессуары", brand: "asus", marketplaces: ["ozon"], current_price: 12990, min_competitor_price: 11990, max_competitor_price: 13990, competitor_count: 3, last_checked_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
+  { id: "12", name: "Монитор Dell 27 S2722QC", sku: "DEL-27S", category: "Электроника", brand: "philips", marketplaces: ["ozon", "kaspi"], current_price: 32990, min_competitor_price: 30990, max_competitor_price: 35990, competitor_count: 2, last_checked_at: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString() },
+  { id: "13", name: "Колонка JBL Charge 5", sku: "JBL-CH5", category: "Электроника", brand: "sony", marketplaces: ["ozon", "wildberries"], current_price: 14990, min_competitor_price: 13990, max_competitor_price: 16990, competitor_count: 5, last_checked_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+  { id: "14", name: "Планшет Samsung Tab S9", sku: "SAM-TS9", category: "Гаджеты", brand: "samsung", marketplaces: ["ozon", "wildberries"], current_price: 49990, min_competitor_price: 46990, max_competitor_price: 54990, competitor_count: 4, last_checked_at: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString() },
+  { id: "15", name: "Фитнес-браслет Xiaomi Band 8", sku: "XMI-B8", category: "Гаджеты", brand: "xiaomi", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 3990, min_competitor_price: 3690, max_competitor_price: 4490, competitor_count: 6, last_checked_at: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() },
 ];
-
-const MOCK_CATEGORIES = ["Электроника", "Бытовая техника", "Гаджеты", "Аксессуары"];
-
-const PAGE_SIZES = [20, 50, 100] as const;
 
 function SortIcon({ sortKey, currentKey, dir }: { sortKey: SortKey; currentKey: SortKey | null; dir: SortDir }) {
   if (currentKey !== sortKey) {
@@ -104,33 +121,105 @@ export function ProductsPage() {
   const [sortKey, setSortKey] = useState<SortKey | null>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [isLoading] = useState(false);
+  const [filtersSheetOpen, setFiltersSheetOpen] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [priceRange, setPriceRange] = useState({
+    min: 0,
+    max: 200000,
+    currentMin: 0,
+    currentMax: 200000,
+  });
 
   const search = useDebounce(searchRaw, 300);
 
-  const handleSort = useCallback((key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortDir("asc");
+  const filterConfigs = MOCK_FILTERS_BY_CATEGORY[category] ?? MOCK_FILTERS_BY_CATEGORY.all;
+
+  const handleFilterChange = useCallback((filterId: string, values: string[]) => {
+    setActiveFilters((prev) => {
+      const next = { ...prev };
+      if (values.length === 0) {
+        delete next[filterId];
+      } else {
+        next[filterId] = values;
+      }
+      return next;
+    });
+    setPage(1);
+  }, []);
+
+  const handlePriceChange = useCallback((min: number, max: number) => {
+    setPriceRange((prev) => ({ ...prev, currentMin: min, currentMax: max }));
+    setPage(1);
+  }, []);
+
+  const handleResetFilters = useCallback(() => {
+    setActiveFilters({});
+    setPriceRange((prev) => ({
+      ...prev,
+      currentMin: prev.min,
+      currentMax: prev.max,
+    }));
+    setPage(1);
+  }, []);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    Object.values(activeFilters).forEach((arr) => {
+      count += arr.length;
+    });
+    if (priceRange.currentMin !== priceRange.min || priceRange.currentMax !== priceRange.max) {
+      count += 1;
     }
-    setSortKey(key);
-  }, [sortKey]);
+    return count;
+  }, [activeFilters, priceRange]);
+
+  const handleSort = useCallback((key: SortKey) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortDir("asc");
+      }
+      return key;
+    });
+  }, []);
+
+  const categoryProductFilter = category && category !== "all" ? CATEGORY_TO_PRODUCT[category] ?? "" : "";
 
   const filteredProducts = useMemo(() => {
     let list = [...MOCK_PRODUCTS];
+
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(
         (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.sku?.toLowerCase().includes(q) ?? false)
+          p.name.toLowerCase().includes(q) || (p.sku?.toLowerCase().includes(q) ?? false)
       );
     }
-    if (category && category !== "all") {
-      list = list.filter((p) => p.category === category);
+
+    if (categoryProductFilter) {
+      list = list.filter((p) => p.category === categoryProductFilter);
     }
+
+    // TODO: send activeFilters as query params to API
+    Object.entries(activeFilters).forEach(([filterId, values]) => {
+      if (values.length === 0) return;
+      if (filterId === "brand") {
+        list = list.filter((p) => values.includes(p.brand));
+      } else if (filterId === "marketplace") {
+        list = list.filter((p) => values.some((v) => p.marketplaces.includes(v)));
+      }
+    });
+
+    if (priceRange.currentMin > priceRange.min || priceRange.currentMax < priceRange.max) {
+      list = list.filter(
+        (p) =>
+          p.current_price >= priceRange.currentMin && p.current_price <= priceRange.currentMax
+      );
+    }
+
     return list;
-  }, [search, category]);
+  }, [search, categoryProductFilter, activeFilters, priceRange]);
 
   const sortedProducts = useMemo(() => {
     const list = [...filteredProducts];
@@ -148,9 +237,7 @@ export function ProductsPage() {
         return sortDir === "asc" ? cmp : -cmp;
       }
       if (typeof aVal === "string" && typeof bVal === "string") {
-        return sortDir === "asc"
-          ? aVal.localeCompare(bVal)
-          : bVal.localeCompare(aVal);
+        return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       }
       const cmp = (aVal as number) - (bVal as number);
       return sortDir === "asc" ? cmp : -cmp;
@@ -164,12 +251,16 @@ export function ProductsPage() {
   const start = (clampedPage - 1) * pageSize;
   const paginatedProducts = sortedProducts.slice(start, start + pageSize);
 
-  const hasFilters = !!search || (!!category && category !== "all");
+  const hasFilters =
+    !!search ||
+    (!!category && category !== "all") ||
+    activeFilterCount > 0;
   const isEmpty = filteredProducts.length === 0;
 
   const clearFilters = () => {
     setSearchRaw("");
     setCategory("all");
+    handleResetFilters();
     setPage(1);
   };
 
@@ -181,8 +272,20 @@ export function ProductsPage() {
     // TODO: API — open add dialog
   };
 
+  const filtersPanelContent = (
+    <FiltersPanel
+      category={category}
+      filters={filterConfigs}
+      activeFilters={activeFilters}
+      priceRange={priceRange}
+      onFilterChange={handleFilterChange}
+      onPriceChange={handlePriceChange}
+      onReset={handleResetFilters}
+    />
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="flex h-full flex-col">
       <PageHeader
         title="nav.products"
         actions={
@@ -202,7 +305,24 @@ export function ProductsPage() {
       {/* Toolbar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-2 lg:w-auto">
-          <div className="relative w-full lg:w-72">
+          {/* Filters toggle — tablet/mobile */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex lg:hidden"
+            onClick={() => setFiltersSheetOpen(true)}
+            aria-label={t("filters.button")}
+          >
+            <SlidersHorizontal className="mr-2 size-4" />
+            {t("filters.button")}
+            {activeFilterCount > 0 && (
+              <Badge variant="secondary" className="ml-2 size-5 px-1 text-xs">
+                {activeFilterCount}
+              </Badge>
+            )}
+          </Button>
+
+          <div className="relative flex-1 lg:max-w-72">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground dark:text-muted-foreground" />
             <Input
               placeholder={t("products.search")}
@@ -226,172 +346,193 @@ export function ProductsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("products.allCategories")}</SelectItem>
-              {MOCK_CATEGORIES.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
+              <SelectItem value="electronics">{t("products.categoryElectronics")}</SelectItem>
+              <SelectItem value="appliances">{t("products.categoryAppliances")}</SelectItem>
+              <SelectItem value="gadgets">{t("products.categoryGadgets")}</SelectItem>
+              <SelectItem value="accessories">{t("products.categoryAccessories")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-lg border border-border dark:border-border">
-        {isLoading ? (
-          <div className="p-4">
-            <div className="space-y-2">
-              {Array.from({ length: 7 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+      {/* Main layout: filters + table */}
+      <div className="mt-4 flex min-h-0 flex-1 gap-4">
+        {/* Desktop: filters panel */}
+        <div className="hidden lg:block lg:h-[calc(100vh-16rem)] lg:shrink-0">
+          {filtersPanelContent}
+        </div>
+
+        {/* Right content: table */}
+        <div className="min-w-0 flex-1 space-y-4">
+          <div className="overflow-hidden rounded-lg border border-border dark:border-border">
+            {isLoading ? (
+              <div className="p-4">
+                <div className="space-y-2">
+                  {Array.from({ length: 7 }).map((_, i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
+              </div>
+            ) : isEmpty && !hasFilters ? (
+              <EmptyState
+                title="products.noProducts"
+                description="products.noProductsHint"
+                icon={Package}
+                action={{ label: "products.addProduct", onClick: handleAddProduct }}
+              />
+            ) : isEmpty && hasFilters ? (
+              <div className="flex flex-col items-center justify-center gap-4 px-4 py-12">
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                  {t("products.noResults")}
+                </p>
+                <Button variant="outline" onClick={clearFilters}>
+                  {t("products.clearFilters")}
+                </Button>
+              </div>
+            ) : (
+              <div className="max-h-[calc(100vh-20rem)] overflow-x-auto overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead
+                        className="sticky top-0 z-10 cursor-pointer bg-background hover:bg-muted/50 dark:bg-background dark:hover:bg-muted/50"
+                        onClick={() => handleSort("name")}
+                      >
+                        <div className="flex items-center gap-1">
+                          {t("products.name")}
+                          <SortIcon sortKey="name" currentKey={sortKey} dir={sortDir} />
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="sticky top-0 z-10 cursor-pointer bg-background hover:bg-muted/50 dark:bg-background dark:hover:bg-muted/50"
+                        onClick={() => handleSort("current_price")}
+                      >
+                        <div className="flex items-center gap-1">
+                          {t("products.myPrice")}
+                          <SortIcon sortKey="current_price" currentKey={sortKey} dir={sortDir} />
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 lg:table-cell dark:bg-background dark:hover:bg-muted/50"
+                        onClick={() => handleSort("min_competitor_price")}
+                      >
+                        <div className="flex items-center gap-1">
+                          {t("products.minCompetitorPrice")}
+                          <SortIcon sortKey="min_competitor_price" currentKey={sortKey} dir={sortDir} />
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 lg:table-cell dark:bg-background dark:hover:bg-muted/50"
+                        onClick={() => handleSort("max_competitor_price")}
+                      >
+                        <div className="flex items-center gap-1">
+                          {t("products.maxPrice")}
+                          <SortIcon sortKey="max_competitor_price" currentKey={sortKey} dir={sortDir} />
+                        </div>
+                      </TableHead>
+                      <TableHead
+                        className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 lg:table-cell dark:bg-background dark:hover:bg-muted/50"
+                        onClick={() => handleSort("competitor_count")}
+                      >
+                        <div className="flex items-center gap-1">
+                          {t("products.competitorCount")}
+                          <SortIcon sortKey="competitor_count" currentKey={sortKey} dir={sortDir} />
+                        </div>
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-10 bg-background dark:bg-background">
+                        {t("products.position")}
+                      </TableHead>
+                      <TableHead
+                        className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 sm:table-cell dark:bg-background dark:hover:bg-muted/50"
+                        onClick={() => handleSort("last_checked_at")}
+                      >
+                        <div className="flex items-center gap-1">
+                          {t("products.lastParsing")}
+                          <SortIcon sortKey="last_checked_at" currentKey={sortKey} dir={sortDir} />
+                        </div>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedProducts.map((p) => (
+                      <ProductTableRow
+                        key={p.id}
+                        product={p}
+                        locale={locale}
+                        onRowClick={() => navigate(`/products/${p.id}`)}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {!isEmpty && !isLoading && total > 0 && (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                {t("products.paginationShown", {
+                  from: start + 1,
+                  to: Math.min(start + pageSize, total),
+                  total,
+                })}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={clampedPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  {t("common.back")}
+                </Button>
+                <span className="px-2 text-sm">
+                  {clampedPage} / {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={clampedPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  {t("common.next")}
+                </Button>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => {
+                    setPageSize(Number(v));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZES.map((s) => (
+                      <SelectItem key={s} value={String(s)}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
-        ) : isEmpty && !hasFilters ? (
-          <EmptyState
-            title="products.noProducts"
-            description="products.noProductsHint"
-            icon={Package}
-            action={{ label: "products.addProduct", onClick: handleAddProduct }}
-          />
-        ) : isEmpty && hasFilters ? (
-          <div className="flex flex-col items-center justify-center gap-4 px-4 py-12">
-            <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-              {t("products.noResults")}
-            </p>
-            <Button variant="outline" onClick={clearFilters}>
-              {t("products.clearFilters")}
-            </Button>
-          </div>
-        ) : (
-          <div className="max-h-[calc(100vh-20rem)] overflow-x-auto overflow-y-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead
-                    className="sticky top-0 z-10 cursor-pointer bg-background hover:bg-muted/50 dark:bg-background dark:hover:bg-muted/50"
-                    onClick={() => handleSort("name")}
-                  >
-                    <div className="flex items-center gap-1">
-                      {t("products.name")}
-                      <SortIcon sortKey="name" currentKey={sortKey} dir={sortDir} />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 z-10 cursor-pointer bg-background hover:bg-muted/50 dark:bg-background dark:hover:bg-muted/50"
-                    onClick={() => handleSort("current_price")}
-                  >
-                    <div className="flex items-center gap-1">
-                      {t("products.myPrice")}
-                      <SortIcon sortKey="current_price" currentKey={sortKey} dir={sortDir} />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 lg:table-cell dark:bg-background dark:hover:bg-muted/50"
-                    onClick={() => handleSort("min_competitor_price")}
-                  >
-                    <div className="flex items-center gap-1">
-                      {t("products.minCompetitorPrice")}
-                      <SortIcon sortKey="min_competitor_price" currentKey={sortKey} dir={sortDir} />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 lg:table-cell dark:bg-background dark:hover:bg-muted/50"
-                    onClick={() => handleSort("max_competitor_price")}
-                  >
-                    <div className="flex items-center gap-1">
-                      {t("products.maxPrice")}
-                      <SortIcon sortKey="max_competitor_price" currentKey={sortKey} dir={sortDir} />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 lg:table-cell dark:bg-background dark:hover:bg-muted/50"
-                    onClick={() => handleSort("competitor_count")}
-                  >
-                    <div className="flex items-center gap-1">
-                      {t("products.competitorCount")}
-                      <SortIcon sortKey="competitor_count" currentKey={sortKey} dir={sortDir} />
-                    </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-10 bg-background dark:bg-background">
-                    {t("products.position")}
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 z-10 hidden cursor-pointer bg-background hover:bg-muted/50 sm:table-cell dark:bg-background dark:hover:bg-muted/50"
-                    onClick={() => handleSort("last_checked_at")}
-                  >
-                    <div className="flex items-center gap-1">
-                      {t("products.lastParsing")}
-                      <SortIcon sortKey="last_checked_at" currentKey={sortKey} dir={sortDir} />
-                    </div>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedProducts.map((p) => (
-                  <ProductTableRow
-                    key={p.id}
-                    product={p}
-                    locale={locale}
-                    onRowClick={() => navigate(`/products/${p.id}`)}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Pagination */}
-      {!isEmpty && !isLoading && total > 0 && (
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-            {t("products.paginationShown", {
-              from: start + 1,
-              to: Math.min(start + pageSize, total),
-              total,
-            })}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={clampedPage <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              {t("common.back")}
-            </Button>
-            <span className="px-2 text-sm">
-              {clampedPage} / {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={clampedPage >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              {t("common.next")}
-            </Button>
-            <Select
-              value={String(pageSize)}
-              onValueChange={(v) => {
-                setPageSize(Number(v));
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-9 w-20">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZES.map((s) => (
-                  <SelectItem key={s} value={String(s)}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {/* Filters Sheet — tablet/mobile */}
+      <Sheet open={filtersSheetOpen} onOpenChange={setFiltersSheetOpen}>
+        <SheetContent side="left" className="w-64 p-0">
+          <SheetHeader className="sr-only">
+            <SheetTitle>{t("filters.title")}</SheetTitle>
+          </SheetHeader>
+          <div className="h-full overflow-hidden">
+            {filtersPanelContent}
           </div>
-        </div>
-      )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -409,9 +550,7 @@ function ProductTableRow({
   const minPrice = product.min_competitor_price;
   const myPrice = product.current_price;
   const diffPercent =
-    minPrice != null && minPrice > 0
-      ? ((myPrice - minPrice) / minPrice) * 100
-      : null;
+    minPrice != null && minPrice > 0 ? ((myPrice - minPrice) / minPrice) * 100 : null;
   const isOverpriced = diffPercent != null && diffPercent > 0;
   const isCheaper = diffPercent != null && diffPercent < 0;
 
@@ -432,9 +571,7 @@ function ProductTableRow({
         {formatPrice(product.current_price, "RUB", locale)}
       </TableCell>
       <TableCell className="hidden lg:table-cell">
-        {minPrice != null
-          ? formatPrice(minPrice, "RUB", locale)
-          : t("common.dash")}
+        {minPrice != null ? formatPrice(minPrice, "RUB", locale) : t("common.dash")}
       </TableCell>
       <TableCell className="hidden lg:table-cell">
         {product.max_competitor_price != null
@@ -457,12 +594,8 @@ function ProductTableRow({
             )}
           >
             {isOverpriced
-              ? t("products.overpricedBy", {
-                  percent: diffPercent.toFixed(1),
-                })
-              : t("products.cheaperBy", {
-                  percent: Math.abs(diffPercent).toFixed(1),
-                })}
+              ? t("products.overpricedBy", { percent: diffPercent.toFixed(1) })
+              : t("products.cheaperBy", { percent: Math.abs(diffPercent).toFixed(1) })}
           </Badge>
         ) : (
           t("common.dash")

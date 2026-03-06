@@ -6,8 +6,10 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+
 from app.database import async_session_maker
-from app.models import Alert, AlertEvent, CompetitorProduct, Product
+from app.models import Alert, AlertEvent, Competitor, CompetitorProduct, Product
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -53,17 +55,20 @@ def check_alerts(
     async def _do():
         async with async_session_maker() as session:
             cp_result = await session.execute(
-                select(CompetitorProduct, Product)
+                select(CompetitorProduct, Product, Competitor)
                 .join(Product, CompetitorProduct.product_id == Product.id)
+                .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
                 .where(CompetitorProduct.id == UUID(competitor_product_id))
             )
             row = cp_result.one_or_none()
             if not row:
                 return
-            cp, product = row
+            cp, product, competitor = row
 
             alerts_result = await session.execute(
-                select(Alert).where(
+                select(Alert)
+                .options(joinedload(Alert.user))
+                .where(
                     Alert.is_active.is_(True),
                     (Alert.product_id.is_(None)) | (Alert.product_id == product.id),
                 )
@@ -123,7 +128,17 @@ def check_alerts(
                     )
                     session.add(event)
                     await session.flush()
-                    _send_notification(alert, message, sent_via)
+                    await _send_notification(
+                        alert=alert,
+                        message=message,
+                        channel=sent_via,
+                        product_name=product.name,
+                        competitor_name=competitor.name,
+                        marketplace=competitor.marketplace or "",
+                        old_price=float(old_price_dec) if old_price_dec else 0,
+                        new_price=float(new_price_dec) if new_price_dec else 0,
+                        promo_label=promo_label or "",
+                    )
                     logger.info("Alert triggered alert_id=%s: %s", alert.id, message)
 
             await session.commit()
@@ -131,7 +146,17 @@ def check_alerts(
     _run_async(_do())
 
 
-def _send_notification(alert: Alert, message: str, channel: str) -> None:
+async def _send_notification(
+    alert: Alert,
+    message: str,
+    channel: str,
+    product_name: str,
+    competitor_name: str,
+    marketplace: str,
+    old_price: float,
+    new_price: float,
+    promo_label: str,
+) -> None:
     """Send notification via email and/or Telegram."""
     try:
         if channel in ("email", "both"):
@@ -139,8 +164,41 @@ def _send_notification(alert: Alert, message: str, channel: str) -> None:
 
             send_alert_email_to_user(alert.user_id, message)
         if channel in ("telegram", "both"):
-            from app.notifications.telegram_bot import send_alert_telegram
+            user = alert.user
+            chat_id = user.telegram_chat_id if user else None
+            if not chat_id:
+                logger.warning("Alert user has no telegram_chat_id, skipping Telegram")
+                return
+            from app.notifications.telegram_bot import (
+                send_out_of_stock_alert,
+                send_price_alert,
+                send_promo_alert,
+            )
 
-            send_alert_telegram(alert.user_id, message)
+            if alert.type in ("price_drop", "price_increase"):
+                await send_price_alert(
+                    chat_id=chat_id,
+                    product_name=product_name,
+                    competitor_name=competitor_name,
+                    old_price=old_price,
+                    new_price=new_price,
+                    currency="RUB",
+                    marketplace=marketplace,
+                )
+            elif alert.type == "out_of_stock":
+                await send_out_of_stock_alert(
+                    chat_id=chat_id,
+                    product_name=product_name,
+                    competitor_name=competitor_name,
+                    marketplace=marketplace,
+                )
+            elif alert.type == "new_promo":
+                await send_promo_alert(
+                    chat_id=chat_id,
+                    product_name=product_name,
+                    competitor_name=competitor_name,
+                    promo_label=promo_label,
+                    marketplace=marketplace,
+                )
     except Exception as e:
         logger.warning("Notification send failed: %s", e)

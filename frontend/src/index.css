@@ -47,9 +47,9 @@
   --destructive: 0 72% 51%;
   --destructive-foreground: hsl(0 0% 98%);
 
-  /* Sidebar */
-  --sidebar: hsl(220 25% 12%);
-  --sidebar-foreground: hsl(0 0% 95%);
+  /* Sidebar — light mode: matches background */
+  --sidebar: hsl(40 20% 98%);
+  --sidebar-foreground: hsl(220 15% 12%);
 
   /* Marketplace badge colors (task spec: Ozon blue, WB purple, Kaspi yellow, Custom slate) */
   --color-marketplace-ozon: hsl(217 91% 60%);

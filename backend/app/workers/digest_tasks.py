@@ -120,7 +120,7 @@ def generate_weekly_digest(user_id: str) -> None:
             session.add(digest)
             await session.flush()
 
-            _send_digest(user, content_md, "weekly")
+            await _send_digest(user, content_md, "weekly")
             digest.sent_at = now
             await session.commit()
             logger.info("Weekly digest generated for user_id=%s", user_id)
@@ -158,7 +158,7 @@ def generate_daily_digest(user_id: str) -> None:
             session.add(digest)
             await session.flush()
 
-            _send_digest(user, content_md, "daily")
+            await _send_digest(user, content_md, "daily")
             digest.sent_at = now
             await session.commit()
             logger.info("Daily digest generated for user_id=%s", user_id)
@@ -194,15 +194,16 @@ def schedule_daily_digests() -> None:
     _run_async(_do())
 
 
-def _send_digest(user: "User", content_md: str, period: str) -> None:
+async def _send_digest(user: "User", content_md: str, period: str) -> None:
     """Send digest via email and/or Telegram based on user preferences."""
     try:
         from app.notifications.email_sender import send_digest_email_to_user
-        from app.notifications.telegram_bot import send_digest_telegram
+        from app.notifications.telegram_bot import send_digest
 
         subject = f"Imperecta: {period.capitalize()} digest"
         send_digest_email_to_user(user.id, subject, content_md)
         if user.telegram_chat_id:
-            send_digest_telegram(user.id, content_md)
+            digest_summary = content_md[:3000] if len(content_md) > 3000 else content_md
+            await send_digest(user.telegram_chat_id, digest_summary)
     except Exception as e:
         logger.warning("Digest send failed: %s", e)

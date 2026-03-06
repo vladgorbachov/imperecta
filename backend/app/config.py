@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     resend_api_key: str | None = None
     email_from: str = "noreply@imperecta.com"
     telegram_bot_token: str | None = None
+    app_url: str = "https://imperecta-production.up.railway.app"
 
     proxy_list: str = ""
+    proxy_sticky_duration: int = 10  # minutes for sticky session
+    proxy_country_routing: bool = True  # use geo-targeted proxies
     sentry_dsn: str = ""
     allowed_origins: str = "http://localhost:5173"
     app_env: str = "development"
@@ -37,8 +40,15 @@ class Settings(BaseSettings):
         return v
 
     @property
-    def proxy_list_parsed(self) -> list[str]:
-        """Return proxy list as list of strings."""
+    def proxy_url(self) -> str | None:
+        """Primary proxy URL from PROXY_LIST."""
+        if not self.proxy_list:
+            return None
+        return self.proxy_list.split(",")[0].strip()
+
+    @property
+    def proxy_urls(self) -> list[str]:
+        """All proxy URLs from PROXY_LIST."""
         if not self.proxy_list:
             return []
         return [p.strip() for p in self.proxy_list.split(",") if p.strip()]

@@ -44,8 +44,10 @@ class User(Base):
         DateTime(timezone=True),
         nullable=True,
     )
-    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    telegram_link_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, unique=True
+    )
+    telegram_link_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
     language: Mapped[str] = mapped_column(String(5), default="en", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
