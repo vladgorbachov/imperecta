@@ -8,10 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CompetitorProduct, PriceSnapshot, Product
-from app.scrapers.base import ScrapedData
-from app.scrapers.generic_web import GenericWebScraper
-from app.scrapers.ozon import OzonScraper
-from app.scrapers.wildberries import WildberriesScraper
+from app.scrapers import ScrapeResult, ScraperFactory
 
 
 def _detect_scraper_type(url: str, scraper_type_field: str | None) -> str:
@@ -28,20 +25,19 @@ def _detect_scraper_type(url: str, scraper_type_field: str | None) -> str:
 
 def _get_scraper(scraper_type: str, css_selector_price: str | None):
     """Get scraper instance by type."""
-    if scraper_type == "ozon":
-        return OzonScraper()
-    if scraper_type == "wildberries":
-        return WildberriesScraper()
-    return GenericWebScraper(css_selector_price=css_selector_price)
+    kwargs = {}
+    if scraper_type == "generic":
+        kwargs["css_selector_price"] = css_selector_price
+    return ScraperFactory.create(scraper_type, **kwargs)
 
 
 async def scrape_competitor_product(
     competitor_product_id: UUID,
     db: AsyncSession,
-) -> ScrapedData:
+) -> ScrapeResult:
     """
     Scrape competitor product, save PriceSnapshot, update CompetitorProduct.
-    Returns ScrapedData.
+    Returns ScrapeResult.
     """
     result = await db.execute(
         select(CompetitorProduct, Product)

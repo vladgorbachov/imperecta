@@ -58,7 +58,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "flex flex-col border-r border-border bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-in-out dark:border-border dark:bg-sidebar dark:text-sidebar-foreground",
+        "flex flex-col border-r border-border bg-background text-foreground transition-[width] duration-300 ease-in-out dark:border-border dark:bg-background dark:text-foreground",
         isMobile ? "w-full" : collapsed ? "w-16" : "w-60"
       )}
     >
@@ -95,7 +95,7 @@ export function Sidebar({
           const linkClassName = cn(
             "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150",
             isActive
-              ? "border-l-4 border-primary bg-primary/10 text-primary dark:border-primary dark:bg-primary/10 dark:text-primary"
+              ? "border-l-4 border-primary bg-accent/10 text-primary dark:border-primary dark:bg-accent/10 dark:text-primary"
               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground",
             !showLabels && "justify-center px-2"
           );

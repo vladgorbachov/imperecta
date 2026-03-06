@@ -4,6 +4,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -29,10 +30,30 @@ async def _ensure_tables() -> None:
         logger.warning("create_all failed (may run later): %s", e)
 
 
+async def _setup_telegram_webhook() -> None:
+    """Set Telegram webhook to receive bot messages."""
+    token = settings.telegram_bot_token
+    if not token:
+        return
+    webhook_url = f"{settings.app_url}/api/telegram/webhook"
+    api_url = f"https://api.telegram.org/bot{token}/setWebhook"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(api_url, json={"url": webhook_url})
+            data = resp.json()
+            if data.get("ok"):
+                logger.info("Telegram webhook set: %s", webhook_url)
+            else:
+                logger.error("Telegram webhook error: %s", data)
+    except Exception as e:
+        logger.error("Failed to set Telegram webhook: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start app immediately; create DB tables in background for Railway healthcheck."""
     asyncio.create_task(_ensure_tables())
+    asyncio.create_task(_setup_telegram_webhook())
     yield
 
 

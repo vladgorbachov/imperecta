@@ -1,14 +1,29 @@
-"""Scraping engine for marketplace price collection."""
+"""
+Imperecta scraping engine.
 
-from app.scrapers.base import AbstractScraper, ScrapedData
-from app.scrapers.generic_web import GenericWebScraper
-from app.scrapers.ozon import OzonScraper
-from app.scrapers.wildberries import WildberriesScraper
+Usage:
+    from app.scrapers import ScraperFactory, ScrapeResult
+    scraper = ScraperFactory.create("ozon")
+    result = await scraper.scrape(url)
+"""
+
+from app.scrapers.engine import (
+    BaseScraper,
+    GenericWebScraper,
+    OzonScraper,
+    ScrapeResult,
+    ScraperFactory,
+    WildberriesScraper,
+)
+from app.scrapers.proxy_manager import ProxyManager, proxy_manager
 
 __all__ = [
-    "AbstractScraper",
-    "ScrapedData",
-    "OzonScraper",
-    "WildberriesScraper",
+    "BaseScraper",
     "GenericWebScraper",
+    "OzonScraper",
+    "ScrapeResult",
+    "ScraperFactory",
+    "WildberriesScraper",
+    "ProxyManager",
+    "proxy_manager",
 ]

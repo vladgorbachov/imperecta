@@ -1,225 +1,147 @@
-"""Telegram bot for alerts and digest."""
+"""Telegram bot for alerts and digest via HTTP API (webhook mode)."""
 
-import asyncio
 import logging
-import re
-from uuid import UUID
 
-from sqlalchemy import select
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+import httpx
 
 from app.config import Settings
-from app.database import async_session_maker
-from app.models import CompetitorProduct, Digest, Product, User
 
 logger = logging.getLogger(__name__)
 settings = Settings()
-BOT_URL = "https://t.me/ImperectaBot"
-MAX_MESSAGE_LENGTH = 4096
-RETRY_COUNT = 2
 
 
-def _md_to_telegram_html(text: str) -> str:
-    """Convert markdown to Telegram HTML (bold, italic)."""
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-    text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
-    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
-    text = re.sub(r"_(.+?)_", r"<i>\1</i>", text)
-    text = re.sub(r"^### (.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
-    text = re.sub(r"^## (.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
-    text = re.sub(r"^# (.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
-    return text
+def _api_url() -> str:
+    """Telegram API base URL."""
+    if not settings.telegram_bot_token:
+        return ""
+    return f"https://api.telegram.org/bot{settings.telegram_bot_token}"
 
 
-async def _start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command."""
-    await update.message.reply_text(
-        "Привет! Я бот Imperecta — мониторинг цен конкурентов.\n\n"
-        "Введите код привязки из личного кабинета Imperecta."
+async def send_message(
+    chat_id: int,
+    text: str,
+    parse_mode: str = "HTML",
+) -> bool:
+    """Send a message to a Telegram user."""
+    if not settings.telegram_bot_token:
+        logger.warning("TELEGRAM_BOT_TOKEN not set, skipping message")
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{_api_url()}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": parse_mode,
+                },
+            )
+            if response.status_code == 200:
+                logger.info("Telegram message sent to chat_id=%s", chat_id)
+                return True
+            logger.error(
+                "Telegram API error: %s %s",
+                response.status_code,
+                response.text,
+            )
+            return False
+    except Exception as e:
+        logger.error("Failed to send Telegram message: %s", e)
+        return False
+
+
+async def send_price_alert(
+    chat_id: int,
+    product_name: str,
+    competitor_name: str,
+    old_price: float,
+    new_price: float,
+    currency: str = "RUB",
+    marketplace: str = "",
+) -> bool:
+    """Send a formatted price change alert."""
+    change = new_price - old_price
+    percent = (change / old_price * 100) if old_price else 0
+    direction = "📈" if change > 0 else "📉"
+    sign = "+" if change > 0 else ""
+
+    text = (
+        f"{direction} <b>Изменение цены</b>\n\n"
+        f"<b>Товар:</b> {product_name}\n"
+        f"<b>Конкурент:</b> {competitor_name}"
+    )
+    if marketplace:
+        text += f" ({marketplace})"
+    text += (
+        f"\n<b>Было:</b> {old_price:.0f} {currency}\n"
+        f"<b>Стало:</b> {new_price:.0f} {currency}\n"
+        f"<b>Изменение:</b> {sign}{change:.0f} {currency} ({sign}{percent:.1f}%)"
     )
 
-
-async def _text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle text message: check telegram_link_code and link account."""
-    text = (update.message.text or "").strip()
-    if not text:
-        return
-
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    if not chat_id:
-        return
-
-    async with async_session_maker() as session:
-        result = await session.execute(select(User).where(User.telegram_link_code == text))
-        user = result.scalar_one_or_none()
-
-        if user:
-            user.telegram_chat_id = chat_id
-            user.telegram_link_code = None
-            await session.commit()
-            await update.message.reply_text("Аккаунт привязан!")
-        else:
-            await update.message.reply_text("Код не найден. Проверьте код в личном кабинете.")
+    return await send_message(chat_id, text)
 
 
-async def _status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /status: show tracked products count and last price."""
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    if not chat_id:
-        return
+async def send_digest(chat_id: int, digest_text: str) -> bool:
+    """Send a digest message (may be long, split if needed)."""
+    MAX_LENGTH = 4000  # Telegram limit is 4096
 
-    async with async_session_maker() as session:
-        result = await session.execute(select(User).where(User.telegram_chat_id == chat_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            await update.message.reply_text("Сначала привяжите аккаунт. Введите код из личного кабинета.")
-            return
+    if len(digest_text) <= MAX_LENGTH:
+        return await send_message(chat_id, digest_text)
 
-        count_result = await session.execute(
-            select(CompetitorProduct)
-            .join(Product, CompetitorProduct.product_id == Product.id)
-            .where(Product.user_id == user.id, CompetitorProduct.is_active.is_(True))
-        )
-        cps = count_result.scalars().all()
-        total = len(cps)
-
-        last_price_msg = ""
-        if cps:
-            cp = cps[0]
-            if cp.last_price is not None:
-                last_price_msg = f"\nПоследняя цена: {cp.last_price} ₽"
-
-        await update.message.reply_text(
-            f"Отслеживаемых товаров: {total}{last_price_msg}"
-        )
-
-
-async def _digest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /digest: send latest digest."""
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    if not chat_id:
-        return
-
-    async with async_session_maker() as session:
-        result = await session.execute(select(User).where(User.telegram_chat_id == chat_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            await update.message.reply_text("Сначала привяжите аккаунт.")
-            return
-
-        digest_result = await session.execute(
-            select(Digest)
-            .where(Digest.user_id == user.id)
-            .order_by(Digest.created_at.desc())
-            .limit(1)
-        )
-        digest = digest_result.scalar_one_or_none()
-        if not digest:
-            await update.message.reply_text("Дайджестов пока нет.")
-            return
-
-        await send_telegram_digest(chat_id, digest.content_md)
-
-
-async def send_telegram_alert(chat_id: int, message: str) -> None:
-    """Send formatted alert message (HTML). Retry 2 times on error."""
-    if not settings.telegram_bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN not set")
-        return
-
-    html = f"<b>Imperecta</b>\n\n{message.replace('<', '&lt;').replace('>', '&gt;')}"
-    last_error = None
-    for attempt in range(RETRY_COUNT + 1):
-        try:
-            from telegram import Bot
-
-            bot = Bot(token=settings.telegram_bot_token)
-            await bot.send_message(
-                chat_id=chat_id,
-                text=html,
-                parse_mode="HTML",
-            )
-            return
-        except Exception as e:
-            last_error = e
-            if attempt < RETRY_COUNT:
-                await asyncio.sleep(1)
-    logger.warning("Telegram alert send failed after retries: %s", last_error)
-
-
-async def send_telegram_digest(chat_id: int, digest_md: str) -> None:
-    """Convert markdown to Telegram HTML, split if > 4096 chars."""
-    if not settings.telegram_bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN not set")
-        return
-
-    html = _md_to_telegram_html(digest_md)
-    parts = []
-    while len(html) > MAX_MESSAGE_LENGTH:
-        parts.append(html[:MAX_MESSAGE_LENGTH])
-        html = html[MAX_MESSAGE_LENGTH:]
-    if html:
-        parts.append(html)
-
-    from telegram import Bot
-
-    bot = Bot(token=settings.telegram_bot_token)
-    for part in parts:
-        try:
-            await bot.send_message(chat_id=chat_id, text=part, parse_mode="HTML")
-        except Exception as e:
-            logger.warning("Telegram digest send failed: %s", e)
+    # Split long digest into chunks
+    chunks = []
+    while digest_text:
+        if len(digest_text) <= MAX_LENGTH:
+            chunks.append(digest_text)
             break
+        split_at = digest_text.rfind("\n", 0, MAX_LENGTH)
+        if split_at == -1:
+            split_at = MAX_LENGTH
+        chunks.append(digest_text[:split_at])
+        digest_text = digest_text[split_at:].lstrip()
+
+    success = True
+    for chunk in chunks:
+        if not await send_message(chat_id, chunk):
+            success = False
+    return success
 
 
-def send_alert_telegram(user_id: UUID, message: str) -> None:
-    """Sync wrapper: fetch chat_id and send alert. Used by Celery."""
-    import asyncio
+async def send_out_of_stock_alert(
+    chat_id: int,
+    product_name: str,
+    competitor_name: str,
+    marketplace: str = "",
+) -> bool:
+    """Send out-of-stock alert."""
+    text = (
+        f"⚠️ <b>Нет в наличии</b>\n\n"
+        f"<b>Товар:</b> {product_name}\n"
+        f"<b>Конкурент:</b> {competitor_name}"
+    )
+    if marketplace:
+        text += f" ({marketplace})"
+    text += "\n\nТовар пропал из наличия у конкурента."
 
-    async def _do():
-        async with async_session_maker() as session:
-            result = await session.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
-            if user and user.telegram_chat_id:
-                await send_telegram_alert(user.telegram_chat_id, message)
-
-    asyncio.run(_do())
-
-
-def send_digest_telegram(user_id: UUID, content: str) -> None:
-    """Sync wrapper for Celery."""
-    import asyncio
-
-    async def _do():
-        async with async_session_maker() as session:
-            result = await session.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
-            if user and user.telegram_chat_id:
-                await send_telegram_digest(user.telegram_chat_id, content)
-
-    asyncio.run(_do())
+    return await send_message(chat_id, text)
 
 
-def run_bot() -> None:
-    """Run Telegram bot (polling). Call from separate process."""
-    if not settings.telegram_bot_token:
-        raise ValueError("TELEGRAM_BOT_TOKEN required")
+async def send_promo_alert(
+    chat_id: int,
+    product_name: str,
+    competitor_name: str,
+    promo_label: str,
+    marketplace: str = "",
+) -> bool:
+    """Send new promotion alert."""
+    text = (
+        f"🏷️ <b>Новая акция</b>\n\n"
+        f"<b>Товар:</b> {product_name}\n"
+        f"<b>Конкурент:</b> {competitor_name}"
+    )
+    if marketplace:
+        text += f" ({marketplace})"
+    text += f"\n<b>Акция:</b> {promo_label}"
 
-    app = Application.builder().token(settings.telegram_bot_token).build()
-    app.add_handler(CommandHandler("start", _start_handler))
-    app.add_handler(CommandHandler("status", _status_handler))
-    app.add_handler(CommandHandler("digest", _digest_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _text_handler))
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-if __name__ == "__main__":
-    run_bot()
+    return await send_message(chat_id, text)
