@@ -9,6 +9,9 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 settings = Settings()
 
+# Public URL to open the bot in Telegram (used for account linking)
+BOT_URL = "https://t.me/ImperectaBot"
+
 
 def _api_url() -> str:
     """Telegram API base URL."""

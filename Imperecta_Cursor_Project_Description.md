@@ -208,10 +208,13 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Типы писем:** алерты о изменении цен, еженедельные дайджесты
 
 #### 9. Telegram Bot API
-- **Что:** Алерты и дайджесты в Telegram
+- **Что:** Алерты и дайджесты в Telegram, привязка аккаунта
 - **Бот:** @ImperectaBot
-- **Функции:** привязка аккаунта, получение алертов, команда /digest
-- **Вызывается из:** celery-worker (алерты), backend (привязка аккаунта)
+- **Функции:** webhook для входящих сообщений, генерация кода привязки, отвязка, статус
+- **API:** POST /api/telegram/webhook, /generate-link-code, /unlink; GET /api/telegram/status
+- **Webhook:** автоматически устанавливается при старте backend (lifespan)
+- **Модель User:** telegram_chat_id, telegram_link_code (миграция 003)
+- **Вызывается из:** celery-worker (алерты), backend (webhook, привязка)
 
 #### 10. GitHub
 - **Что:** Репозиторий + CI/CD
@@ -263,16 +266,16 @@ imperecta/
 │   │   ├── main.py              # FastAPI entrypoint, CORS, Sentry, lifespan (create_all)
 │   │   ├── config.py            # Pydantic Settings (env vars)
 │   │   ├── database.py          # SQLAlchemy async engine, session, Base
-│   │   ├── models/              # 9 моделей: User, Product, Competitor, CompetitorProduct,
+│   │   ├── models/              # 9 моделей: User, UserPlan, Product, Competitor, CompetitorProduct,
 │   │   │                         # PriceSnapshot, Alert, AlertEvent, Digest
 │   │   ├── schemas/             # Pydantic request/response schemas
-│   │   ├── api/                 # 7 роутеров: auth, products, competitors, analytics,
+│   │   ├── api/                 # 8 роутеров: auth, telegram, products, competitors, analytics,
 │   │   │                         # alerts, digests, import_export
 │   │   ├── services/            # auth, price, alert, digest, ai, import
-│   │   ├── scrapers/            # base, ozon, wildberries, generic_web, proxy_manager
+│   │   ├── scrapers/            # engine (Ozon, WB, GenericWebScraper, ScraperFactory), proxy_manager
 │   │   ├── workers/             # celery_app, scrape_tasks, alert_tasks, digest_tasks, scheduler
 │   │   └── notifications/       # email_sender, telegram_bot
-│   ├── alembic/                 # migrations (001_initial_schema)
+│   ├── alembic/                 # migrations (001_initial_schema, 003_telegram_user_fields)
 │   ├── tests/                   # pytest (conftest, test_health)
 │   ├── requirements.txt
 │   ├── Dockerfile               # uvicorn only; tables via create_all in lifespan
@@ -283,13 +286,16 @@ imperecta/
 │   │   ├── api/                 # client.ts + auth, products, competitors, analytics,
 │   │   │                         # alerts, digests, import
 │   │   ├── hooks/               # useAuth, useProducts, useCompetitors, useAnalytics, useAlerts
-│   │   ├── components/          # layout (Header, Sidebar, DashboardLayout), charts,
-│   │   │                         # tables, ui (shadcn), ProtectedRoute, StubPage
-│   │   ├── pages/               # 11 страниц: Login, Register, Dashboard, Products,
-│   │   │                         # ProductDetail, Competitors, Alerts, Digests, Import, Settings
+│   │   ├── components/          # layout (Header, Sidebar, MobileSidebar, DashboardLayout), charts,
+│   │   │                         # products (FiltersPanel), tables, ui (shadcn, collapsible),
+│   │   │                         # auth (AuthLayout, AuthProvider), ProtectedRoute, StubPage
+│   │   ├── pages/               # 12 страниц: Login, Register, ForgotPassword, Dashboard, Products,
+│   │   │                         # ProductDetail, Competitors, Alerts, Digests, Import, Settings, NotFound
 │   │   ├── stores/              # authStore (Zustand)
 │   │   ├── i18n/                # ru.json, en.json, index.ts
-│   │   └── lib/                 # utils.ts
+│   │   ├── lib/                 # utils.ts
+│   │   ├── data/                # mockFilters, mock data
+│   │   └── types/               # filters, shared types
 │   ├── vite.config.ts           # proxy /api → localhost:8000
 │   └── package.json
 ├── docker-compose.yml           # postgres, redis, backend, celery-worker, celery-beat, frontend
@@ -307,7 +313,8 @@ imperecta/
 
 | Модуль | Endpoints |
 |--------|-----------|
-| **auth** | POST /register, /login, /refresh; POST /telegram-link; GET/PUT /me |
+| **auth** | POST /register, /login, /refresh; GET/PUT /me |
+| **telegram** | POST /webhook (Telegram callback); POST /generate-link-code, /unlink; GET /status |
 | **products** | GET /categories, GET/POST /, GET/PUT/DELETE /{id} |
 | **competitors** | GET/POST /; PUT/DELETE /{id}; POST /products; GET /products/{product_id}, /{competitor_id}/products; DELETE /products/{id} |
 | **analytics** | GET /products/{id}/price-history, /products/{id}/comparison; GET /dashboard/summary, /dashboard/anomalies |
@@ -321,7 +328,7 @@ imperecta/
 
 | Маршрут | Страница | Функционал |
 |---------|----------|------------|
-| /login, /register | LoginPage, RegisterPage | Аутентификация, JWT |
+| /login, /register, /forgot-password | LoginPage, RegisterPage, ForgotPasswordPage | Аутентификация, JWT, восстановление пароля |
 | /dashboard | DashboardPage | Сводка: товары, конкуренты, алерты, изменения цен; аномалии |
 | /products | ProductsPage | CRUD товаров, категории, поиск, пагинация, импорт CSV |
 | /products/:id | ProductDetailPage | График цен (7d/30d/90d), конкуренты, алерты |
@@ -354,8 +361,8 @@ imperecta/
 - [x] Railway: 3 сервиса созданы, переменные заданы
 - [x] Cloudflare Pages подключён
 - [x] Snyk подключён
-- [x] Backend: FastAPI, все API-роуты, Celery tasks, scrapers (Ozon, WB, generic)
-- [x] Frontend: 11 страниц с полным UI (Dashboard, Products, Competitors, Alerts, Digests, Import, Settings)
+- [x] Backend: FastAPI, все API-роуты (включая telegram), Celery tasks, scrapers (engine: Ozon, WB, generic, ScraperFactory)
+- [x] Frontend: 12 страниц (Dashboard, Products, ProductDetail, Competitors, Alerts, Digests, Import, Settings, Login, Register, ForgotPassword, NotFound), FiltersPanel, collapsible
 - [x] Локальная разработка: docker-compose (postgres, redis, backend, celery-worker, celery-beat, frontend)
 - [x] CI: ruff, pytest, eslint, build, security (bandit, safety, pip-audit, gitleaks, snyk)
 - [ ] Успешный деплой backend (Railway)
