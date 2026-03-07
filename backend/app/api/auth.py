@@ -14,6 +14,7 @@ from app.models import User
 from app.models.user import UserPlan
 from app.notifications.telegram_bot import BOT_URL
 from app.schemas.user import (
+    ChangeInitialPasswordRequest,
     RefreshTokenRequest,
     TelegramLinkResponse,
     TokenResponse,
@@ -33,12 +34,22 @@ from app.services.auth_service import (
 router = APIRouter()
 
 
-def _create_tokens(user_id: UUID) -> TokenResponse:
+def _create_tokens(
+    user_id: UUID,
+    force_password_change: bool | None = None,
+    persistent: bool = False,
+) -> TokenResponse:
     """Create access and refresh tokens for user."""
-    return TokenResponse(
+    refresh_token, expire = create_refresh_token(user_id, persistent=persistent)
+    resp = TokenResponse(
         access_token=create_access_token(user_id),
-        refresh_token=create_refresh_token(user_id),
+        refresh_token=refresh_token,
+        persistent=persistent,
+        expires_at=expire.isoformat(),
     )
+    if force_password_change is not None:
+        resp.force_password_change = force_password_change
+    return resp
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -85,7 +96,44 @@ async def login(
             detail="Invalid email or password",
         )
 
-    return _create_tokens(user.id)
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    force_change = user.force_password_change if user.force_password_change else None
+    return _create_tokens(
+        user.id,
+        force_password_change=force_change,
+        persistent=data.remember_me,
+    )
+
+
+@router.post("/change-initial-password", response_model=TokenResponse)
+async def change_initial_password(
+    data: ChangeInitialPasswordRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> TokenResponse:
+    """Change email and password for users with force_password_change=True."""
+    if not current_user.force_password_change:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Initial password change not required",
+        )
+
+    result = await db.execute(select(User).where(User.email == data.new_email))
+    existing = result.scalar_one_or_none()
+    if existing is not None and existing.id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already in use",
+        )
+
+    current_user.email = data.new_email
+    current_user.password_hash = hash_password(data.new_password)
+    current_user.force_password_change = False
+    await db.flush()
+
+    return _create_tokens(current_user.id)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -93,7 +141,7 @@ async def refresh(
     data: RefreshTokenRequest,
     db: DbSession,
 ) -> TokenResponse:
-    """Return new access token from refresh token."""
+    """Return new access token from refresh token. Propagates persistent claim."""
     try:
         payload = decode_token(data.refresh_token)
     except JWTError:
@@ -131,10 +179,15 @@ async def refresh(
             detail="User not found",
         )
 
+    persistent = payload.get("persistent") is True
+    refresh_token, expire = create_refresh_token(user_id, persistent=persistent)
+
     return TokenResponse(
         access_token=create_access_token(user_id),
-        refresh_token=data.refresh_token,
+        refresh_token=refresh_token,
         token_type="bearer",
+        persistent=persistent,
+        expires_at=expire.isoformat(),
     )
 
 

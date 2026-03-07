@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import i18n from "i18next";
+import { authApi } from "@/api/auth";
 import {
+  loadTokens,
+  saveTokens,
   clearStoredTokens,
   getStoredToken,
-  setStoredToken,
-} from "@/api/client";
-import { authApi } from "@/api/auth";
+} from "@/lib/authStorage";
 
 const LANGUAGE_STORAGE_KEY = "imperecta_language";
 
@@ -24,37 +25,101 @@ export interface User {
   language: string;
   created_at: string;
   telegram_chat_id?: number | null;
+  is_superuser?: boolean;
+  force_password_change?: boolean;
 }
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+  remember_me: boolean;
+}
+
+export interface LoginResult {
+  success: boolean;
+  forcePasswordChange?: boolean;
+}
+
+export { clearStoredTokens, getStoredToken };
 
 interface AuthState {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
+  persistent: boolean;
+  expiresAt: string | null;
   isInitialized: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, companyName?: string, language?: string) => Promise<void>;
+
+  login: (credentials: LoginCredentials) => Promise<LoginResult>;
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    companyName?: string,
+    language?: string
+  ) => Promise<void>;
   logout: () => void;
   setUser: (user: User | null) => void;
+  setTokensFromResponse: (data: {
+    access_token: string;
+    refresh_token: string;
+    persistent?: boolean;
+    expires_at?: string;
+  }) => void;
   fetchUser: () => Promise<User | null>;
+  refreshAccessToken: () => Promise<boolean>;
+  restoreSession: () => Promise<boolean>;
+  checkSessionExpiry: () => { valid: boolean; nearExpiry?: boolean };
   updateLanguage: (code: string) => Promise<void>;
   init: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  accessToken: getStoredToken(),
+  accessToken: null,
   refreshToken: null,
+  persistent: false,
+  expiresAt: null,
   isInitialized: false,
 
-  login: async (email: string, password: string) => {
-    const { data } = await authApi.login(email, password);
-    setStoredToken(data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
+  login: async (credentials: LoginCredentials) => {
+    const { data } = await authApi.login(
+      credentials.email,
+      credentials.password,
+      credentials.remember_me
+    );
+    const persistent = data.persistent ?? credentials.remember_me;
     set({
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
+      persistent,
+      expiresAt: data.expires_at ?? null,
     });
-    await get().fetchUser();
+    saveTokens({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      persistent,
+      expiresAt: data.expires_at ?? null,
+      user: null as unknown,
+    });
+    const user = await get().fetchUser();
+    if (user) {
+      if (data.force_password_change !== undefined) {
+        set({ user: { ...user, force_password_change: data.force_password_change } });
+      }
+      saveTokens({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        persistent,
+        expiresAt: data.expires_at ?? null,
+        user: { ...user, force_password_change: data.force_password_change } as User,
+      });
+      if (user.language) applyUserLanguage(user.language);
+    }
+    return {
+      success: true,
+      forcePasswordChange: data.force_password_change ?? false,
+    };
   },
 
   register: async (
@@ -64,22 +129,66 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     companyName?: string,
     language?: string
   ) => {
-    const { data } = await authApi.register(email, password, name, companyName, language);
-    setStoredToken(data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
+    const { data } = await authApi.register(
+      email,
+      password,
+      name,
+      companyName,
+      language
+    );
+    const persistent = data.persistent ?? false;
+    const expiresAt = data.expires_at ?? null;
     set({
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
+      persistent,
+      expiresAt,
+    });
+    saveTokens({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      persistent,
+      expiresAt,
+      user: null as unknown,
     });
     await get().fetchUser();
   },
 
   logout: () => {
     clearStoredTokens();
-    set({ user: null, accessToken: null, refreshToken: null });
+    set({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      persistent: false,
+      expiresAt: null,
+    });
+    window.location.href = "/login";
   },
 
   setUser: (user) => set({ user }),
+
+  setTokensFromResponse: (data: {
+    access_token: string;
+    refresh_token: string;
+    persistent?: boolean;
+    expires_at?: string;
+  }) => {
+    const persistent = data.persistent ?? false;
+    set({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      persistent,
+      expiresAt: data.expires_at ?? null,
+    });
+    saveTokens({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      persistent,
+      expiresAt: data.expires_at ?? null,
+      user: get().user as unknown,
+    });
+  },
 
   fetchUser: async () => {
     const token = get().accessToken ?? getStoredToken();
@@ -94,27 +203,106 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  refreshAccessToken: async () => {
+    const refreshToken = get().refreshToken;
+    if (!refreshToken) return false;
+    try {
+      const { data } = await authApi.refresh(refreshToken);
+      const persistent = data.persistent ?? get().persistent;
+      set({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        persistent,
+        expiresAt: data.expires_at ?? null,
+      });
+      saveTokens({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        persistent,
+        expiresAt: data.expires_at ?? null,
+        user: get().user as unknown,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  restoreSession: async () => {
+    const saved = loadTokens();
+    if (!saved) {
+      set({ isInitialized: true });
+      return false;
+    }
+    const expiresAt = saved.expiresAt;
+    if (expiresAt) {
+      try {
+        const expiry = new Date(expiresAt).getTime();
+        if (expiry <= Date.now()) {
+          clearStoredTokens();
+          set({ isInitialized: true });
+          return false;
+        }
+      } catch {
+        // Invalid date, try refresh anyway
+      }
+    }
+    set({
+      accessToken: saved.accessToken,
+      refreshToken: saved.refreshToken,
+      persistent: saved.persistent,
+      expiresAt: saved.expiresAt ?? null,
+      user: saved.user,
+    });
+    const success = await get().refreshAccessToken();
+    if (!success) {
+      clearStoredTokens();
+      set({ isInitialized: true });
+      return false;
+    }
+    const user = await get().fetchUser();
+    if (user?.language) applyUserLanguage(user.language);
+    set({ isInitialized: true });
+    return true;
+  },
+
+  checkSessionExpiry: () => {
+    const expiresAt = get().expiresAt;
+    if (!expiresAt) return { valid: true };
+    const expiry = new Date(expiresAt).getTime();
+    const now = Date.now();
+    const threeDays = 3 * 24 * 60 * 60 * 1000;
+    if (expiry <= now) return { valid: false };
+    if (expiry - now < threeDays && get().persistent) {
+      return { valid: true, nearExpiry: true };
+    }
+    return { valid: true };
+  },
+
   updateLanguage: async (code: string) => {
     applyUserLanguage(code);
     try {
       const { data } = await authApi.updateMe({ language: code });
       if (data) set({ user: data });
     } catch {
-      // Local language change still applied; API error ignored
+      // Local language change still applied
     }
   },
 
   init: async () => {
-    const token = getStoredToken();
-    if (!token) {
+    const saved = loadTokens();
+    if (!saved) {
       set({ isInitialized: true });
       return;
     }
-    set({ accessToken: token });
+    set({
+      accessToken: saved.accessToken,
+      refreshToken: saved.refreshToken,
+      persistent: saved.persistent,
+      expiresAt: saved.expiresAt ?? null,
+    });
     const user = await get().fetchUser();
-    if (user?.language) {
-      applyUserLanguage(user.language);
-    }
+    if (user?.language) applyUserLanguage(user.language);
     set({ isInitialized: true });
   },
 }));

@@ -29,34 +29,6 @@ import { FileText, Mail, MessageCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Digest } from "@/api/digests";
 
-const MOCK_DIGEST_CONTENT = `# Изменения цен за период
-
-**Ключевые изменения:** 12 товаров изменили цену. Рекомендуем обратить внимание на позиции ниже.
-
-## Снижение цен
-
-- **Смартфон Galaxy A55** — Ozon: \`32 990 ₽\` → \`28 990 ₽\` (−12%)
-- **Наушники JBL Tune 510BT** — WB: \`2 490 ₽\` → \`2 199 ₽\` (−12%)
-- **Чехол для iPhone 15** — Kaspi: \`1 890 ₽\` → \`1 590 ₽\` (−16%)
-
-## Рост цен
-
-- **Планшет iPad 10** — Ozon: \`42 990 ₽\` → \`45 990 ₽\` (+7%)
-- **Умные часы Xiaomi Band 8** — WB: \`3 490 ₽\` → \`3 790 ₽\` (+9%)
-
-## Рекомендации
-
-1. Снизьте цену на **Смартфон Galaxy A55** — конкуренты дешевле на 8–15%.
-2. Рассмотрите акцию на **Наушники JBL** — сильное снижение у WB.
-3. Мониторьте **Планшет iPad 10** — рост цен может быть временным.
-
-## Топ конкурентов по активности
-
-- **Ozon** — 5 изменений
-- **Wildberries** — 4 изменения
-- **Kaspi** — 3 изменения
-`;
-
 function renderMarkdown(md: string): string {
   if (!md) return "";
   let out = md
@@ -223,7 +195,7 @@ function DigestModal({
   }
 
   const isDaily = digest.period_type === "daily";
-  const content = digest.content_md?.trim() || MOCK_DIGEST_CONTENT;
+  const content = digest.content_md?.trim() || "";
 
   return (
     <Dialog open onOpenChange={() => onClose()}>

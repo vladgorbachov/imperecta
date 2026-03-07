@@ -64,8 +64,12 @@ export function LoginPage() {
     setSubmitError("");
     setLoading(true);
     try {
-      await login(email, password);
-      navigate(from, { replace: true });
+      const result = await login({ email, password, remember_me: rememberMe });
+      if (result.forcePasswordChange) {
+        navigate("/change-password", { replace: true });
+      } else {
+        navigate(from, { replace: true });
+      }
     } catch (err: unknown) {
       const message =
         err && typeof err === "object" && "response" in err
@@ -156,7 +160,7 @@ export function LoginPage() {
         <div className="flex items-center justify-between">
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <Checkbox checked={rememberMe} onCheckedChange={(v) => setRememberMe(v === true)} />
-            {t("auth.rememberMe")}
+            {t("auth.login.rememberMe")}
           </label>
           <Link
             to="/forgot-password"

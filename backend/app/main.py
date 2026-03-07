@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
+from app.api.admin import router as admin_router
 from app.config import Settings
 from app.database import Base, engine
 
@@ -28,6 +29,24 @@ async def _ensure_tables() -> None:
             await conn.run_sync(Base.metadata.create_all)
     except Exception as e:
         logger.warning("create_all failed (may run later): %s", e)
+
+
+async def _ensure_superuser() -> None:
+    """Create default superuser if none exists. Retries until tables exist."""
+    import asyncio
+
+    from app.database import async_session_maker
+    from app.services.admin_service import ensure_superuser
+
+    for attempt in range(10):
+        try:
+            async with async_session_maker() as db:
+                await ensure_superuser(db)
+            return
+        except Exception as e:
+            logger.warning("ensure_superuser attempt %s failed: %s", attempt + 1, e)
+            await asyncio.sleep(2)
+    logger.error("ensure_superuser gave up after 10 attempts")
 
 
 async def _setup_telegram_webhook() -> None:
@@ -54,6 +73,7 @@ async def lifespan(app: FastAPI):
     """Start app immediately; create DB tables in background for Railway healthcheck."""
     asyncio.create_task(_ensure_tables())
     asyncio.create_task(_setup_telegram_webhook())
+    asyncio.create_task(_ensure_superuser())
     yield
 
 
@@ -72,6 +92,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 
 @app.get("/health")

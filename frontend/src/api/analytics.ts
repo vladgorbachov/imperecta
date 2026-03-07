@@ -59,9 +59,20 @@ export interface ComparisonResponse {
   competitors: ComparisonCompetitor[];
 }
 
+export interface AnomalyItem {
+  product_name: string;
+  competitor_name: string;
+  old_price: number;
+  new_price: number;
+  change_percent: number;
+  detected_at: string;
+}
+
 export const analyticsApi = {
   getDashboardSummary: () =>
     apiClient.get<DashboardSummary>("/analytics/dashboard/summary"),
+  getDashboardAnomalies: () =>
+    apiClient.get<{ items: AnomalyItem[] }>("/analytics/dashboard/anomalies"),
   getPriceHistory: (productId: string, period: "7d" | "30d" | "90d") =>
     apiClient.get<PriceHistoryResponse>(
       `/analytics/products/${productId}/price-history`,

@@ -20,7 +20,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Anthropic Claude API** — генерация ИИ-дайджестов на русском языке
 - **Resend** — отправка email-уведомлений
 - **python-telegram-bot** — Telegram-бот для алертов
-- **JWT (python-jose)** — аутентификация
+- **JWT (python-jose)** — аутентификация (access 30 мин, refresh 7/30 дней при «Запомнить меня»)
 
 ### Frontend
 - **Vite 6** + **React 19** + **TypeScript**
@@ -28,7 +28,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Tailwind CSS 4** + **shadcn/ui** (Radix UI) — UI-компоненты
 - **Recharts** — графики цен (PriceChart, ComparisonChart, TrendBadge)
 - **TanStack Query v5** — серверное состояние и кеширование
-- **Zustand v5** — клиентское состояние (auth)
+- **Zustand v5** — клиентское состояние (auth, persist: localStorage / sessionStorage)
 - **Axios** — HTTP-клиент
 - **react-i18next** — локализация (ru.json, en.json)
 - **Sonner** — toast-уведомления
@@ -181,7 +181,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 #### 5. Supabase (PostgreSQL)
 - **Что:** Основная база данных
 - **Connection:** Transaction Pooler (PgBouncer), порт 6543
-- **Таблицы:** users, products, competitors, competitor_products, price_snapshots, alerts, alert_events, digests
+- **Таблицы:** users, products, competitors, competitor_products, price_snapshots, alerts, alert_events, digests, scrape_logs, admin_marketplaces, api_logs
 - **Кто подключается:** backend (imperecta), celery-worker, alembic (миграции при деплое)
 
 #### 6. Upstash (Redis)
@@ -198,7 +198,8 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Что:** ИИ для генерации дайджестов
 - **Endpoint:** `https://api.anthropic.com/v1/messages`
 - **Модель:** по умолчанию claude-sonnet-4-20250514 (настраивается через `CLAUDE_MODEL`, без жёсткой привязки к версии)
-- **Использование:** celery-worker вызывает при генерации дайджестов
+- **Использование:** celery-worker вызывает при генерации дайджестов; все вызовы логируются в api_logs
+- **Мониторинг:** claude_monitor (health check), GET /api/admin/claude-status (для superuser)
 - **Язык вывода:** русский
 
 #### 8. Resend (Email)
@@ -242,6 +243,8 @@ JWT_SECRET=<generated-secret-48-chars>
 JWT_ALGORITHM=HS256
 JWT_EXPIRATION_MINUTES=30
 JWT_REFRESH_EXPIRATION_DAYS=7
+JWT_REFRESH_EXPIRATION_DAYS_REMEMBER=30
+JWT_REFRESH_EXPIRATION_DAYS_REMEMBER=30
 CLAUDE_API_KEY=sk-ant-api03-xxx
 CLAUDE_MODEL=claude-sonnet-4-20250514
 RESEND_API_KEY=re_xxx
@@ -263,19 +266,20 @@ PORT=8000
 imperecta/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entrypoint, CORS, Sentry, lifespan (create_all)
+│   │   ├── main.py              # FastAPI entrypoint, CORS, Sentry, lifespan (create_all, ensure_superuser)
 │   │   ├── config.py            # Pydantic Settings (env vars)
 │   │   ├── database.py          # SQLAlchemy async engine, session, Base
-│   │   ├── models/              # 9 моделей: User, UserPlan, Product, Competitor, CompetitorProduct,
-│   │   │                         # PriceSnapshot, Alert, AlertEvent, Digest
+│   │   ├── models/              # User, UserPlan, Product, Competitor, CompetitorProduct,
+│   │   │                         # PriceSnapshot, Alert, AlertEvent, Digest,
+│   │   │                         # ScrapeLog, AdminMarketplace, ApiLog
 │   │   ├── schemas/             # Pydantic request/response schemas
-│   │   ├── api/                 # 8 роутеров: auth, telegram, products, competitors, analytics,
-│   │   │                         # alerts, digests, import_export
-│   │   ├── services/            # auth, price, alert, digest, ai, import
+│   │   ├── api/                 # auth, telegram, products, competitors, analytics,
+│   │   │                         # alerts, digests, import_export, admin (superuser only)
+│   │   ├── services/            # auth, price, alert, digest, ai, import, admin, claude_monitor
 │   │   ├── scrapers/            # engine (Ozon, WB, GenericWebScraper, ScraperFactory), proxy_manager
 │   │   ├── workers/             # celery_app, scrape_tasks, alert_tasks, digest_tasks, scheduler
 │   │   └── notifications/       # email_sender, telegram_bot
-│   ├── alembic/                 # migrations (001_initial_schema, 003_telegram_user_fields)
+│   ├── alembic/                 # migrations 001–005: initial, user_language, telegram, superuser+scrape_logs+admin_marketplaces+api_logs, last_login_at
 │   ├── tests/                   # pytest (conftest, test_health)
 │   ├── requirements.txt
 │   ├── Dockerfile               # uvicorn only; tables via create_all in lifespan
@@ -283,17 +287,19 @@ imperecta/
 │   └── security.cfg             # Bandit config
 ├── frontend/
 │   ├── src/
-│   │   ├── api/                 # client.ts + auth, products, competitors, analytics,
-│   │   │                         # alerts, digests, import
-│   │   ├── hooks/               # useAuth, useProducts, useCompetitors, useAnalytics, useAlerts
+│   │   ├── api/                 # client.ts, setupAuth.ts (interceptors), auth, admin,
+│   │   │                         # products, competitors, analytics, alerts, digests, import
+│   │   ├── lib/                 # utils.ts, authStorage.ts (localStorage/sessionStorage)
+│   │   ├── hooks/               # useAuth, useProducts, useCompetitors, useAnalytics, useAlerts, useAdmin
 │   │   ├── components/          # layout (Header, Sidebar, MobileSidebar, DashboardLayout), charts,
 │   │   │                         # products (FiltersPanel), tables, ui (shadcn, collapsible),
-│   │   │                         # auth (AuthLayout, AuthProvider), ProtectedRoute, StubPage
-│   │   ├── pages/               # 12 страниц: Login, Register, ForgotPassword, Dashboard, Products,
-│   │   │                         # ProductDetail, Competitors, Alerts, Digests, Import, Settings, NotFound
+│   │   │                         # auth (AuthLayout, AuthProvider), ProtectedRoute, SuperuserRoute,
+│   │   │                         # ChangePasswordRoute, SessionExpiryWarning, StubPage
+│   │   ├── pages/               # Login, Register, ForgotPassword, ForcePasswordChange, Dashboard,
+│   │   │                         # Products, ProductDetail, Competitors, Alerts, Digests, Import,
+│   │   │                         # Analytics (заглушка), AdminPage (superuser), Settings, NotFound
 │   │   ├── stores/              # authStore (Zustand)
 │   │   ├── i18n/                # ru.json, en.json, index.ts
-│   │   ├── lib/                 # utils.ts
 │   │   ├── data/                # mockFilters, mock data
 │   │   └── types/               # filters, shared types
 │   ├── vite.config.ts           # proxy /api → localhost:8000
@@ -313,7 +319,7 @@ imperecta/
 
 | Модуль | Endpoints |
 |--------|-----------|
-| **auth** | POST /register, /login, /refresh; GET/PUT /me |
+| **auth** | POST /register, /login, /refresh, /change-initial-password; GET/PUT /me |
 | **telegram** | POST /webhook (Telegram callback); POST /generate-link-code, /unlink; GET /status |
 | **products** | GET /categories, GET/POST /, GET/PUT/DELETE /{id} |
 | **competitors** | GET/POST /; PUT/DELETE /{id}; POST /products; GET /products/{product_id}, /{competitor_id}/products; DELETE /products/{id} |
@@ -321,14 +327,17 @@ imperecta/
 | **alerts** | GET/POST /; PUT/DELETE /{id}; GET /events |
 | **digests** | GET /, /{id} |
 | **import** | POST /products/preview, /products/csv; GET /products/template |
+| **admin** (superuser) | GET /stats, /marketplaces, /marketplaces/{id}/logs, /scrape-activity, /error-distribution, /users, /claude-status; POST /marketplaces; DELETE /marketplaces/{id} |
 
 **Health:** GET /health (liveness), GET /api/health (DB + Redis check)
+
+**Реестр маркетплейсов (admin_marketplaces):** дополняет встроенный реестр (Ozon, WB, Kaspi, Custom). Суперюзер добавляет кастомные маркетплейсы через POST /admin/marketplaces. Celery worker обновляет last_scrape_at, total/successful/failed_scrapes при каждом scrape_single.
 
 ### Frontend страницы
 
 | Маршрут | Страница | Функционал |
 |---------|----------|------------|
-| /login, /register, /forgot-password | LoginPage, RegisterPage, ForgotPasswordPage | Аутентификация, JWT, восстановление пароля |
+| /login, /register, /forgot-password, /change-password | LoginPage, RegisterPage, ForgotPasswordPage, ForcePasswordChangePage | Аутентификация, JWT, «Запомнить меня», смена пароля суперюзера |
 | /dashboard | DashboardPage | Сводка: товары, конкуренты, алерты, изменения цен; аномалии |
 | /products | ProductsPage | CRUD товаров, категории, поиск, пагинация, импорт CSV |
 | /products/:id | ProductDetailPage | График цен (7d/30d/90d), конкуренты, алерты |
@@ -336,13 +345,31 @@ imperecta/
 | /alerts | AlertsPage | CRUD алертов (price_drop, price_increase, out_of_stock, new_promo), каналы (email, telegram, both) |
 | /digests | DigestsPage | Список дайджестов, просмотр |
 | /import | ImportPage | Импорт товаров из CSV, preview, шаблон |
+| /analytics | AnalyticsPage | Заглушка «Раздел в разработке» |
+| /admin | AdminPage | Админ-панель (только superuser): статистика, маркетплейсы, парсинг, Claude API, пользователи |
 | /settings | SettingsPage | Профиль (name, company_name), привязка Telegram |
+
+### Sidebar и навигация
+
+- **Аналитика** (BarChart3) → /analytics — видна всем пользователям
+- **Администрирование** (Shield) → /admin — видна только при `user.is_superuser === true`
+- Остальные пункты: Dashboard, Products, Competitors, Alerts, Digests, Import, Settings
+
+### Аутентификация и сессии
+
+| Функция | Описание |
+|--------|----------|
+| **JWT** | access_token 30 мин, refresh_token 7 или 30 дней |
+| **Запомнить меня** | При включении: refresh 30 дней, localStorage. При выключении: refresh 7 дней, sessionStorage |
+| **Суперюзер** | admin@imperecta.com / admin (при первом запуске), is_superuser, force_password_change |
+| **Смена пароля** | POST /change-initial-password — обязательна при первом входе суперюзера |
+| **SessionExpiryWarning** | Pop-up за 3 дня до истечения сессии (persistent), при истечении — принудительный re-login |
 
 ### Celery задачи
 
 | Задача | Триггер | Описание |
 |--------|---------|----------|
-| scrape_single | API / вручную | Парсинг одного competitor_product, проверка алертов |
+| scrape_single | API / вручную | Парсинг одного competitor_product, логирование в scrape_logs, проверка алертов |
 | scrape_user_products | API | Парсинг всех товаров пользователя |
 | scrape_all | Beat каждые 6 ч | Парсинг всех активных пользователей |
 | cleanup_old_snapshots | Beat вс 03:00 | Удаление данных старше 90 дней |
@@ -362,7 +389,9 @@ imperecta/
 - [x] Cloudflare Pages подключён
 - [x] Snyk подключён
 - [x] Backend: FastAPI, все API-роуты (включая telegram), Celery tasks, scrapers (engine: Ozon, WB, generic, ScraperFactory)
-- [x] Frontend: 12 страниц (Dashboard, Products, ProductDetail, Competitors, Alerts, Digests, Import, Settings, Login, Register, ForgotPassword, NotFound), FiltersPanel, collapsible
+- [x] Frontend: 15 страниц (Dashboard, Products, ProductDetail, Competitors, Alerts, Digests, Import, Analytics, AdminPage, Settings, Login, Register, ForgotPassword, ForcePasswordChange, NotFound), FiltersPanel, collapsible, SessionExpiryWarning
+- [x] Backend: суперюзер, Admin API, scrape_logs, admin_marketplaces, api_logs, логирование Claude API
+- [x] Auth: «Запомнить меня», persistent-сессии (localStorage/sessionStorage), restoreSession при загрузке, 401 auto-refresh
 - [x] Локальная разработка: docker-compose (postgres, redis, backend, celery-worker, celery-beat, frontend)
 - [x] CI: ruff, pytest, eslint, build, security (bandit, safety, pip-audit, gitleaks, snyk)
 - [ ] Успешный деплой backend (Railway)

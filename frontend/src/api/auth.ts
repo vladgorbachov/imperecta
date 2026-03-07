@@ -1,11 +1,21 @@
 import { apiClient } from "./client";
 
 export const authApi = {
-  login: (email: string, password: string) =>
-    apiClient.post<{ access_token: string; refresh_token: string }>(
-      "/auth/login",
-      { email, password }
-    ),
+  login: (email: string, password: string, remember_me?: boolean) =>
+    apiClient.post<{
+      access_token: string;
+      refresh_token: string;
+      persistent?: boolean;
+      expires_at?: string;
+      force_password_change?: boolean;
+    }>("/auth/login", { email, password, remember_me: remember_me ?? false }),
+  refresh: (refresh_token: string) =>
+    apiClient.post<{
+      access_token: string;
+      refresh_token: string;
+      persistent?: boolean;
+      expires_at?: string;
+    }>("/auth/refresh", { refresh_token }),
   register: (
     email: string,
     password: string,
@@ -13,7 +23,12 @@ export const authApi = {
     companyName?: string,
     language?: string
   ) =>
-    apiClient.post<{ access_token: string; refresh_token: string }>(
+    apiClient.post<{
+      access_token: string;
+      refresh_token: string;
+      persistent?: boolean;
+      expires_at?: string;
+    }>(
       "/auth/register",
       { email, password, name, company_name: companyName ?? null, language: language ?? "en" }
     ),
@@ -28,6 +43,8 @@ export const authApi = {
       language: string;
       created_at: string;
       telegram_chat_id: number | null;
+      is_superuser?: boolean;
+      force_password_change?: boolean;
     }>("/auth/me"),
   updateMe: (data: {
     name?: string;
