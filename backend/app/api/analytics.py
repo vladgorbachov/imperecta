@@ -319,3 +319,32 @@ async def get_comparison_matrix(
 
     service = BenchmarkService(db, current_user.id)
     return await service.get_comparison_matrix()
+
+
+# --- Dashboard endpoints (frontend expects /api/analytics/dashboard/...) ---
+
+
+@router.get("/dashboard/summary")
+async def get_dashboard_summary(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Dashboard summary: KPIs, price changes, top changes, active promos."""
+    from app.services.dashboard_service import DashboardService
+
+    service = DashboardService(db, current_user.id)
+    return await service.get_dashboard_summary()
+
+
+@router.get("/dashboard/anomalies")
+async def get_dashboard_anomalies(
+    current_user: CurrentUser,
+    db: DbSession,
+    limit: int = Query(10, ge=1, le=100, description="Max anomalies to return"),
+) -> dict:
+    """Price anomalies (>10% change) in last 24 hours. Returns { items: [...] }."""
+    from app.services.dashboard_service import DashboardService
+
+    service = DashboardService(db, current_user.id)
+    items = await service.get_anomalies(limit=limit)
+    return {"items": items}

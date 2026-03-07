@@ -7,7 +7,15 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Alert, AlertEvent, Competitor, CompetitorProduct, PriceSnapshot, Product
+from app.models import (
+    Alert,
+    AlertEvent,
+    Competitor,
+    CompetitorProduct,
+    PriceSnapshot,
+    Product,
+    ScrapeLog,
+)
 
 
 class DashboardService:
@@ -386,4 +394,97 @@ class DashboardService:
             "competitors_avg": [round(v, 2) for v in competitors_avg],
             "forecast": forecast,
             "forecast_labels": forecast_labels,
+        }
+
+    async def get_dashboard_summary(self) -> dict:
+        """
+        Dashboard summary for frontend: total_products, total_competitors,
+        total_tracked_items, last_scrape_at, alerts_triggered_today,
+        price_changes_today, top_changes, active_promos.
+        """
+        now = datetime.now(timezone.utc)
+        day_ago = now - timedelta(hours=24)
+
+        kpi = await self.get_kpi()
+        total_products = kpi["total_products"]
+        total_competitors = kpi["total_competitors"]
+        total_tracked_items = kpi["total_competitor_products"]
+        alerts_triggered_today = kpi["active_alerts_count"]
+
+        # last_scrape_at: max from scrape_logs for user's competitor_products
+        last_scrape_result = await self.db.execute(
+            select(func.max(ScrapeLog.created_at))
+            .select_from(ScrapeLog)
+            .join(CompetitorProduct, ScrapeLog.competitor_product_id == CompetitorProduct.id)
+            .join(Product, CompetitorProduct.product_id == Product.id)
+            .where(Product.user_id == self.user_id)
+        )
+        last_scrape_at = last_scrape_result.scalar_one_or_none()
+
+        # price_changes_today and top_changes: from price_snapshots in last 24h
+        changes_result = await self.db.execute(
+            select(
+                Product.name.label("product_name"),
+                Competitor.name.label("competitor_name"),
+                PriceSnapshot.old_price,
+                PriceSnapshot.price.label("new_price"),
+                (
+                    (PriceSnapshot.price - PriceSnapshot.old_price)
+                    / PriceSnapshot.old_price
+                    * 100
+                ).label("change_pct"),
+            )
+            .select_from(PriceSnapshot)
+            .join(CompetitorProduct, PriceSnapshot.competitor_product_id == CompetitorProduct.id)
+            .join(Product, CompetitorProduct.product_id == Product.id)
+            .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+            .where(
+                Product.user_id == self.user_id,
+                PriceSnapshot.scraped_at >= day_ago,
+                PriceSnapshot.old_price.isnot(None),
+                PriceSnapshot.old_price > 0,
+            )
+        )
+        rows = changes_result.all()
+        drops = sum(1 for r in rows if float(r.change_pct) < 0)
+        increases = sum(1 for r in rows if float(r.change_pct) > 0)
+        sorted_rows = sorted(rows, key=lambda r: abs(float(r.change_pct)), reverse=True)
+        top_changes = [
+            {
+                "product_name": r.product_name,
+                "competitor_name": r.competitor_name,
+                "old_price": float(r.old_price),
+                "new_price": float(r.new_price),
+                "change_percent": round(float(r.change_pct), 2),
+            }
+            for r in sorted_rows[:5]
+        ]
+
+        # active_promos: competitor_products with non-null promo_label
+        promos_result = await self.db.execute(
+            select(Competitor.name, Product.name, CompetitorProduct.last_promo_label)
+            .select_from(CompetitorProduct)
+            .join(Product, CompetitorProduct.product_id == Product.id)
+            .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+            .where(
+                Product.user_id == self.user_id,
+                CompetitorProduct.is_active.is_(True),
+                CompetitorProduct.last_promo_label.isnot(None),
+                CompetitorProduct.last_promo_label != "",
+            )
+        )
+        active_promos = [
+            {"competitor_name": c, "product_name": p, "promo_label": pl or ""}
+            for c, p, pl in promos_result.all()
+        ]
+
+        return {
+            "total_products": total_products,
+            "total_competitors": total_competitors,
+            "total_tracked_items": total_tracked_items,
+            "last_scrape_at": last_scrape_at.isoformat() if last_scrape_at else None,
+            "alerts_triggered_today": alerts_triggered_today,
+            "price_changes_today": {"drops": drops, "increases": increases},
+            "top_changes": top_changes,
+            "active_promos": active_promos,
         }

@@ -36,7 +36,7 @@ async def list_categories(
     return [r[0] for r in result.all() if r[0]]
 
 
-@router.get("/", response_model=ProductListResponse)
+@router.get("", response_model=ProductListResponse)
 async def list_products(
     current_user: CurrentUser,
     db: DbSession,

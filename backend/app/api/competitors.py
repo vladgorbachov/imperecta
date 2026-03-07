@@ -31,7 +31,7 @@ def _compute_price_diff(
     return round(diff, 2)
 
 
-@router.get("/", response_model=list[CompetitorResponse])
+@router.get("", response_model=list[CompetitorResponse])
 async def list_competitors(
     current_user: CurrentUser,
     db: DbSession,

@@ -12,7 +12,7 @@ from app.schemas.digest import DigestResponse
 router = APIRouter()
 
 
-@router.get("/", response_model=list[DigestResponse])
+@router.get("", response_model=list[DigestResponse])
 async def list_digests(
     current_user: CurrentUser,
     db: DbSession,
