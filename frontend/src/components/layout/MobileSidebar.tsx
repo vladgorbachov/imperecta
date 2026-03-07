@@ -8,17 +8,18 @@ interface MobileSidebarProps {
 }
 
 /**
- * Mobile sidebar: Sheet from left with same content as Sidebar.
+ * Mobile sidebar: Sheet from start (left in LTR, right in RTL).
  * Closes on nav item click (handled by Sidebar onNavigate).
  */
 export function MobileSidebar({ open, onOpenChange }: MobileSidebarProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isRtl = i18n.language === "ar";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
-        side="left"
-        className="w-60 p-0"
+        side={isRtl ? "right" : "left"}
+        className="w-[256px] p-0"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{t("layout.navigation")}</SheetTitle>

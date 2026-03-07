@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, DbSession
 from app.models import CompetitorProduct, Product
 from app.schemas.product import (
+    CompetitorProductBrief,
     ProductCreate,
     ProductDetailResponse,
     ProductListItem,
@@ -109,6 +110,18 @@ async def list_products(
     return ProductListResponse(items=items, total=total)
 
 
+@router.get("/at-risk")
+async def get_products_at_risk(
+    current_user: CurrentUser,
+    db: DbSession,
+    limit: int = Query(5, ge=1, le=20, description="Max products to return"),
+) -> list[dict]:
+    """Products where user's price is significantly higher than competitors."""
+    from app.services.product_ai_service import get_products_at_risk as get_at_risk
+
+    return await get_at_risk(db, current_user.id, limit=limit)
+
+
 @router.get("/{id}", response_model=ProductDetailResponse)
 async def get_product(
     id: UUID,
@@ -141,8 +154,6 @@ async def get_product(
             }
         )
 
-    from app.schemas.product import CompetitorProductBrief
-
     return ProductDetailResponse(
         id=product.id,
         user_id=product.user_id,
@@ -157,6 +168,33 @@ async def get_product(
         updated_at=product.updated_at,
         competitor_products=[CompetitorProductBrief(**b) for b in competitor_briefs],
     )
+
+
+@router.get("/{id}/ai-recommendation")
+async def get_product_ai_recommendation(
+    id: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """AI price recommendation for a single product."""
+    import logging
+
+    from app.services.product_ai_service import get_price_recommendation
+
+    logger = logging.getLogger(__name__)
+    try:
+        return await get_price_recommendation(db, id, current_user.id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.warning("get_price_recommendation failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="AI recommendation service temporarily unavailable",
+        )
 
 
 @router.post("/", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)

@@ -88,6 +88,7 @@ import { ImportPage } from "@/pages/ImportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { AnalyticsPage } from "@/pages/AnalyticsPage";
+import { AIAnalystPage } from "@/pages/AIAnalystPage";
 import { ChangePasswordRoute } from "@/components/ChangePasswordRoute";
 import { SuperuserRoute } from "@/components/SuperuserRoute";
 
@@ -123,6 +124,7 @@ export function App() {
                     <Route path="digests" element={<DigestsPage />} />
                     <Route path="import" element={<ImportPage />} />
                     <Route path="analytics" element={<AnalyticsPage />} />
+                    <Route path="ai" element={<AIAnalystPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Route>
                   <Route

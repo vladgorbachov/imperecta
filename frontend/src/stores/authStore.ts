@@ -252,7 +252,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       refreshToken: saved.refreshToken,
       persistent: saved.persistent,
       expiresAt: saved.expiresAt ?? null,
-      user: saved.user,
+      user: saved.user as User | null,
     });
     const success = await get().refreshAccessToken();
     if (!success) {

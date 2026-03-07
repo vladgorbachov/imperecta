@@ -48,7 +48,8 @@ class User(Base):
         BigInteger, nullable=True, unique=True
     )
     telegram_link_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
-    language: Mapped[str] = mapped_column(String(5), default="en", nullable=False)
+    language: Mapped[str] = mapped_column(String(5), default="en", nullable=False)  # en, ar, es, zh, ru, fr
+    ai_tone: Mapped[str] = mapped_column(String(20), default="balanced", nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     force_password_change: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(

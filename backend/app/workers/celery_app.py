@@ -25,6 +25,7 @@ celery_app = Celery(
         "app.workers.scrape_tasks",
         "app.workers.alert_tasks",
         "app.workers.digest_tasks",
+        "app.workers.cleanup_tasks",
     ],
 )
 celery_app.conf.update(

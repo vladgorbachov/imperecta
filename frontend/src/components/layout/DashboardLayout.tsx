@@ -9,7 +9,7 @@ import { useSidebar } from "@/hooks/useSidebar";
 /**
  * Main dashboard layout: CSS Grid with sidebar + main area.
  * Sidebar hidden on mobile (< md), visible md and above.
- * Header always visible. Main: scrollable with responsive padding.
+ * RTL: document.dir=rtl flips layout; border-inline-end for logical placement.
  */
 export function DashboardLayout() {
   const { isCollapsed, toggle } = useSidebar();
@@ -17,7 +17,7 @@ export function DashboardLayout() {
 
   return (
     <div className="grid h-screen grid-cols-[auto_1fr] grid-rows-[auto_1fr] bg-background text-foreground dark:bg-background dark:text-foreground">
-      <aside className="col-span-1 row-span-2 hidden border-r border-border dark:border-border md:block">
+      <aside className="col-span-1 row-span-2 hidden border-e border-border dark:border-border md:block">
         <Sidebar
           collapsed={isCollapsed}
           onToggle={toggle}

@@ -1,7 +1,8 @@
 """Import/Export API endpoints."""
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import Product
@@ -12,6 +13,36 @@ from app.services.import_service import (
 )
 
 router = APIRouter()
+
+
+class AutoCategorizeRequest(BaseModel):
+    """Request body for auto-categorize."""
+
+    products: list[dict] = Field(
+        ...,
+        description="List of {name, sku, price}",
+    )
+
+
+@router.post("/auto-categorize")
+async def post_auto_categorize(
+    body: AutoCategorizeRequest,
+    current_user: CurrentUser,
+) -> list[dict]:
+    """AI auto-categorization for imported products. Returns list with suggested_category."""
+    import logging
+
+    from app.services.product_ai_service import auto_categorize
+
+    logger = logging.getLogger(__name__)
+    try:
+        return await auto_categorize(body.products)
+    except Exception as e:
+        logger.warning("auto_categorize failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="AI categorization service temporarily unavailable",
+        )
 
 
 @router.post("/products/preview")

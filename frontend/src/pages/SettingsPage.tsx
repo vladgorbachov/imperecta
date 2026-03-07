@@ -1,17 +1,9 @@
 /**
- * Settings page: Profile, Telegram, Notifications, Plan sections.
+ * Settings page: Profile, Telegram, Notifications, AI Personalization, Plan sections.
+ * Sections separated by shadcn Separator.
  *
  * i18n keys used:
- * - nav.settings
- * - settings.profile, settings.telegram, settings.notifications, settings.plan
- * - settings.emailConfirmed, settings.telegramConnected, settings.telegramDisconnected
- * - settings.getLinkCode, settings.codeInstruction, settings.telegramDisconnect
- * - settings.channelEmail, settings.channelTelegram, settings.channelBoth
- * - settings.digestTime, settings.planTrial, settings.planBasic, settings.planPro
- * - settings.trialWarning, settings.productsLimit, settings.competitorsLimit
- * - settings.upgradePlan
- * - auth.name, auth.companyName, auth.email
- * - common.save, common.loading
+ * - nav.settings, settings.*, auth.*, common.*
  */
 
 import { useState, useEffect } from "react";
@@ -33,6 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LanguageSelector } from "@/components/ui/LanguageSelector";
+import type { LanguageCode } from "@/i18n";
 import { RadioGroup, RadioGroupItemStyled } from "@/components/ui/radio-group";
 import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
@@ -50,6 +44,8 @@ const PLAN_LIMITS: Record<string, { products: number; competitors: number }> = {
   pro: { products: 999, competitors: 999 },
 };
 
+const TRIAL_DAYS_TOTAL = 14;
+
 const DIGEST_HOURS = Array.from({ length: 13 }, (_, i) => i + 8);
 
 export function SettingsPage() {
@@ -63,6 +59,9 @@ export function SettingsPage() {
   const [codeSecondsLeft, setCodeSecondsLeft] = useState(0);
   const [notifChannel, setNotifChannel] = useState<"email" | "telegram" | "both">("both");
   const [digestHour, setDigestHour] = useState("10");
+  const [digestTone, setDigestTone] = useState<"conservative" | "balanced" | "aggressive">(
+    "balanced"
+  );
 
   const { data: userData, isLoading } = useQuery({
     queryKey: ["user", "me"],
@@ -140,9 +139,7 @@ export function SettingsPage() {
     });
   };
 
-  const handleLanguageChange = (code: string) => {
-    i18n.changeLanguage(code);
-    localStorage.setItem("imperecta_language", code);
+  const handleLanguageChange = (code: LanguageCode) => {
     updateLanguage(code);
   };
 
@@ -213,24 +210,18 @@ export function SettingsPage() {
                       className="flex-1 bg-muted dark:bg-muted"
                     />
                     <Badge className="bg-green-500/15 text-green-700 border-green-500/30 dark:bg-green-500/20 dark:text-green-400 dark:border-green-500/40">
-                      {t("settings.emailConfirmed")}
+                      {t("settings.emailVerified")}
                     </Badge>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t("auth.language")}</label>
-                  <Select
-                    value={i18n.language?.startsWith("ru") ? "ru" : "en"}
-                    onValueChange={handleLanguageChange}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ru">{t("auth.languageRu")}</SelectItem>
-                      <SelectItem value="en">{t("auth.languageEn")}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <LanguageSelector
+                    value={(u?.language as LanguageCode) ?? (i18n.language as LanguageCode)}
+                    onChange={handleLanguageChange}
+                    showFlags
+                    compact={false}
+                  />
                 </div>
                 <Button type="submit" disabled={updateMutation.isPending}>
                   {updateMutation.isPending ? t("common.loading") : t("common.save")}
@@ -378,6 +369,56 @@ export function SettingsPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>{t("settings.aiPersonalization")}</CardTitle>
+              <CardDescription>{t("settings.aiPersonalizationDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t("settings.digestTone")}</label>
+                <RadioGroup
+                  value={digestTone}
+                  onValueChange={(v) =>
+                    setDigestTone(v as "conservative" | "balanced" | "aggressive")
+                  }
+                  className="flex flex-col gap-3"
+                >
+                  <label className="flex cursor-pointer items-start gap-2">
+                    <RadioGroupItemStyled value="conservative" className="mt-0.5" />
+                    <div>
+                      <span className="font-medium">{t("settings.digestToneConservative")}</span>
+                      <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                        {t("settings.digestToneConservativeDesc")}
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2">
+                    <RadioGroupItemStyled value="balanced" className="mt-0.5" />
+                    <div>
+                      <span className="font-medium">{t("settings.digestToneBalanced")}</span>
+                      <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                        {t("settings.digestToneBalancedDesc")}
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2">
+                    <RadioGroupItemStyled value="aggressive" className="mt-0.5" />
+                    <div>
+                      <span className="font-medium">{t("settings.digestToneAggressive")}</span>
+                      <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                        {t("settings.digestToneAggressiveDesc")}
+                      </p>
+                    </div>
+                  </label>
+                </RadioGroup>
+              </div>
+              {/* TODO: save to user profile, use in Claude prompt */}
+            </CardContent>
+          </Card>
+
+          <Separator />
+
+          <Card>
+            <CardHeader>
               <CardTitle>{t("settings.plan")}</CardTitle>
               <CardDescription>{t("settings.planDescription")}</CardDescription>
             </CardHeader>
@@ -393,17 +434,26 @@ export function SettingsPage() {
                       "bg-primary/15 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/40"
                   )}
                 >
-                  {plan === "trial" || plan === "starter"
+                  {plan === "trial"
                     ? t("settings.planTrial")
-                    : plan === "business"
-                      ? t("settings.planBasic")
-                      : t("settings.planPro")}
+                    : plan === "starter"
+                      ? t("settings.planStarter")
+                      : plan === "business"
+                        ? t("settings.planBusiness")
+                        : t("settings.planPro")}
                 </Badge>
               </div>
               {plan === "trial" && trialDaysLeft > 0 && (
-                <p className="text-sm text-amber-600 dark:text-amber-500">
-                  {t("settings.trialWarning", { count: trialDaysLeft })}
-                </p>
+                <div className="space-y-2">
+                  <p className="text-sm text-amber-600 dark:text-amber-500">
+                    {t("settings.trialDaysLeft", { count: trialDaysLeft })}
+                  </p>
+                  <Progress
+                    value={Math.max(0, TRIAL_DAYS_TOTAL - trialDaysLeft)}
+                    max={TRIAL_DAYS_TOTAL}
+                    className="h-2"
+                  />
+                </div>
               )}
               <div className="space-y-2">
                 <p className="text-sm">
@@ -431,7 +481,7 @@ export function SettingsPage() {
                   variant={competitorsVariant}
                 />
               </div>
-              <Button className="w-full" size="lg">
+              <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" size="lg">
                 <Zap className="mr-2 size-4" />
                 {t("settings.upgradePlan")}
               </Button>

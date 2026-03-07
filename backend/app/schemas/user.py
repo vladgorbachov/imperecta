@@ -5,14 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-ALLOWED_LANGUAGE_CODES = frozenset(
-    {
-        "ru", "uk", "be", "kk", "uz", "ky", "tg", "tk", "az",
-        "hy", "ka", "ro", "en", "de", "fr", "es", "it", "pt", "nl", "pl", "cs",
-        "sk", "hu", "bg", "hr", "sr", "sl", "mk", "sq", "el", "tr", "fi", "sv",
-        "no", "da", "et", "lv", "lt", "ga", "is", "mt", "bs",
-    }
-)
+# UN official languages only
+SUPPORTED_LANGUAGES = ["en", "ar", "es", "zh", "ru", "fr"]
+ALLOWED_LANGUAGE_CODES = frozenset(SUPPORTED_LANGUAGES)
+
+AI_TONE_VALUES = frozenset({"conservative", "balanced", "aggressive"})
 
 
 def _validate_language(v: str) -> str:
@@ -57,6 +54,7 @@ class UserResponse(BaseModel):
     plan: str
     trial_ends_at: datetime | None
     language: str
+    ai_tone: str = "balanced"
     created_at: datetime
     telegram_chat_id: int | None = None
 
@@ -70,6 +68,7 @@ class UserUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
     company_name: str | None = Field(None, max_length=255)
     language: str | None = Field(None, max_length=5)
+    ai_tone: str | None = Field(None, max_length=20)
 
     @field_validator("language")
     @classmethod
@@ -77,6 +76,13 @@ class UserUpdate(BaseModel):
         if v is None:
             return None
         return _validate_language(v)
+
+    @field_validator("ai_tone")
+    @classmethod
+    def validate_ai_tone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return _validate_ai_tone(v)
 
 
 class TokenResponse(BaseModel):

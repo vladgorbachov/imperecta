@@ -23,8 +23,7 @@ const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 export function SessionExpiryWarning() {
   const { t } = useTranslation();
-  const { accessToken, persistent, expiresAt, refreshAccessToken, logout } =
-    useAuthStore();
+  const { accessToken, persistent, refreshAccessToken, logout } = useAuthStore();
 
   const [expiredOpen, setExpiredOpen] = useState(false);
   const [expiringOpen, setExpiringOpen] = useState(false);
