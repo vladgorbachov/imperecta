@@ -1,7 +1,7 @@
 """Add performance indexes for production load.
 
-Revision ID: 006_performance_indexes
-Revises: 005_last_login_at
+Revision ID: 007_performance_indexes
+Revises: 006_ai_chat_tables
 Create Date: 2026-03-06
 
 """
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "006_performance_indexes"
-down_revision: Union[str, None] = "005_last_login_at"
+revision: str = "007_performance_indexes"
+down_revision: Union[str, None] = "006_ai_chat_tables"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
