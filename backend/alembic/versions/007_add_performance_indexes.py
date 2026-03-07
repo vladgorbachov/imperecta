@@ -4,6 +4,7 @@ Revision ID: 007_performance_indexes
 Revises: 006_ai_chat_tables
 Create Date: 2026-03-06
 
+Idempotent: indexes may exist from partial run or create_all.
 """
 from typing import Sequence, Union
 
@@ -26,19 +27,27 @@ def upgrade() -> None:
         "ix_snapshots_cp_date",
         "price_snapshots",
         ["competitor_product_id", "scraped_at"],
+        if_not_exists=True,
     )
-    op.create_index("ix_snapshots_date", "price_snapshots", ["scraped_at"])
+    op.create_index(
+        "ix_snapshots_date",
+        "price_snapshots",
+        ["scraped_at"],
+        if_not_exists=True,
+    )
 
     # alert_events: add indexes for triggered_at queries
     op.create_index(
         "ix_alert_events_triggered",
         "alert_events",
         ["triggered_at"],
+        if_not_exists=True,
     )
     op.create_index(
         "ix_alert_events_alert_triggered",
         "alert_events",
         ["alert_id", "triggered_at"],
+        if_not_exists=True,
     )
 
     # scrape_logs: rename marketplace index and add status index
@@ -47,11 +56,13 @@ def upgrade() -> None:
         "ix_scrape_logs_mp_date",
         "scrape_logs",
         ["marketplace_id", "created_at"],
+        if_not_exists=True,
     )
     op.create_index(
         "ix_scrape_logs_status",
         "scrape_logs",
         ["status", "created_at"],
+        if_not_exists=True,
     )
 
     # ai_chat_messages: add composite index for session + created_at
@@ -59,6 +70,7 @@ def upgrade() -> None:
         "ix_chat_messages_session",
         "ai_chat_messages",
         ["session_id", "created_at"],
+        if_not_exists=True,
     )
 
     # api_logs: add composite index for service + created_at
@@ -66,6 +78,7 @@ def upgrade() -> None:
         "ix_api_logs_service_date",
         "api_logs",
         ["service", "created_at"],
+        if_not_exists=True,
     )
 
 
