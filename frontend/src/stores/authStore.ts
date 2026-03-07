@@ -25,6 +25,7 @@ export interface User {
   language: string;
   created_at: string;
   telegram_chat_id?: number | null;
+  avatar_url?: string | null;
   is_superuser?: boolean;
   force_password_change?: boolean;
 }

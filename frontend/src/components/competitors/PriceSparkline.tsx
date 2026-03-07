@@ -10,19 +10,6 @@ interface PriceSparklineProps {
   className?: string;
 }
 
-/** Generate mock 30-day aggressiveness data from competitor id (deterministic). */
-export function mockSparklineData(competitorId: string): number[] {
-  const hash = competitorId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const data: number[] = [];
-  const base = 50 + (hash % 30);
-  for (let i = 0; i < 30; i++) {
-    const trend = Math.sin((i / 30) * Math.PI) * 20;
-    const noise = ((hash + i) % 11) - 5;
-    data.push(Math.max(0, Math.min(100, base + trend + noise)));
-  }
-  return data;
-}
-
 export function PriceSparkline({ data, className }: PriceSparklineProps) {
   const chartData = data.map((v, i) => ({ value: v, index: i }));
 

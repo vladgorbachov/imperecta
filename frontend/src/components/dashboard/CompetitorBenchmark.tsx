@@ -1,6 +1,6 @@
 /**
  * Competitor benchmark: table or grid view.
- * TODO: create GET /api/analytics/competitor-benchmark. Mock 5 competitors.
+ * Data: GET /api/analytics/competitor-benchmark
  */
 
 import { useState } from "react";
@@ -8,55 +8,24 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { LayoutGrid, List } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { analyticsApi } from "@/api/analytics";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-// TODO: create GET /api/analytics/competitor-benchmark
-const MOCK_BENCHMARKS = [
-  {
-    id: "1",
-    name: "Ozon Seller",
-    marketplace: "Ozon" as const,
-    priceIndex: 72,
-    lastChange: 3.2,
-    aggressiveness: "aggressive" as const,
-  },
-  {
-    id: "2",
-    name: "WB Premium",
-    marketplace: "Wildberries" as const,
-    priceIndex: 45,
-    lastChange: -1.5,
-    aggressiveness: "moderate" as const,
-  },
-  {
-    id: "3",
-    name: "Kaspi Partner",
-    marketplace: "Kaspi" as const,
-    priceIndex: 38,
-    lastChange: 0.8,
-    aggressiveness: "passive" as const,
-  },
-  {
-    id: "4",
-    name: "MegaStore",
-    marketplace: "Ozon" as const,
-    priceIndex: 88,
-    lastChange: 5.1,
-    aggressiveness: "aggressive" as const,
-  },
-  {
-    id: "5",
-    name: "TechDeal",
-    marketplace: "Wildberries" as const,
-    priceIndex: 55,
-    lastChange: -2.3,
-    aggressiveness: "moderate" as const,
-  },
-];
-
 type ViewMode = "table" | "grid";
+
+function toMarketplaceDisplay(m: string): string {
+  const map: Record<string, string> = {
+    ozon: "Ozon",
+    wildberries: "Wildberries",
+    kaspi: "Kaspi",
+    custom: "Custom",
+  };
+  return map[m?.toLowerCase() ?? ""] ?? m;
+}
 
 function getBarColor(index: number): string {
   if (index <= 40) return "bg-price-down";
@@ -69,14 +38,44 @@ export function CompetitorBenchmark() {
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
-  const benchmarks = MOCK_BENCHMARKS;
+  const { data: benchmarksRaw, isLoading } = useQuery({
+    queryKey: ["analytics", "competitor-benchmark"],
+    queryFn: () => analyticsApi.getCompetitorBenchmark().then((r) => r.data),
+  });
+
+  const benchmarks = (benchmarksRaw ?? []).map((b) => ({
+    id: (b as { competitor_id?: string }).competitor_id ?? (b as { id?: string }).id ?? "",
+    name: (b as { competitor_name?: string }).competitor_name ?? (b as { name?: string }).name ?? "",
+    marketplace: toMarketplaceDisplay(
+      (b as { marketplace?: string }).marketplace ?? ""
+    ),
+    priceIndex: (b as { price_index?: number }).price_index ?? (b as { priceIndex?: number }).priceIndex ?? 100,
+    lastChange: (b as { last_change_pct?: number }).last_change_pct ?? (b as { lastChange?: number }).lastChange ?? 0,
+    aggressiveness: ((b as { aggressiveness?: string }).aggressiveness ?? "passive") as
+      | "aggressive"
+      | "moderate"
+      | "passive",
+  }));
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border">
+        <Skeleton className="mb-4 h-6 w-48" />
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-20 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.2, duration: 0.3 }}
-      className="rounded-xl border border-border/50 bg-card/60 p-4 shadow-sm backdrop-blur-lg dark:bg-zinc-900/60 dark:border-border/50"
+      className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
     >
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -104,12 +103,16 @@ export function CompetitorBenchmark() {
         </div>
       </div>
 
-      {viewMode === "table" ? (
+      {benchmarks.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          {t("dashboard.benchmark.noData")}
+        </p>
+      ) : viewMode === "table" ? (
         <div className="space-y-2">
           {benchmarks.map((b) => (
             <div
               key={b.id}
-              className="flex flex-wrap items-center gap-3 rounded-lg border border-border/50 p-3 dark:border-border/50"
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-3 dark:border-border"
             >
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{b.name}</p>
@@ -151,7 +154,7 @@ export function CompetitorBenchmark() {
           {benchmarks.map((b) => (
             <div
               key={b.id}
-              className="rounded-lg border border-border/50 p-3 dark:border-border/50"
+              className="rounded-lg border border-border bg-muted/30 p-3 dark:border-border"
             >
               <p className="font-medium">{b.name}</p>
               <Badge variant="secondary" className="mt-1 text-xs">

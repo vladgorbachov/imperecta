@@ -48,7 +48,7 @@ export function ChatInput({ onSend, disabled, className }: ChatInputProps) {
   return (
     <div
       className={cn(
-        "flex gap-2 rounded-xl border border-border/50 bg-card/60 p-3 backdrop-blur-sm dark:border-border/50 dark:bg-card/60",
+        "flex gap-2 rounded-xl border border-border bg-card p-3 dark:border-border",
         className
       )}
     >

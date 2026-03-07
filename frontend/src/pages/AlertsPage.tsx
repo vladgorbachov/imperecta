@@ -95,27 +95,28 @@ function getEventPriority(ev: AlertEvent, type: AlertType): Priority {
   return "info";
 }
 
-/** Mock AI explanation. TODO: GET /api/alerts/events/{id}/ai-explanation */
-function mockAiExplanation(_ev: AlertEvent, type: AlertType): string {
-  if (type === "new_promo") return "Competitor launched March 8 promotion";
-  if (type === "price_drop") return "Competitor reduced price to match market";
-  if (type === "out_of_stock") return "Product temporarily unavailable at competitor";
-  return "Competitor adjusted price after market analysis";
-}
-
-/** Mock 7-day alerts count for sidebar chart. */
-function mockAlertsByDay(): Array<{ day: string; count: number }> {
-  const data: Array<{ day: string; count: number }> = [];
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function groupEventsByDay(events: AlertEvent[]): Array<{ day: string; count: number }> {
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const counts: Record<string, number> = {};
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    data.push({
-      day: days[d.getDay() === 0 ? 6 : d.getDay() - 1],
-      count: Math.floor(Math.random() * 12) + 2,
-    });
+    const key = d.toISOString().slice(0, 10);
+    counts[key] = 0;
   }
-  return data;
+  for (const ev of events) {
+    const key = ev.triggered_at?.slice(0, 10) ?? "";
+    if (key in counts) counts[key]++;
+  }
+  const result: Array<{ day: string; count: number }> = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const dayName = dayNames[d.getDay() === 0 ? 6 : d.getDay() - 1];
+    result.push({ day: dayName, count: counts[key] ?? 0 });
+  }
+  return result;
 }
 
 interface SearchableProductSelectProps {
@@ -273,8 +274,9 @@ export function AlertsPage() {
     return typeMatch && priorityMatch && channelMatch;
   });
 
-  const alertsByDayData = mockAlertsByDay();
-  const alertsTodayCount = alertsByDayData[alertsByDayData.length - 1]?.count ?? 0;
+  const alertsByDayData = groupEventsByDay(events);
+  const today = new Date().toISOString().slice(0, 10);
+  const alertsTodayCount = events.filter((e) => e.triggered_at?.slice(0, 10) === today).length;
 
   const createMutation = useMutation({
     mutationFn: alertsApi.create,
@@ -406,7 +408,7 @@ export function AlertsPage() {
 
         {/* Right: Sidebar (30%) */}
         <aside className="w-full space-y-6 lg:w-[30%] lg:min-w-[280px]">
-          <div className="rounded-xl border border-border bg-card/60 p-4 shadow-sm dark:border-border dark:bg-card/60">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border">
             <h3 className="mb-3 text-sm font-semibold">{t("alerts.alertsToday")}</h3>
             <p className="mb-4 text-3xl font-bold">{alertsTodayCount}</p>
             <div className="h-24">
@@ -431,7 +433,7 @@ export function AlertsPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card/60 p-4 shadow-sm dark:border-border dark:bg-card/60">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold">{t("alerts.activeRules")}</h3>
               <Button size="sm" onClick={() => { setEditAlert(null); setForm({ product_id: "", type: "price_drop", threshold_percent: "", channel: "email" }); setCreateOpen(true); }}>
@@ -600,7 +602,7 @@ function TimelineCard({
   const priority = getEventPriority(event, type);
   const Icon = ALERT_TYPE_ICONS[type];
   const stripeClass = PRIORITY_STRIPE[priority];
-  const aiExplanation = mockAiExplanation(event, type);
+  const aiExplanation = event.message ?? null;
 
   let titleKey = ALERT_TYPE_KEYS[type];
   let title: string;
@@ -640,9 +642,11 @@ function TimelineCard({
             <p className="mt-1 text-sm text-muted-foreground">
               {event.product_name ?? t("alerts.product")} · {event.competitor_name ?? t("dashboard.competitor")} · {marketplace}
             </p>
-            <p className="mt-2 italic text-sm text-muted-foreground">
-              {aiExplanation}
-            </p>
+            {aiExplanation && (
+              <p className="mt-2 italic text-sm text-muted-foreground">
+                {aiExplanation}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

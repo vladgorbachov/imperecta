@@ -43,6 +43,7 @@ export const authApi = {
       language: string;
       created_at: string;
       telegram_chat_id: number | null;
+      avatar_url: string | null;
       is_superuser?: boolean;
       force_password_change?: boolean;
     }>("/auth/me"),
@@ -50,6 +51,7 @@ export const authApi = {
     name?: string;
     company_name?: string;
     language?: string;
+    avatar_url?: string | null;
   }) => apiClient.put("/auth/me", data),
   getTelegramLink: () =>
     apiClient.post<{ code: string; bot_url: string }>("/auth/telegram-link"),

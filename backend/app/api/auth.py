@@ -229,6 +229,7 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
         ai_tone=getattr(current_user, "ai_tone", "balanced"),
         created_at=current_user.created_at,
         telegram_chat_id=current_user.telegram_chat_id,
+        avatar_url=getattr(current_user, "avatar_url", None),
     )
 
 
@@ -254,4 +255,5 @@ async def update_me(
         ai_tone=getattr(current_user, "ai_tone", "balanced"),
         created_at=current_user.created_at,
         telegram_chat_id=current_user.telegram_chat_id,
+        avatar_url=getattr(current_user, "avatar_url", None),
     )

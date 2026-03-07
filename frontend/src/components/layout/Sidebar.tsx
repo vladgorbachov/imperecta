@@ -14,7 +14,6 @@ import {
   Bell,
   FileText,
   Upload,
-  Settings,
   Shield,
   TrendingUp,
   Bot,
@@ -241,14 +240,14 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "sidebar flex flex-col bg-card/50 text-foreground backdrop-blur-xl transition-[width] duration-300 ease-in-out dark:bg-card/50",
+        "sidebar flex flex-col bg-card text-foreground transition-[width] duration-300 ease-in-out",
         "border-e border-border/50 dark:border-border/50",
         isMobile ? "w-full" : collapsed ? "w-16" : "w-[256px]"
       )}
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
-      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4">
+      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4 scrollbar-hide">
         <SidebarSection label={t("nav.section.core")} collapsed={collapsed}>
           <SidebarItem
             icon={LayoutDashboard}
@@ -329,18 +328,6 @@ export function Sidebar({
             isMobile={isMobile}
             onNavigate={onNavigate}
             isActive={isActive("/import")}
-          />
-        </SidebarSection>
-
-        <SidebarSection label={t("nav.section.account")} collapsed={collapsed}>
-          <SidebarItem
-            icon={Settings}
-            label={t("nav.settings")}
-            to="/settings"
-            collapsed={collapsed}
-            isMobile={isMobile}
-            onNavigate={onNavigate}
-            isActive={isActive("/settings")}
           />
         </SidebarSection>
 

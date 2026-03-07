@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router-dom";
-import { Menu, LogOut, Bell, Sun, Moon } from "lucide-react";
+import { Menu, LogOut, Bell, Sun, Moon, Settings } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import {
@@ -88,7 +88,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               aria-label={t("auth.profile")}
             >
               <Avatar className="size-9">
-                <AvatarImage src="" alt={user?.name} />
+                <AvatarImage src={user?.avatar_url ?? undefined} alt={user?.name} />
                 <AvatarFallback className="bg-primary text-primary-foreground">
                   {initials}
                 </AvatarFallback>
@@ -105,6 +105,10 @@ export function Header({ onMenuClick }: HeaderProps) {
               </p>
             </div>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => navigate("/settings")}>
+              <Settings className="me-2 size-4" />
+              {t("nav.settings")}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={handleLogout}>
               <LogOut className="me-2 size-4" />
               {t("auth.logout")}

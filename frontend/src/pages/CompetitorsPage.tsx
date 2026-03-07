@@ -24,6 +24,7 @@ import { formatDate, formatPrice } from "@/lib/formatters";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi } from "@/api/competitors";
+import { analyticsApi } from "@/api/analytics";
 import { productsApi } from "@/api/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +55,7 @@ import { TrendBadge } from "@/components/ui-custom/TrendBadge";
 import { CircularScore } from "@/components/ui-custom/CircularScore";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
-import { PriceSparkline, mockSparklineData } from "@/components/competitors/PriceSparkline";
+import { PriceSparkline } from "@/components/competitors/PriceSparkline";
 import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
@@ -89,23 +90,10 @@ function detectScraperFromUrl(url: string): ScraperType {
   return "auto";
 }
 
-/** Mock benchmark score 0–100 from competitor id. */
-function mockScore(competitorId: string): number {
-  const hash = competitorId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return 25 + (hash % 70);
-}
-
-/** Mock strength: weak / moderate / strong. */
-function mockStrength(score: number): "weak" | "moderate" | "strong" {
+function strengthFromScore(score: number): "weak" | "moderate" | "strong" {
   if (score >= 70) return "strong";
   if (score >= 40) return "moderate";
   return "weak";
-}
-
-/** Mock aggressiveness 0–100 for table column. */
-function mockAggressiveness(competitorId: string): number {
-  const hash = competitorId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return (hash % 40) + 30;
 }
 
 interface SearchableProductSelectProps {
@@ -225,6 +213,20 @@ export function CompetitorsPage() {
       return data;
     },
   });
+
+  const { data: benchmarksRaw = [] } = useQuery({
+    queryKey: ["analytics", "competitor-benchmark"],
+    queryFn: () => analyticsApi.getCompetitorBenchmark().then((r) => r.data),
+  });
+  const benchmarkMap = Object.fromEntries(
+    benchmarksRaw.map((b: { competitor_id?: string; competitor_name?: string; score?: number; trend_30d?: number[] }) => [
+      (b as { competitor_id?: string }).competitor_id ?? "",
+      {
+        score: (b as { score?: number }).score ?? 0,
+        trend_30d: (b as { trend_30d?: number[] }).trend_30d ?? [],
+      },
+    ])
+  );
 
   const { data: productsData } = useQuery({
     queryKey: ["products"],
@@ -383,6 +385,7 @@ export function CompetitorsPage() {
             <CompetitorCard
               key={c.id}
               competitor={c}
+              benchmark={benchmarkMap[c.id]}
               onWhatIsDoingNow={() => handleWhatIsDoingNow(c)}
               onDetails={() => setExpandedId((id) => (id === c.id ? null : c.id))}
               expanded={expandedId === c.id}
@@ -413,6 +416,7 @@ export function CompetitorsPage() {
                 <ExpandableCompetitorRow
                   key={c.id}
                   competitor={c}
+                  benchmark={benchmarkMap[c.id]}
                   products={products}
                   expanded={expandedId === c.id}
                   onToggle={() => setExpandedId((id) => (id === c.id ? null : c.id))}
@@ -470,6 +474,7 @@ function CompetitorCard({
   onAddProduct,
 }: {
   competitor: Competitor;
+  benchmark?: { score: number; trend_30d: number[] };
   onWhatIsDoingNow: () => void;
   onDetails: () => void;
   expanded: boolean;
@@ -479,9 +484,9 @@ function CompetitorCard({
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const marketplace = competitor.marketplace as Marketplace;
-  const score = mockScore(competitor.id);
-  const strength = mockStrength(score);
-  const sparklineData = mockSparklineData(competitor.id);
+  const score = benchmark?.score ?? 0;
+  const strength = strengthFromScore(score);
+  const sparklineData = benchmark?.trend_30d ?? [];
 
   const { data: competitorProducts = [], isLoading } = useQuery({
     queryKey: ["competitors", competitor.id, "products"],
@@ -642,12 +647,14 @@ function LinkedProductRow({
 
 function ExpandableCompetitorRow({
   competitor,
+  benchmark,
   products,
   expanded,
   onToggle,
   onAddProduct,
 }: {
   competitor: Competitor;
+  benchmark?: { score: number; trend_30d: number[] };
   products: { id: string; name: string; sku: string | null }[];
   expanded: boolean;
   onToggle: () => void;
@@ -665,8 +672,8 @@ function ExpandableCompetitorRow({
   });
 
   const marketplace = competitor.marketplace as Marketplace;
-  const score = mockScore(competitor.id);
-  const aggressiveness = mockAggressiveness(competitor.id);
+  const score = benchmark?.score ?? 0;
+  const aggressiveness = score;
 
   return (
     <>

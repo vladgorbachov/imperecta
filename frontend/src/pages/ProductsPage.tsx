@@ -66,8 +66,8 @@ interface ProductRow {
 
 const PAGE_SIZES = [20, 50, 100] as const;
 
-/** Mock 7d change: up/down/stable with percent. Derived from min_competitor vs current. */
-function mock7dChange(
+/** 7d change derived from min_competitor vs current (no historical API). */
+function computePricePosition(
   current: number,
   minComp: number | null
 ): { trend: "up" | "down" | "stable"; value: number } {
@@ -78,8 +78,8 @@ function mock7dChange(
   return { trend: "stable", value: 0 };
 }
 
-/** Mock AI recommendation based on price position. */
-function mockAiRecommendation(
+/** Recommendation based on price position vs competitors. */
+function computeRecommendation(
   current: number,
   minComp: number | null
 ): { type: AiRecommendation; label: string } {
@@ -90,14 +90,14 @@ function mockAiRecommendation(
   return { type: "keep", label: "keep" };
 }
 
-/** Mock margin forecast percent. */
-function mockMarginForecast(current: number, minComp: number | null): number | null {
+/** Margin percent: (current - minComp) / current * 100. */
+function computeMarginPercent(current: number, minComp: number | null): number | null {
   if (minComp == null || minComp <= 0) return null;
   const margin = ((current - minComp) / current) * 100;
   return Math.round(margin * 10) / 10;
 }
 
-/** Mock top 5 at-risk products (most overpriced vs competitors). */
+/** Top at-risk products (most overpriced vs competitors). */
 function getAtRiskProducts(
   products: ProductRow[],
   limit: number
@@ -487,9 +487,9 @@ function ProductTableRow({
 }) {
   const { t } = useTranslation();
   const minPrice = product.min_competitor_price;
-  const change7d = mock7dChange(product.current_price, minPrice);
-  const rec = mockAiRecommendation(product.current_price, minPrice);
-  const marginForecast = mockMarginForecast(product.current_price, minPrice);
+  const change7d = computePricePosition(product.current_price, minPrice);
+  const rec = computeRecommendation(product.current_price, minPrice);
+  const marginForecast = computeMarginPercent(product.current_price, minPrice);
 
   const recBadgeClasses = {
     lower: "bg-price-down/15 text-price-down border-price-down/30 dark:bg-price-down/20 dark:text-price-down",

@@ -4,7 +4,7 @@
 
 :root {
   /* Brand accent — deep teal/cyan (competitive intelligence: sharp, analytical) */
-  --color-accent: hsl(185 80% 40%);
+  --color-accent: hsl(185 80% 35%);
   --color-accent-foreground: hsl(0 0% 100%);
 
   /* Backgrounds — light mode, slight warm tint */
@@ -15,17 +15,17 @@
   --popover: hsl(0 0% 100%);
   --popover-foreground: hsl(220 15% 12%);
 
-  /* Muted */
+  /* Muted — darker for readable contrast on light cards */
   --muted: hsl(40 15% 95%);
-  --muted-foreground: hsl(220 10% 45%);
+  --muted-foreground: hsl(220 14% 32%);
 
   /* Borders and inputs */
   --border: hsl(220 15% 90%);
   --input: hsl(220 15% 90%);
   --ring: 185 80% 40%;
 
-  /* Primary (brand accent) */
-  --primary: 185 80% 40%;
+  /* Primary (brand accent) — darker for contrast on light backgrounds */
+  --primary: 185 80% 32%;
   --primary-foreground: hsl(0 0% 100%);
 
   /* Secondary */
@@ -34,7 +34,7 @@
 
   /* Accent (interactive hover states) */
   --accent: hsl(185 60% 95%);
-  --accent-foreground: hsl(185 80% 25%);
+  --accent-foreground: hsl(185 80% 22%);
 
   /* Semantic colors */
   --color-price-up: hsl(0 72% 51%);
@@ -98,9 +98,9 @@
   --popover: hsl(220 20% 11%);
   --popover-foreground: hsl(0 0% 95%);
 
-  /* Muted */
+  /* Muted — lighter for readable contrast on dark cards */
   --muted: hsl(220 15% 15%);
-  --muted-foreground: hsl(220 10% 60%);
+  --muted-foreground: hsl(220 8% 72%);
 
   /* Borders and inputs */
   --border: hsl(220 15% 18%);
@@ -117,7 +117,7 @@
 
   /* Accent */
   --accent: hsl(185 40% 18%);
-  --accent-foreground: hsl(185 70% 70%);
+  --accent-foreground: hsl(185 75% 78%);
 
   /* Semantic colors — dark variants */
   --color-price-up: hsl(0 72% 55%);
@@ -210,6 +210,12 @@
   html {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-body);
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none;
   }
   body {
     @apply bg-background text-foreground;
@@ -290,4 +296,13 @@
 
 .animate-shimmer {
   animation: shimmer 2s infinite;
+}
+
+/* Hide scrollbar visually, keep scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }

@@ -15,7 +15,7 @@ const PRESET_KEYS = [
 ] as const;
 
 interface PresetQuestionsProps {
-  /** question: translated text for display, presetKey: i18n key for mock lookup */
+  /** question: translated text for display, presetKey: optional i18n key */
   onSelect: (question: string, presetKey: string) => void;
   className?: string;
 }
@@ -30,7 +30,7 @@ export function PresetQuestions({ onSelect, className }: PresetQuestionsProps) {
           key={key}
           type="button"
           onClick={() => onSelect(t(key), key)}
-          className="rounded-xl border border-border/50 bg-card/60 px-4 py-3 text-left text-sm transition-colors hover:bg-accent/20 hover:border-primary/30 dark:border-border/50 dark:bg-card/60 dark:hover:bg-accent/20"
+          className="rounded-xl border border-border bg-card px-4 py-3 text-left text-sm transition-colors hover:bg-muted/50 hover:border-primary/30 dark:border-border dark:hover:bg-muted/50"
         >
           {t(key)}
         </button>

@@ -6,9 +6,9 @@
  * - nav.settings, settings.*, auth.*, common.*
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Zap } from "lucide-react";
+import { Copy, Zap, Upload, Link as LinkIcon } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "@/api/auth";
 import { analyticsApi } from "@/api/analytics";
@@ -31,6 +31,7 @@ import { RadioGroup, RadioGroupItemStyled } from "@/components/ui/radio-group";
 import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -48,6 +49,8 @@ const TRIAL_DAYS_TOTAL = 14;
 
 const DIGEST_HOURS = Array.from({ length: 13 }, (_, i) => i + 8);
 
+const AVATAR_MAX_SIZE_BYTES = 200 * 1024; // 200KB
+
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
@@ -55,6 +58,8 @@ export function SettingsPage() {
   const updateLanguage = useAuthStore((s) => s.updateLanguage);
 
   const [profileForm, setProfileForm] = useState({ name: "", company_name: "" });
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
   const [codeSecondsLeft, setCodeSecondsLeft] = useState(0);
   const [notifChannel, setNotifChannel] = useState<"email" | "telegram" | "both">("both");
@@ -82,6 +87,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (u) {
       setProfileForm({ name: u.name, company_name: u.company_name ?? "" });
+      setAvatarUrl((u as { avatar_url?: string | null }).avatar_url ?? "");
     }
   }, [u?.id]);
 
@@ -93,7 +99,12 @@ export function SettingsPage() {
   }, [telegramCode, codeSecondsLeft]);
 
   const updateMutation = useMutation({
-    mutationFn: async (data: { name?: string; company_name?: string; language?: string }) => {
+    mutationFn: async (data: {
+      name?: string;
+      company_name?: string;
+      language?: string;
+      avatar_url?: string | null;
+    }) => {
       const res = await authApi.updateMe(data);
       return res.data;
     },
@@ -136,7 +147,30 @@ export function SettingsPage() {
     updateMutation.mutate({
       name: profileForm.name,
       company_name: profileForm.company_name || undefined,
+      avatar_url: avatarUrl.trim() || null,
     });
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error(t("settings.avatarInvalidType"));
+      return;
+    }
+    if (file.size > AVATAR_MAX_SIZE_BYTES) {
+      toast.error(t("settings.avatarTooLarge"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      if (result.startsWith("data:image/")) {
+        setAvatarUrl(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   const handleLanguageChange = (code: LanguageCode) => {
@@ -185,6 +219,51 @@ export function SettingsPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleProfileSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">{t("settings.avatar")}</label>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <Avatar className="size-16">
+                      <AvatarImage src={avatarUrl || undefined} alt={u?.name} />
+                      <AvatarFallback className="bg-primary/20 text-primary">
+                        {u?.name
+                          ?.split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2) ?? "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleFileSelect}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <Upload className="me-2 size-4" />
+                          {t("settings.avatarUpload")}
+                        </Button>
+                        <div className="flex items-center gap-2">
+                          <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
+                          <Input
+                            placeholder={t("settings.avatarUrlPlaceholder")}
+                            value={avatarUrl.startsWith("data:") ? "" : avatarUrl}
+                            onChange={(e) => setAvatarUrl(e.target.value.trim())}
+                            className="max-w-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t("auth.name")}</label>
                   <Input

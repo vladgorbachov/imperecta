@@ -297,10 +297,10 @@ imperecta/
 │   │   │                         # ChangePasswordRoute, SessionExpiryWarning, StubPage
 │   │   ├── pages/               # Login, Register, ForgotPassword, ForcePasswordChange, Dashboard,
 │   │   │                         # Products, ProductDetail, Competitors, Alerts, Digests, Import,
-│   │   │                         # Analytics (заглушка), AdminPage (superuser), Settings, NotFound
+│   │   │                         # Analytics, AIAnalyst, AdminPage (superuser), Settings, NotFound
 │   │   ├── stores/              # authStore (Zustand)
 │   │   ├── i18n/                # ru.json, en.json, index.ts
-│   │   ├── data/                # mockFilters, mock data
+│   │   ├── data/                # mockFilters (legacy)
 │   │   └── types/               # filters, shared types
 │   ├── vite.config.ts           # proxy /api → localhost:8000
 │   └── package.json
@@ -345,15 +345,16 @@ imperecta/
 | /alerts | AlertsPage | CRUD алертов (price_drop, price_increase, out_of_stock, new_promo), каналы (email, telegram, both) |
 | /digests | DigestsPage | Список дайджестов, просмотр |
 | /import | ImportPage | Импорт товаров из CSV, preview, шаблон |
-| /analytics | AnalyticsPage | Заглушка «Раздел в разработке» |
+| /analytics | AnalyticsPage | Тренды, прогнозы, матрица сравнения цен |
 | /admin | AdminPage | Админ-панель (только superuser): статистика, маркетплейсы, парсинг, Claude API, пользователи |
-| /settings | SettingsPage | Профиль (name, company_name), привязка Telegram |
+| /settings | SettingsPage | Профиль (name, company_name), аватар (загрузка файлом или по URL), привязка Telegram |
 
 ### Sidebar и навигация
 
 - **Аналитика** (BarChart3) → /analytics — видна всем пользователям
 - **Администрирование** (Shield) → /admin — видна только при `user.is_superuser === true`
-- Остальные пункты: Dashboard, Products, Competitors, Alerts, Digests, Import, Settings
+- Остальные пункты: Dashboard, Products, Competitors, Alerts, Digests, Import
+- **Settings** — в меню пользователя (хедер), не в сайдбаре
 
 ### Аутентификация и сессии
 

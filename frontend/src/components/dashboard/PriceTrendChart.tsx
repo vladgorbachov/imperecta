@@ -1,10 +1,9 @@
 /**
  * Price trend chart with Recharts.
- * Data: GET /api/analytics/products/aggregate-trend
- * TODO: create endpoint. Mock 37 data points (30 days + 7 forecast).
+ * Data: GET /api/dashboard/aggregate-trend
  */
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Area,
@@ -19,60 +18,52 @@ import {
 } from "recharts";
 import { Download } from "lucide-react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
+import { analyticsApi } from "@/api/analytics";
 import { formatChartDate } from "@/lib/formatters";
-
-// TODO: create GET /api/analytics/products/aggregate-trend
-function generateMockData(period: "7d" | "30d" | "90d", locale: string): Array<{
-  date: string;
-  dateLabel: string;
-  myAvg: number;
-  competitorAvg: number;
-  forecast: number | null;
-  isForecast?: boolean;
-}> {
-  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
-  const forecastDays = 7;
-  const data: Array<{
-    date: string;
-    dateLabel: string;
-    myAvg: number;
-    competitorAvg: number;
-    forecast: number | null;
-    isForecast?: boolean;
-  }> = [];
-  const basePrice = 45000;
-  const now = new Date();
-
-  for (let i = -days; i <= forecastDays; i++) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const isForecast = i > 0;
-    const noise = () => (Math.random() - 0.5) * 2000;
-    const trend = i * 50;
-    data.push({
-      date: dateStr,
-      dateLabel: formatChartDate(d, locale),
-      myAvg: Math.round(basePrice + trend + noise() + (isForecast ? i * 30 : 0)),
-      competitorAvg: Math.round(basePrice * 0.95 + trend * 0.8 + noise()),
-      forecast: isForecast ? Math.round(basePrice + trend + i * 40 + noise()) : null,
-      isForecast,
-    });
-  }
-  return data;
-}
+import { Button } from "@/components/ui/button";
 
 type Period = "7d" | "30d" | "90d";
+
+const PERIOD_DAYS: Record<Period, number> = { "7d": 7, "30d": 30, "90d": 90 };
 
 export function PriceTrendChart() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const [period, setPeriod] = useState<Period>("30d");
 
-  const chartData = useMemo(() => generateMockData(period, locale), [period, locale]);
+  const days = PERIOD_DAYS[period];
+  const { data: trendData, isLoading } = useQuery({
+    queryKey: ["dashboard", "aggregate-trend", days],
+    queryFn: async () => {
+      const { data } = await analyticsApi.getAggregateTrend(days, 7);
+      return data;
+    },
+  });
+
+  const chartData = trendData
+    ? [
+        ...trendData.labels.map((date, i) => ({
+          date,
+          dateLabel: formatChartDate(new Date(date), locale),
+          myAvg: trendData.my_products_avg[i] ?? 0,
+          competitorAvg: trendData.competitors_avg[i] ?? 0,
+          forecast: null as number | null,
+          isForecast: false,
+        })),
+        ...(trendData.forecast_labels ?? []).map((date, i) => ({
+          date,
+          dateLabel: formatChartDate(new Date(date), locale),
+          myAvg: 0,
+          competitorAvg: 0,
+          forecast: trendData.forecast[i] ?? null,
+          isForecast: true,
+        })),
+      ]
+    : [];
 
   const handleDownloadCsv = () => {
+    if (!chartData.length) return;
     const headers = ["date", "myAvg", "competitorAvg", "forecast"];
     const rows = chartData.map((r) =>
       [r.date, r.myAvg, r.competitorAvg, r.forecast ?? ""].join(",")
@@ -87,12 +78,40 @@ export function PriceTrendChart() {
     URL.revokeObjectURL(url);
   };
 
+  if (isLoading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="h-[400px] rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
+      >
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          {t("common.loading")}
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (!chartData.length || chartData.every((d) => !d.myAvg && !d.competitorAvg && !d.forecast)) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="h-[400px] rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
+      >
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <p>{t("dashboard.chart.noData")}</p>
+        </div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.1, duration: 0.3 }}
-      className="h-[400px] rounded-xl border border-border/50 bg-card/60 p-4 shadow-sm backdrop-blur-lg dark:bg-zinc-900/60 dark:border-border/50"
+      className="h-[400px] rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-2">
@@ -124,11 +143,11 @@ export function PriceTrendChart() {
           <XAxis
             dataKey="dateLabel"
             tick={{ fontSize: 11 }}
-            stroke="hsl(var(--muted-foreground))"
+            stroke="var(--muted-foreground)"
           />
           <YAxis
             tick={{ fontSize: 11 }}
-            stroke="hsl(var(--muted-foreground))"
+            stroke="var(--muted-foreground)"
             tickFormatter={(v) => new Intl.NumberFormat(locale).format(v)}
           />
           <Tooltip
@@ -175,7 +194,7 @@ export function PriceTrendChart() {
           <Line
             type="monotone"
             dataKey="competitorAvg"
-            stroke="hsl(var(--muted-foreground))"
+            stroke="var(--muted-foreground)"
             strokeWidth={1.5}
             strokeDasharray="5 5"
             dot={false}

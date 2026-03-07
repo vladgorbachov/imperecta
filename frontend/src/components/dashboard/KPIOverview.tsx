@@ -6,7 +6,7 @@
 import { useTranslation } from "react-i18next";
 import { Package, TrendingUp, Bell, DollarSign, ChevronUp, ChevronDown } from "lucide-react";
 import { motion } from "framer-motion";
-import { useDashboardSummary } from "@/hooks/useDashboard";
+import { useDashboardSummary, useDashboardKpi } from "@/hooks/useDashboard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -23,15 +23,15 @@ export function KPIOverview() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const { data: summary, isLoading, isError } = useDashboardSummary();
+  const { data: kpi } = useDashboardKpi();
 
-  // TODO: create GET /api/analytics/dashboard/summary with avg_price_change_24h, revenue_impact
-  const avgPriceChange24h = summary?.price_changes_today
+  const avgPriceChange24h = kpi?.avg_price_change_24h ?? (summary?.price_changes_today
     ? (summary.price_changes_today.increases - summary.price_changes_today.drops) * 0.5
-    : 0;
-  const revenueImpact = 12.4;
-  const revenueConfidence = 84;
-  const criticalAlerts = Math.min(3, summary?.alerts_triggered_today ?? 0);
-  const weekTrend: number | undefined = undefined; // TODO: from API
+    : 0);
+  const revenueImpact = kpi?.revenue_impact_percent ?? 0;
+  const revenueConfidence = Math.round((kpi?.revenue_impact_confidence ?? 0) * 100);
+  const criticalAlerts = Math.min(3, kpi?.critical_alerts_count ?? summary?.alerts_triggered_today ?? 0);
+  const weekTrend = kpi?.trend_vs_last_week?.price_change;
 
   const cards = [
     {
@@ -88,7 +88,7 @@ export function KPIOverview() {
           initial="hidden"
           animate="visible"
           className={cn(
-            "rounded-xl border border-border/50 bg-card/60 p-4 shadow-sm backdrop-blur-lg transition-transform hover:scale-[1.02] dark:bg-zinc-900/60 dark:border-border/50"
+            "rounded-xl border border-border bg-card p-4 shadow-sm transition-transform hover:scale-[1.02] dark:border-border"
           )}
         >
           <div className="flex items-start justify-between">
