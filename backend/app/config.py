@@ -56,8 +56,12 @@ class Settings(BaseSettings):
 
     @property
     def origins_list(self) -> list[str]:
-        """Return allowed origins as list of strings."""
-        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        """Return allowed origins as list of strings. Always includes production frontend."""
+        origins = [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+        production_frontend = "https://imperecta.pages.dev"
+        if production_frontend not in origins:
+            origins.append(production_frontend)
+        return origins
 
     class Config:
         env_file = ".env"
