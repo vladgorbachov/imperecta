@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Administration page for superusers.
  * Stats, Claude API status, add marketplace, scrape activity, error distribution,

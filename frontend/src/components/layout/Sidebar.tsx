@@ -1,3 +1,6 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+// Desktop only: hidden on md and below, shown via MobileSidebar (Sheet) on mobile
+
 /**
  * Sectional sidebar with glass effect.
  * Sections: Core, Market Intelligence, Tools, Account, Admin (superuser).

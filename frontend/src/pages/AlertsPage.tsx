@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Alerts page: Twitter-style timeline feed + sidebar.
  * i18n: nav.alerts, alerts.*, common.*

@@ -84,7 +84,7 @@ export function AnomalyFeed() {
     return (
       <div className="space-y-2">
         {[0, 1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-24 rounded-lg" />
+          <Skeleton key={i} className="h-20 animate-pulse rounded-lg sm:h-24" />
         ))}
       </div>
     );
@@ -99,7 +99,7 @@ export function AnomalyFeed() {
   }
 
   return (
-    <div className="max-h-[400px] space-y-2 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-sm scrollbar-hide dark:border-border">
+    <div className="max-h-[320px] w-full space-y-2 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-sm scrollbar-hide sm:max-h-[400px] dark:border-border">
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {t("dashboard.anomalies.title")}
       </h3>

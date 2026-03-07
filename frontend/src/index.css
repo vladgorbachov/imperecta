@@ -222,7 +222,7 @@
   }
 }
 
-/* Safe area for notched devices (iOS, Android) */
+/* MOBILE-2026: Safe area for notched devices (iOS, Android) */
 .safe-area-top {
   padding-top: env(safe-area-inset-top, 0);
 }
@@ -231,6 +231,11 @@
 }
 .safe-area-bottom-margin {
   margin-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Touch-friendly: remove 300ms tap delay on mobile */
+.touch-manipulation {
+  touch-action: manipulation;
 }
 
 /* Digest modal markdown styles */

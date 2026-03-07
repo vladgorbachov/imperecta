@@ -1,5 +1,7 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
- * KPI Overview: 4 cards with glass effect.
+ * KPI Overview: 4 cards with glass effect, glassmorphism on mobile.
  * Data from GET /api/analytics/dashboard/summary
  */
 
@@ -70,16 +72,16 @@ export function KPIOverview() {
 
   if (isLoading || isError) {
     return (
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-32 rounded-xl" />
+          <Skeleton key={i} className="h-28 rounded-xl animate-pulse sm:h-32" />
         ))}
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       {cards.map((card, i) => (
         <motion.div
           key={card.key}
@@ -88,7 +90,8 @@ export function KPIOverview() {
           initial="hidden"
           animate="visible"
           className={cn(
-            "rounded-xl border border-border bg-card p-4 shadow-sm transition-transform hover:scale-[1.02] dark:border-border"
+            "rounded-xl border border-border bg-card/80 p-4 shadow-sm backdrop-blur-sm transition-transform hover:scale-[1.02] active:scale-[0.98] dark:border-border",
+            "dark:bg-card/90"
           )}
         >
           <div className="flex items-start justify-between">

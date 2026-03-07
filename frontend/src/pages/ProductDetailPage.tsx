@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Product detail page: header, tabs (Chart | Competitors | Alerts).
  * Data from useProduct, analyticsApi.getPriceHistory, analyticsApi.getComparison, useAlerts.
@@ -264,12 +266,12 @@ export function ProductDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/products"
-            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "min-h-11 min-w-11 shrink-0")}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "min-h-12 min-w-12 shrink-0 touch-manipulation")}
           >
             <ArrowLeft className="size-5" />
           </Link>
           <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
-            <h1 className="truncate font-display text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">
+            <h1 className="truncate font-display text-lg font-bold tracking-tight sm:text-xl md:text-2xl lg:text-3xl">
               {product.name}
             </h1>
             {product.sku && (
@@ -343,7 +345,7 @@ export function ProductDetailPage() {
                 </Button>
               ))}
             </div>
-            <div className="h-80 w-full">
+            <div className="h-64 w-full min-w-0 sm:h-72 md:h-80">
               {historyLoading ? (
                 <Skeleton className="h-full w-full" />
               ) : chartData.length === 0 ? (

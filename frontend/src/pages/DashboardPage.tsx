@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * AI Market Command Center dashboard.
  * Responsive grid layout with KPI, charts, anomalies, benchmark, simulator, AI panel, quick actions.
@@ -15,7 +17,7 @@ import { PageHeader } from "@/components/ui-custom/PageHeader";
 
 export function DashboardPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <PageHeader title="nav.dashboard" />
 
       {/* Row 1: KPI Overview */}
@@ -30,30 +32,30 @@ export function DashboardPage() {
 
       {/* Row 2: PriceTrendChart + AnomalyFeed */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
+        <div className="min-w-0 lg:col-span-3">
           <PriceTrendChart />
         </div>
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <AnomalyFeed />
         </div>
       </div>
 
       {/* Row 3: ScenarioSimulator + CompetitorBenchmark */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
+        <div className="min-w-0 lg:col-span-3">
           <ScenarioSimulator />
         </div>
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <CompetitorBenchmark />
         </div>
       </div>
 
       {/* Row 4: AIInsightsPanel + QuickActions */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
+        <div className="min-w-0 lg:col-span-3">
           <AIInsightsPanel />
         </div>
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <QuickActions />
         </div>
       </div>

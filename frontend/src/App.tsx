@@ -98,7 +98,7 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <TooltipProvider delayDuration={300}>
             <Suspense fallback={<LoadingScreen />}>
               <BrowserRouter>
@@ -139,7 +139,7 @@ export function App() {
                   </Route>
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>
-                <Toaster position="top-right" richColors closeButton />
+                <Toaster position="top-center" richColors closeButton />
               </BrowserRouter>
             </Suspense>
           </TooltipProvider>

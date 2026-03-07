@@ -1,5 +1,7 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
- * AI Product Intelligence Hub: toolbar, at-risk widget, table with AI recommendations.
+ * AI Product Intelligence Hub: toolbar, at-risk widget, table/cards with AI recommendations.
  * i18n keys: nav.products, products.*, common.*
  */
 
@@ -344,12 +346,17 @@ export function ProductsPage() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Table (desktop) / Cards (mobile) */}
       <div className="mt-4 min-w-0 flex-1 space-y-4">
         <div className="overflow-hidden rounded-lg border border-border dark:border-border">
           {isLoading ? (
             <div className="p-4">
-              <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-3 md:hidden">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-36 animate-pulse rounded-lg" />
+                ))}
+              </div>
+              <div className="hidden space-y-2 md:block">
                 {Array.from({ length: 7 }).map((_, i) => (
                   <Skeleton key={i} className="h-12 w-full" />
                 ))}
@@ -372,47 +379,64 @@ export function ProductsPage() {
               </Button>
             </div>
           ) : (
-            <div className="max-h-[55vh] overflow-x-auto overflow-y-auto sm:max-h-[calc(100vh-20rem)]">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-10">
-                      <Checkbox
-                        checked={
-                          productRows.length > 0 &&
-                          selectedIds.size === productRows.length
-                        }
-                        onCheckedChange={toggleSelectAll}
-                        aria-label={t("products.selectAll")}
+            <>
+              {/* Mobile: card grid */}
+              <div className="grid grid-cols-2 gap-3 p-4 md:hidden">
+                {productRows.map((p) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    locale={locale}
+                    isSelected={selectedIds.has(p.id)}
+                    onSelect={() => toggleSelect(p.id)}
+                    onRowClick={() => navigate(`/products/${p.id}`)}
+                    t={t}
+                  />
+                ))}
+              </div>
+              {/* Desktop: table */}
+              <div className="hidden max-h-[55vh] overflow-x-auto overflow-y-auto md:block sm:max-h-[calc(100vh-20rem)]">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={
+                            productRows.length > 0 &&
+                            selectedIds.size === productRows.length
+                          }
+                          onCheckedChange={toggleSelectAll}
+                          aria-label={t("products.selectAll")}
+                        />
+                      </TableHead>
+                      <TableHead>{t("products.name")}</TableHead>
+                      <TableHead>{t("products.myPrice")}</TableHead>
+                      <TableHead>{t("products.change7d")}</TableHead>
+                      <TableHead className="hidden lg:table-cell">
+                        {t("products.minCompetitorPrice")}
+                      </TableHead>
+                      <TableHead className="hidden xl:table-cell">
+                        {t("products.marginForecast")}
+                      </TableHead>
+                      <TableHead>{t("products.recommendation")}</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productRows.map((p) => (
+                      <ProductTableRow
+                        key={p.id}
+                        product={p}
+                        locale={locale}
+                        isSelected={selectedIds.has(p.id)}
+                        onSelect={() => toggleSelect(p.id)}
+                        onRowClick={() => navigate(`/products/${p.id}`)}
                       />
-                    </TableHead>
-                    <TableHead>{t("products.name")}</TableHead>
-                    <TableHead>{t("products.myPrice")}</TableHead>
-                    <TableHead>{t("products.change7d")}</TableHead>
-                    <TableHead className="hidden lg:table-cell">
-                      {t("products.minCompetitorPrice")}
-                    </TableHead>
-                    <TableHead className="hidden xl:table-cell">
-                      {t("products.marginForecast")}
-                    </TableHead>
-                    <TableHead>{t("products.recommendation")}</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {productRows.map((p) => (
-                    <ProductTableRow
-                      key={p.id}
-                      product={p}
-                      locale={locale}
-                      isSelected={selectedIds.has(p.id)}
-                      onSelect={() => toggleSelect(p.id)}
-                      onRowClick={() => navigate(`/products/${p.id}`)}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </div>
 
@@ -469,6 +493,65 @@ export function ProductsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function ProductCard({
+  product,
+  locale,
+  isSelected,
+  onSelect,
+  onRowClick,
+  t,
+}: {
+  product: ProductRow;
+  locale: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  onRowClick: () => void;
+  t: (key: string) => string;
+}) {
+  const minPrice = product.min_competitor_price;
+  const change7d = computePricePosition(product.current_price, minPrice);
+  const rec = computeRecommendation(product.current_price, minPrice);
+  const recBadgeClasses = {
+    lower: "bg-price-down/15 text-price-down dark:bg-price-down/20 dark:text-price-down",
+    keep: "bg-muted text-muted-foreground dark:bg-muted/80 dark:text-muted-foreground",
+    raise: "bg-primary/15 text-primary dark:bg-primary/20 dark:text-primary",
+  };
+  const recLabelKey =
+    rec.type === "lower"
+      ? "products.recommendationLower5"
+      : rec.type === "raise"
+        ? "products.recommendationRaise"
+        : "products.recommendationKeep";
+
+  return (
+    <button
+      type="button"
+      onClick={onRowClick}
+      className="flex min-h-[120px] flex-col items-stretch gap-2 rounded-lg border border-border bg-card p-3 text-left transition-colors active:scale-[0.98] hover:bg-muted/50 dark:border-border dark:bg-card dark:hover:bg-muted/30"
+    >
+      <div className="flex items-start justify-between gap-1">
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={onSelect}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={t("products.selectProduct", { name: product.name })}
+          className="shrink-0"
+        />
+        <Badge variant="secondary" className={cn("text-[10px]", recBadgeClasses[rec.type])}>
+          {t(recLabelKey)}
+        </Badge>
+      </div>
+      <span className="line-clamp-2 text-sm font-medium">{product.name}</span>
+      <div className="mt-auto flex items-center justify-between">
+        <span className="text-sm font-semibold">
+          {formatPrice(product.current_price, "RUB", locale)}
+        </span>
+        <TrendBadge trend={change7d.trend} value={change7d.value} size="sm" />
+      </div>
+    </button>
   );
 }
 

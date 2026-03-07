@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Scenario simulator: "What if" price change slider.
  * TODO: create POST /api/analytics/simulate-scenario
@@ -52,7 +54,7 @@ export function ScenarioSimulator() {
             min={-30}
             max={30}
             step={1}
-            className="mt-2"
+            className="mt-2 touch-manipulation"
           />
           <p className="mt-1 text-2xl font-bold">
             {priceChangePercent >= 0 ? "+" : ""}
