@@ -25,6 +25,5 @@ COPY . .
 ARG PORT=8000
 EXPOSE ${PORT}
 
-# Start app only. Run migrations via Railway start command: alembic upgrade head && uvicorn ...
-# Celery worker/beat use custom start commands and must NOT run alembic/uvicorn.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run migrations then start app. Celery worker/beat override CMD with custom commands.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
