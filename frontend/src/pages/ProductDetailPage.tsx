@@ -393,7 +393,7 @@ export function ProductDetailPage() {
         </TabsContent>
 
         <TabsContent value="forecast" className="mt-4 animate-in fade-in-0 duration-200">
-          <div className="h-80 w-full rounded-lg border border-border bg-card/60 p-4 dark:border-border dark:bg-card/60">
+          <div className="h-80 w-full rounded-lg border border-border bg-card p-4 dark:border-border dark:bg-card">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>

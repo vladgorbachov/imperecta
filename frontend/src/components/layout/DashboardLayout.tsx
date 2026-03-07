@@ -24,7 +24,7 @@ export function DashboardLayout() {
         />
       </aside>
       <Header onMenuClick={() => setMobileSheetOpen(true)} />
-      <main className="col-span-1 min-h-0 overflow-auto p-3 md:p-6">
+      <main className="col-span-1 min-h-0 overflow-auto p-3 md:p-6 scrollbar-hide">
         <Outlet />
       </main>
       <MobileSidebar

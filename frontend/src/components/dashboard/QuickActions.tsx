@@ -69,7 +69,7 @@ export function QuickActions() {
             key={a.key}
             variant="outline"
             className={cn(
-              "h-auto flex-col gap-2 rounded-xl border border-border/50 bg-card/60 p-4 shadow-sm backdrop-blur-lg transition-all hover:scale-[1.02] hover:bg-accent/30 dark:bg-zinc-900/60 dark:border-border/50",
+              "h-auto flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:scale-[1.02] hover:bg-muted/50 dark:border-border",
               a.disabled && "opacity-60"
             )}
             onClick={a.disabled ? undefined : a.onClick}

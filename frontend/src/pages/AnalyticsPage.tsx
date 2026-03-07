@@ -3,7 +3,7 @@
  * i18n: analytics.*, dashboard.*, common.*
  */
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +11,6 @@ import { formatChartDate } from "@/lib/formatters";
 import {
   Area,
   AreaChart,
-  ReferenceArea,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -20,6 +19,7 @@ import {
 } from "recharts";
 import { productsApi } from "@/api/products";
 import { competitorsApi } from "@/api/competitors";
+import { analyticsApi } from "@/api/analytics";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,42 +37,7 @@ import { MarketComparisonSection } from "@/components/analytics/MarketComparison
 
 type Period = "7d" | "30d" | "90d";
 
-/** Mock 14-day price forecast with confidence interval. */
-function mockForecastData(locale: string) {
-  const data: Array<{ date: string; dateLabel: string; forecast: number; low: number; high: number }> = [];
-  const base = 45500;
-  const now = new Date();
-  for (let i = 0; i < 14; i++) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const trend = i * 80;
-    const noise = () => (Math.random() - 0.5) * 500;
-    const f = Math.round(base + trend + noise());
-    data.push({
-      date: dateStr,
-      dateLabel: formatChartDate(d, locale),
-      forecast: f,
-      low: Math.max(0, f - 800),
-      high: f + 1000,
-    });
-  }
-  return data;
-}
-
-/** Mock AI trend summary. TODO: GET /api/analytics/trend-summary */
-const MOCK_TREND_SUMMARY = [
-  "Average prices increased by 2.3% over the last 30 days.",
-  "Competitor Ozon reduced prices on 15% of overlapping products.",
-  "Seasonality factor suggests a slight upward trend toward the end of the month.",
-  "Your products maintain a 5% premium vs. market average.",
-];
-
-/** Mock market forecast. TODO: GET /api/analytics/market-forecast */
-const MOCK_MARKET_FORECAST = {
-  text: "Based on current trends, we expect moderate price pressure in the electronics segment. Competitors may run promotional campaigns in the next 7–10 days. Recommended: monitor Ozon and WB for flash sales.",
-  confidence: 87,
-};
+const PERIOD_DAYS: Record<Period, number> = { "7d": 7, "30d": 30, "90d": 90 };
 
 export function AnalyticsPage() {
   const { t, i18n } = useTranslation();
@@ -81,6 +46,8 @@ export function AnalyticsPage() {
   const [period, setPeriod] = useState<Period>("30d");
   const [category, setCategory] = useState<string>("all");
   const [competitorFilter, setCompetitorFilter] = useState<string[]>([]);
+
+  const days = PERIOD_DAYS[period];
 
   const { data: productsData } = useQuery({
     queryKey: ["products", "analytics"],
@@ -104,6 +71,22 @@ export function AnalyticsPage() {
     },
   });
 
+  const { data: trendData } = useQuery({
+    queryKey: ["dashboard", "aggregate-trend", days],
+    queryFn: async () => {
+      const { data } = await analyticsApi.getAggregateTrend(days, 14);
+      return data;
+    },
+  });
+
+  const { data: marketForecast } = useQuery({
+    queryKey: ["analytics", "market-forecast"],
+    queryFn: async () => {
+      const { data } = await analyticsApi.getMarketForecast(14);
+      return data;
+    },
+  });
+
   const products = productsData?.items ?? [];
   const filteredProducts =
     category && category !== "all"
@@ -116,7 +99,21 @@ export function AnalyticsPage() {
     ? competitorFilter
     : competitorList.map((c) => c.id);
 
-  const forecastData = useMemo(() => mockForecastData(locale), [locale]);
+  const forecastData =
+    trendData?.forecast_labels?.map((date, i) => ({
+      date,
+      dateLabel: formatChartDate(new Date(date), locale),
+      forecast: trendData.forecast[i] ?? 0,
+    })) ?? [];
+
+  const marketText = marketForecast?.summary ?? marketForecast?.text ?? "";
+  const marketConfidence = marketForecast?.confidence != null
+    ? Math.round(
+        typeof marketForecast.confidence === "number" && marketForecast.confidence <= 1
+          ? marketForecast.confidence * 100
+          : (marketForecast.confidence as number)
+      )
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -184,16 +181,14 @@ export function AnalyticsPage() {
             competitors={competitorList}
           />
 
-          <div className="rounded-xl border border-border bg-card/60 p-4 shadow-sm dark:border-border dark:bg-card/60">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border dark:bg-card">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
               <Sparkles className="size-4" />
               {t("analytics.aiSummary")}
             </h3>
-            <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-              {MOCK_TREND_SUMMARY.map((s, i) => (
-                <li key={i}>{s}</li>
-              ))}
-            </ul>
+            <p className="text-sm text-muted-foreground">
+              {t("analytics.aiSummaryEmpty")}
+            </p>
           </div>
         </TabsContent>
 
@@ -201,74 +196,76 @@ export function AnalyticsPage() {
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-4">
               <h3 className="text-sm font-semibold">{t("analytics.priceForecast14d")}</h3>
-              <div className="h-64 rounded-lg border border-border bg-card/60 p-4 dark:border-border dark:bg-card/60">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
-                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
-                    <YAxis
-                      tick={{ fontSize: 10 }}
-                      stroke="hsl(var(--muted-foreground))"
-                      tickFormatter={(v) => new Intl.NumberFormat(locale).format(v)}
-                    />
-                    <Tooltip
-                      content={({ active, payload }) => {
-                        if (!active || !payload?.length) return null;
-                        const p = payload[0]?.payload as (typeof forecastData)[0];
-                        return (
-                          <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md">
-                            <p className="mb-1 font-medium">{p?.dateLabel}</p>
-                            <p className="text-xs">
-                              {t("analytics.forecast")}: {p?.forecast != null ? new Intl.NumberFormat(locale).format(p.forecast) : "—"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {t("analytics.confidenceInterval")}: {p?.low}–{p?.high}
-                            </p>
-                          </div>
-                        );
-                      }}
-                    />
-                    {forecastData.map((_, i) => (
-                      <ReferenceArea
-                        key={i}
-                        x1={i - 0.5}
-                        x2={i + 0.5}
-                        y1={forecastData[i]?.low ?? 0}
-                        y2={forecastData[i]?.high ?? 0}
-                        fill="hsl(var(--primary))"
-                        fillOpacity={0.15}
+              <div className="h-64 rounded-lg border border-border bg-card p-4 dark:border-border dark:bg-card">
+                {forecastData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                      <YAxis
+                        tick={{ fontSize: 10 }}
+                        stroke="hsl(var(--muted-foreground))"
+                        tickFormatter={(v) => new Intl.NumberFormat(locale).format(v)}
                       />
-                    ))}
-                    <Area
-                      type="monotone"
-                      dataKey="forecast"
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2}
-                      fill="url(#forecastGrad)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const p = payload[0]?.payload as (typeof forecastData)[0];
+                          return (
+                            <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md">
+                              <p className="mb-1 font-medium">{p?.dateLabel}</p>
+                              <p className="text-xs">
+                                {t("analytics.forecast")}: {p?.forecast != null ? new Intl.NumberFormat(locale).format(p.forecast) : "—"}
+                              </p>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="forecast"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth={2}
+                        fill="url(#forecastGrad)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    {t("analytics.noForecastData")}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="space-y-4">
               <h3 className="text-sm font-semibold">{t("analytics.marketForecastQuestion")}</h3>
-              <div className="rounded-xl border border-border bg-card/60 p-4 shadow-sm dark:border-border dark:bg-card/60">
-                <p className="mb-4 text-sm text-muted-foreground">
-                  {MOCK_MARKET_FORECAST.text}
-                </p>
-                <div>
-                  <p className="mb-2 text-xs text-muted-foreground">
-                    {t("analytics.confidence")}: {MOCK_MARKET_FORECAST.confidence}%
+              <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border dark:bg-card">
+                {marketText ? (
+                  <>
+                    <p className="mb-4 text-sm text-muted-foreground">
+                      {marketText}
+                    </p>
+                    {marketConfidence > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs text-muted-foreground">
+                          {t("analytics.confidence")}: {marketConfidence}%
+                        </p>
+                        <Progress value={marketConfidence} className="h-2" />
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("analytics.noMarketForecast")}
                   </p>
-                  <Progress value={MOCK_MARKET_FORECAST.confidence} className="h-2" />
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -277,7 +274,7 @@ export function AnalyticsPage() {
         </TabsContent>
 
         <TabsContent value="comparison" className="mt-6">
-          <div className="rounded-xl border border-border bg-card/60 p-6 shadow-sm dark:border-border dark:bg-card/60">
+          <div className="rounded-xl border border-border bg-card p-6 shadow-sm dark:border-border dark:bg-card">
             <MarketComparisonSection products={productList} competitors={competitorList} />
           </div>
         </TabsContent>

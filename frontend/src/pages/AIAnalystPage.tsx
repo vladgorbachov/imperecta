@@ -1,6 +1,6 @@
 /**
  * AI Analyst: full-screen chat with user context.
- * TODO: connect to POST /api/ai/chat { messages, context }
+ * Connects to POST /api/ai/chat
  */
 
 import { useState, useRef, useEffect } from "react";
@@ -19,77 +19,7 @@ import { ChatMessageComponent, type ChatMessage } from "@/components/ai/ChatMess
 import { TypingIndicator } from "@/components/ai/TypingIndicator";
 import { PresetQuestions } from "@/components/ai/PresetQuestions";
 import { ChatInput } from "@/components/ai/ChatInput";
-
-/** Mock AI responses keyed by preset i18n key. */
-const MOCK_RESPONSES: Record<string, string> = {
-  "ai.preset1": `## Top 3 Underpriced Products
-
-Based on competitor and market analysis:
-
-| Product | Current | Recommended | Potential |
-|---------|---------|-------------|-----------|
-| Smartphone X | 45,000 ₽ | 48,500 ₽ | +7.8% |
-| Headphones Y | 12,900 ₽ | 14,200 ₽ | +10.1% |
-| Tablet Z | 28,500 ₽ | 30,000 ₽ | +5.3% |
-
-**Recommendation:** Raise prices 5–7% over 2 weeks. Competitors maintain higher levels.`,
-  "ai.preset2": `## Margin vs Market
-
-**Your avg margin:** ~23.5%  
-**Market avg:** ~18.2%
-
-You are **5.3 pp above market** — good for premium positioning.
-
-- **Electronics:** you 21%, market 15%
-- **Accessories:** you 28%, market 22%
-
-**Risk:** increased competition may shift buyers to cheaper options.`,
-  "ai.preset3": `## Scenario: Competitor −15%
-
-**Options:**
-
-1. **No reaction** — if market share is stable, hold price
-2. **Partial cut** — −5–7% on key SKUs
-3. **Promo** — temporary discount instead of permanent cut
-
-**Recommendation:** Cut 5% only on top 3 competing products. Full match would erode margin.`,
-  "ai.preset4": `## +10% Volume Simulation
-
-At current prices:
-
-| Metric | Now | After +10% |
-|--------|-----|------------|
-| Revenue | 2.4M ₽ | 2.64M ₽ |
-| Margin | 23.5% | 22.1% |
-| Logistics | 8% | 7.2% |
-
-**Conclusion:** +10% volume yields +9.2% revenue with modest margin pressure. Feasible with current stock.`,
-  "ai.preset5": `## Analysis: Competitor X Raised Price
-
-Possible reasons:
-
-- **Cost** — higher procurement prices
-- **Demand** — testing price elasticity
-- **Positioning** — moving to premium
-- **Assortment** — phasing out cheap SKUs
-
-**Action:** Monitor 1–2 weeks. If X's volume drops — no need to react.`,
-  "ai.preset6": `## Weekly Risks
-
-1. **Ozon** — promo on 12% of products, possible outflow
-2. **WB** — cuts on gadgets up to −8%
-3. **Stock** — 3 products low on inventory
-
-**Priority:** Update prices on top 5 products by Wednesday.`,
-};
-
-function getMockResponse(userMessage: string, presetKey?: string): string {
-  const key = presetKey ?? userMessage;
-  return (
-    MOCK_RESPONSES[key] ??
-    `Based on your data: **${userMessage}** — this is an important question. I recommend analyzing trends over the last 7 days and comparing with competitors.`
-  );
-}
+import { aiApi } from "@/api/ai";
 
 export function AIAnalystPage() {
   const { t } = useTranslation();
@@ -97,29 +27,53 @@ export function AIAnalystPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [chatHistory, setChatHistory] = useState<string[]>([]);
+  const [sessionId, setSessionId] = useState<number | undefined>();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, isTyping]);
 
-  const handleSend = (content: string, presetKey?: string) => {
+  const handleSend = async (content: string, _presetKey?: string) => {
     const userMsg: ChatMessage = { role: "user", content, timestamp: Date.now() };
     setMessages((m) => [...m, userMsg]);
     setIsTyping(true);
 
-    setTimeout(() => {
-      const aiContent = getMockResponse(content, presetKey);
-      const aiMsg: ChatMessage = { role: "assistant", content: aiContent, timestamp: Date.now() };
+    try {
+      const { data } = await aiApi.chat({
+        message: content,
+        session_id: sessionId,
+        context_type: "general",
+      });
+      setSessionId(data.session_id);
+      const aiMsg: ChatMessage = {
+        role: "assistant",
+        content: data.response,
+        timestamp: Date.now(),
+      };
       setMessages((m) => [...m, aiMsg]);
       setChatHistory((h) => [content, ...h.slice(0, 9)]);
+    } catch (err) {
+      const msg =
+        (err as { response?: { status?: number } })?.response?.status === 503
+          ? t("ai.serviceUnavailable")
+          : t("common.error");
+      toast.error(msg);
+      const fallbackMsg: ChatMessage = {
+        role: "assistant",
+        content: t("ai.serviceUnavailable"),
+        timestamp: Date.now(),
+      };
+      setMessages((m) => [...m, fallbackMsg]);
+    } finally {
       setIsTyping(false);
-    }, 2000);
+    }
   };
 
   const handleNewChat = () => {
     setMessages([]);
     setIsTyping(false);
+    setSessionId(undefined);
   };
 
   const handleCopy = () => {

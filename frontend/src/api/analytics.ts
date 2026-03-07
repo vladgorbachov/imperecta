@@ -73,6 +73,27 @@ export const analyticsApi = {
     apiClient.get<DashboardSummary>("/analytics/dashboard/summary"),
   getDashboardAnomalies: () =>
     apiClient.get<{ items: AnomalyItem[] }>("/analytics/dashboard/anomalies"),
+  getCompetitorBenchmark: () =>
+    apiClient.get<
+      Array<{
+        id: string;
+        name: string;
+        marketplace: string;
+        priceIndex: number;
+        lastChange: number;
+        aggressiveness: string;
+      }>
+    >("/analytics/competitor-benchmark"),
+  getAggregateTrend: (period?: number, forecast?: number) =>
+    apiClient.get<{
+      labels: string[];
+      my_products_avg: number[];
+      competitors_avg: number[];
+      forecast: number[];
+      forecast_labels: string[];
+    }>("/dashboard/aggregate-trend", {
+      params: { period: period ?? 30, forecast: forecast ?? 7 },
+    }),
   getPriceHistory: (productId: string, period: "7d" | "30d" | "90d") =>
     apiClient.get<PriceHistoryResponse>(
       `/analytics/products/${productId}/price-history`,
@@ -81,5 +102,27 @@ export const analyticsApi = {
   getComparison: (productId: string) =>
     apiClient.get<ComparisonResponse>(
       `/analytics/products/${productId}/comparison`
+    ),
+  getKpi: () =>
+    apiClient.get<{
+      total_products: number;
+      total_competitors: number;
+      avg_price_change_24h: number;
+      active_alerts_count: number;
+      critical_alerts_count: number;
+      revenue_impact_percent: number;
+      revenue_impact_confidence: number;
+      trend_vs_last_week: { products: number; price_change: number; alerts: number };
+    }>("/dashboard/kpi"),
+  getComparisonMatrix: () =>
+    apiClient.get<{
+      products: { id: string; name: string }[];
+      competitors: { id: string; name: string; marketplace: string }[];
+      matrix: (number | null)[][];
+    }>("/analytics/comparison-matrix"),
+  getMarketForecast: (days?: number) =>
+    apiClient.get<{ text?: string; confidence?: number; forecast?: unknown }>(
+      "/analytics/market-forecast",
+      { params: { days: days ?? 7 } }
     ),
 };

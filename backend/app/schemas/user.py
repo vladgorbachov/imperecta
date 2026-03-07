@@ -57,6 +57,7 @@ class UserResponse(BaseModel):
     ai_tone: str = "balanced"
     created_at: datetime
     telegram_chat_id: int | None = None
+    avatar_url: str | None = None
 
     class Config:
         from_attributes = True
@@ -69,6 +70,7 @@ class UserUpdate(BaseModel):
     company_name: str | None = Field(None, max_length=255)
     language: str | None = Field(None, max_length=5)
     ai_tone: str | None = Field(None, max_length=20)
+    avatar_url: str | None = Field(None, max_length=2048)
 
     @field_validator("language")
     @classmethod

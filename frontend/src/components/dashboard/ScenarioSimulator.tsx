@@ -34,7 +34,7 @@ export function ScenarioSimulator() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.25, duration: 0.3 }}
-      className="rounded-xl border border-border/50 bg-card/60 p-4 shadow-sm backdrop-blur-lg dark:bg-zinc-900/60 dark:border-border/50"
+      className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
     >
       <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {t("dashboard.simulator.title")}
@@ -60,7 +60,7 @@ export function ScenarioSimulator() {
           </p>
         </div>
 
-        <div className="space-y-2 rounded-lg border border-border/50 bg-background/50 p-3 dark:border-border/50">
+        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 dark:border-border">
           <p className="text-sm">
             {t("dashboard.simulator.expectedSales")}{" "}
             <span

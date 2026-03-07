@@ -11,6 +11,16 @@ export function useDashboardSummary() {
   });
 }
 
+export function useDashboardKpi() {
+  return useQuery({
+    queryKey: ["dashboard", "kpi"],
+    queryFn: async () => {
+      const { data } = await analyticsApi.getKpi();
+      return data;
+    },
+  });
+}
+
 export function useDashboardAnomalies() {
   return useQuery({
     queryKey: ["dashboard", "anomalies"],

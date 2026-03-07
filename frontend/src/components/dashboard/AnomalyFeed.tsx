@@ -24,60 +24,6 @@ const SEVERITY_COLORS: Record<Severity, string> = {
   info: "bg-blue-500",
 };
 
-// TODO: mock when API fails or returns empty
-const MOCK_ANOMALIES = [
-  {
-    id: "1",
-    product_id: "mock-1",
-    product_name: "iPhone 15 128GB",
-    competitor_name: "Ozon",
-    change_percent: -12,
-    ai_insight: "Competitor running March 8 promo",
-    detected_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    severity: "critical" as Severity,
-  },
-  {
-    id: "2",
-    product_id: "mock-2",
-    product_name: "Samsung Galaxy S24",
-    competitor_name: "Wildberries",
-    change_percent: 5,
-    ai_insight: "Price increased after stock replenishment",
-    detected_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-    severity: "warning" as Severity,
-  },
-  {
-    id: "3",
-    product_id: "mock-3",
-    product_name: "MacBook Air M3",
-    competitor_name: "Ozon",
-    change_percent: -8,
-    ai_insight: "Flash sale detected",
-    detected_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    severity: "info" as Severity,
-  },
-  {
-    id: "4",
-    product_id: "mock-4",
-    product_name: "AirPods Pro 2",
-    competitor_name: "Kaspi",
-    change_percent: -15,
-    ai_insight: "New competitor entered market",
-    detected_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-    severity: "critical" as Severity,
-  },
-  {
-    id: "5",
-    product_id: "mock-5",
-    product_name: "Xiaomi 14",
-    competitor_name: "Wildberries",
-    change_percent: 3,
-    ai_insight: "Minor adjustment, monitor",
-    detected_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    severity: "info" as Severity,
-  },
-];
-
 interface AnomalyItem {
   id?: string;
   product_id?: string;
@@ -129,9 +75,10 @@ export function AnomalyFeed() {
             competitor_name: a.competitor_name,
             change_percent: a.change_percent,
             detected_at: a.detected_at,
+            product_id: a.product_id,
           })
         )
-      : MOCK_ANOMALIES;
+      : [];
 
   if (isLoading) {
     return (
@@ -152,18 +99,23 @@ export function AnomalyFeed() {
   }
 
   return (
-    <div className="max-h-[400px] space-y-2 overflow-y-auto rounded-xl border border-border/50 bg-card/60 p-4 shadow-sm backdrop-blur-lg dark:bg-zinc-900/60 dark:border-border/50">
+    <div className="max-h-[400px] space-y-2 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-sm scrollbar-hide dark:border-border">
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {t("dashboard.anomalies.title")}
       </h3>
-      {anomalies.slice(0, 5).map((item, i) => (
+      {anomalies.length === 0 ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          {t("dashboard.anomaliesEmpty")}
+        </p>
+      ) : (
+        anomalies.slice(0, 5).map((item, i) => (
         <motion.div
           key={item.id ?? i}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 + i * 0.05 }}
           className={cn(
-            "flex gap-3 rounded-lg border border-border/50 bg-background/50 p-3 transition-colors hover:bg-accent/30 dark:border-border/50"
+            "flex gap-3 rounded-lg border border-border bg-muted/50 p-3 transition-colors hover:bg-muted dark:border-border"
           )}
         >
           <div
@@ -198,7 +150,7 @@ export function AnomalyFeed() {
             size="sm"
             className="shrink-0"
             onClick={() => {
-              if (item.product_id && !item.product_id.startsWith("mock")) {
+              if (item.product_id) {
                 navigate(`/products/${item.product_id}`);
               } else {
                 navigate("/products");
@@ -208,7 +160,8 @@ export function AnomalyFeed() {
             {t("dashboard.anomalies.view")}
           </Button>
         </motion.div>
-      ))}
+      ))
+      )}
     </div>
   );
 }

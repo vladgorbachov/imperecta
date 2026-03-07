@@ -1,11 +1,12 @@
 /**
  * Heatmap: rows = my products, columns = competitors.
  * Cell color: green (I'm cheaper) to red (I'm more expensive).
- * TODO: GET /api/analytics/comparison-matrix
+ * Data: GET /api/analytics/comparison-matrix
  */
 
 import { useTranslation } from "react-i18next";
-import { formatPrice } from "@/lib/formatters";
+import { useQuery } from "@tanstack/react-query";
+import { analyticsApi } from "@/api/analytics";
 import {
   Dialog,
   DialogContent,
@@ -14,18 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-export interface ComparisonCell {
-  myPrice: number;
-  competitorPrice: number;
-  diffPercent: number;
-}
-
-export interface ComparisonMatrixData {
-  products: { id: string; name: string }[];
-  competitors: { id: string; name: string }[];
-  cells: Record<string, Record<string, ComparisonCell>>;
-}
-
 interface ComparisonMatrixProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -33,39 +22,36 @@ interface ComparisonMatrixProps {
   competitors: { id: string; name: string }[];
 }
 
-/** Mock comparison matrix data. */
-function mockMatrixData(
-  products: { id: string; name: string }[],
-  competitors: { id: string; name: string }[]
-): ComparisonMatrixData {
-  const cells: Record<string, Record<string, ComparisonCell>> = {};
-  const basePrice = 45000;
-  products.forEach((p, pi) => {
-    cells[p.id] = {};
-    competitors.forEach((c, ci) => {
-      const myP = basePrice + pi * 2000 + (p.id.charCodeAt(0) % 500);
-      const compP = myP * (0.9 + (ci * 0.05) + ((c.id.charCodeAt(0) % 10) / 100));
-      const diffPercent = ((myP - compP) / compP) * 100;
-      cells[p.id][c.id] = {
-        myPrice: myP,
-        competitorPrice: compP,
-        diffPercent,
-      };
-    });
-  });
-  return { products, competitors, cells };
+function toMarketplaceDisplay(m: string): string {
+  const map: Record<string, string> = {
+    ozon: "Ozon",
+    wildberries: "Wildberries",
+    kaspi: "Kaspi",
+    custom: "Custom",
+  };
+  return map[m?.toLowerCase() ?? ""] ?? m;
 }
 
 export function ComparisonMatrix({
   open,
   onOpenChange,
-  products,
-  competitors,
+  products: _products,
+  competitors: _competitors,
 }: ComparisonMatrixProps) {
-  const { t, i18n } = useTranslation();
-  const locale = i18n.language;
+  const { t } = useTranslation();
 
-  const data = mockMatrixData(products, competitors);
+  const { data: matrixData, isLoading } = useQuery({
+    queryKey: ["analytics", "comparison-matrix"],
+    queryFn: async () => {
+      const { data } = await analyticsApi.getComparisonMatrix();
+      return data;
+    },
+    enabled: open,
+  });
+
+  const products = matrixData?.products ?? [];
+  const competitors = matrixData?.competitors ?? [];
+  const matrix = matrixData?.matrix ?? [];
 
   const getCellColor = (diffPercent: number) => {
     if (diffPercent <= -10) return "bg-emerald-500/80 dark:bg-emerald-600/80";
@@ -86,7 +72,11 @@ export function ComparisonMatrix({
           <p className="text-sm text-muted-foreground dark:text-muted-foreground">
             {t("competitors.comparisonMatrixHint")}
           </p>
-          {products.length === 0 || competitors.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+              {t("common.loading")}
+            </div>
+          ) : products.length === 0 || competitors.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {t("competitors.comparisonMatrixEmpty")}
             </p>
@@ -103,12 +93,12 @@ export function ComparisonMatrix({
                   <div
                     key={c.id}
                     className="truncate bg-muted/50 p-2 text-center text-xs font-medium dark:bg-muted/30"
-                    title={c.name}
+                    title={`${c.name} (${toMarketplaceDisplay(c.marketplace)})`}
                   >
                     {c.name}
                   </div>
                 ))}
-                {products.flatMap((p) => [
+                {products.flatMap((p, pi) => [
                   <div
                     key={`label-${p.id}`}
                     className="truncate bg-muted/30 p-2 text-xs dark:bg-muted/20"
@@ -116,9 +106,9 @@ export function ComparisonMatrix({
                   >
                     {p.name}
                   </div>,
-                  ...competitors.map((c) => {
-                    const cell = data.cells[p.id]?.[c.id];
-                    if (!cell)
+                  ...competitors.map((c, ci) => {
+                    const diff = matrix[pi]?.[ci];
+                    if (diff == null)
                       return (
                         <div key={`${p.id}-${c.id}`} className="bg-background p-1" />
                       );
@@ -127,12 +117,12 @@ export function ComparisonMatrix({
                         key={`${p.id}-${c.id}`}
                         className={cn(
                           "flex min-h-[44px] cursor-default items-center justify-center p-1 text-xs transition-colors hover:ring-2 hover:ring-ring",
-                          getCellColor(cell.diffPercent)
+                          getCellColor(diff)
                         )}
-                        title={`${t("competitors.myPrice")}: ${formatPrice(cell.myPrice, "RUB", locale)} | ${c.name}: ${formatPrice(cell.competitorPrice, "RUB", locale)} (${cell.diffPercent > 0 ? "+" : ""}${cell.diffPercent.toFixed(1)}%)`}
+                        title={`${c.name}: ${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`}
                       >
-                        {cell.diffPercent > 0 ? "+" : ""}
-                        {cell.diffPercent.toFixed(0)}%
+                        {diff > 0 ? "+" : ""}
+                        {diff.toFixed(0)}%
                       </div>
                     );
                   }),

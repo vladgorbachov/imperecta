@@ -47,7 +47,7 @@ export function AdvancedScenarioSimulator() {
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card/60 p-4 shadow-sm dark:border-border dark:bg-card/60">
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border dark:bg-card">
       <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {t("analytics.scenarioSimulator")}
       </h3>
