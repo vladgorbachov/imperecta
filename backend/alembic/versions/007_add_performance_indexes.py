@@ -17,11 +17,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # price_snapshots: replace single-column indexes with composite + date
-    op.drop_index(
-        "ix_price_snapshots_competitor_product_id",
-        table_name="price_snapshots",
+    # Use IF EXISTS for idempotency (indexes may not exist if create_all used current model)
+    op.execute(
+        "DROP INDEX IF EXISTS ix_price_snapshots_competitor_product_id"
     )
-    op.drop_index("ix_price_snapshots_scraped_at", table_name="price_snapshots")
+    op.execute("DROP INDEX IF EXISTS ix_price_snapshots_scraped_at")
     op.create_index(
         "ix_snapshots_cp_date",
         "price_snapshots",
@@ -42,10 +42,7 @@ def upgrade() -> None:
     )
 
     # scrape_logs: rename marketplace index and add status index
-    op.drop_index(
-        "ix_scrape_logs_marketplace_created",
-        table_name="scrape_logs",
-    )
+    op.execute("DROP INDEX IF EXISTS ix_scrape_logs_marketplace_created")
     op.create_index(
         "ix_scrape_logs_mp_date",
         "scrape_logs",
@@ -74,14 +71,14 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # api_logs
-    op.drop_index("ix_api_logs_service_date", table_name="api_logs")
+    op.execute("DROP INDEX IF EXISTS ix_api_logs_service_date")
 
     # ai_chat_messages
-    op.drop_index("ix_chat_messages_session", table_name="ai_chat_messages")
+    op.execute("DROP INDEX IF EXISTS ix_chat_messages_session")
 
     # scrape_logs
-    op.drop_index("ix_scrape_logs_status", table_name="scrape_logs")
-    op.drop_index("ix_scrape_logs_mp_date", table_name="scrape_logs")
+    op.execute("DROP INDEX IF EXISTS ix_scrape_logs_status")
+    op.execute("DROP INDEX IF EXISTS ix_scrape_logs_mp_date")
     op.create_index(
         "ix_scrape_logs_marketplace_created",
         "scrape_logs",
@@ -89,12 +86,12 @@ def downgrade() -> None:
     )
 
     # alert_events
-    op.drop_index("ix_alert_events_alert_triggered", table_name="alert_events")
-    op.drop_index("ix_alert_events_triggered", table_name="alert_events")
+    op.execute("DROP INDEX IF EXISTS ix_alert_events_alert_triggered")
+    op.execute("DROP INDEX IF EXISTS ix_alert_events_triggered")
 
     # price_snapshots
-    op.drop_index("ix_snapshots_date", table_name="price_snapshots")
-    op.drop_index("ix_snapshots_cp_date", table_name="price_snapshots")
+    op.execute("DROP INDEX IF EXISTS ix_snapshots_date")
+    op.execute("DROP INDEX IF EXISTS ix_snapshots_cp_date")
     op.create_index(
         "ix_price_snapshots_competitor_product_id",
         "price_snapshots",
