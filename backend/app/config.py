@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     proxy_sticky_duration: int = 10  # minutes for sticky session
     proxy_country_routing: bool = True  # use geo-targeted proxies
     sentry_dsn: str = ""
-    allowed_origins: str = "http://localhost:5173"
+    allowed_origins: str = "http://localhost:5173,https://imperecta.pages.dev"
     app_env: str = "development"
     port: int = 8000
 
