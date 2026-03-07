@@ -9,10 +9,13 @@ Changes:
 - create scrape_logs table
 - create admin_marketplaces table
 - create api_logs table
+
+Idempotent: tables may exist from create_all; use IF NOT EXISTS.
 """
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import inspect
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -22,20 +25,34 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    """Add superuser fields and new tables."""
-    op.add_column(
-        "users",
-        sa.Column("is_superuser", sa.Boolean(), nullable=False, server_default="false"),
-    )
-    op.add_column(
-        "users",
-        sa.Column("force_password_change", sa.Boolean(), nullable=False, server_default="false"),
-    )
+def _table_exists(connection, name: str) -> bool:
+    return inspect(connection).has_table(name)
 
-    op.create_table(
-        "scrape_logs",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+
+def upgrade() -> None:
+    """Add superuser fields and new tables. Idempotent for create_all-created DB."""
+    conn = op.get_bind()
+
+    # users: add columns if not exist
+    if not _table_exists(conn, "users"):
+        raise RuntimeError("users table must exist (run 001-003 or create_all)")
+    insp = inspect(conn)
+    user_cols = {c["name"] for c in insp.get_columns("users")}
+    if "is_superuser" not in user_cols:
+        op.add_column(
+            "users",
+            sa.Column("is_superuser", sa.Boolean(), nullable=False, server_default="false"),
+        )
+    if "force_password_change" not in user_cols:
+        op.add_column(
+            "users",
+            sa.Column("force_password_change", sa.Boolean(), nullable=False, server_default="false"),
+        )
+
+    if not _table_exists(conn, "scrape_logs"):
+        op.create_table(
+            "scrape_logs",
+            sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("marketplace_id", sa.String(50), nullable=False),
         sa.Column("marketplace_name", sa.String(100), nullable=False),
         sa.Column(
@@ -61,18 +78,19 @@ def upgrade() -> None:
             ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_scrape_logs_marketplace_id", "scrape_logs", ["marketplace_id"])
-    op.create_index("ix_scrape_logs_created_at", "scrape_logs", ["created_at"])
-    op.create_index(
-        "ix_scrape_logs_marketplace_created",
-        "scrape_logs",
-        ["marketplace_id", "created_at"],
-    )
+        )
+        op.create_index("ix_scrape_logs_marketplace_id", "scrape_logs", ["marketplace_id"])
+        op.create_index("ix_scrape_logs_created_at", "scrape_logs", ["created_at"])
+        op.create_index(
+            "ix_scrape_logs_marketplace_created",
+            "scrape_logs",
+            ["marketplace_id", "created_at"],
+        )
 
-    op.create_table(
-        "admin_marketplaces",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+    if not _table_exists(conn, "admin_marketplaces"):
+        op.create_table(
+            "admin_marketplaces",
+            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("marketplace_id", sa.String(50), nullable=False),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("domain", sa.String(255), nullable=False),
@@ -98,10 +116,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("marketplace_id"),
-    )
+        )
 
-    op.create_table(
-        "api_logs",
+    if not _table_exists(conn, "api_logs"):
+        op.create_table(
+            "api_logs",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("service", sa.String(30), nullable=False),
         sa.Column("endpoint", sa.String(255), nullable=True),
@@ -117,9 +136,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_api_logs_service", "api_logs", ["service"])
-    op.create_index("ix_api_logs_created_at", "api_logs", ["created_at"])
+        )
+        op.create_index("ix_api_logs_service", "api_logs", ["service"])
+        op.create_index("ix_api_logs_created_at", "api_logs", ["created_at"])
 
 
 def downgrade() -> None:
