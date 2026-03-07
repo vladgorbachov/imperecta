@@ -21,6 +21,15 @@ def _validate_language(v: str) -> str:
     return v
 
 
+def _validate_ai_tone(v: str) -> str:
+    """Validate ai_tone is in allowed values."""
+    if v not in AI_TONE_VALUES:
+        raise ValueError(
+            f"Invalid ai_tone. Allowed: {', '.join(sorted(AI_TONE_VALUES))}"
+        )
+    return v
+
+
 class UserRegister(BaseModel):
     """Schema for user registration."""
 
@@ -70,7 +79,7 @@ class UserUpdate(BaseModel):
     company_name: str | None = Field(None, max_length=255)
     language: str | None = Field(None, max_length=5)
     ai_tone: str | None = Field(None, max_length=20)
-    avatar_url: str | None = Field(None, max_length=2048)
+    avatar_url: str | None = Field(None, max_length=500_000)
 
     @field_validator("language")
     @classmethod

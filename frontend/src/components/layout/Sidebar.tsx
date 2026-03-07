@@ -151,19 +151,23 @@ interface SidebarSectionProps {
   label: string;
   collapsed: boolean;
   children: React.ReactNode;
+  rightAction?: React.ReactNode;
 }
 
-function SidebarSection({ label, collapsed, children }: SidebarSectionProps) {
+function SidebarSection({ label, collapsed, children, rightAction }: SidebarSectionProps) {
   const showLabels = !collapsed;
 
   return (
     <Collapsible defaultOpen className="px-2">
       {showLabels && (
-        <CollapsibleTrigger
-          className="flex w-full items-center py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {label}
-        </CollapsibleTrigger>
+        <div className="flex w-full items-center justify-between gap-2 py-2">
+          <CollapsibleTrigger
+            className="flex flex-1 items-center text-left text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {label}
+          </CollapsibleTrigger>
+          {rightAction}
+        </div>
       )}
       <CollapsibleContent>
         <div className="space-y-0.5 py-1">{children}</div>
@@ -205,19 +209,15 @@ function SidebarFooter({
             : trialDaysLeft}
         </p>
       )}
-      {!isMobile && (
+      {!isMobile && collapsed && (
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-full text-muted-foreground hover:bg-accent/50 hover:text-foreground"
           onClick={onToggle}
-          aria-label={collapsed ? t("common.expand") : t("common.collapse")}
+          aria-label={t("common.expand")}
         >
-          {collapsed ? (
-            <ChevronRight className="size-4" />
-          ) : (
-            <ChevronLeft className="size-4" />
-          )}
+          <ChevronRight className="size-4" />
         </Button>
       )}
     </div>
@@ -248,7 +248,27 @@ export function Sidebar({
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
       <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4 scrollbar-hide">
-        <SidebarSection label={t("nav.section.core")} collapsed={collapsed}>
+        <SidebarSection
+          label={t("nav.section.core")}
+          collapsed={collapsed}
+          rightAction={
+            !isMobile ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                onClick={onToggle}
+                aria-label={collapsed ? t("common.expand") : t("common.collapse")}
+              >
+                {collapsed ? (
+                  <ChevronRight className="size-4" />
+                ) : (
+                  <ChevronLeft className="size-4" />
+                )}
+              </Button>
+            ) : undefined
+          }
+        >
           <SidebarItem
             icon={LayoutDashboard}
             label={t("nav.dashboard")}
