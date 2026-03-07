@@ -6,6 +6,7 @@ import time
 from uuid import UUID
 
 import anthropic
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -13,10 +14,16 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 settings = Settings()
 
-SYSTEM_PROMPT = """Ты — аналитик конкурентной разведки. Пиши на русском языке.
+SYSTEM_PROMPT_BASE = """Ты — аналитик конкурентной разведки. Пиши на русском языке.
 Генерируй краткий, полезный дайджест изменений цен для e-commerce бизнеса.
 Формат: markdown. Структура: Ключевые изменения, Акции конкурентов,
 Рекомендации по ценообразованию, Аномалии (если есть)."""
+
+AI_TONE_INSTRUCTIONS = {
+    "conservative": "Be cautious. Emphasize risks. Recommend minimal changes.",
+    "balanced": "Be objective. Present both opportunities and risks.",
+    "aggressive": "Focus on growth opportunities. Recommend bold moves.",
+}
 
 
 async def _log_api_call(
@@ -67,14 +74,24 @@ def _fallback_digest(period_data: dict) -> str:
     return "\n".join(lines)
 
 
+def _build_system_prompt(ai_tone: str = "balanced") -> str:
+    """Build system prompt with ai_tone instruction."""
+    tone_instruction = AI_TONE_INSTRUCTIONS.get(
+        ai_tone, AI_TONE_INSTRUCTIONS["balanced"]
+    )
+    return f"{SYSTEM_PROMPT_BASE}\n\nTone: {tone_instruction}"
+
+
 async def generate_digest(
     user_id: UUID,
     period_data: dict,
     db: AsyncSession | None = None,
+    user=None,
 ) -> str:
     """
     Generate digest markdown using Anthropic Claude API.
     period_data: { top_changes, promos, anomalies, summary_stats }
+    user: User model instance for ai_tone. If None and db provided, fetches from DB.
     Returns markdown string. Fallback to template on error.
     Logs API calls to api_logs when db session is provided.
     """
@@ -82,6 +99,18 @@ async def generate_digest(
         logger.warning("CLAUDE_API_KEY not set, using fallback digest")
         return _fallback_digest(period_data)
 
+    ai_tone = "balanced"
+    if user:
+        ai_tone = getattr(user, "ai_tone", "balanced") or "balanced"
+    elif db:
+        from app.models import User
+
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        u = user_result.scalar_one_or_none()
+        if u:
+            ai_tone = getattr(u, "ai_tone", "balanced") or "balanced"
+
+    system_prompt = _build_system_prompt(ai_tone)
     user_prompt = json.dumps(period_data, ensure_ascii=False, indent=2)
     start = time.time()
 
@@ -90,7 +119,7 @@ async def generate_digest(
         response = await client.messages.create(
             model=settings.claude_model,
             max_tokens=2048,
-            system=SYSTEM_PROMPT,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
         duration_ms = int((time.time() - start) * 1000)

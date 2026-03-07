@@ -11,9 +11,9 @@
  * - common.loading
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Upload, Download, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Upload, Download, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { importApi } from "@/api/import";
 import { apiBaseUrl } from "@/api/client";
@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -49,9 +50,11 @@ const COLUMN_KEYS: Record<(typeof KNOWN_COLUMNS)[number], string> = {
   category: "import.columnCategory",
 };
 
-function parseCsv(text: string): { headers: string[]; rows: string[][]; totalRows: number } {
+function parseCsv(
+  text: string
+): { headers: string[]; rows: string[][]; allRows: string[][]; totalRows: number } {
   const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
-  if (lines.length === 0) return { headers: [], rows: [], totalRows: 0 };
+  if (lines.length === 0) return { headers: [], rows: [], allRows: [], totalRows: 0 };
   const parseRow = (line: string): string[] => {
     const result: string[] = [];
     let current = "";
@@ -73,7 +76,7 @@ function parseCsv(text: string): { headers: string[]; rows: string[][]; totalRow
   const headers = parseRow(lines[0]);
   const allRows = lines.slice(1).map(parseRow);
   const rows = allRows.slice(0, 5);
-  return { headers, rows, totalRows: allRows.length };
+  return { headers, rows, allRows, totalRows: allRows.length };
 }
 
 function autoMapColumn(header: string): (typeof KNOWN_COLUMNS)[number] | null {
@@ -116,6 +119,7 @@ export function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
+  const [allRows, setAllRows] = useState<string[][]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [columnMap, setColumnMap] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
@@ -126,6 +130,8 @@ export function ImportPage() {
   } | null>(null);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [productsWithoutCategory, setProductsWithoutCategory] = useState(0);
+  const [autoCategorizeDismissed, setAutoCategorizeDismissed] = useState(false);
 
   const handleFileSelect = useCallback(
     async (selectedFile: File) => {
@@ -136,9 +142,10 @@ export function ImportPage() {
       setFile(selectedFile);
       setResult(null);
       const text = await selectedFile.text();
-      const { headers: h, rows: r, totalRows: tr } = parseCsv(text);
+      const { headers: h, rows: r, allRows: ar, totalRows: tr } = parseCsv(text);
       setHeaders(h);
       setRows(r);
+      setAllRows(ar);
       setTotalRows(tr);
       const map: Record<string, string> = {};
       h.forEach((header) => {
@@ -147,6 +154,7 @@ export function ImportPage() {
         else map[header] = "";
       });
       setColumnMap(map);
+      setAutoCategorizeDismissed(false);
     },
     [t]
   );
@@ -175,10 +183,23 @@ export function ImportPage() {
     setFile(null);
     setHeaders([]);
     setRows([]);
+    setAllRows([]);
     setColumnMap({});
     setResult(null);
+    setProductsWithoutCategory(0);
+    setAutoCategorizeDismissed(false);
     fileInputRef.current?.click();
   };
+
+  // Recompute productsWithoutCategory when column mapping changes
+  useEffect(() => {
+    if (headers.length === 0 || allRows.length === 0) return;
+    const catHeader = headers.find((h) => columnMap[h] === "category") ?? null;
+    const catIdx = catHeader ? headers.indexOf(catHeader) : -1;
+    const count =
+      catIdx >= 0 ? allRows.filter((row) => !(row[catIdx] ?? "").trim()).length : 0;
+    setProductsWithoutCategory(count);
+  }, [headers, columnMap, allRows]);
 
   const handleMappingChange = (header: string, value: string) => {
     setColumnMap((prev) => ({ ...prev, [header]: value }));
@@ -196,7 +217,7 @@ export function ImportPage() {
     try {
       setImportProgress(30);
       const text = await file.text();
-      const { headers: h, rows: allRows } = parseCsv(text);
+      const { headers: h, allRows } = parseCsv(text);
       const revMap: Record<string, string> = {};
       h.forEach((header) => {
         const target = columnMap[header];
@@ -407,6 +428,35 @@ export function ImportPage() {
             </div>
           )}
 
+          {productsWithoutCategory > 0 && !autoCategorizeDismissed && (
+            <Card className="border-primary/30 bg-primary/5 dark:border-primary/20 dark:bg-primary/10">
+              <CardContent className="space-y-4 pt-6">
+                <p className="text-sm font-medium">
+                  {t("import.aiNoCategories", { count: productsWithoutCategory })}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      // TODO: POST /api/import/auto-categorize
+                      toast.info(t("common.comingSoon"));
+                      setAutoCategorizeDismissed(true);
+                    }}
+                  >
+                    {t("import.aiAssignYes")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAutoCategorizeDismissed(true)}
+                  >
+                    {t("import.aiAssignNo")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {!importing && (
             <Button
               size="lg"
@@ -417,6 +467,19 @@ export function ImportPage() {
               {t("import.importProducts", { count: productCount })}
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            className="w-full"
+            disabled
+            aria-disabled
+          >
+            <FileSpreadsheet className="mr-2 size-4" />
+            {t("import.exportStrategicReport")}
+            <Badge variant="secondary" className="ml-2">
+              {t("common.comingSoon")}
+            </Badge>
+          </Button>
         </>
       )}
 

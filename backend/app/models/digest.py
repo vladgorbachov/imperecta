@@ -27,9 +27,9 @@ class Digest(Base):
         nullable=False,
     )
     period_type: Mapped[str] = mapped_column(
-        String(10),
+        String(20),
         nullable=False,
-    )  # daily, weekly
+    )  # daily, weekly, strategic
     period_start: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -39,6 +39,7 @@ class Digest(Base):
         nullable=False,
     )
     content_md: Mapped[str] = mapped_column(Text, nullable=False)
+    # UNUSED: consider removing in next migration
     summary_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

@@ -259,6 +259,16 @@
   margin-bottom: 0.5rem;
 }
 
+/* RTL support for Arabic */
+[dir="rtl"] .sidebar {
+  border-inline-start: 1px solid var(--border);
+  border-inline-end: none;
+}
+[dir="rtl"] .digest-content ul {
+  margin-inline-start: 1.25rem;
+  margin-inline-end: 0;
+}
+
 @keyframes grid-pulse {
   0%, 100% {
     opacity: 1;

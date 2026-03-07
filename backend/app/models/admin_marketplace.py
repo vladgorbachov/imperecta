@@ -40,6 +40,7 @@ class AdminMarketplace(Base):
         server_default=func.now(),
         nullable=False,
     )
+    # UNUSED: consider removing in next migration
     created_by: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

@@ -1,5 +1,6 @@
 """Admin API endpoints (superuser only)."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -14,6 +15,8 @@ from app.api.deps import DbSession, get_current_superuser
 from app.models import AdminMarketplace, Competitor, CompetitorProduct, ScrapeLog, User
 from app.models.product import Product
 from app.services.claude_monitor import check_claude_api_health, get_claude_api_stats
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/admin",
@@ -60,7 +63,7 @@ async def admin_stats(db: DbSession) -> dict:
     # For now count all users as "active" since we lack last_login_at
     active_users_count = users_count
 
-    admin_marketplaces_result = await db.execute(select(func.count()).select_from(AdminMarketplaceModel))
+    admin_marketplaces_result = await db.execute(select(func.count()).select_from(AdminMarketplace))
     admin_count = admin_marketplaces_result.scalar() or 0
     marketplaces_count = len(MARKETPLACE_REGISTRY) + admin_count
 
@@ -408,7 +411,7 @@ async def admin_users(db: DbSession) -> list[dict]:
             "plan": u.plan.value if hasattr(u.plan, "value") else str(u.plan),
             "products_count": products_count,
             "created_at": u.created_at.strftime("%Y-%m-%d"),
-            "last_login_at": None,
+            "last_login_at": u.last_login_at.strftime("%Y-%m-%d %H:%M") if u.last_login_at else None,
             "is_active": True,
         })
     return out
@@ -417,6 +420,13 @@ async def admin_users(db: DbSession) -> list[dict]:
 @router.get("/claude-status")
 async def claude_status(db: DbSession) -> dict:
     """Check Claude API health and return usage stats."""
-    health = await check_claude_api_health()
-    stats = await get_claude_api_stats(db)
-    return {"health": health, "stats": stats}
+    try:
+        health = await check_claude_api_health()
+        stats = await get_claude_api_stats(db)
+        return {"health": health, "stats": stats}
+    except Exception as e:
+        logger.warning("claude-status failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Claude API status temporarily unavailable",
+        )

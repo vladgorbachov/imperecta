@@ -9,8 +9,10 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, DbSession
 from app.models import Alert, AlertEvent, CompetitorProduct, Product
 from app.schemas.alert import (
+    AlertAutoResponseResponse,
     AlertCreate,
     AlertEventResponse,
+    AlertExplanationResponse,
     AlertResponse,
     AlertUpdate,
 )
@@ -170,6 +172,107 @@ async def list_alert_events(
             message=ev.message,
             sent_via=ev.sent_via,
             triggered_at=ev.triggered_at,
+            severity=ev.severity,
+            ai_explanation=ev.ai_explanation,
+            ai_recommendation=ev.ai_recommendation,
+            ai_recommended_price=ev.ai_recommended_price,
         )
         for ev in events_list
     ]
+
+
+@router.get("/events/{event_id}/explanation", response_model=AlertExplanationResponse)
+async def get_alert_event_explanation(
+    event_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> AlertExplanationResponse:
+    """Get AI explanation for alert event. Generates if not yet available."""
+    event_result = await db.execute(
+        select(AlertEvent)
+        .join(Alert, AlertEvent.alert_id == Alert.id)
+        .where(
+            AlertEvent.id == event_id,
+            Alert.user_id == current_user.id,
+        )
+    )
+    event = event_result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert event not found",
+        )
+
+    if not event.ai_explanation:
+        import logging
+
+        from app.services.alert_ai_service import generate_alert_explanation
+
+        logger = logging.getLogger(__name__)
+        try:
+            result = await generate_alert_explanation(db, event_id)
+            return AlertExplanationResponse(
+                explanation=result.get("explanation"),
+                recommendation=result.get("recommendation"),
+                recommended_price=result.get("recommended_price"),
+                severity=event.severity,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        except Exception as e:
+            logger.warning("generate_alert_explanation failed: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail="AI explanation service temporarily unavailable",
+            )
+
+    return AlertExplanationResponse(
+        explanation=event.ai_explanation,
+        recommendation=event.ai_recommendation,
+        recommended_price=float(event.ai_recommended_price) if event.ai_recommended_price else None,
+        severity=event.severity,
+    )
+
+
+@router.post("/events/{event_id}/auto-response", response_model=AlertAutoResponseResponse)
+async def post_alert_event_auto_response(
+    event_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> AlertAutoResponseResponse:
+    """Generate auto-response: recommended price for this alert."""
+    event_result = await db.execute(
+        select(AlertEvent)
+        .join(Alert, AlertEvent.alert_id == Alert.id)
+        .where(
+            AlertEvent.id == event_id,
+            Alert.user_id == current_user.id,
+        )
+    )
+    event = event_result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert event not found",
+        )
+
+    import logging
+
+    from app.services.alert_ai_service import generate_auto_response
+
+    logger = logging.getLogger(__name__)
+    try:
+        result = await generate_auto_response(db, event_id)
+        return AlertAutoResponseResponse(
+            recommended_price=result.get("recommended_price"),
+            reasoning=result.get("reasoning", ""),
+            expected_impact=result.get("expected_impact", ""),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.warning("generate_auto_response failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="AI auto-response service temporarily unavailable",
+        )

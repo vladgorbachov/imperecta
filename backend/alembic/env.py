@@ -11,6 +11,8 @@ from sqlalchemy.engine import Connection
 from app.database import Base
 from app.models import (
     AdminMarketplace,
+    AIChatMessage,
+    AIChatSession,
     ApiLog,
     Alert,
     AlertEvent,

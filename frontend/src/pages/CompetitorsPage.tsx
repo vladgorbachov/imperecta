@@ -1,25 +1,27 @@
 /**
- * Competitors page: table with expandable rows, AddCompetitorDialog, AddCompetitorProductDialog.
- *
- * i18n keys used:
- * - nav.competitors
- * - competitors.addCompetitor, competitors.linkProduct
- * - competitors.name, competitors.websiteUrl, competitors.marketplace
- * - competitors.myProduct, competitors.productUrl, competitors.scraper
- * - competitors.selectProduct, competitors.autoDetect
- * - competitors.added, competitors.productsCount
- * - competitors.tableProduct, competitors.tableUrl, competitors.tablePrice
- * - competitors.noCompetitors, competitors.noProductsLinked
- * - competitors.marketplaceOzon, competitors.marketplaceWb, competitors.marketplaceKaspi, competitors.marketplaceCustom
- * - competitors.scraperAuto, competitors.scraperOzonApi, competitors.scraperWbApi, competitors.scraperCss, competitors.scraperJsonApi
- * - common.cancel, common.add
- * - products.search
+ * Competitors page: card grid (default) / table view, AI scoring, ComparisonMatrix.
+ * i18n: nav.competitors, competitors.*, common.*
  */
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, ChevronDown, ChevronRight, ExternalLink, Users, Wand2 } from "lucide-react";
+import {
+  Plus,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Users,
+  Wand2,
+  Search,
+  LayoutGrid,
+  Table as TableIcon,
+  BarChart3,
+  Sparkles,
+  ChevronDown as ChevronDownIcon,
+} from "lucide-react";
+import { toast } from "sonner";
 import { formatDate, formatPrice } from "@/lib/formatters";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi } from "@/api/competitors";
 import { productsApi } from "@/api/products";
@@ -49,14 +51,17 @@ import {
 } from "@/components/ui/table";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { TrendBadge } from "@/components/ui-custom/TrendBadge";
+import { CircularScore } from "@/components/ui-custom/CircularScore";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
+import { PriceSparkline, mockSparklineData } from "@/components/competitors/PriceSparkline";
+import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
 
 type Marketplace = "ozon" | "wildberries" | "kaspi" | "custom";
 type ScraperType = "auto" | "ozon_api" | "wb_api" | "css_selector" | "json_api";
+type ViewMode = "grid" | "table";
 
 function mapScraperToApi(type: ScraperType): string {
   const map: Record<ScraperType, string> = {
@@ -82,6 +87,25 @@ function detectScraperFromUrl(url: string): ScraperType {
   if (lower.includes("ozon.ru") || lower.includes("ozon.")) return "ozon_api";
   if (lower.includes("wildberries") || lower.includes("wb.ru")) return "wb_api";
   return "auto";
+}
+
+/** Mock benchmark score 0–100 from competitor id. */
+function mockScore(competitorId: string): number {
+  const hash = competitorId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return 25 + (hash % 70);
+}
+
+/** Mock strength: weak / moderate / strong. */
+function mockStrength(score: number): "weak" | "moderate" | "strong" {
+  if (score >= 70) return "strong";
+  if (score >= 40) return "moderate";
+  return "weak";
+}
+
+/** Mock aggressiveness 0–100 for table column. */
+function mockAggressiveness(competitorId: string): number {
+  const hash = competitorId.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return (hash % 40) + 30;
 }
 
 interface SearchableProductSelectProps {
@@ -174,6 +198,9 @@ function SearchableProductSelect({
 export function CompetitorsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [searchRaw, setSearchRaw] = useState("");
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [addCompetitorOpen, setAddCompetitorOpen] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [selectedCompetitor, setSelectedCompetitor] = useState<Competitor | null>(null);
@@ -188,6 +215,8 @@ export function CompetitorsPage() {
     url: "",
     scraper_type: "auto" as ScraperType,
   });
+
+  const search = useDebounce(searchRaw, 300);
 
   const { data: competitors = [], isLoading } = useQuery({
     queryKey: ["competitors"],
@@ -206,6 +235,10 @@ export function CompetitorsPage() {
   });
   const products = productsData?.items ?? [];
 
+  const filteredCompetitors = competitors.filter((c) =>
+    search ? c.name.toLowerCase().includes(search.toLowerCase()) : true
+  );
+
   const createMutation = useMutation({
     mutationFn: competitorsApi.create,
     onSuccess: () => {
@@ -221,7 +254,7 @@ export function CompetitorsPage() {
     mutationFn: (data: Parameters<typeof competitorsApi.addProduct>[0]) =>
       competitorsApi.addProduct({
         ...data,
-        scraper_type: mapScraperToApi(data.scraper_type),
+        scraper_type: mapScraperToApi((data.scraper_type ?? "auto") as ScraperType),
       }),
     onSuccess: () => {
       if (selectedCompetitor) {
@@ -255,17 +288,24 @@ export function CompetitorsPage() {
   const handleAddProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCompetitor || !productForm.product_id) return;
+    const scraperType = productForm.scraper_type;
+    if (!scraperType) return;
     addProductMutation.mutate({
       product_id: productForm.product_id,
       competitor_id: selectedCompetitor.id,
       url: productForm.url,
-      scraper_type: productForm.scraper_type as ScraperType,
+      scraper_type: scraperType as ScraperType,
     });
   };
 
   const handleAutoDetect = () => {
     const detected = detectScraperFromUrl(productForm.url);
     setProductForm((f) => ({ ...f, scraper_type: detected }));
+  };
+
+  const handleWhatIsDoingNow = (_competitor: Competitor) => {
+    toast.info(t("competitors.aiAnalyzing"));
+    // TODO: POST /api/ai/competitor-analysis
   };
 
   return (
@@ -279,6 +319,47 @@ export function CompetitorsPage() {
           </Button>
         }
       />
+
+      {/* Toolbar */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-2">
+          <div className="relative flex-1 sm:max-w-64">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={t("products.search")}
+              value={searchRaw}
+              onChange={(e) => setSearchRaw(e.target.value)}
+              className="w-full pl-9"
+            />
+          </div>
+          <div className="flex rounded-md border border-input bg-background p-0.5">
+            <Button
+              variant={viewMode === "grid" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("grid")}
+              aria-label={t("competitors.viewGrid")}
+            >
+              <LayoutGrid className="size-4" />
+            </Button>
+            <Button
+              variant={viewMode === "table" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("table")}
+              aria-label={t("competitors.viewTable")}
+            >
+              <TableIcon className="size-4" />
+            </Button>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setComparisonOpen(true)}
+          >
+            <BarChart3 className="mr-2 size-4" />
+            {t("competitors.compareAll")}
+          </Button>
+        </div>
+      </div>
 
       {isLoading ? (
         <div className="space-y-2">
@@ -296,6 +377,23 @@ export function CompetitorsPage() {
             onClick: () => setAddCompetitorOpen(true),
           }}
         />
+      ) : viewMode === "grid" ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredCompetitors.map((c) => (
+            <CompetitorCard
+              key={c.id}
+              competitor={c}
+              onWhatIsDoingNow={() => handleWhatIsDoingNow(c)}
+              onDetails={() => setExpandedId((id) => (id === c.id ? null : c.id))}
+              expanded={expandedId === c.id}
+              products={products}
+              onAddProduct={() => {
+                setSelectedCompetitor(c);
+                setAddProductOpen(true);
+              }}
+            />
+          ))}
+        </div>
       ) : (
         <div className="overflow-x-auto overflow-hidden rounded-lg border border-border dark:border-border">
           <Table>
@@ -304,12 +402,14 @@ export function CompetitorsPage() {
                 <TableHead className="w-10" />
                 <TableHead>{t("competitors.name")}</TableHead>
                 <TableHead>{t("competitors.marketplace")}</TableHead>
+                <TableHead>{t("competitors.score")}</TableHead>
+                <TableHead>{t("competitors.aggressiveness")}</TableHead>
                 <TableHead>{t("competitors.productsCountHeader")}</TableHead>
                 <TableHead>{t("competitors.added")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {competitors.map((c) => (
+              {filteredCompetitors.map((c) => (
                 <ExpandableCompetitorRow
                   key={c.id}
                   competitor={c}
@@ -326,6 +426,13 @@ export function CompetitorsPage() {
           </Table>
         </div>
       )}
+
+      <ComparisonMatrix
+        open={comparisonOpen}
+        onOpenChange={setComparisonOpen}
+        products={products.map((p) => ({ id: p.id, name: p.name }))}
+        competitors={competitors.map((c) => ({ id: c.id, name: c.name }))}
+      />
 
       <AddCompetitorDialog
         open={addCompetitorOpen}
@@ -350,6 +457,185 @@ export function CompetitorsPage() {
         onAutoDetect={handleAutoDetect}
         isLoading={addProductMutation.isPending}
       />
+    </div>
+  );
+}
+
+function CompetitorCard({
+  competitor,
+  onWhatIsDoingNow,
+  onDetails,
+  expanded,
+  products,
+  onAddProduct,
+}: {
+  competitor: Competitor;
+  onWhatIsDoingNow: () => void;
+  onDetails: () => void;
+  expanded: boolean;
+  products: { id: string; name: string; sku: string | null }[];
+  onAddProduct: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language;
+  const marketplace = competitor.marketplace as Marketplace;
+  const score = mockScore(competitor.id);
+  const strength = mockStrength(score);
+  const sparklineData = mockSparklineData(competitor.id);
+
+  const { data: competitorProducts = [], isLoading } = useQuery({
+    queryKey: ["competitors", competitor.id, "products"],
+    queryFn: async () => {
+      const { data } = await competitorsApi.getProducts(competitor.id);
+      return data;
+    },
+    enabled: expanded,
+  });
+
+  const strengthKey =
+    strength === "strong"
+      ? "competitors.strengthStrong"
+      : strength === "moderate"
+        ? "competitors.strengthModerate"
+        : "competitors.strengthWeak";
+
+  return (
+    <div className="flex flex-col rounded-lg border border-border bg-card p-4 shadow-sm dark:border-border dark:bg-card">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <a
+            href={competitor.website_url ?? "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-primary hover:underline dark:text-primary"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {competitor.name}
+            <ExternalLink className="size-4 shrink-0" />
+          </a>
+          <div className="mt-1">
+            <MarketplaceBadge marketplace={marketplace} size="sm" />
+          </div>
+        </div>
+        <CircularScore value={score} size={44} strokeWidth={3} />
+      </div>
+
+      <div className="mt-3 h-10">
+        <PriceSparkline data={sparklineData} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "rounded-md border px-2 py-0.5 text-xs font-medium",
+            strength === "strong" &&
+              "bg-red-500/15 text-red-600 dark:bg-red-500/20 dark:text-red-400",
+            strength === "moderate" &&
+              "bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400",
+            strength === "weak" &&
+              "bg-muted text-muted-foreground dark:bg-muted/80 dark:text-muted-foreground"
+          )}
+        >
+          {t(strengthKey)}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={onWhatIsDoingNow}
+        >
+          <Sparkles className="mr-2 size-4" />
+          {t("competitors.whatIsDoingNow")}
+        </Button>
+        <Button variant="outline" size="sm" onClick={onDetails}>
+          <ChevronDownIcon
+            className={cn("mr-2 size-4 transition-transform", expanded && "rotate-180")}
+          />
+          {t("competitors.details")}
+        </Button>
+      </div>
+
+      {expanded && (
+        <div className="mt-4 border-t border-border pt-4 dark:border-border">
+          <div className="mb-4 flex justify-end">
+            <Button size="sm" variant="outline" onClick={onAddProduct}>
+              <Plus className="mr-2 size-4" />
+              {t("competitors.linkProduct")}
+            </Button>
+          </div>
+          {isLoading ? (
+            <div className="h-16 animate-pulse rounded bg-muted" />
+          ) : competitorProducts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {t("competitors.noProductsLinked")}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {competitorProducts.map((cp) => (
+                <LinkedProductRow
+                  key={cp.id}
+                  cp={cp}
+                  products={products}
+                  locale={locale}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkedProductRow({
+  cp,
+  products,
+  locale,
+}: {
+  cp: CompetitorProduct;
+  products: { id: string; name: string; sku: string | null }[];
+  locale: string;
+}) {
+  const { t } = useTranslation();
+  const productName =
+    products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
+  const trend =
+    cp.price_diff != null
+      ? cp.price_diff > 0
+        ? ("up" as const)
+        : cp.price_diff < 0
+          ? ("down" as const)
+          : ("stable" as const)
+      : undefined;
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 dark:border-border dark:bg-muted/20">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{productName}</p>
+        <a
+          href={cp.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="truncate text-xs text-muted-foreground hover:underline"
+        >
+          {cp.url}
+        </a>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {cp.last_price != null && (
+          <span className="text-sm">{formatPrice(cp.last_price, "RUB", locale)}</span>
+        )}
+        {trend && (
+          <TrendBadge
+            trend={trend}
+            value={cp.price_diff != null ? Math.abs(cp.price_diff) : undefined}
+            size="sm"
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -379,6 +665,8 @@ function ExpandableCompetitorRow({
   });
 
   const marketplace = competitor.marketplace as Marketplace;
+  const score = mockScore(competitor.id);
+  const aggressiveness = mockAggressiveness(competitor.id);
 
   return (
     <>
@@ -408,13 +696,17 @@ function ExpandableCompetitorRow({
         <TableCell>
           <MarketplaceBadge marketplace={marketplace} size="sm" />
         </TableCell>
+        <TableCell>
+          <CircularScore value={score} size={32} strokeWidth={2} />
+        </TableCell>
+        <TableCell>{aggressiveness}%</TableCell>
         <TableCell>{competitor.product_count}</TableCell>
         <TableCell className="text-muted-foreground dark:text-muted-foreground">
           {formatDate(competitor.created_at, locale)}
         </TableCell>
       </TableRow>
       <TableRow className="bg-muted/30 dark:bg-muted/20">
-        <TableCell colSpan={5} className="p-0">
+        <TableCell colSpan={7} className="p-0">
           <div
             className={cn(
               "overflow-hidden transition-[max-height] duration-300 ease-in-out",
@@ -431,7 +723,7 @@ function ExpandableCompetitorRow({
               {isLoading ? (
                 <div className="h-24 animate-pulse rounded bg-muted" />
               ) : competitorProducts.length === 0 ? (
-                <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   {t("competitors.noProductsLinked")}
                 </p>
               ) : (
@@ -446,7 +738,12 @@ function ExpandableCompetitorRow({
                   </TableHeader>
                   <TableBody>
                     {competitorProducts.map((cp) => (
-                      <LinkedProductRow key={cp.id} cp={cp} products={products} locale={locale} />
+                      <TableLinkedProductRow
+                        key={cp.id}
+                        cp={cp}
+                        products={products}
+                        locale={locale}
+                      />
                     ))}
                   </TableBody>
                 </Table>
@@ -459,7 +756,7 @@ function ExpandableCompetitorRow({
   );
 }
 
-function LinkedProductRow({
+function TableLinkedProductRow({
   cp,
   products,
   locale,
@@ -469,25 +766,22 @@ function LinkedProductRow({
   locale: string;
 }) {
   const { t } = useTranslation();
-  const productName = products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
-  const trend = cp.price_diff != null
-    ? cp.price_diff > 0
-      ? ("up" as const)
-      : cp.price_diff < 0
-        ? ("down" as const)
-        : ("stable" as const)
-    : undefined;
+  const productName =
+    products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
+  const trend =
+    cp.price_diff != null
+      ? cp.price_diff > 0
+        ? ("up" as const)
+        : cp.price_diff < 0
+          ? ("down" as const)
+          : ("stable" as const)
+      : undefined;
 
   return (
     <TableRow>
       <TableCell className="font-medium">{productName}</TableCell>
-      <TableCell className="max-w-48 truncate text-muted-foreground dark:text-muted-foreground">
-        <a
-          href={cp.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:underline"
-        >
+      <TableCell className="max-w-48 truncate text-muted-foreground">
+        <a href={cp.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
           {cp.url}
         </a>
       </TableCell>
@@ -686,7 +980,7 @@ function AddCompetitorProductDialog({
                   <Wand2 className="size-4" />
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {t("competitors.autoDetect")}
               </p>
             </div>

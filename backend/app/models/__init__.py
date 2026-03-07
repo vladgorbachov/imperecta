@@ -1,6 +1,7 @@
 """SQLAlchemy models."""
 
 from app.models.admin_marketplace import AdminMarketplace
+from app.models.ai_chat import AIChatMessage, AIChatSession
 from app.models.alert import Alert
 from app.models.alert_event import AlertEvent
 from app.models.api_log import ApiLog
@@ -14,6 +15,8 @@ from app.models.user import User, UserPlan
 
 __all__ = [
     "AdminMarketplace",
+    "AIChatMessage",
+    "AIChatSession",
     "ApiLog",
     "ScrapeLog",
     "User",

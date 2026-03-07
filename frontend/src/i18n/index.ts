@@ -4,48 +4,12 @@ import HttpBackend from "i18next-http-backend";
 import LanguageDetector from "i18next-browser-languagedetector";
 
 export const SUPPORTED_LANGUAGES = [
-  { code: "ru", name: "Русский", flag: "🇷🇺", region: "cis" },
-  { code: "uk", name: "Українська", flag: "🇺🇦", region: "cis" },
-  { code: "be", name: "Беларуская", flag: "🇧🇾", region: "cis" },
-  { code: "kk", name: "Қазақша", flag: "🇰🇿", region: "cis" },
-  { code: "uz", name: "Oʻzbekcha", flag: "🇺🇿", region: "cis" },
-  { code: "ky", name: "Кыргызча", flag: "🇰🇬", region: "cis" },
-  { code: "tg", name: "Тоҷикӣ", flag: "🇹🇯", region: "cis" },
-  { code: "tk", name: "Türkmençe", flag: "🇹🇲", region: "cis" },
-  { code: "az", name: "Azərbaycanca", flag: "🇦🇿", region: "cis" },
-  { code: "hy", name: "Հայերեն", flag: "🇦🇲", region: "cis" },
-  { code: "ka", name: "ქართული", flag: "🇬🇪", region: "cis" },
-  { code: "ro", name: "Română", flag: "🇷🇴", region: "cis" },
-  { code: "en", name: "English", flag: "🇬🇧", region: "europe" },
-  { code: "de", name: "Deutsch", flag: "🇩🇪", region: "europe" },
-  { code: "fr", name: "Français", flag: "🇫🇷", region: "europe" },
-  { code: "es", name: "Español", flag: "🇪🇸", region: "europe" },
-  { code: "it", name: "Italiano", flag: "🇮🇹", region: "europe" },
-  { code: "pt", name: "Português", flag: "🇵🇹", region: "europe" },
-  { code: "nl", name: "Nederlands", flag: "🇳🇱", region: "europe" },
-  { code: "pl", name: "Polski", flag: "🇵🇱", region: "europe" },
-  { code: "cs", name: "Čeština", flag: "🇨🇿", region: "europe" },
-  { code: "sk", name: "Slovenčina", flag: "🇸🇰", region: "europe" },
-  { code: "hu", name: "Magyar", flag: "🇭🇺", region: "europe" },
-  { code: "bg", name: "Български", flag: "🇧🇬", region: "europe" },
-  { code: "hr", name: "Hrvatski", flag: "🇭🇷", region: "europe" },
-  { code: "sr", name: "Српски", flag: "🇷🇸", region: "europe" },
-  { code: "sl", name: "Slovenščina", flag: "🇸🇮", region: "europe" },
-  { code: "mk", name: "Македонски", flag: "🇲🇰", region: "europe" },
-  { code: "sq", name: "Shqip", flag: "🇦🇱", region: "europe" },
-  { code: "el", name: "Ελληνικά", flag: "🇬🇷", region: "europe" },
-  { code: "tr", name: "Türkçe", flag: "🇹🇷", region: "europe" },
-  { code: "fi", name: "Suomi", flag: "🇫🇮", region: "europe" },
-  { code: "sv", name: "Svenska", flag: "🇸🇪", region: "europe" },
-  { code: "no", name: "Norsk", flag: "🇳🇴", region: "europe" },
-  { code: "da", name: "Dansk", flag: "🇩🇰", region: "europe" },
-  { code: "et", name: "Eesti", flag: "🇪🇪", region: "europe" },
-  { code: "lv", name: "Latviešu", flag: "🇱🇻", region: "europe" },
-  { code: "lt", name: "Lietuvių", flag: "🇱🇹", region: "europe" },
-  { code: "ga", name: "Gaeilge", flag: "🇮🇪", region: "europe" },
-  { code: "is", name: "Íslenska", flag: "🇮🇸", region: "europe" },
-  { code: "mt", name: "Malti", flag: "🇲🇹", region: "europe" },
-  { code: "bs", name: "Bosanski", flag: "🇧🇦", region: "europe" },
+  { code: "en", name: "English", flag: "🇬🇧", dir: "ltr" as const },
+  { code: "ar", name: "العربية", flag: "🇸🇦", dir: "rtl" as const },
+  { code: "es", name: "Español", flag: "🇪🇸", dir: "ltr" as const },
+  { code: "zh", name: "中文", flag: "🇨🇳", dir: "ltr" as const },
+  { code: "ru", name: "Русский", flag: "🇷🇺", dir: "ltr" as const },
+  { code: "fr", name: "Français", flag: "🇫🇷", dir: "ltr" as const },
 ] as const;
 
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]["code"];
@@ -64,7 +28,7 @@ i18n
     nonExplicitSupportedLngs: false,
 
     detection: {
-      order: ["localStorage", "navigator", "htmlTag"],
+      order: ["localStorage", "htmlTag"],
       lookupLocalStorage: STORAGE_KEY,
       caches: ["localStorage"],
     },
@@ -82,13 +46,17 @@ i18n
     },
   });
 
-const setHtmlLang = (lng: string) => {
-  if (typeof document !== "undefined") {
-    document.documentElement.lang = lng || "en";
-  }
-};
+i18n.on("languageChanged", (lng) => {
+  const dir = SUPPORTED_LANGUAGES.find((l) => l.code === lng)?.dir ?? "ltr";
+  document.documentElement.dir = dir;
+  document.documentElement.lang = lng;
+});
 
-i18n.on("languageChanged", setHtmlLang);
-i18n.on("initialized", () => setHtmlLang(i18n.language));
+i18n.on("initialized", () => {
+  const lng = i18n.language;
+  const dir = SUPPORTED_LANGUAGES.find((l) => l.code === lng)?.dir ?? "ltr";
+  document.documentElement.dir = dir;
+  document.documentElement.lang = lng;
+});
 
 export default i18n;

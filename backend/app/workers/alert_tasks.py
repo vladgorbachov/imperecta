@@ -118,6 +118,18 @@ def check_alerts(
                     message = f"Новая акция: {promo_label}"
 
                 if triggered and message:
+                    severity = None
+                    if alert.type in ("price_drop", "price_increase") and old_price_dec and new_price_dec:
+                        change_pct = abs(
+                            float((new_price_dec - old_price_dec) / old_price_dec * 100)
+                        )
+                        if change_pct > 25:
+                            severity = "critical"
+                        elif change_pct >= 15:
+                            severity = "warning"
+                        elif change_pct >= 10:
+                            severity = "info"
+
                     event = AlertEvent(
                         alert_id=alert.id,
                         competitor_product_id=cp.id,
@@ -125,9 +137,18 @@ def check_alerts(
                         new_price=new_price_dec,
                         message=message,
                         sent_via=sent_via,
+                        severity=severity,
                     )
                     session.add(event)
                     await session.flush()
+
+                    # Fire-and-forget AI explanation for critical and warning only
+                    if severity in ("critical", "warning"):
+                        generate_alert_ai_explanation.apply_async(
+                            args=[event.id],
+                            countdown=3,
+                        )
+
                     await _send_notification(
                         alert=alert,
                         message=message,
@@ -142,6 +163,26 @@ def check_alerts(
                     logger.info("Alert triggered alert_id=%s: %s", alert.id, message)
 
             await session.commit()
+
+    _run_async(_do())
+
+
+@celery_app.task(name="generate_alert_ai_explanation")
+def generate_alert_ai_explanation(alert_event_id: int) -> None:
+    """Generate AI explanation for alert event. Fire-and-forget from check_alerts."""
+    async def _do():
+        async with async_session_maker() as session:
+            try:
+                from app.services.alert_ai_service import generate_alert_explanation
+
+                await generate_alert_explanation(session, alert_event_id)
+                await session.commit()
+            except Exception as e:
+                logger.warning(
+                    "generate_alert_explanation failed for event %s: %s",
+                    alert_event_id,
+                    e,
+                )
 
     _run_async(_do())
 

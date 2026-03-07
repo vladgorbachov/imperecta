@@ -51,49 +51,19 @@ class ComparisonResponse(BaseModel):
     competitors: list[ComparisonCompetitor]
 
 
-class TopChange(BaseModel):
-    """Top price change item."""
+class SimulateRequest(BaseModel):
+    """Request body for POST /api/analytics/simulate."""
 
-    product_name: str
-    competitor_name: str
-    old_price: Decimal
-    new_price: Decimal
-    change_percent: float
+    product_id: UUID | None = None
+    price_change_pct: float  # -30 to +30
+    volume_change_pct: float = 0  # -50 to +50
 
 
-class ActivePromo(BaseModel):
-    """Active promo item."""
+class AdvancedSimulationRequest(BaseModel):
+    """Request body for POST /api/analytics/advanced-simulation."""
 
-    competitor_name: str
-    product_name: str
-    promo_label: str
-
-
-class DashboardSummaryResponse(BaseModel):
-    """Dashboard summary response."""
-
-    total_products: int
-    total_competitors: int
-    total_tracked_items: int
-    last_scrape_at: datetime | None
-    alerts_triggered_today: int
-    price_changes_today: dict
-    top_changes: list[TopChange]
-    active_promos: list[ActivePromo]
-
-
-class AnomalyItem(BaseModel):
-    """Anomaly item (change > 15%)."""
-
-    product_name: str
-    competitor_name: str
-    old_price: Decimal
-    new_price: Decimal
-    change_percent: float
-    detected_at: datetime
-
-
-class AnomaliesResponse(BaseModel):
-    """Anomalies response."""
-
-    items: list[AnomalyItem]
+    price_change_pct: float
+    volume_change_pct: float = 0
+    ad_budget_change_pct: float = 0
+    inflation_pct: float = 0
+    season: str = "normal"  # "normal", "holiday", "sale"

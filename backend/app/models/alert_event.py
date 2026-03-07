@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -16,6 +16,10 @@ class AlertEvent(Base):
     """Alert event record when alert was triggered."""
 
     __tablename__ = "alert_events"
+    __table_args__ = (
+        Index("ix_alert_events_triggered", "triggered_at"),
+        Index("ix_alert_events_alert_triggered", "alert_id", "triggered_at"),
+    )
 
     id: Mapped[int] = mapped_column(
         BigInteger,
@@ -41,6 +45,10 @@ class AlertEvent(Base):
         server_default=func.now(),
         nullable=False,
     )
+    severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ai_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_recommended_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
 
     alert: Mapped["Alert"] = relationship("Alert", back_populates="alert_events")
     competitor_product: Mapped["CompetitorProduct | None"] = relationship(

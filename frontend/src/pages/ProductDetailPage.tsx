@@ -9,6 +9,9 @@ import { useTranslation } from "react-i18next";
 import {
   LineChart,
   Line,
+  Area,
+  AreaChart,
+  ReferenceArea,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -26,7 +29,7 @@ import {
   Send,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { formatPrice, formatDate, formatRelativeTime } from "@/lib/formatters";
+import { formatPrice, formatDate, formatRelativeTime, formatChartDate } from "@/lib/formatters";
 import { CHART_COLORS, CHART_PRIMARY } from "@/lib/design-tokens";
 import { analyticsApi } from "@/api/analytics";
 import { useProduct } from "@/hooks/useProducts";
@@ -126,7 +129,7 @@ export function ProductDetailPage() {
     const myPrice = Number(priceHistory.my_price);
     const dateToPoint: Record<string, ChartDataPoint> = {};
 
-    priceHistory.competitors.forEach((comp, compIdx) => {
+    priceHistory.competitors.forEach((comp) => {
       comp.data_points.forEach((dp) => {
         const dateStr = typeof dp.date === "string" ? dp.date.slice(0, 10) : String(dp.date).slice(0, 10);
         if (!dateToPoint[dateStr]) {
@@ -151,16 +154,32 @@ export function ProductDetailPage() {
 
   const competitorProducts = product?.competitor_products ?? [];
   const comparisonCompetitors = comparison?.competitors ?? [];
+  const myPriceForCompare = product?.current_price ?? 0;
   const displayCompetitors = competitorProducts.length > 0
-    ? competitorProducts.map((c) => ({
-        id: c.id,
-        competitor_name: c.competitor_name,
-        url: c.url,
-        last_price: c.last_price,
-        last_promo_label: c.last_promo_label,
-        last_in_stock: c.last_in_stock,
-        last_checked_at: c.last_checked_at,
-      }))
+    ? competitorProducts.map((c) => {
+        const diffPercent =
+          c.last_price != null && myPriceForCompare > 0
+            ? ((Number(c.last_price) - myPriceForCompare) / myPriceForCompare) * 100
+            : null;
+        const trend: "up" | "down" | "stable" =
+          diffPercent == null
+            ? "stable"
+            : diffPercent > 1
+              ? "up"
+              : diffPercent < -1
+                ? "down"
+                : "stable";
+        return {
+          id: c.id,
+          competitor_name: c.competitor_name,
+          url: c.url,
+          last_price: c.last_price,
+          last_promo_label: c.last_promo_label,
+          last_in_stock: c.last_in_stock,
+          last_checked_at: c.last_checked_at,
+          trend,
+        };
+      })
     : comparisonCompetitors.map((c, i) => ({
         id: `comp-${i}`,
         competitor_name: c.name,
@@ -169,6 +188,7 @@ export function ProductDetailPage() {
         last_promo_label: c.promo_label,
         last_in_stock: c.in_stock,
         last_checked_at: null,
+        trend: c.trend,
       }));
   const isParsed = competitorProducts.some((c) => c.last_checked_at) || comparisonCompetitors.length > 0;
 
@@ -193,6 +213,50 @@ export function ProductDetailPage() {
   }
 
   const myPrice = product.current_price;
+
+  // TODO: GET /api/products/{id}/ai-recommendation
+  const minComp = displayCompetitors
+    .map((c) => c.last_price)
+    .filter((p): p is number => p != null)
+    .reduce<number | null>((acc, p) => (acc == null ? p : Math.min(acc, p)), null);
+  const aiRecType =
+    minComp == null || minComp <= 0
+      ? "keep"
+      : ((myPrice - minComp) / minComp) * 100 > 8
+        ? "lower"
+        : ((myPrice - minComp) / minComp) * 100 < -5
+          ? "raise"
+          : "keep";
+  const aiRecKey =
+    aiRecType === "lower"
+      ? "productDetail.aiRecommendationLower5"
+      : aiRecType === "raise"
+        ? "productDetail.aiRecommendationRaise"
+        : "productDetail.aiRecommendationKeep";
+
+  // TODO: GET /api/products/{id}/forecast
+  const forecastData = useMemo(() => {
+    const days = 14;
+    const data: Array<{ date: string; dateLabel: string; forecast: number; low: number; high: number }> = [];
+    const base = 120;
+    const now = new Date();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const trend = i * 2;
+      const noise = () => (Math.random() - 0.5) * 15;
+      const f = Math.round(base + trend + noise());
+      data.push({
+        date: dateStr,
+        dateLabel: formatChartDate(d, locale),
+        forecast: f,
+        low: Math.max(0, f - 20),
+        high: f + 25,
+      });
+    }
+    return data;
+  }, [locale]);
 
   return (
     <div className="space-y-6">
@@ -224,6 +288,20 @@ export function ProductDetailPage() {
               {formatPrice(myPrice, "RUB", locale)}
             </p>
           </div>
+          <Badge
+            variant="secondary"
+            className={cn(
+              "text-sm",
+              aiRecType === "lower" &&
+                "bg-price-down/15 text-price-down border-price-down/30 dark:bg-price-down/20 dark:text-price-down",
+              aiRecType === "keep" &&
+                "bg-muted text-muted-foreground border-border dark:bg-muted/80 dark:text-muted-foreground",
+              aiRecType === "raise" &&
+                "bg-primary/15 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary"
+            )}
+          >
+            {t(aiRecKey)}
+          </Badge>
           <div className="flex items-center gap-2">
             <span
               className={cn(
@@ -244,9 +322,10 @@ export function ProductDetailPage() {
       </div>
 
       <Tabs defaultValue="chart">
-        <TabsList className="w-full sm:w-auto">
-          <TabsTrigger value="chart">{t("productDetail.priceChart")}</TabsTrigger>
+        <TabsList className="w-full flex-wrap sm:w-auto">
+          <TabsTrigger value="chart">{t("productDetail.priceDynamics")}</TabsTrigger>
           <TabsTrigger value="competitors">{t("productDetail.competitors")}</TabsTrigger>
+          <TabsTrigger value="forecast">{t("productDetail.salesForecast")}</TabsTrigger>
           <TabsTrigger value="alerts">{t("productDetail.alerts")}</TabsTrigger>
         </TabsList>
 
@@ -313,6 +392,63 @@ export function ProductDetailPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="forecast" className="mt-4 animate-in fade-in-0 duration-200">
+          <div className="h-80 w-full rounded-lg border border-border bg-card/60 p-4 dark:border-border dark:bg-card/60">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="forecastAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted dark:stroke-muted" />
+                <XAxis dataKey="dateLabel" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  stroke="hsl(var(--muted-foreground))"
+                  tickFormatter={(v) => String(v)}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const p = payload[0]?.payload as (typeof forecastData)[0];
+                    return (
+                      <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md dark:border-border dark:bg-card">
+                        <p className="mb-2 font-medium">{p?.dateLabel}</p>
+                        <p className="text-sm">
+                          {t("productDetail.forecastSales")}: {p?.forecast}
+                        </p>
+                        <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                          {t("productDetail.confidenceInterval")}: {p?.low}–{p?.high}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                {forecastData.map((_, i) => (
+                  <ReferenceArea
+                    key={i}
+                    x1={i - 0.5}
+                    x2={i + 0.5}
+                    y1={forecastData[i]?.low ?? 0}
+                    y2={forecastData[i]?.high ?? 0}
+                    fill="hsl(var(--primary))"
+                    fillOpacity={0.15}
+                  />
+                ))}
+                <Area
+                  type="monotone"
+                  dataKey="forecast"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth={2}
+                  fill="url(#forecastAreaGradient)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </TabsContent>
+
         <TabsContent value="competitors" className="mt-4 animate-in fade-in-0 duration-200">
           <div className="space-y-4">
             <Button variant="outline" size="sm" onClick={() => navigate("/competitors")}>
@@ -369,7 +505,7 @@ export function ProductDetailPage() {
                           <TableCell>
                             {diffPercent != null ? (
                               <TrendBadge
-                                trend={diffPercent > 0 ? "up" : diffPercent < 0 ? "down" : "stable"}
+                                trend={c.trend}
                                 value={Math.abs(diffPercent)}
                                 size="sm"
                               />

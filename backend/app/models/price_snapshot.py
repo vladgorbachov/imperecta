@@ -17,8 +17,8 @@ class PriceSnapshot(Base):
 
     __tablename__ = "price_snapshots"
     __table_args__ = (
-        Index("ix_price_snapshots_competitor_product_id", "competitor_product_id"),
-        Index("ix_price_snapshots_scraped_at", "scraped_at"),
+        Index("ix_snapshots_cp_date", "competitor_product_id", "scraped_at"),
+        Index("ix_snapshots_date", "scraped_at"),
     )
 
     id: Mapped[int] = mapped_column(

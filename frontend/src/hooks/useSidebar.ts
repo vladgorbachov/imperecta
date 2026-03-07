@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-const STORAGE_KEY = "sidebar_collapsed";
+const STORAGE_KEY = "imperecta_sidebar_collapsed";
 
 /**
  * Manages sidebar collapsed state with localStorage persistence.

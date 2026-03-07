@@ -1,8 +1,12 @@
-import { Fragment, useMemo } from "react";
+/**
+ * Sectional sidebar with glass effect.
+ * Sections: Core, Market Intelligence, Tools, Account, Admin (superuser).
+ * Collapsed state persisted in localStorage "imperecta_sidebar_collapsed".
+ */
+
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useTheme } from "next-themes";
-import { useAuthStore } from "@/stores/authStore";
+import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   Package,
@@ -12,28 +16,25 @@ import {
   Upload,
   Settings,
   Shield,
-  BarChart3,
+  TrendingUp,
+  Bot,
+  Sparkles,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-
-const baseNavItems = [
-  { to: "/dashboard", icon: LayoutDashboard, key: "dashboard" },
-  { to: "/products", icon: Package, key: "products" },
-  { to: "/competitors", icon: Users, key: "competitors" },
-  { to: "/alerts", icon: Bell, key: "alerts" },
-  { to: "/digests", icon: FileText, key: "digests" },
-  { to: "/import", icon: Upload, key: "import" },
-  { to: "/analytics", icon: BarChart3, key: "analytics" },
-  { to: "/settings", icon: Settings, key: "settings" },
-] as const;
 
 interface SidebarProps {
   collapsed: boolean;
@@ -42,10 +43,188 @@ interface SidebarProps {
   onNavigate?: () => void;
 }
 
-/**
- * Desktop sidebar: logo, nav items, collapse button, trial indicator.
- * Expanded: w-60. Collapsed: w-16, icons only with tooltips.
- */
+function SidebarLogo({
+  collapsed,
+  isMobile,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  isMobile?: boolean;
+  onNavigate?: () => void;
+}) {
+  const showLabels = !collapsed || isMobile;
+
+  return (
+    <Link
+      to="/dashboard"
+      onClick={isMobile ? onNavigate : undefined}
+      className={cn(
+        "flex h-16 shrink-0 items-center gap-2 border-b border-border/50 px-4 transition-colors hover:bg-accent/30 dark:border-border/50",
+        showLabels ? "justify-start" : "justify-center"
+      )}
+    >
+      <span
+        className={cn(
+          "font-display font-bold tracking-tight text-foreground",
+          showLabels ? "text-lg" : "text-sm truncate"
+        )}
+      >
+        {showLabels ? "Imperecta" : "I"}
+      </span>
+    </Link>
+  );
+}
+
+function SparklesBadge({ className }: { className?: string }) {
+  return (
+    <Sparkles
+      className={cn("size-3.5 shrink-0 text-primary group-hover:animate-pulse", className)}
+      aria-hidden
+    />
+  );
+}
+
+interface SidebarItemProps {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  to: string;
+  badge?: React.ReactNode;
+  collapsed: boolean;
+  isMobile?: boolean;
+  onNavigate?: () => void;
+  isActive: boolean;
+}
+
+function SidebarItem({
+  icon: Icon,
+  label,
+  to,
+  badge,
+  collapsed,
+  isMobile,
+  onNavigate,
+  isActive,
+}: SidebarItemProps) {
+  const showLabels = !collapsed || isMobile;
+
+  const content = (
+    <Link
+      to={to}
+      onClick={isMobile ? onNavigate : undefined}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-md py-2.5 text-sm transition-colors",
+        showLabels ? "ps-3 pe-3" : "justify-center ps-2 pe-2",
+        isActive
+          ? "bg-accent font-medium text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+      )}
+    >
+      {isActive && (
+        <motion.div
+          layoutId="sidebar-active-indicator"
+          className="absolute inset-y-1.5 start-0 w-[3px] rounded-e-full bg-primary"
+          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+        />
+      )}
+      <Icon className="size-5 shrink-0" />
+      {showLabels && (
+        <>
+          <span className="truncate flex-1">{label}</span>
+          {badge}
+        </>
+      )}
+    </Link>
+  );
+
+  if (collapsed && !isMobile) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{content}</TooltipTrigger>
+        <TooltipContent side="right">{label}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return content;
+}
+
+interface SidebarSectionProps {
+  label: string;
+  collapsed: boolean;
+  children: React.ReactNode;
+}
+
+function SidebarSection({ label, collapsed, children }: SidebarSectionProps) {
+  const showLabels = !collapsed;
+
+  return (
+    <Collapsible defaultOpen className="px-2">
+      {showLabels && (
+        <CollapsibleTrigger
+          className="flex w-full items-center py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {label}
+        </CollapsibleTrigger>
+      )}
+      <CollapsibleContent>
+        <div className="space-y-0.5 py-1">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function SidebarFooter({
+  collapsed,
+  onToggle,
+  isMobile,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  isMobile?: boolean;
+}) {
+  const { t } = useTranslation();
+  const user = useAuthStore((s) => s.user);
+  const showLabels = !collapsed || isMobile;
+
+  const trialEndsAt = user?.trial_ends_at ? new Date(user.trial_ends_at) : null;
+  const trialDaysLeft = trialEndsAt
+    ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+    : 0;
+  const isTrial = (user?.plan ?? "trial").toLowerCase() === "trial";
+
+  return (
+    <div className="shrink-0 border-t border-border/50 p-3 dark:border-border/50">
+      {isTrial && (
+        <p
+          className={cn(
+            "mb-2 text-xs text-muted-foreground",
+            !showLabels && "text-center"
+          )}
+        >
+          {showLabels
+            ? t("layout.trialDaysLeft", { count: trialDaysLeft })
+            : trialDaysLeft}
+        </p>
+      )}
+      {!isMobile && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-full text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          onClick={onToggle}
+          aria-label={collapsed ? t("common.expand") : t("common.collapse")}
+        >
+          {collapsed ? (
+            <ChevronRight className="size-4" />
+          ) : (
+            <ChevronLeft className="size-4" />
+          )}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar({
   collapsed,
   onToggle,
@@ -53,127 +232,134 @@ export function Sidebar({
   onNavigate,
 }: SidebarProps) {
   const { t } = useTranslation();
-  const { resolvedTheme } = useTheme();
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
-  const showLabels = !collapsed || isMobile;
 
-  const navItems = useMemo(() => {
-    const items = [...baseNavItems];
-    if (user?.is_superuser) {
-      const settingsIdx = items.findIndex((i) => i.key === "settings");
-      items.splice(settingsIdx, 0, {
-        to: "/admin",
-        icon: Shield,
-        key: "admin",
-      });
-    }
-    return items;
-  }, [user?.is_superuser]);
-
-  const { trialDaysLeft, progressPercent } = useMemo(() => {
-    const trialEndsAt = user?.trial_ends_at ? new Date(user.trial_ends_at) : null;
-    const daysLeft = trialEndsAt
-      ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-      : 0;
-    const total = 14;
-    const percent = trialEndsAt ? ((total - daysLeft) / total) * 100 : 0;
-    return { trialDaysLeft: daysLeft, progressPercent: Math.min(100, percent) };
-  }, [user?.trial_ends_at]);
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(path + "/");
 
   return (
     <aside
       className={cn(
-        "flex flex-col border-r border-border bg-background text-foreground transition-[width] duration-300 ease-in-out dark:border-border dark:bg-background dark:text-foreground",
-        isMobile ? "w-full" : collapsed ? "w-16" : "w-60"
+        "sidebar flex flex-col bg-card/50 text-foreground backdrop-blur-xl transition-[width] duration-300 ease-in-out dark:bg-card/50",
+        "border-e border-border/50 dark:border-border/50",
+        isMobile ? "w-full" : collapsed ? "w-16" : "w-[256px]"
       )}
     >
-      <div
-        className={cn(
-          "flex h-16 shrink-0 items-center gap-2 border-b border-border px-4 dark:border-border",
-          showLabels ? "justify-between" : "justify-center"
-        )}
-      >
-        <img
-          src={
-            (resolvedTheme ?? "light") === "dark"
-              ? "/images/logo-dark.png"
-              : "/images/logo-light.png"
-          }
-          alt="Imperecta"
-          className={cn(
-            "object-contain object-left transition-opacity duration-200",
-            showLabels ? "h-10 w-auto" : "h-8 w-8"
-          )}
-        />
-        {!isMobile && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground"
-            onClick={onToggle}
-            aria-label={collapsed ? t("common.expand") : t("common.collapse")}
-          >
-            {collapsed ? (
-              <ChevronRight className="size-4" />
-            ) : (
-              <ChevronLeft className="size-4" />
-            )}
-          </Button>
-        )}
-      </div>
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {navItems.map(({ to, icon: Icon, key }) => {
-          const isAdmin = key === "admin";
-          const navKey = isAdmin ? "admin" : key;
-          const isActive = location.pathname === to || location.pathname.startsWith(to + "/");
-          const linkClassName = cn(
-            "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150",
-            isActive
-              ? "border-l-4 border-primary bg-accent/10 text-primary dark:border-primary dark:bg-accent/10 dark:text-primary"
-              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground",
-            !showLabels && "justify-center px-2"
-          );
-          const linkEl = (
-            <Link
-              to={to}
-              onClick={isMobile ? onNavigate : undefined}
-              className={linkClassName}
-            >
-              <Icon className="size-5 shrink-0" />
-              {showLabels && <span className="truncate">{t(`nav.${navKey}`)}</span>}
-            </Link>
-          );
-          return collapsed && !isMobile ? (
-            <Tooltip key={to}>
-              <TooltipTrigger asChild>{linkEl}</TooltipTrigger>
-              <TooltipContent side="right">{t(`nav.${navKey}`)}</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Fragment key={to}>{linkEl}</Fragment>
-          );
-        })}
-      </nav>
-      <div className="shrink-0 border-t border-border p-3 dark:border-border">
-        <p className="mb-2 text-xs text-muted-foreground dark:text-muted-foreground">
-          {showLabels ? t("layout.trialDaysLeft", { count: trialDaysLeft }) : trialDaysLeft}
-        </p>
-        <div className="mb-2 h-2 overflow-hidden rounded-full bg-muted dark:bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-[width] dark:bg-primary"
-            style={{ width: `${progressPercent}%` }}
+      <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
+
+      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4">
+        <SidebarSection label={t("nav.section.core")} collapsed={collapsed}>
+          <SidebarItem
+            icon={LayoutDashboard}
+            label={t("nav.dashboard")}
+            to="/dashboard"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/dashboard")}
           />
-        </div>
-        {showLabels && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="w-full text-xs"
-          >
-            {t("layout.upgrade")}
-          </Button>
+          <SidebarItem
+            icon={Package}
+            label={t("nav.products")}
+            to="/products"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/products")}
+          />
+          <SidebarItem
+            icon={Users}
+            label={t("nav.competitors")}
+            to="/competitors"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/competitors")}
+          />
+        </SidebarSection>
+
+        <SidebarSection label={t("nav.section.intelligence")} collapsed={collapsed}>
+          <SidebarItem
+            icon={TrendingUp}
+            label={t("nav.analytics")}
+            to="/analytics"
+            badge={<SparklesBadge />}
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/analytics")}
+          />
+          <SidebarItem
+            icon={Bell}
+            label={t("nav.alerts")}
+            to="/alerts"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/alerts")}
+          />
+          <SidebarItem
+            icon={FileText}
+            label={t("nav.digests")}
+            to="/digests"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/digests")}
+          />
+        </SidebarSection>
+
+        <SidebarSection label={t("nav.section.tools")} collapsed={collapsed}>
+          <SidebarItem
+            icon={Bot}
+            label={t("nav.ai")}
+            to="/ai"
+            badge={<SparklesBadge />}
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/ai")}
+          />
+          <SidebarItem
+            icon={Upload}
+            label={t("nav.import")}
+            to="/import"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/import")}
+          />
+        </SidebarSection>
+
+        <SidebarSection label={t("nav.section.account")} collapsed={collapsed}>
+          <SidebarItem
+            icon={Settings}
+            label={t("nav.settings")}
+            to="/settings"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/settings")}
+          />
+        </SidebarSection>
+
+        {user?.is_superuser && (
+          <SidebarSection label={t("nav.section.admin")} collapsed={collapsed}>
+            <SidebarItem
+              icon={Shield}
+              label={t("nav.admin")}
+              to="/admin"
+              collapsed={collapsed}
+              isMobile={isMobile}
+              onNavigate={onNavigate}
+              isActive={isActive("/admin")}
+            />
+          </SidebarSection>
         )}
-      </div>
+      </nav>
+
+      <SidebarFooter collapsed={collapsed} onToggle={onToggle} isMobile={isMobile} />
     </aside>
   );
 }

@@ -18,16 +18,13 @@ from app.models import (
     Product,
 )
 from app.schemas.analytics import (
-    ActivePromo,
-    AnomalyItem,
-    AnomaliesResponse,
+    AdvancedSimulationRequest,
     ComparisonCompetitor,
     ComparisonResponse,
-    DashboardSummaryResponse,
     PriceHistoryCompetitor,
     PriceHistoryDataPoint,
     PriceHistoryResponse,
-    TopChange,
+    SimulateRequest,
 )
 
 router = APIRouter()
@@ -228,214 +225,97 @@ async def get_comparison(
     return ComparisonResponse(my_price=my_price, competitors=competitors)
 
 
-@router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
-async def get_dashboard_summary(
+# --- Forecast and simulation endpoints ---
+
+
+@router.get("/products/{product_id}/forecast")
+async def get_product_forecast(
+    product_id: UUID,
     current_user: CurrentUser,
     db: DbSession,
-) -> DashboardSummaryResponse:
-    """Dashboard summary for current user."""
+    days: int = Query(14, ge=1, le=90, description="Forecast horizon in days"),
+) -> dict:
+    """Forecast price trend for a product based on competitor price history."""
+    from app.services.forecast_service import ForecastService
 
-    today_start = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-
-    total_products = (
-        await db.execute(
-            select(func.count()).select_from(Product).where(Product.user_id == current_user.id)
+    service = ForecastService(db, current_user.id)
+    try:
+        return await service.product_forecast(product_id, forecast_days=days)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
         )
-    ).scalar() or 0
-
-    total_competitors = (
-        await db.execute(
-            select(func.count())
-            .select_from(Competitor)
-            .where(Competitor.user_id == current_user.id)
-        )
-    ).scalar() or 0
-
-    total_tracked = (
-        await db.execute(
-            select(func.count())
-            .select_from(CompetitorProduct)
-            .join(Product, CompetitorProduct.product_id == Product.id)
-            .where(Product.user_id == current_user.id, CompetitorProduct.is_active.is_(True))
-        )
-    ).scalar() or 0
-
-    last_scrape = (
-        await db.execute(
-            select(func.max(CompetitorProduct.last_checked_at))
-            .join(Product, CompetitorProduct.product_id == Product.id)
-            .where(Product.user_id == current_user.id)
-        )
-    ).scalar()
-
-    alerts_today = (
-        await db.execute(
-            select(func.count())
-            .select_from(AlertEvent)
-            .join(Alert, AlertEvent.alert_id == Alert.id)
-            .where(
-                Alert.user_id == current_user.id,
-                AlertEvent.triggered_at >= today_start,
-            )
-        )
-    ).scalar() or 0
-
-    drops_result = await db.execute(
-        select(func.count())
-        .select_from(PriceSnapshot)
-        .join(CompetitorProduct, PriceSnapshot.competitor_product_id == CompetitorProduct.id)
-        .join(Product, CompetitorProduct.product_id == Product.id)
-        .where(
-            Product.user_id == current_user.id,
-            PriceSnapshot.scraped_at >= today_start,
-            PriceSnapshot.old_price.isnot(None),
-            PriceSnapshot.price < PriceSnapshot.old_price,
-        )
-    )
-    drops = drops_result.scalar() or 0
-
-    increases_result = await db.execute(
-        select(func.count())
-        .select_from(PriceSnapshot)
-        .join(CompetitorProduct, PriceSnapshot.competitor_product_id == CompetitorProduct.id)
-        .join(Product, CompetitorProduct.product_id == Product.id)
-        .where(
-            Product.user_id == current_user.id,
-            PriceSnapshot.scraped_at >= today_start,
-            PriceSnapshot.old_price.isnot(None),
-            PriceSnapshot.price > PriceSnapshot.old_price,
-        )
-    )
-    increases = increases_result.scalar() or 0
-
-    top_changes_result = await db.execute(
-        select(
-            Product.name.label("product_name"),
-            Competitor.name.label("competitor_name"),
-            PriceSnapshot.old_price,
-            PriceSnapshot.price.label("new_price"),
-            (
-                (PriceSnapshot.price - PriceSnapshot.old_price)
-                / PriceSnapshot.old_price
-                * 100
-            ).label("change_pct"),
-        )
-        .select_from(PriceSnapshot)
-        .join(CompetitorProduct, PriceSnapshot.competitor_product_id == CompetitorProduct.id)
-        .join(Product, CompetitorProduct.product_id == Product.id)
-        .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
-        .where(
-            Product.user_id == current_user.id,
-            PriceSnapshot.scraped_at >= today_start,
-            PriceSnapshot.old_price.isnot(None),
-            PriceSnapshot.old_price > 0,
-        )
-        .order_by(
-            func.abs(
-                (PriceSnapshot.price - PriceSnapshot.old_price) / PriceSnapshot.old_price * 100
-            ).desc()
-        )
-        .limit(5)
-    )
-    top_changes = [
-        TopChange(
-            product_name=r.product_name,
-            competitor_name=r.competitor_name,
-            old_price=r.old_price,
-            new_price=r.new_price,
-            change_percent=float(r.change_pct),
-        )
-        for r in top_changes_result.all()
-    ]
-
-    promos_result = await db.execute(
-        select(
-            Competitor.name.label("competitor_name"),
-            Product.name.label("product_name"),
-            CompetitorProduct.last_promo_label,
-        )
-        .select_from(CompetitorProduct)
-        .join(Product, CompetitorProduct.product_id == Product.id)
-        .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
-        .where(
-            Product.user_id == current_user.id,
-            CompetitorProduct.is_active.is_(True),
-            CompetitorProduct.last_promo_label.isnot(None),
-            CompetitorProduct.last_promo_label != "",
-        )
-    )
-    active_promos = [
-        ActivePromo(
-            competitor_name=r.competitor_name,
-            product_name=r.product_name,
-            promo_label=r.last_promo_label or "",
-        )
-        for r in promos_result.all()
-    ]
-
-    return DashboardSummaryResponse(
-        total_products=total_products,
-        total_competitors=total_competitors,
-        total_tracked_items=total_tracked,
-        last_scrape_at=last_scrape,
-        alerts_triggered_today=alerts_today,
-        price_changes_today={"drops": drops, "increases": increases},
-        top_changes=top_changes,
-        active_promos=active_promos,
-    )
 
 
-@router.get("/dashboard/anomalies", response_model=AnomaliesResponse)
-async def get_dashboard_anomalies(
+@router.get("/market-forecast")
+async def get_market_forecast(
     current_user: CurrentUser,
     db: DbSession,
-) -> AnomaliesResponse:
-    """Anomalies in last 24 hours (price change > 15%)."""
+    days: int = Query(7, ge=1, le=30, description="Forecast horizon in days"),
+) -> dict:
+    """Aggregate market forecast across all user's products."""
+    from app.services.forecast_service import ForecastService
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    service = ForecastService(db, current_user.id)
+    return await service.market_forecast(forecast_days=days)
 
-    result = await db.execute(
-        select(
-            Product.name.label("product_name"),
-            Competitor.name.label("competitor_name"),
-            PriceSnapshot.old_price,
-            PriceSnapshot.price.label("new_price"),
-            (
-                (PriceSnapshot.price - PriceSnapshot.old_price)
-                / PriceSnapshot.old_price
-                * 100
-            ).label("change_pct"),
-            PriceSnapshot.scraped_at.label("detected_at"),
-        )
-        .select_from(PriceSnapshot)
-        .join(CompetitorProduct, PriceSnapshot.competitor_product_id == CompetitorProduct.id)
-        .join(Product, CompetitorProduct.product_id == Product.id)
-        .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
-        .where(
-            Product.user_id == current_user.id,
-            PriceSnapshot.scraped_at >= cutoff,
-            PriceSnapshot.old_price.isnot(None),
-            PriceSnapshot.old_price > 0,
-            func.abs(
-                (PriceSnapshot.price - PriceSnapshot.old_price) / PriceSnapshot.old_price * 100
-            )
-            > 15,
-        )
-        .order_by(PriceSnapshot.scraped_at.desc())
+
+@router.post("/simulate")
+async def post_simulate(
+    body: SimulateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Simulate price change impact on sales, revenue, and margin."""
+    from app.services.forecast_service import ForecastService
+
+    service = ForecastService(db, current_user.id)
+    return await service.simulate_scenario(
+        product_id=body.product_id,
+        price_change_pct=body.price_change_pct,
+        volume_change_pct=body.volume_change_pct,
     )
 
-    items = [
-        AnomalyItem(
-            product_name=r.product_name,
-            competitor_name=r.competitor_name,
-            old_price=r.old_price,
-            new_price=r.new_price,
-            change_percent=float(r.change_pct),
-            detected_at=r.detected_at,
-        )
-        for r in result.all()
-    ]
 
-    return AnomaliesResponse(items=items)
+@router.post("/advanced-simulation")
+async def post_advanced_simulation(
+    body: AdvancedSimulationRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Extended simulation with season, ad budget, and inflation factors."""
+    from app.services.forecast_service import ForecastService
+
+    service = ForecastService(db, current_user.id)
+    return await service.advanced_simulation(
+        price_change_pct=body.price_change_pct,
+        volume_change_pct=body.volume_change_pct,
+        ad_budget_change_pct=body.ad_budget_change_pct,
+        inflation_pct=body.inflation_pct,
+        season=body.season,
+    )
+
+
+@router.get("/competitor-benchmark")
+async def get_competitor_benchmark(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[dict]:
+    """Competitor benchmark scores (0-100) with components and trend."""
+    from app.services.benchmark_service import BenchmarkService
+
+    service = BenchmarkService(db, current_user.id)
+    return await service.get_competitor_scores()
+
+
+@router.get("/comparison-matrix")
+async def get_comparison_matrix(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Price comparison matrix: products × competitors (% diff, positive = I'm cheaper)."""
+    from app.services.benchmark_service import BenchmarkService
+
+    service = BenchmarkService(db, current_user.id)
+    return await service.get_comparison_matrix()

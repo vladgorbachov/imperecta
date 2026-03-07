@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
 from app.api.admin import router as admin_router
+from app.api.ai import router as ai_router
+from app.api.dashboard import router as dashboard_router
 from app.config import Settings
 from app.database import Base, engine
 
@@ -93,6 +95,8 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
+app.include_router(dashboard_router, prefix="/api")
 
 
 @app.get("/health")
@@ -103,9 +107,10 @@ async def liveness() -> dict:
 
 @app.get("/api/health")
 async def health_check() -> dict:
-    """Health check endpoint with DB and Redis connectivity."""
+    """Health check endpoint with DB, Redis connectivity and connection pool status."""
     db_ok = False
     redis_ok = False
+    db_pool: dict | None = None
 
     try:
         from sqlalchemy import text
@@ -113,6 +118,12 @@ async def health_check() -> dict:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         db_ok = True
+        pool = engine.pool
+        db_pool = {
+            "size": pool.size(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+        }
     except Exception:
         pass
 
@@ -125,8 +136,11 @@ async def health_check() -> dict:
     except Exception:
         pass
 
-    return {
+    result: dict = {
         "status": "ok",
         "db": db_ok,
         "redis": redis_ok,
     }
+    if db_pool is not None:
+        result["db_pool"] = db_pool
+    return result

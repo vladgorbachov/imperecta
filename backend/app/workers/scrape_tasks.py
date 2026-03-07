@@ -183,21 +183,3 @@ def scrape_all() -> None:
         scrape_user_products.delay(uid)
 
 
-@celery_app.task
-def cleanup_old_snapshots() -> None:
-    """Delete price snapshots older than 90 days."""
-
-    async def _do():
-        from datetime import datetime, timedelta, timezone
-
-        from sqlalchemy import delete
-
-        from app.models import PriceSnapshot
-
-        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-        async with async_session_maker() as session:
-            await session.execute(delete(PriceSnapshot).where(PriceSnapshot.scraped_at < cutoff))
-            await session.commit()
-        logger.info("Cleaned up snapshots older than 90 days")
-
-    _run_async(_do())

@@ -106,7 +106,8 @@ export function RegisterPage() {
     setSubmitError("");
     setLoading(true);
     try {
-      const lang = i18n.language?.startsWith("ru") ? "ru" : "en";
+      const raw = (i18n.language ?? "en").split("-")[0];
+      const lang = ["en", "ar", "es", "zh", "ru", "fr"].includes(raw) ? raw : "en";
       await register(email, password, name, undefined, lang);
       navigate("/dashboard", { replace: true });
     } catch (err: unknown) {

@@ -226,6 +226,7 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
         plan=current_user.plan.value,
         trial_ends_at=current_user.trial_ends_at,
         language=current_user.language,
+        ai_tone=getattr(current_user, "ai_tone", "balanced"),
         created_at=current_user.created_at,
         telegram_chat_id=current_user.telegram_chat_id,
     )
@@ -250,6 +251,7 @@ async def update_me(
         plan=current_user.plan.value,
         trial_ends_at=current_user.trial_ends_at,
         language=current_user.language,
+        ai_tone=getattr(current_user, "ai_tone", "balanced"),
         created_at=current_user.created_at,
         telegram_chat_id=current_user.telegram_chat_id,
     )

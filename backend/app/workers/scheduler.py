@@ -17,8 +17,8 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.digest_tasks.schedule_daily_digests",
         "schedule": crontab(minute=0, hour=8),
     },
-    "cleanup-old-snapshots": {
-        "task": "app.workers.scrape_tasks.cleanup_old_snapshots",
-        "schedule": crontab(minute=0, hour=3, day_of_week=0),
+    "cleanup-old-data": {
+        "task": "cleanup_old_data",
+        "schedule": crontab(minute=0, hour=4, day_of_week=0),
     },
 }

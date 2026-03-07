@@ -108,7 +108,7 @@ def generate_weekly_digest(user_id: str) -> None:
             period_start = now - timedelta(days=7)
 
             data = await _collect_period_data(session, user.id, period_start, period_end)
-            content_md = await ai_generate_digest(user.id, data, db=session)
+            content_md = await ai_generate_digest(user.id, data, db=session, user=user)
 
             digest = Digest(
                 user_id=user.id,
@@ -146,7 +146,7 @@ def generate_daily_digest(user_id: str) -> None:
             period_start = now - timedelta(days=1)
 
             data = await _collect_period_data(session, user.id, period_start, period_end)
-            content_md = await ai_generate_digest(user.id, data, db=session)
+            content_md = await ai_generate_digest(user.id, data, db=session, user=user)
 
             digest = Digest(
                 user_id=user.id,

@@ -17,7 +17,8 @@ class ScrapeLog(Base):
 
     __tablename__ = "scrape_logs"
     __table_args__ = (
-        Index("ix_scrape_logs_marketplace_created", "marketplace_id", "created_at"),
+        Index("ix_scrape_logs_mp_date", "marketplace_id", "created_at"),
+        Index("ix_scrape_logs_status", "status", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

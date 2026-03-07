@@ -2,9 +2,7 @@ import { useTranslation } from "react-i18next";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -18,16 +16,10 @@ import { useAuthStore } from "@/stores/authStore";
 
 const STORAGE_KEY = "imperecta_language";
 
-const REGION_LABELS: Record<string, string> = {
-  cis: "CIS",
-  europe: "Europe",
-};
-
 interface LanguageSelectorProps {
   value?: LanguageCode;
   onChange?: (code: LanguageCode) => void;
   showFlags?: boolean;
-  grouped?: boolean;
   /** Compact: flag + code only (e.g. "🇬🇧 en") */
   compact?: boolean;
 }
@@ -36,7 +28,6 @@ export function LanguageSelector({
   value,
   onChange,
   showFlags = true,
-  grouped = true,
   compact = false,
 }: LanguageSelectorProps) {
   const { i18n } = useTranslation();
@@ -60,36 +51,17 @@ export function LanguageSelector({
     onChange?.(langCode);
   };
 
-  const renderOption = (l: (typeof SUPPORTED_LANGUAGES)[number]) => (
-    <SelectItem key={l.code} value={l.code}>
-      {compact ? `${l.flag} ${l.code}` : showFlags ? `${l.flag} ${l.name}` : l.name}
-    </SelectItem>
-  );
-
   return (
     <Select value={currentCode} onValueChange={handleChange}>
       <SelectTrigger className={compact ? "h-8 w-16" : undefined}>
         <SelectValue>{displayValue}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {grouped ? (
-          <>
-            <SelectGroup>
-              <SelectLabel>{REGION_LABELS.cis}</SelectLabel>
-              {SUPPORTED_LANGUAGES.filter((l) => l.region === "cis").map(
-                renderOption
-              )}
-            </SelectGroup>
-            <SelectGroup>
-              <SelectLabel>{REGION_LABELS.europe}</SelectLabel>
-              {SUPPORTED_LANGUAGES.filter((l) => l.region === "europe").map(
-                renderOption
-              )}
-            </SelectGroup>
-          </>
-        ) : (
-          SUPPORTED_LANGUAGES.map(renderOption)
-        )}
+        {SUPPORTED_LANGUAGES.map((l) => (
+          <SelectItem key={l.code} value={l.code}>
+            {compact ? `${l.flag} ${l.code}` : showFlags ? `${l.flag} ${l.name}` : l.name}
+          </SelectItem>
+        ))}
       </SelectContent>
     </Select>
   );

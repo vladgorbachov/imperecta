@@ -50,6 +50,27 @@ class AlertEventResponse(BaseModel):
     message: str
     sent_via: str
     triggered_at: datetime
+    severity: str | None = None
+    ai_explanation: str | None = None
+    ai_recommendation: str | None = None
+    ai_recommended_price: Decimal | None = None
 
     class Config:
         from_attributes = True
+
+
+class AlertExplanationResponse(BaseModel):
+    """Schema for AI explanation response."""
+
+    explanation: str | None
+    recommendation: str | None
+    recommended_price: float | None
+    severity: str | None = None
+
+
+class AlertAutoResponseResponse(BaseModel):
+    """Schema for auto-response (price recommendation)."""
+
+    recommended_price: float | None
+    reasoning: str
+    expected_impact: str

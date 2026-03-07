@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -13,6 +13,9 @@ class ApiLog(Base):
     """Log entry for each external API call."""
 
     __tablename__ = "api_logs"
+    __table_args__ = (
+        Index("ix_api_logs_service_date", "service", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     service: Mapped[str] = mapped_column(String(30), nullable=False, index=True)

@@ -1,11 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router-dom";
-import { Menu, LogOut, User, Settings, Bell, Sun, Moon } from "lucide-react";
+import { Menu, LogOut, Bell, Sun, Moon } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { LanguageSelector } from "@/components/ui/LanguageSelector";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,12 +18,13 @@ interface HeaderProps {
 }
 
 /**
- * Top bar: breadcrumb (left), theme toggle, language switcher, Bell with Badge, avatar dropdown.
+ * Top bar: menu (mobile), theme toggle, notifications, avatar dropdown.
+ * Dropdown: user name + email (info only), separator, logout.
  */
 export function Header({ onMenuClick }: HeaderProps) {
   const { t } = useTranslation();
   const { resolvedTheme, setTheme } = useTheme();
-  const { user, logout, updateLanguage } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -73,12 +72,6 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Moon className="size-5 text-foreground dark:text-foreground" />
           )}
         </Button>
-        <LanguageSelector
-          value={user?.language as import("@/i18n").LanguageCode}
-          onChange={(code) => updateLanguage(code)}
-          compact
-          grouped={false}
-        />
         <Button
           variant="ghost"
           size="icon"
@@ -103,17 +96,17 @@ export function Header({ onMenuClick }: HeaderProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem onClick={() => navigate("/settings")}>
-              <User className="mr-2 size-4" />
-              {t("auth.profile")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate("/settings")}>
-              <Settings className="mr-2 size-4" />
-              {t("nav.settings")}
-            </DropdownMenuItem>
+            <div className="px-2 py-2">
+              <p className="truncate text-sm font-medium text-foreground">
+                {user?.name ?? "—"}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {user?.email ?? "—"}
+              </p>
+            </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout}>
-              <LogOut className="mr-2 size-4" />
+              <LogOut className="me-2 size-4" />
               {t("auth.logout")}
             </DropdownMenuItem>
           </DropdownMenuContent>
