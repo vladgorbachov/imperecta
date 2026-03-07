@@ -222,6 +222,17 @@
   }
 }
 
+/* Safe area for notched devices (iOS, Android) */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.safe-area-bottom-margin {
+  margin-bottom: env(safe-area-inset-bottom, 0);
+}
+
 /* Digest modal markdown styles */
 .digest-content h1 {
   font-family: var(--font-display);

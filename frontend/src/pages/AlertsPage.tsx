@@ -340,9 +340,9 @@ export function AlertsPage() {
       <div className="flex flex-col gap-6 lg:flex-row">
         {/* Left: Timeline feed (70%) */}
         <div className="min-w-0 flex-1 lg:max-w-[70%]">
-          <div className="mb-4 flex flex-wrap gap-2">
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="w-full min-w-0 sm:w-36">
                 <SelectValue placeholder={t("alerts.filterType")} />
               </SelectTrigger>
               <SelectContent>
@@ -353,7 +353,7 @@ export function AlertsPage() {
               </SelectContent>
             </Select>
             <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="w-full min-w-0 sm:w-36">
                 <SelectValue placeholder={t("alerts.filterPriority")} />
               </SelectTrigger>
               <SelectContent>
@@ -364,7 +364,7 @@ export function AlertsPage() {
               </SelectContent>
             </Select>
             <Select value={channelFilter} onValueChange={setChannelFilter}>
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="w-full min-w-0 sm:w-36">
                 <SelectValue placeholder={t("alerts.filterChannel")} />
               </SelectTrigger>
               <SelectContent>

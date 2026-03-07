@@ -83,9 +83,9 @@ export function AIAnalystPage() {
   const isEmpty = messages.length === 0 && !isTyping;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden rounded-xl border border-border/50 bg-gradient-to-b from-background via-background to-muted/20 dark:from-background dark:via-background dark:to-muted/10">
+    <div className="flex min-h-[50vh] h-[calc(100vh-4rem)] max-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-xl border border-border/50 bg-gradient-to-b from-background via-background to-muted/20 dark:from-background dark:via-background dark:to-muted/10">
       {/* Header */}
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border/50 px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 py-3 sm:gap-4 sm:px-4">
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
             <Bot className="size-5 text-primary" />
@@ -136,7 +136,7 @@ export function AIAnalystPage() {
       {/* Messages area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-6"
+        className="flex-1 overflow-y-auto px-3 py-4 sm:px-4 sm:py-6"
       >
         <div className="mx-auto max-w-3xl space-y-6">
           {isEmpty ? (
@@ -171,7 +171,7 @@ export function AIAnalystPage() {
       </div>
 
       {/* Input area */}
-      <div className="shrink-0 border-t border-border/50 p-4">
+      <div className="shrink-0 border-t border-border/50 p-3 sm:p-4">
         <div className="mx-auto max-w-3xl">
           <ChatInput onSend={handleSend} disabled={isTyping} />
         </div>

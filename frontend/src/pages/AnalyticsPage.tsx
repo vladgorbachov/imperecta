@@ -141,7 +141,7 @@ export function AnalyticsPage() {
               </Button>
             ))}
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-full min-w-0 sm:w-40">
                 <SelectValue placeholder={t("analytics.categoryFilter")} />
               </SelectTrigger>
               <SelectContent>
@@ -159,7 +159,7 @@ export function AnalyticsPage() {
                 setCompetitorFilter(v === "all" ? [] : [v])
               }
             >
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-full min-w-0 sm:w-48">
                 <SelectValue placeholder={t("analytics.competitorFilter")} />
               </SelectTrigger>
               <SelectContent>
