@@ -3,16 +3,17 @@ import { createRoot } from "react-dom/client";
 import { useAuthStore } from "@/stores/authStore";
 import { App } from "@/App";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import "@/api/setupAuth";
 import "@/i18n";
 import "./index.css";
 
 function AppWithInit() {
-  const init = useAuthStore((s) => s.init);
+  const restoreSession = useAuthStore((s) => s.restoreSession);
   const isInitialized = useAuthStore((s) => s.isInitialized);
 
   useEffect(() => {
-    init();
-  }, [init]);
+    restoreSession();
+  }, [restoreSession]);
 
   if (!isInitialized) {
     return <LoadingScreen />;

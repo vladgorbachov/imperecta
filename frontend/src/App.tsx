@@ -86,6 +86,10 @@ import { AlertsPage } from "@/pages/AlertsPage";
 import { DigestsPage } from "@/pages/DigestsPage";
 import { ImportPage } from "@/pages/ImportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { AdminPage } from "@/pages/AdminPage";
+import { AnalyticsPage } from "@/pages/AnalyticsPage";
+import { ChangePasswordRoute } from "@/components/ChangePasswordRoute";
+import { SuperuserRoute } from "@/components/SuperuserRoute";
 
 const queryClient = new QueryClient();
 
@@ -101,6 +105,7 @@ export function App() {
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/register" element={<RegisterPage />} />
                   <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                  <Route path="/change-password" element={<ChangePasswordRoute />} />
                   <Route
                     path="/"
                     element={
@@ -117,7 +122,18 @@ export function App() {
                     <Route path="alerts" element={<AlertsPage />} />
                     <Route path="digests" element={<DigestsPage />} />
                     <Route path="import" element={<ImportPage />} />
+                    <Route path="analytics" element={<AnalyticsPage />} />
                     <Route path="settings" element={<SettingsPage />} />
+                  </Route>
+                  <Route
+                    path="/admin"
+                    element={
+                      <SuperuserRoute>
+                        <DashboardLayout />
+                      </SuperuserRoute>
+                    }
+                  >
+                    <Route index element={<AdminPage />} />
                   </Route>
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>

@@ -44,6 +44,7 @@ class UserLogin(BaseModel):
 
     email: EmailStr
     password: str
+    remember_me: bool = False
 
 
 class UserResponse(BaseModel):
@@ -84,6 +85,16 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    persistent: bool = False
+    expires_at: str | None = None
+    force_password_change: bool | None = None
+
+
+class ChangeInitialPasswordRequest(BaseModel):
+    """Schema for forced password change (superuser first login)."""
+
+    new_email: EmailStr
+    new_password: str = Field(..., min_length=8)
 
 
 class RefreshTokenRequest(BaseModel):

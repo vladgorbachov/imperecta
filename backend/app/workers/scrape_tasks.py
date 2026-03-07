@@ -3,13 +3,15 @@
 import asyncio
 import logging
 import random
+import time
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker
-from app.models import CompetitorProduct, Product, User
+from app.models import AdminMarketplace, Competitor, CompetitorProduct, Product, User
+from app.scrapers.engine import ScraperFactory
 from app.services.price_service import scrape_competitor_product
 from app.workers.alert_tasks import check_alerts
 from app.workers.celery_app import celery_app
@@ -27,6 +29,50 @@ def _run_async(coro):
         loop.close()
 
 
+async def _log_scrape_and_update_admin(
+    session: AsyncSession,
+    marketplace_id: str,
+    marketplace_name: str,
+    url: str,
+    competitor_product_id: UUID,
+    status: str,
+    error_message: str | None = None,
+    price_found=None,
+    duration_ms: int | None = None,
+    proxy_used: bool = False,
+) -> None:
+    """Log scrape to scrape_logs and update admin_marketplaces if applicable."""
+    scraper = ScraperFactory.create("generic")
+    await scraper._log_scrape(
+        session,
+        marketplace_id=marketplace_id,
+        marketplace_name=marketplace_name,
+        url=url,
+        status=status,
+        error_message=error_message,
+        price_found=float(price_found) if price_found is not None else None,
+        duration_ms=duration_ms,
+        proxy_used=proxy_used,
+        competitor_product_id=competitor_product_id,
+    )
+
+    result = await session.execute(
+        select(AdminMarketplace).where(AdminMarketplace.marketplace_id == marketplace_id)
+    )
+    am = result.scalar_one_or_none()
+    if am:
+        from datetime import datetime, timezone
+
+        am.last_scrape_at = datetime.now(timezone.utc)
+        am.last_scrape_status = status
+        am.last_error = error_message
+        am.total_scrapes += 1
+        if status == "success":
+            am.successful_scrapes += 1
+        else:
+            am.failed_scrapes += 1
+
+
 @celery_app.task(bind=True, max_retries=3)
 def scrape_single(self, competitor_product_id: str) -> None:
     """Scrape single competitor product, save snapshot, trigger alert check."""
@@ -34,16 +80,35 @@ def scrape_single(self, competitor_product_id: str) -> None:
     async def _do():
         async with async_session_maker() as session:
             result = await session.execute(
-                select(CompetitorProduct.last_price, CompetitorProduct.last_in_stock)
+                select(CompetitorProduct, Competitor)
+                .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
                 .where(CompetitorProduct.id == UUID(competitor_product_id))
             )
             row = result.one_or_none()
-            old_price = str(row[0]) if row and row[0] is not None else None
-            old_in_stock = row[1] if row else None
+            if not row:
+                raise ValueError("Competitor product not found")
+            cp, competitor = row
+            old_price = str(cp.last_price) if cp.last_price is not None else None
+            old_in_stock = cp.last_in_stock
 
+            marketplace_id = competitor.marketplace
+            marketplace_name = competitor.name or marketplace_id
+
+            start = time.time()
             try:
                 data = await scrape_competitor_product(
                     UUID(competitor_product_id), session
+                )
+                duration_ms = int((time.time() - start) * 1000)
+                await _log_scrape_and_update_admin(
+                    session,
+                    marketplace_id=marketplace_id,
+                    marketplace_name=marketplace_name,
+                    url=cp.url,
+                    competitor_product_id=cp.id,
+                    status="success",
+                    price_found=data.price,
+                    duration_ms=duration_ms,
                 )
                 await session.commit()
                 check_alerts.delay(
@@ -59,7 +124,19 @@ def scrape_single(self, competitor_product_id: str) -> None:
                     competitor_product_id,
                     data.price,
                 )
-            except Exception:
+            except Exception as exc:
+                duration_ms = int((time.time() - start) * 1000)
+                status_str = "timeout" if "timeout" in str(exc).lower() else "error"
+                await _log_scrape_and_update_admin(
+                    session,
+                    marketplace_id=marketplace_id,
+                    marketplace_name=marketplace_name,
+                    url=cp.url,
+                    competitor_product_id=cp.id,
+                    status=status_str,
+                    error_message=str(exc),
+                    duration_ms=duration_ms,
+                )
                 await session.rollback()
                 raise
 

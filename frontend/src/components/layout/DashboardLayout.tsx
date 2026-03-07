@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { MobileSidebar } from "./MobileSidebar";
+import { SessionExpiryWarning } from "@/components/SessionExpiryWarning";
 import { useSidebar } from "@/hooks/useSidebar";
 
 /**
@@ -30,6 +31,7 @@ export function DashboardLayout() {
         open={mobileSheetOpen}
         onOpenChange={setMobileSheetOpen}
       />
+      <SessionExpiryWarning />
     </div>
   );
 }

@@ -256,7 +256,6 @@ export function AlertsPage() {
       channel: form.channel,
     };
     if (editAlert) {
-      // TODO: API — alertsApi.update for full edit
       createMutation.mutate(payload);
     } else {
       createMutation.mutate(payload);

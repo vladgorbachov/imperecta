@@ -10,14 +10,17 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from app.database import Base
 from app.models import (
-    User,
-    Product,
-    Competitor,
-    CompetitorProduct,
-    PriceSnapshot,
+    AdminMarketplace,
+    ApiLog,
     Alert,
     AlertEvent,
+    Competitor,
+    CompetitorProduct,
     Digest,
+    PriceSnapshot,
+    Product,
+    ScrapeLog,
+    User,
 )
 
 config = context.config

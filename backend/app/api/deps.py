@@ -82,3 +82,16 @@ async def get_current_user(
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_superuser(current_user: CurrentUser) -> User:
+    """Require superuser role."""
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superuser access required",
+        )
+    return current_user
+
+
+CurrentSuperuser = Annotated[User, Depends(get_current_superuser)]

@@ -15,8 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-const NOTIFICATION_COUNT = 3;
-
 interface HeaderProps {
   onMenuClick?: () => void;
 }
@@ -88,14 +86,6 @@ export function Header({ onMenuClick }: HeaderProps) {
           aria-label={t("common.notifications")}
         >
           <Bell className="size-5" />
-          {NOTIFICATION_COUNT > 0 && (
-            <Badge
-              variant="destructive"
-              className="absolute -right-1 -top-1 size-5 items-center justify-center rounded-full p-0 text-xs"
-            >
-              {NOTIFICATION_COUNT}
-            </Badge>
-          )}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

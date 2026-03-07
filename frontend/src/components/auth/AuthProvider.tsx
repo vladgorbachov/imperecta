@@ -58,8 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [authUser, accessToken]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      await loginStore(email, password);
+    async (email: string, password: string, rememberMe = false) => {
+      await loginStore({ email, password, remember_me: rememberMe });
     },
     [loginStore]
   );

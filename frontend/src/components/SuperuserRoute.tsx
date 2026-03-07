@@ -1,11 +1,16 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 
-interface ProtectedRouteProps {
+interface SuperuserRouteProps {
   children: React.ReactNode;
 }
 
-export function ProtectedRoute({ children }: ProtectedRouteProps) {
+/**
+ * Protects admin routes: requires auth and superuser role.
+ * Not logged in -> /login
+ * Logged in but not superuser -> /dashboard
+ */
+export function SuperuserRoute({ children }: SuperuserRouteProps) {
   const location = useLocation();
   const { isInitialized, user, accessToken } = useAuthStore();
 
@@ -23,6 +28,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (user?.force_password_change) {
     return <Navigate to="/change-password" replace />;
+  }
+
+  if (!user?.is_superuser) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

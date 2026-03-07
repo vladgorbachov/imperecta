@@ -109,6 +109,36 @@ class BaseScraper(ABC):
         """Implement actual scraping logic. Called by scrape() with retries."""
         pass
 
+    async def _log_scrape(
+        self,
+        db,
+        marketplace_id: str,
+        marketplace_name: str,
+        url: str,
+        status: str,
+        error_message: str | None = None,
+        price_found: float | Decimal | None = None,
+        duration_ms: int | None = None,
+        proxy_used: bool = False,
+        competitor_product_id=None,
+    ) -> None:
+        """Log scrape result to scrape_logs table."""
+        from app.models.scrape_log import ScrapeLog
+
+        price_val = Decimal(str(price_found)) if price_found is not None else None
+        log = ScrapeLog(
+            marketplace_id=marketplace_id,
+            marketplace_name=marketplace_name,
+            competitor_product_id=competitor_product_id,
+            url=url,
+            status=status,
+            error_message=error_message,
+            price_found=price_val,
+            duration_ms=duration_ms,
+            proxy_used=proxy_used,
+        )
+        db.add(log)
+
 
 # -----------------------------------------------------------------------------
 # OzonScraper

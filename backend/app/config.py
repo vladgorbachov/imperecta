@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 30
     jwt_refresh_expiration_days: int = 7
+    jwt_refresh_expiration_days_remember: int = 30  # "Remember me" refresh token TTL
 
     claude_api_key: str | None = None
     claude_model: str = "claude-sonnet-4-20250514"

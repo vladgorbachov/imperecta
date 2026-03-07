@@ -1,7 +1,8 @@
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
+import { useAuthStore } from "@/stores/authStore";
 import {
   LayoutDashboard,
   Package,
@@ -10,6 +11,8 @@ import {
   FileText,
   Upload,
   Settings,
+  Shield,
+  BarChart3,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -21,18 +24,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-const navItems = [
+const baseNavItems = [
   { to: "/dashboard", icon: LayoutDashboard, key: "dashboard" },
   { to: "/products", icon: Package, key: "products" },
   { to: "/competitors", icon: Users, key: "competitors" },
   { to: "/alerts", icon: Bell, key: "alerts" },
   { to: "/digests", icon: FileText, key: "digests" },
   { to: "/import", icon: Upload, key: "import" },
+  { to: "/analytics", icon: BarChart3, key: "analytics" },
   { to: "/settings", icon: Settings, key: "settings" },
 ] as const;
-
-const TRIAL_TOTAL_DAYS = 14;
-const TRIAL_DAYS_LEFT = 7;
 
 interface SidebarProps {
   collapsed: boolean;
@@ -54,8 +55,31 @@ export function Sidebar({
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
   const location = useLocation();
+  const user = useAuthStore((s) => s.user);
   const showLabels = !collapsed || isMobile;
-  const progressPercent = ((TRIAL_TOTAL_DAYS - TRIAL_DAYS_LEFT) / TRIAL_TOTAL_DAYS) * 100;
+
+  const navItems = useMemo(() => {
+    const items = [...baseNavItems];
+    if (user?.is_superuser) {
+      const settingsIdx = items.findIndex((i) => i.key === "settings");
+      items.splice(settingsIdx, 0, {
+        to: "/admin",
+        icon: Shield,
+        key: "admin",
+      });
+    }
+    return items;
+  }, [user?.is_superuser]);
+
+  const { trialDaysLeft, progressPercent } = useMemo(() => {
+    const trialEndsAt = user?.trial_ends_at ? new Date(user.trial_ends_at) : null;
+    const daysLeft = trialEndsAt
+      ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+      : 0;
+    const total = 14;
+    const percent = trialEndsAt ? ((total - daysLeft) / total) * 100 : 0;
+    return { trialDaysLeft: daysLeft, progressPercent: Math.min(100, percent) };
+  }, [user?.trial_ends_at]);
 
   return (
     <aside
@@ -100,6 +124,8 @@ export function Sidebar({
       </div>
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
         {navItems.map(({ to, icon: Icon, key }) => {
+          const isAdmin = key === "admin";
+          const navKey = isAdmin ? "admin" : key;
           const isActive = location.pathname === to || location.pathname.startsWith(to + "/");
           const linkClassName = cn(
             "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150",
@@ -115,13 +141,13 @@ export function Sidebar({
               className={linkClassName}
             >
               <Icon className="size-5 shrink-0" />
-              {showLabels && <span className="truncate">{t(`nav.${key}`)}</span>}
+              {showLabels && <span className="truncate">{t(`nav.${navKey}`)}</span>}
             </Link>
           );
           return collapsed && !isMobile ? (
             <Tooltip key={to}>
               <TooltipTrigger asChild>{linkEl}</TooltipTrigger>
-              <TooltipContent side="right">{t(`nav.${key}`)}</TooltipContent>
+              <TooltipContent side="right">{t(`nav.${navKey}`)}</TooltipContent>
             </Tooltip>
           ) : (
             <Fragment key={to}>{linkEl}</Fragment>
@@ -130,7 +156,7 @@ export function Sidebar({
       </nav>
       <div className="shrink-0 border-t border-border p-3 dark:border-border">
         <p className="mb-2 text-xs text-muted-foreground dark:text-muted-foreground">
-          {showLabels ? t("layout.trialDaysLeft", { count: TRIAL_DAYS_LEFT }) : TRIAL_DAYS_LEFT}
+          {showLabels ? t("layout.trialDaysLeft", { count: trialDaysLeft }) : trialDaysLeft}
         </p>
         <div className="mb-2 h-2 overflow-hidden rounded-full bg-muted dark:bg-muted">
           <div

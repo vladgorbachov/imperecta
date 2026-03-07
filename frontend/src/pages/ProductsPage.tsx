@@ -20,7 +20,8 @@ import {
 } from "lucide-react";
 import { formatPrice, formatRelativeTime } from "@/lib/formatters";
 import { useDebounce } from "@/hooks/useDebounce";
-import { MOCK_FILTERS_BY_CATEGORY } from "@/data/mockFilters";
+import { useProducts, useProductCategories } from "@/hooks/useProducts";
+import { DEFAULT_FILTERS } from "@/data/filters";
 import { FiltersPanel } from "@/components/products/FiltersPanel";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
@@ -46,21 +47,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-const CATEGORY_TO_PRODUCT: Record<string, string> = {
-  all: "",
-  electronics: "Электроника",
-  appliances: "Бытовая техника",
-  gadgets: "Гаджеты",
-  accessories: "Аксессуары",
-};
-
 interface ProductRow {
   id: string;
   name: string;
   sku: string | null;
   category: string | null;
-  brand: string;
-  marketplaces: string[];
   current_price: number;
   min_competitor_price: number | null;
   max_competitor_price: number | null;
@@ -78,25 +69,6 @@ type SortKey =
 type SortDir = "asc" | "desc";
 
 const PAGE_SIZES = [20, 50, 100] as const;
-
-// TODO: API — replace with useProducts() / productsApi.list()
-const MOCK_PRODUCTS: ProductRow[] = [
-  { id: "1", name: "Смартфон Galaxy A55", sku: "GAL-A55-128", category: "Электроника", brand: "samsung", marketplaces: ["ozon", "wildberries"], current_price: 32490, min_competitor_price: 28990, max_competitor_price: 32990, competitor_count: 5, last_checked_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-  { id: "2", name: "Наушники Sony WH-1000XM5", sku: "SNY-XM5", category: "Электроника", brand: "sony", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 28900, min_competitor_price: 27500, max_competitor_price: 31500, competitor_count: 4, last_checked_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
-  { id: "3", name: "Пылесос Dyson V15", sku: "DYS-V15", category: "Бытовая техника", brand: "philips", marketplaces: ["ozon"], current_price: 79990, min_competitor_price: 75990, max_competitor_price: 89990, competitor_count: 3, last_checked_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() },
-  { id: "4", name: "Кофемашина DeLonghi Magnifica", sku: "DLG-MAG", category: "Бытовая техника", brand: "bosch", marketplaces: ["ozon", "wildberries"], current_price: 42900, min_competitor_price: 45900, max_competitor_price: 49900, competitor_count: 2, last_checked_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() },
-  { id: "5", name: "Умные часы Apple Watch SE", sku: "APL-WSE", category: "Гаджеты", brand: "asus", marketplaces: ["ozon", "kaspi"], current_price: 32990, min_competitor_price: 29990, max_competitor_price: 35990, competitor_count: 6, last_checked_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() },
-  { id: "6", name: "Телевизор Samsung 55 QLED", sku: "SAM-55Q", category: "Электроника", brand: "samsung", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 89990, min_competitor_price: 84990, max_competitor_price: 94990, competitor_count: 4, last_checked_at: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString() },
-  { id: "7", name: "Ноутбук Lenovo IdeaPad", sku: "LNV-IDP", category: "Электроника", brand: "asus", marketplaces: ["ozon"], current_price: 54990, min_competitor_price: 52990, max_competitor_price: 59990, competitor_count: 5, last_checked_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString() },
-  { id: "8", name: "Микроволновка LG NeoChef", sku: "LG-NC", category: "Бытовая техника", brand: "lg", marketplaces: ["ozon", "wildberries"], current_price: 12990, min_competitor_price: 11990, max_competitor_price: 13990, competitor_count: 3, last_checked_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString() },
-  { id: "9", name: "Блендер Braun Multiquick", sku: "BRN-MQ", category: "Бытовая техника", brand: "bosch", marketplaces: ["wildberries"], current_price: 8990, min_competitor_price: 8490, max_competitor_price: 9990, competitor_count: 2, last_checked_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString() },
-  { id: "10", name: "Робот-пылесос Xiaomi S10", sku: "XMI-S10", category: "Бытовая техника", brand: "xiaomi", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 34990, min_competitor_price: 32990, max_competitor_price: 37990, competitor_count: 4, last_checked_at: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString() },
-  { id: "11", name: "Клавиатура Logitech MX Keys", sku: "LOG-MXK", category: "Аксессуары", brand: "asus", marketplaces: ["ozon"], current_price: 12990, min_competitor_price: 11990, max_competitor_price: 13990, competitor_count: 3, last_checked_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
-  { id: "12", name: "Монитор Dell 27 S2722QC", sku: "DEL-27S", category: "Электроника", brand: "philips", marketplaces: ["ozon", "kaspi"], current_price: 32990, min_competitor_price: 30990, max_competitor_price: 35990, competitor_count: 2, last_checked_at: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString() },
-  { id: "13", name: "Колонка JBL Charge 5", sku: "JBL-CH5", category: "Электроника", brand: "sony", marketplaces: ["ozon", "wildberries"], current_price: 14990, min_competitor_price: 13990, max_competitor_price: 16990, competitor_count: 5, last_checked_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-  { id: "14", name: "Планшет Samsung Tab S9", sku: "SAM-TS9", category: "Гаджеты", brand: "samsung", marketplaces: ["ozon", "wildberries"], current_price: 49990, min_competitor_price: 46990, max_competitor_price: 54990, competitor_count: 4, last_checked_at: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString() },
-  { id: "15", name: "Фитнес-браслет Xiaomi Band 8", sku: "XMI-B8", category: "Гаджеты", brand: "xiaomi", marketplaces: ["ozon", "wildberries", "kaspi"], current_price: 3990, min_competitor_price: 3690, max_competitor_price: 4490, competitor_count: 6, last_checked_at: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() },
-];
 
 function SortIcon({ sortKey, currentKey, dir }: { sortKey: SortKey; currentKey: SortKey | null; dir: SortDir }) {
   if (currentKey !== sortKey) {
@@ -120,7 +92,6 @@ export function ProductsPage() {
   const [pageSize, setPageSize] = useState<number>(20);
   const [sortKey, setSortKey] = useState<SortKey | null>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [isLoading] = useState(false);
   const [filtersSheetOpen, setFiltersSheetOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [priceRange, setPriceRange] = useState({
@@ -131,8 +102,17 @@ export function ProductsPage() {
   });
 
   const search = useDebounce(searchRaw, 300);
+  const categoryParam = category && category !== "all" ? category : undefined;
 
-  const filterConfigs = MOCK_FILTERS_BY_CATEGORY[category] ?? MOCK_FILTERS_BY_CATEGORY.all;
+  const { products: apiProducts, total: apiTotal, isLoading } = useProducts({
+    search: search || undefined,
+    category: categoryParam,
+    page,
+    limit: pageSize,
+  });
+  const { data: categories = [] } = useProductCategories();
+
+  const filterConfigs = DEFAULT_FILTERS;
 
   const handleFilterChange = useCallback((filterId: string, values: string[]) => {
     setActiveFilters((prev) => {
@@ -184,42 +164,27 @@ export function ProductsPage() {
     });
   }, []);
 
-  const categoryProductFilter = category && category !== "all" ? CATEGORY_TO_PRODUCT[category] ?? "" : "";
-
   const filteredProducts = useMemo(() => {
-    let list = [...MOCK_PRODUCTS];
-
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) || (p.sku?.toLowerCase().includes(q) ?? false)
-      );
-    }
-
-    if (categoryProductFilter) {
-      list = list.filter((p) => p.category === categoryProductFilter);
-    }
-
-    // TODO: send activeFilters as query params to API
-    Object.entries(activeFilters).forEach(([filterId, values]) => {
-      if (values.length === 0) return;
-      if (filterId === "brand") {
-        list = list.filter((p) => values.includes(p.brand));
-      } else if (filterId === "marketplace") {
-        list = list.filter((p) => values.some((v) => p.marketplaces.includes(v)));
-      }
-    });
+    const list: ProductRow[] = apiProducts.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      category: p.category,
+      current_price: p.current_price,
+      min_competitor_price: p.min_competitor_price,
+      max_competitor_price: p.max_competitor_price,
+      competitor_count: p.competitor_count,
+      last_checked_at: p.last_checked_at,
+    }));
 
     if (priceRange.currentMin > priceRange.min || priceRange.currentMax < priceRange.max) {
-      list = list.filter(
+      return list.filter(
         (p) =>
           p.current_price >= priceRange.currentMin && p.current_price <= priceRange.currentMax
       );
     }
-
     return list;
-  }, [search, categoryProductFilter, activeFilters, priceRange]);
+  }, [apiProducts, priceRange]);
 
   const sortedProducts = useMemo(() => {
     const list = [...filteredProducts];
@@ -245,11 +210,11 @@ export function ProductsPage() {
     return list;
   }, [filteredProducts, sortKey, sortDir]);
 
-  const total = sortedProducts.length;
+  const total = apiTotal;
   const totalPages = Math.ceil(total / pageSize) || 1;
   const clampedPage = Math.min(page, totalPages) || 1;
   const start = (clampedPage - 1) * pageSize;
-  const paginatedProducts = sortedProducts.slice(start, start + pageSize);
+  const paginatedProducts = sortedProducts;
 
   const hasFilters =
     !!search ||
@@ -265,11 +230,11 @@ export function ProductsPage() {
   };
 
   const handleImportCsv = () => {
-    // TODO: API — importApi.uploadProductsCsv
+    navigate("/import");
   };
 
   const handleAddProduct = () => {
-    // TODO: API — open add dialog
+    navigate("/import");
   };
 
   const filtersPanelContent = (
@@ -346,10 +311,11 @@ export function ProductsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("products.allCategories")}</SelectItem>
-              <SelectItem value="electronics">{t("products.categoryElectronics")}</SelectItem>
-              <SelectItem value="appliances">{t("products.categoryAppliances")}</SelectItem>
-              <SelectItem value="gadgets">{t("products.categoryGadgets")}</SelectItem>
-              <SelectItem value="accessories">{t("products.categoryAccessories")}</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
