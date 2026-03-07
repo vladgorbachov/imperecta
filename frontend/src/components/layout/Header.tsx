@@ -44,13 +44,13 @@ export function Header({ onMenuClick }: HeaderProps) {
   const isDark = resolvedTheme === "dark";
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background px-4 dark:border-border dark:bg-background md:px-6">
+    <header className="flex h-14 min-h-[44px] shrink-0 items-center justify-between border-b border-border bg-background px-3 safe-area-top sm:h-16 sm:px-4 dark:border-border dark:bg-background md:px-6">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {onMenuClick && (
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0 md:hidden"
+            className="shrink-0 min-h-11 min-w-11 md:hidden"
             onClick={onMenuClick}
             aria-label={t("common.menu")}
           >
@@ -58,11 +58,11 @@ export function Header({ onMenuClick }: HeaderProps) {
           </Button>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <Button
           variant="ghost"
           size="icon"
-          className="size-9"
+          className="min-h-11 min-w-11 sm:size-9"
           onClick={() => setTheme(isDark ? "light" : "dark")}
           aria-label={t("common.toggleTheme")}
         >
@@ -75,7 +75,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         <Button
           variant="ghost"
           size="icon"
-          className="relative size-9"
+          className="relative min-h-11 min-w-11 sm:size-9"
           aria-label={t("common.notifications")}
         >
           <Bell className="size-5" />
@@ -84,10 +84,10 @@ export function Header({ onMenuClick }: HeaderProps) {
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className="relative size-9 rounded-full"
+              className="relative min-h-11 min-w-11 rounded-full sm:size-9"
               aria-label={t("auth.profile")}
             >
-              <Avatar className="size-9">
+              <Avatar className="size-9 sm:size-9">
                 <AvatarImage src={user?.avatar_url ?? undefined} alt={user?.name} />
                 <AvatarFallback className="bg-primary text-primary-foreground">
                   {initials}

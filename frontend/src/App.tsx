@@ -139,7 +139,7 @@ export function App() {
                   </Route>
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>
-                <Toaster position="top-right" />
+                <Toaster position="top-right" richColors closeButton />
               </BrowserRouter>
             </Suspense>
           </TooltipProvider>

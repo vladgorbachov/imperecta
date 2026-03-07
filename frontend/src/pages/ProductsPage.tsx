@@ -277,7 +277,7 @@ export function ProductsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={handleOptimizeAll}>
+          <Button variant="outline" size="sm" onClick={handleOptimizeAll} className="hidden sm:inline-flex">
             <Sparkles className="mr-2 size-4" />
             {t("products.optimizeAllPrices")}
           </Button>
@@ -372,7 +372,7 @@ export function ProductsPage() {
               </Button>
             </div>
           ) : (
-            <div className="max-h-[calc(100vh-20rem)] overflow-x-auto overflow-y-auto">
+            <div className="max-h-[55vh] overflow-x-auto overflow-y-auto sm:max-h-[calc(100vh-20rem)]">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">

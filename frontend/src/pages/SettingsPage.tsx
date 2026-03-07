@@ -205,7 +205,7 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto w-full max-w-2xl space-y-6 px-0 sm:px-0">
       <PageHeader title="nav.settings" />
 
       {isLoading ? (
@@ -221,8 +221,8 @@ export function SettingsPage() {
               <form onSubmit={handleProfileSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t("settings.avatar")}</label>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <Avatar className="size-16">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
+                    <Avatar className="size-16 shrink-0">
                       <AvatarImage src={avatarUrl || undefined} alt={u?.name} />
                       <AvatarFallback className="bg-primary/20 text-primary">
                         {u?.name
@@ -257,7 +257,7 @@ export function SettingsPage() {
                             placeholder={t("settings.avatarUrlPlaceholder")}
                             value={avatarUrl.startsWith("data:") ? "" : avatarUrl}
                             onChange={(e) => setAvatarUrl(e.target.value.trim())}
-                            className="max-w-xs"
+                            className="w-full max-w-xs sm:max-w-xs"
                           />
                         </div>
                       </div>

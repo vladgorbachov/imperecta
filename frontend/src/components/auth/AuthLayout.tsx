@@ -17,7 +17,7 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    <div className="flex min-h-screen min-h-[100dvh] flex-col lg:flex-row safe-area-top safe-area-bottom">
       {/* Brand panel - hidden on mobile, 50% on desktop */}
       <div
         className={cn(
@@ -57,20 +57,20 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
       {/* Form area - full on mobile, 50% on desktop */}
       <div
         className={cn(
-          "flex flex-1 flex-col items-center justify-center p-4 sm:p-6 lg:p-12",
+          "flex flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6 sm:py-8 lg:p-12",
           "bg-background text-foreground",
           className
         )}
       >
         {/* Mobile logo */}
-        <div className="mb-6 lg:hidden">
+        <div className="mb-4 sm:mb-6 lg:hidden">
           <Link to="/" className="inline-block">
             <span className="font-display text-xl font-bold tracking-tight text-foreground">
               {t("nav.logo")}
             </span>
           </Link>
         </div>
-        <div className="w-full max-w-md">{children}</div>
+        <div className="w-full max-w-md px-0 sm:px-2">{children}</div>
       </div>
     </div>
   );

@@ -214,7 +214,7 @@ export function RegisterPage() {
             <button
               type="button"
               onClick={() => setShowPassword((s) => !s)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground"
+              className="absolute right-1 top-1/2 min-h-10 min-w-10 -translate-y-1/2 rounded-md p-2 text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground"
               aria-label={showPassword ? t("common.hidePassword") : t("common.showPassword")}
             >
               {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}

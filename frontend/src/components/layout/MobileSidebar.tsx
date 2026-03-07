@@ -19,7 +19,7 @@ export function MobileSidebar({ open, onOpenChange }: MobileSidebarProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isRtl ? "right" : "left"}
-        className="w-[256px] p-0"
+        className="w-[min(256px,85vw)] max-w-[256px] p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
       >
         <SheetHeader className="sr-only">
           <SheetTitle>{t("layout.navigation")}</SheetTitle>

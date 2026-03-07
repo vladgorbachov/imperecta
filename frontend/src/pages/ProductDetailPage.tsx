@@ -264,12 +264,12 @@ export function ProductDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/products"
-            className={buttonVariants({ variant: "ghost", size: "icon" })}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "min-h-11 min-w-11 shrink-0")}
           >
             <ArrowLeft className="size-5" />
           </Link>
-          <div className="flex flex-1 flex-wrap items-center gap-2">
-            <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
+          <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
+            <h1 className="truncate font-display text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">
               {product.name}
             </h1>
             {product.sku && (
