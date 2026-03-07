@@ -4,6 +4,7 @@ import asyncio
 import os
 import ssl
 from logging.config import fileConfig
+from uuid import uuid4
 
 from alembic import context
 from sqlalchemy import pool
@@ -67,10 +68,16 @@ async def run_async_migrations() -> None:
     if not url:
         raise RuntimeError("DATABASE_URL or sqlalchemy.url must be set")
 
-    # Supabase pooler (PgBouncer): disable prepared statement cache for transaction mode
+    # Supabase pooler (PgBouncer): add params to URL so they reach asyncpg
+    if "supabase.com" in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}prepared_statement_cache_size=0&statement_cache_size=0"
+
+    # Supabase pooler (PgBouncer): use unique prepared statement names to avoid conflicts
     connect_args: dict = {
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
+        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
     }
     if "supabase.com" in url:
         ssl_ctx = ssl.create_default_context()
