@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Analytics page: 3 tabs (Trends, Forecasts, Market Comparison).
  * i18n: analytics.*, dashboard.*, common.*

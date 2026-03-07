@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Settings page: Profile, Telegram, Notifications, AI Personalization, Plan sections.
  * Sections separated by shadcn Separator.

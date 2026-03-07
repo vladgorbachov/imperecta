@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Digests page: 3 tabs (Weekly, Daily Pro, Strategic), cards with preview, modal, AI chat link.
  * i18n: nav.digests, digests.*, common.*

@@ -83,10 +83,15 @@ export function PriceTrendChart() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="h-[400px] rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
+        className="h-[280px] w-full rounded-xl border border-border bg-card p-4 shadow-sm sm:h-[350px] md:h-[400px] dark:border-border"
       >
-        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-          {t("common.loading")}
+        <div className="mb-4 flex gap-2">
+          <div className="h-9 w-14 animate-pulse rounded-md bg-muted" />
+          <div className="h-9 w-14 animate-pulse rounded-md bg-muted" />
+          <div className="h-9 w-14 animate-pulse rounded-md bg-muted" />
+        </div>
+        <div className="flex h-[calc(100%-48px)] flex-col gap-2">
+          <div className="h-full min-h-[180px] animate-pulse rounded-lg bg-muted" />
         </div>
       </motion.div>
     );
@@ -97,9 +102,9 @@ export function PriceTrendChart() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="h-[400px] rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
+        className="h-[280px] w-full rounded-xl border border-border bg-card p-4 shadow-sm sm:h-[350px] md:h-[400px] dark:border-border"
       >
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
           <p>{t("dashboard.chart.noData")}</p>
         </div>
       </motion.div>
@@ -111,7 +116,7 @@ export function PriceTrendChart() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.1, duration: 0.3 }}
-      className="h-[400px] rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
+      className="h-[280px] w-full rounded-xl border border-border bg-card p-4 shadow-sm sm:h-[350px] md:h-[400px] dark:border-border"
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-2">

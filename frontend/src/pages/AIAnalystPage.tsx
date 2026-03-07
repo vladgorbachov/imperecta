@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * AI Analyst: full-screen chat with user context.
  * Connects to POST /api/ai/chat
@@ -83,7 +85,7 @@ export function AIAnalystPage() {
   const isEmpty = messages.length === 0 && !isTyping;
 
   return (
-    <div className="flex min-h-[50vh] h-[calc(100vh-4rem)] max-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-xl border border-border/50 bg-gradient-to-b from-background via-background to-muted/20 dark:from-background dark:via-background dark:to-muted/10">
+    <div className="flex min-h-[50vh] h-[calc(100dvh-12rem)] max-h-[calc(100dvh-12rem)] flex-col overflow-hidden rounded-xl border border-border/50 bg-gradient-to-b from-background via-background to-muted/20 md:h-[calc(100vh-4rem)] md:max-h-[calc(100dvh-4rem)] dark:from-background dark:via-background dark:to-muted/10">
       {/* Header */}
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 py-3 sm:gap-4 sm:px-4">
         <div className="flex items-center gap-3">

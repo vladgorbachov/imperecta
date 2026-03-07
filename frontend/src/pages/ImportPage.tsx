@@ -1,3 +1,5 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
 /**
  * Import page: 3-step flow — upload zone, preview with column mapping, import + results.
  *

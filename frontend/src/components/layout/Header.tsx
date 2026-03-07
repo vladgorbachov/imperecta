@@ -1,3 +1,6 @@
+// MOBILE-2026: fully responsive + bottom nav + drawer
+
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router-dom";
@@ -18,8 +21,8 @@ interface HeaderProps {
 }
 
 /**
- * Top bar: menu (mobile), theme toggle, notifications, avatar dropdown.
- * Dropdown: user name + email (info only), separator, logout.
+ * Top bar: hamburger (mobile), logo always visible, theme toggle, notifications, avatar.
+ * Touch targets min 48px (min-h-12 min-w-12).
  */
 export function Header({ onMenuClick }: HeaderProps) {
   const { t } = useTranslation();
@@ -44,25 +47,31 @@ export function Header({ onMenuClick }: HeaderProps) {
   const isDark = resolvedTheme === "dark";
 
   return (
-    <header className="flex h-14 min-h-[44px] shrink-0 items-center justify-between border-b border-border bg-background px-3 safe-area-top sm:h-16 sm:px-4 dark:border-border dark:bg-background md:px-6">
+    <header className="flex h-14 min-h-[48px] shrink-0 items-center justify-between border-b border-border bg-background/95 px-3 backdrop-blur-sm safe-area-top sm:h-16 sm:px-4 dark:border-border dark:bg-background/95 md:px-6">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {onMenuClick && (
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0 min-h-11 min-w-11 md:hidden"
+            className="shrink-0 min-h-12 min-w-12 touch-manipulation md:hidden"
             onClick={onMenuClick}
             aria-label={t("common.menu")}
           >
             <Menu className="size-5" />
           </Button>
         )}
+        <Link
+          to="/dashboard"
+          className="font-display text-lg font-bold tracking-tight text-foreground truncate min-w-0"
+        >
+          Imperecta
+        </Link>
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <Button
           variant="ghost"
           size="icon"
-          className="min-h-11 min-w-11 sm:size-9"
+          className="min-h-12 min-w-12 touch-manipulation sm:min-h-10 sm:min-w-10"
           onClick={() => setTheme(isDark ? "light" : "dark")}
           aria-label={t("common.toggleTheme")}
         >
@@ -75,7 +84,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         <Button
           variant="ghost"
           size="icon"
-          className="relative min-h-11 min-w-11 sm:size-9"
+          className="relative min-h-12 min-w-12 touch-manipulation sm:min-h-10 sm:min-w-10"
           aria-label={t("common.notifications")}
         >
           <Bell className="size-5" />
@@ -84,7 +93,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className="relative min-h-11 min-w-11 rounded-full sm:size-9"
+              className="relative min-h-12 min-w-12 rounded-full touch-manipulation sm:min-h-10 sm:min-w-10"
               aria-label={t("auth.profile")}
             >
               <Avatar className="size-9 sm:size-9">
