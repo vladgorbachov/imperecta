@@ -67,13 +67,17 @@ async def run_async_migrations() -> None:
     if not url:
         raise RuntimeError("DATABASE_URL or sqlalchemy.url must be set")
 
-    # Supabase pooler: same SSL context as app/database.py (skip verify for self-signed chain)
-    connect_args = {}
+    # Supabase pooler (PgBouncer): disable prepared statement cache for transaction mode
+    connect_args: dict = {
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
     if "supabase.com" in url:
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
-        connect_args = {"ssl": ssl_ctx, "server_settings": {"search_path": "public"}}
+        connect_args["ssl"] = ssl_ctx
+        connect_args["server_settings"] = {"search_path": "public"}
 
     connectable = create_async_engine(
         url, poolclass=pool.NullPool, connect_args=connect_args
