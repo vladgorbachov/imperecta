@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 
 export interface PageHeaderProps {
@@ -14,11 +15,12 @@ export interface PageHeaderProps {
 }
 
 /**
- * Page header with display font, large title.
- * Responsive: actions stack below title on mobile.
+ * Page header with display font, gradient text (dark) or foreground (light).
  */
 export function PageHeader({ title, description, actions, className }: PageHeaderProps) {
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
+  const isLight = resolvedTheme === "light";
 
   return (
     <div
@@ -28,11 +30,24 @@ export function PageHeader({ title, description, actions, className }: PageHeade
       )}
     >
       <div className="space-y-1">
-        <h1 className="font-display text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">
+        <h1
+          className="text-xl font-bold tracking-tight sm:text-2xl md:text-3xl"
+          style={{
+            fontFamily: "var(--font-display)",
+            ...(isLight
+              ? { color: "var(--foreground)" }
+              : {
+                  background: "linear-gradient(135deg, var(--foreground), var(--foreground-muted))",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                }),
+          }}
+        >
           {t(title)}
         </h1>
         {description && (
-          <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+          <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
             {t(description)}
           </p>
         )}

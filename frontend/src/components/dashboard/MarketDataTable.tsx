@@ -1,7 +1,6 @@
 /**
  * Bloomberg-style market data table for dashboard.
- * Data from GET /api/dashboard/market-overview or global market data fallback.
- * Table always shows data (API or global ticker).
+ * Glass-card container, gradient title, row tints with CSS vars.
  */
 
 import { useState, useEffect } from "react";
@@ -84,37 +83,39 @@ function Sparkline({
 
 function TrendBar({ change1m }: { change1m: number | null }) {
   const pct = change1m ?? 0;
-  let gradient = "from-muted to-muted";
-  if (pct > 10) gradient = "from-emerald-600 to-emerald-500";
-  else if (pct > 5) gradient = "from-emerald-500 to-emerald-400";
-  else if (pct > 0) gradient = "from-emerald-400/80 to-emerald-300/80";
-  else if (pct > -5) gradient = "from-rose-400/80 to-rose-300/80";
-  else if (pct > -10) gradient = "from-rose-500 to-rose-400";
-  else gradient = "from-rose-600 to-rose-500";
-
   const width = Math.min(100, Math.max(0, 50 + pct));
+  const isPositive = pct > 0;
+  const gradient = isPositive
+    ? "linear-gradient(90deg, var(--color-price-down), var(--color-price-down))"
+    : "linear-gradient(90deg, var(--color-price-up), var(--color-price-up))";
+
   return (
-    <div className="h-2 w-10 overflow-hidden rounded-full bg-muted">
+    <div
+      className="h-2 w-10 overflow-hidden rounded-full"
+      style={{ background: "var(--glass-bg)" }}
+    >
       <div
-        className={cn("h-full rounded-full bg-gradient-to-r", gradient)}
-        style={{ width: `${width}%` }}
+        className="h-full rounded-full"
+        style={{ width: `${width}%`, background: gradient }}
       />
     </div>
   );
 }
 
 function ChangeCell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-muted-foreground">—</span>;
+  if (value === null) return <span style={{ color: "var(--foreground-muted)" }}>—</span>;
   const isPositive = value > 0;
   const isZero = value === 0;
   return (
     <span
-      className={cn(
-        "font-mono text-sm",
-        isZero && "text-muted-foreground",
-        isPositive && !isZero && "text-emerald-500 dark:text-emerald-400",
-        !isPositive && !isZero && "text-rose-500 dark:text-rose-400"
-      )}
+      className="font-mono text-sm"
+      style={{
+        color: isZero
+          ? "var(--foreground-muted)"
+          : isPositive
+            ? "var(--color-price-down)"
+            : "var(--color-price-up)",
+      }}
     >
       {isPositive ? "+" : ""}
       {value.toFixed(1)}%
@@ -138,7 +139,11 @@ function MarketplaceLogo({
   if (!faviconUrl || imgError) {
     return (
       <div
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary"
+        className="flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-medium"
+        style={{
+          background: "var(--accent-bg)",
+          color: "var(--accent)",
+        }}
         aria-hidden
       >
         {fallback}
@@ -225,13 +230,25 @@ export function MarketDataTable() {
   ];
 
   return (
-    <div className="flex min-h-[600px] flex-1 flex-col rounded-xl border border-border bg-card/60 backdrop-blur dark:border-border">
-      <h3 className="mb-4 px-4 pt-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="glass-card flex min-h-[600px] flex-1 flex-col overflow-hidden rounded-xl">
+      <h3
+        className="mb-4 px-4 pt-4 text-sm font-semibold uppercase tracking-wider"
+        style={{
+          background: "linear-gradient(135deg, var(--foreground), var(--foreground-muted))",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+          fontFamily: "var(--font-display)",
+        }}
+      >
         {t("dashboard.market.title")}
       </h3>
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-border px-4 dark:border-border">
+      <div
+        className="flex flex-wrap gap-1 border-b px-4"
+        style={{ borderColor: "var(--glass-border)" }}
+      >
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -240,9 +257,14 @@ export function MarketDataTable() {
             className={cn(
               "border-b-2 px-3 py-2 text-sm font-medium transition-colors",
               activeTab === tab.key
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                ? "text-[var(--foreground)]"
+                : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
             )}
+            style={
+              activeTab === tab.key
+                ? { borderColor: "var(--accent)" }
+                : { borderColor: "transparent" }
+            }
           >
             {t(tab.i18nKey)}
           </button>
@@ -263,7 +285,8 @@ export function MarketDataTable() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="px-4 py-12 text-center text-sm text-muted-foreground"
+              className="px-4 py-12 text-center text-sm"
+              style={{ color: "var(--foreground-muted)" }}
             >
               {t("dashboard.market.noData")}
             </motion.div>
@@ -276,31 +299,33 @@ export function MarketDataTable() {
               transition={{ duration: 0.15 }}
               className="w-full min-w-[700px]"
             >
-              <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur dark:bg-card/95">
-                <tr className="border-b border-border/30 dark:border-border/30">
+              <thead
+                className="sticky top-0 z-10 backdrop-blur"
+                style={{
+                  background: "var(--background-elevated-subtle)",
+                }}
+              >
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
                   <th className="w-8 px-3 py-2 text-left" />
-                  <th className="w-[100px] px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="w-[100px] px-3 py-2 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     {t("dashboard.market.marketplace")}
                   </th>
-                  <th className="min-w-[120px] px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="min-w-[120px] px-3 py-2 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     {t("dashboard.market.product")}
                   </th>
-                  <th className="w-20 px-3 py-2 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    {t("dashboard.market.price")}
-                  </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="w-20 px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     24h
                   </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     3d
                   </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     1w
                   </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     1m
                   </th>
-                  <th className="w-20 px-3 py-2 text-center text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="w-20 px-3 py-2 text-center text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
                     —
                   </th>
                   <th className="w-10 px-3 py-2" />
@@ -312,16 +337,16 @@ export function MarketDataTable() {
                   const ch1m = row.change_1m ?? 0;
                   const sparkColor =
                     ch1m > 0
-                      ? "rgb(16 185 129)"
+                      ? "var(--color-price-down)"
                       : ch1m < 0
-                        ? "rgb(244 63 94)"
-                        : "rgb(156 163 175)";
+                        ? "var(--color-price-up)"
+                        : "var(--foreground-muted)";
                   const rowBg =
                     ch24 > 5
-                      ? "bg-emerald-500/5 dark:bg-emerald-500/5"
+                      ? "var(--row-tint-green)"
                       : ch24 < -5
-                        ? "bg-rose-500/5 dark:bg-rose-500/5"
-                        : "";
+                        ? "var(--row-tint-red)"
+                        : "transparent";
 
                   return (
                     <motion.tr
@@ -329,10 +354,11 @@ export function MarketDataTable() {
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: Math.min(i * 0.02, 0.2) }}
-                      className={cn(
-                        "h-11 border-b border-border/30 transition-colors hover:bg-accent/10 dark:border-border/30",
-                        rowBg
-                      )}
+                      className="h-11 transition-colors hover:bg-[var(--glass-bg-hover)]"
+                      style={{
+                        borderBottom: "1px solid var(--border)",
+                        background: rowBg,
+                      }}
                     >
                       <td className="px-3 py-2">
                         <MarketplaceLogo
@@ -340,7 +366,7 @@ export function MarketDataTable() {
                           name={row.marketplace}
                         />
                       </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                      <td className="px-3 py-2 text-xs" style={{ color: "var(--foreground-muted)" }}>
                         {row.marketplace}
                       </td>
                       <td className="max-w-[200px] px-3 py-2">
@@ -350,7 +376,7 @@ export function MarketDataTable() {
                               {row.product_name}
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>
+                          <TooltipContent className="glass-card border-[var(--glass-border)]">
                             <p className="max-w-xs">{row.product_name}</p>
                           </TooltipContent>
                         </Tooltip>
@@ -388,7 +414,13 @@ export function MarketDataTable() {
       </div>
 
       {items.length > 0 && (
-        <div className="border-t border-border/30 px-4 py-2 text-xs text-muted-foreground dark:border-border/30">
+        <div
+          className="border-t px-4 py-2 text-xs"
+          style={{
+            borderColor: "var(--border)",
+            color: "var(--foreground-muted)",
+          }}
+        >
           {t("dashboard.market.showing", {
             count: items.length,
             total,

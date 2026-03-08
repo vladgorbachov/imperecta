@@ -536,11 +536,11 @@ function CompetitorCard({
           className={cn(
             "rounded-md border px-2 py-0.5 text-xs font-medium",
             strength === "strong" &&
-              "bg-red-500/15 text-red-600 dark:bg-red-500/20 dark:text-red-400",
+              "bg-[var(--color-price-up-bg)] text-[var(--color-price-up)] border-[var(--color-price-up-border)]",
             strength === "moderate" &&
-              "bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400",
+              "bg-[var(--color-promo-bg)] text-[var(--color-promo)] border-[var(--color-promo-border)]",
             strength === "weak" &&
-              "bg-muted text-muted-foreground dark:bg-muted/80 dark:text-muted-foreground"
+              "bg-[var(--color-muted-bg)] text-[var(--foreground-muted)] border-[var(--glass-border)]"
           )}
         >
           {t(strengthKey)}

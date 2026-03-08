@@ -13,7 +13,7 @@ export interface PromoBadgeProps {
 }
 
 /**
- * Badge for product promo states: promo (amber), discount (amber), out_of_stock (grey), new (teal).
+ * Badge for product promo states: promo/discount (amber glow), out_of_stock (muted), new (accent).
  */
 export function PromoBadge({ type, label, className }: PromoBadgeProps) {
   const { t } = useTranslation();
@@ -21,23 +21,38 @@ export function PromoBadge({ type, label, className }: PromoBadgeProps) {
   const config = {
     promo: {
       label: label ?? t("ui.promo"),
-      classes:
-        "bg-promo/15 text-promo border-promo/30 dark:bg-promo/20 dark:text-promo dark:border-promo/40",
+      style: {
+        background: "var(--color-promo-bg)",
+        border: "1px solid var(--color-promo-border)",
+        color: "var(--color-promo)",
+        boxShadow: "0 0 8px var(--glow-amber)",
+      },
     },
     discount: {
       label: label != null ? t("ui.discount", { percent: label }) : t("ui.promo"),
-      classes:
-        "bg-promo/15 text-promo border-promo/30 dark:bg-promo/20 dark:text-promo dark:border-promo/40",
+      style: {
+        background: "var(--color-promo-bg)",
+        border: "1px solid var(--color-promo-border)",
+        color: "var(--color-promo)",
+        boxShadow: "0 0 8px var(--glow-amber)",
+      },
     },
     out_of_stock: {
       label: label ?? t("ui.outOfStock"),
-      classes:
-        "bg-out-of-stock/15 text-out-of-stock border-out-of-stock/30 dark:bg-out-of-stock/20 dark:text-out-of-stock dark:border-out-of-stock/40",
+      style: {
+        background: "var(--color-muted-bg)",
+        border: "1px solid var(--glass-border)",
+        color: "var(--color-out-of-stock)",
+      },
     },
     new: {
       label: label ?? t("ui.new"),
-      classes:
-        "bg-primary/15 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/40",
+      style: {
+        background: "var(--accent-bg)",
+        border: "1px solid var(--accent-border)",
+        color: "var(--accent)",
+        boxShadow: "0 0 8px var(--accent-glow)",
+      },
     },
   }[type];
 
@@ -45,9 +60,9 @@ export function PromoBadge({ type, label, className }: PromoBadgeProps) {
     <span
       className={cn(
         "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium",
-        config.classes,
         className
       )}
+      style={config.style}
     >
       {config.label}
     </span>

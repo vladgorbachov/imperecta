@@ -43,12 +43,12 @@ export function MarketComparisonSection({
   const matrix = matrixData?.matrix ?? [];
 
   const getCellColor = (diffPercent: number) => {
-    if (diffPercent <= -10) return "bg-emerald-500/80 dark:bg-emerald-600/80";
-    if (diffPercent <= -5) return "bg-emerald-400/60 dark:bg-emerald-500/60";
-    if (diffPercent <= 0) return "bg-emerald-300/40 dark:bg-emerald-400/40";
-    if (diffPercent <= 5) return "bg-amber-300/40 dark:bg-amber-400/40";
-    if (diffPercent <= 10) return "bg-amber-400/60 dark:bg-amber-500/60";
-    return "bg-red-500/80 dark:bg-red-600/80";
+    if (diffPercent <= -10) return "var(--cell-green-80)";
+    if (diffPercent <= -5) return "var(--cell-green-60)";
+    if (diffPercent <= 0) return "var(--cell-green-40)";
+    if (diffPercent <= 5) return "var(--cell-amber-40)";
+    if (diffPercent <= 10) return "var(--cell-amber-60)";
+    return "var(--cell-red-80)";
   };
 
   const handleExportPdf = () => {
@@ -111,10 +111,8 @@ export function MarketComparisonSection({
               return (
                 <div
                   key={`${p.id}-${c.id}`}
-                  className={cn(
-                    "flex min-h-[44px] cursor-default items-center justify-center p-1 text-xs transition-colors hover:ring-2 hover:ring-ring",
-                    getCellColor(diff)
-                  )}
+                  className="flex min-h-[44px] cursor-default items-center justify-center p-1 text-xs transition-colors hover:ring-2 hover:ring-ring"
+                  style={{ background: getCellColor(diff) }}
                 >
                   {diff > 0 ? "+" : ""}{diff.toFixed(0)}%
                 </div>

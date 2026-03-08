@@ -1,7 +1,6 @@
 /**
  * Anomaly feed: vertical list of anomaly cards.
- * Data: GET /api/analytics/dashboard/anomalies
- * TODO: if endpoint returns no product_id, add to API for "View" link.
+ * Amber border, left accent with glow.
  */
 
 import { useEffect } from "react";
@@ -19,9 +18,9 @@ import { cn } from "@/lib/utils";
 type Severity = "critical" | "warning" | "info";
 
 const SEVERITY_COLORS: Record<Severity, string> = {
-  critical: "bg-price-up",
-  warning: "bg-amber-500",
-  info: "bg-blue-500",
+  critical: "var(--color-price-up)",
+  warning: "var(--color-promo)",
+  info: "var(--accent)",
 };
 
 interface AnomalyItem {
@@ -92,75 +91,91 @@ export function AnomalyFeed() {
 
   if (isError) {
     return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-        <p className="text-sm text-destructive">{t("common.error")}</p>
+      <div
+        className="rounded-xl p-4"
+        style={{
+          border: "1px solid var(--color-price-up-border)",
+          background: "var(--color-price-up-bg)",
+        }}
+      >
+        <p className="text-sm" style={{ color: "var(--color-price-up)" }}>{t("common.error")}</p>
       </div>
     );
   }
 
   return (
-    <div className="max-h-[320px] w-full space-y-2 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-sm scrollbar-hide sm:max-h-[400px] dark:border-border">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+    <div
+      className="max-h-[320px] w-full space-y-2 overflow-y-auto rounded-xl p-4 sm:max-h-[400px]"
+      style={{
+        border: "1px solid var(--color-promo-border)",
+        background: "var(--color-promo-bg)",
+        borderLeft: "3px solid var(--color-promo)",
+        boxShadow: "0 0 12px var(--glow-amber)",
+      }}
+    >
+      <h3
+        className="mb-3 text-sm font-semibold uppercase tracking-wider"
+        style={{ color: "var(--foreground-muted)" }}
+      >
         {t("dashboard.anomalies.title")}
       </h3>
       {anomalies.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
+        <p className="py-6 text-center text-sm" style={{ color: "var(--foreground-muted)" }}>
           {t("dashboard.anomaliesEmpty")}
         </p>
       ) : (
         anomalies.slice(0, 5).map((item, i) => (
-        <motion.div
-          key={item.id ?? i}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 + i * 0.05 }}
-          className={cn(
-            "flex gap-3 rounded-lg border border-border bg-muted/50 p-3 transition-colors hover:bg-muted dark:border-border"
-          )}
-        >
-          <div
-            className={cn(
-              "w-1 shrink-0 rounded-full",
-              SEVERITY_COLORS[item.severity ?? "info"]
-            )}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">
-              {item.competitor_name}: {item.product_name}{" "}
-              <span
-                className={cn(
-                  item.change_percent < 0 ? "text-price-down" : "text-price-up"
-                )}
-              >
-                {item.change_percent > 0 ? "+" : ""}
-                {item.change_percent.toFixed(0)}%
-              </span>
-            </p>
-            {item.ai_insight && (
-              <p className="mt-0.5 text-xs italic text-muted-foreground">
-                AI: {item.ai_insight}
-              </p>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatRelativeTime(item.detected_at, locale)}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={() => {
-              if (item.product_id) {
-                navigate(`/products/${item.product_id}`);
-              } else {
-                navigate("/products");
-              }
-            }}
+          <motion.div
+            key={item.id ?? i}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 + i * 0.05 }}
+            className="flex gap-3 rounded-lg p-3 transition-colors hover:bg-[var(--glass-bg-hover)]"
           >
-            {t("dashboard.anomalies.view")}
-          </Button>
-        </motion.div>
-      ))
+            <div
+              className="w-1 shrink-0 rounded-full"
+              style={{ background: SEVERITY_COLORS[item.severity ?? "info"] }}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">
+                {item.competitor_name}: {item.product_name}{" "}
+                <span
+                  style={{
+                    color:
+                      item.change_percent < 0
+                        ? "var(--color-price-down)"
+                        : "var(--color-price-up)",
+                  }}
+                >
+                  {item.change_percent > 0 ? "+" : ""}
+                  {item.change_percent.toFixed(0)}%
+                </span>
+              </p>
+              {item.ai_insight && (
+                <p className="mt-0.5 text-xs italic" style={{ color: "var(--foreground-muted)" }}>
+                  AI: {item.ai_insight}
+                </p>
+              )}
+              <p className="mt-1 text-xs" style={{ color: "var(--foreground-muted)" }}>
+                {formatRelativeTime(item.detected_at, locale)}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() => {
+                if (item.product_id) {
+                  navigate(`/products/${item.product_id}`);
+                } else {
+                  navigate("/products");
+                }
+              }}
+            >
+              {t("dashboard.anomalies.view")}
+            </Button>
+          </motion.div>
+        ))
       )}
     </div>
   );

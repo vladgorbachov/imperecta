@@ -17,7 +17,7 @@ export interface TrendBadgeProps {
 
 /**
  * Badge displaying price trend with icon and optional percentage.
- * Up: red background, pulse; Down: emerald, pulse; Stable: muted.
+ * Up: red glow | Down: emerald glow | Stable: muted.
  */
 export function TrendBadge({ trend, value, size = "md", className }: TrendBadgeProps) {
   const { t } = useTranslation();
@@ -32,18 +32,30 @@ export function TrendBadge({ trend, value, size = "md", className }: TrendBadgeP
   const config = {
     up: {
       icon: TrendingUp,
-      classes:
-        "bg-price-up/15 text-price-up dark:bg-price-up/20 dark:text-price-up border-price-up/30 animate-pulse",
+      style: {
+        background: "var(--color-price-up-bg)",
+        border: "1px solid var(--color-price-up-border)",
+        color: "var(--color-price-up)",
+      },
+      iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-red))" },
     },
     down: {
       icon: TrendingDown,
-      classes:
-        "bg-price-down/15 text-price-down dark:bg-price-down/20 dark:text-price-down border-price-down/30 animate-pulse",
+      style: {
+        background: "rgba(52, 211, 153, 0.15)",
+        border: "1px solid rgba(52, 211, 153, 0.3)",
+        color: "var(--color-price-down)",
+      },
+      iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-green))" },
     },
     stable: {
       icon: Minus,
-      classes:
-        "bg-muted text-muted-foreground dark:bg-muted/80 dark:text-muted-foreground border-border",
+      style: {
+        background: "var(--color-muted-bg)",
+        border: "1px solid var(--glass-border)",
+        color: "var(--foreground-muted)",
+      },
+      iconStyle: undefined,
     },
   }[trend];
 
@@ -54,12 +66,12 @@ export function TrendBadge({ trend, value, size = "md", className }: TrendBadgeP
     <span
       className={cn(
         "inline-flex items-center rounded-md border font-medium",
-        config.classes,
         sizeClasses,
         className
       )}
+      style={config.style}
     >
-      <Icon className="size-3.5 shrink-0" />
+      <Icon className="size-3.5 shrink-0" style={config.iconStyle} />
       <span>{label}</span>
     </span>
   );

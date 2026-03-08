@@ -345,23 +345,37 @@ export function ProductDetailPage() {
                 </Button>
               ))}
             </div>
-            <div className="h-64 w-full min-w-0 sm:h-72 md:h-80">
+            <div className="glass-card h-64 w-full min-w-0 rounded-xl p-4 sm:h-72 md:h-80">
               {historyLoading ? (
                 <Skeleton className="h-full w-full" />
               ) : chartData.length === 0 ? (
-                <div className="flex h-full items-center justify-center rounded-lg border border-border bg-muted/30 dark:border-border dark:bg-muted/20">
-                  <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                <div
+                  className="flex h-full items-center justify-center rounded-lg"
+                  style={{
+                    border: "1px solid var(--glass-border)",
+                    background: "var(--glass-bg)",
+                  }}
+                >
+                  <p className="text-sm" style={{ color: "var(--foreground-muted)" }}>
                     {t("dashboard.noData")}
                   </p>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted dark:stroke-muted" />
-                    <XAxis dataKey="dateLabel" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--border)"
+                      strokeOpacity={0.5}
+                    />
+                    <XAxis
+                      dataKey="dateLabel"
+                      tick={{ fontSize: 12, fill: "var(--foreground-muted)" }}
+                      stroke="var(--foreground-muted)"
+                    />
                     <YAxis
-                      tick={{ fontSize: 12 }}
-                      stroke="hsl(var(--muted-foreground))"
+                      tick={{ fontSize: 12, fill: "var(--foreground-muted)" }}
+                      stroke="var(--foreground-muted)"
                       tickFormatter={(v) => formatPrice(v, "RUB", locale)}
                     />
                     <Tooltip content={<ChartTooltip />} />
@@ -395,20 +409,28 @@ export function ProductDetailPage() {
         </TabsContent>
 
         <TabsContent value="forecast" className="mt-4 animate-in fade-in-0 duration-200">
-          <div className="h-80 w-full rounded-lg border border-border bg-card p-4 dark:border-border dark:bg-card">
+          <div className="glass-card h-80 w-full rounded-xl p-4">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="forecastAreaGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted dark:stroke-muted" />
-                <XAxis dataKey="dateLabel" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--border)"
+                  strokeOpacity={0.5}
+                />
+                <XAxis
+                  dataKey="dateLabel"
+                  tick={{ fontSize: 12, fill: "var(--foreground-muted)" }}
+                  stroke="var(--foreground-muted)"
+                />
                 <YAxis
-                  tick={{ fontSize: 12 }}
-                  stroke="hsl(var(--muted-foreground))"
+                  tick={{ fontSize: 12, fill: "var(--foreground-muted)" }}
+                  stroke="var(--foreground-muted)"
                   tickFormatter={(v) => String(v)}
                 />
                 <Tooltip
@@ -416,7 +438,14 @@ export function ProductDetailPage() {
                     if (!active || !payload?.length) return null;
                     const p = payload[0]?.payload as (typeof forecastData)[0];
                     return (
-                      <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md dark:border-border dark:bg-card">
+                      <div
+                        className="rounded-md px-3 py-2 shadow-md"
+                        style={{
+                          background: "var(--background-elevated)",
+                          border: "1px solid var(--glass-border)",
+                          backdropFilter: "blur(16px)",
+                        }}
+                      >
                         <p className="mb-2 font-medium">{p?.dateLabel}</p>
                         <p className="text-sm">
                           {t("productDetail.forecastSales")}: {p?.forecast}
@@ -435,14 +464,14 @@ export function ProductDetailPage() {
                     x2={i + 0.5}
                     y1={forecastData[i]?.low ?? 0}
                     y2={forecastData[i]?.high ?? 0}
-                    fill="hsl(var(--primary))"
+                    fill="var(--accent)"
                     fillOpacity={0.15}
                   />
                 ))}
                 <Area
                   type="monotone"
                   dataKey="forecast"
-                  stroke="hsl(var(--primary))"
+                  stroke="var(--accent)"
                   strokeWidth={2}
                   fill="url(#forecastAreaGradient)"
                 />
@@ -583,7 +612,14 @@ function ChartTooltip(props: TooltipProps<number, string>) {
   if (!active || !payload?.length) return null;
   const item = payload[0]?.payload as ChartDataPoint;
   return (
-    <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md dark:border-border dark:bg-card">
+    <div
+      className="rounded-md px-3 py-2 shadow-md"
+      style={{
+        background: "var(--background-elevated)",
+        border: "1px solid var(--glass-border)",
+        backdropFilter: "blur(16px)",
+      }}
+    >
       <p className="mb-2 font-medium">{item ? formatDate(item.date, locale) : label}</p>
       <div className="space-y-1 text-sm">
         <p>
