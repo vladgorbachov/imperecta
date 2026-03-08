@@ -1,6 +1,5 @@
 // MOBILE-2026: fully responsive + bottom nav + drawer
 
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router-dom";
@@ -21,8 +20,8 @@ interface HeaderProps {
 }
 
 /**
- * Top bar: hamburger (mobile), logo always visible, theme toggle, notifications, avatar.
- * Touch targets min 48px (min-h-12 min-w-12).
+ * Top bar: hamburger (mobile), theme toggle, notifications, avatar.
+ * Logo is in sidebar. Touch targets min 48px (min-h-12 min-w-12).
  */
 export function Header({ onMenuClick }: HeaderProps) {
   const { t } = useTranslation();
@@ -60,12 +59,6 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Menu className="size-5" />
           </Button>
         )}
-        <Link
-          to="/dashboard"
-          className="font-display text-lg font-bold tracking-tight text-foreground truncate min-w-0"
-        >
-          Imperecta
-        </Link>
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <Button
