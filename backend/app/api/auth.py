@@ -227,6 +227,7 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
         trial_ends_at=current_user.trial_ends_at,
         language=current_user.language,
         ai_tone=getattr(current_user, "ai_tone", "balanced"),
+        is_superuser=getattr(current_user, "is_superuser", False),
         created_at=current_user.created_at,
         telegram_chat_id=current_user.telegram_chat_id,
         avatar_url=getattr(current_user, "avatar_url", None),
