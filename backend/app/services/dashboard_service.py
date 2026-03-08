@@ -2,12 +2,14 @@
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from urllib.parse import urlparse
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    AdminMarketplace,
     Alert,
     AlertEvent,
     Competitor,
@@ -16,6 +18,14 @@ from app.models import (
     Product,
     ScrapeLog,
 )
+
+# Built-in marketplace registry (domain lookup)
+MARKETPLACE_DOMAINS: dict[str, str] = {
+    "ozon": "ozon.ru",
+    "wildberries": "wildberries.ru",
+    "kaspi": "kaspi.kz",
+    "custom": "",
+}
 
 
 class DashboardService:
@@ -394,6 +404,201 @@ class DashboardService:
             "competitors_avg": [round(v, 2) for v in competitors_avg],
             "forecast": forecast,
             "forecast_labels": forecast_labels,
+        }
+
+    async def get_market_overview(
+        self,
+        sort: str = "volatile",
+        limit: int = 50,
+    ) -> dict:
+        """
+        Bloomberg-style market data: all competitor products with price changes.
+
+        Returns:
+            dict with items, total, sort.
+        """
+        # TODO: add Redis caching for heavy queries (1000+ competitor_products)
+        now = datetime.now(timezone.utc)
+        days_30_ago = now - timedelta(days=30)
+        day_ago = now - timedelta(hours=24)
+        days_3_ago = now - timedelta(days=3)
+        week_ago = now - timedelta(days=7)
+        month_ago = now - timedelta(days=30)
+
+        # Load admin marketplace domains for custom marketplaces
+        admin_mp_result = await self.db.execute(
+            select(AdminMarketplace.marketplace_id, AdminMarketplace.domain)
+        )
+        admin_domains = {r[0]: r[1] for r in admin_mp_result.all()}
+        all_domains = {**MARKETPLACE_DOMAINS, **admin_domains}
+
+        # 1. Get all competitor_products with competitor, product
+        cp_result = await self.db.execute(
+            select(
+                CompetitorProduct.id,
+                CompetitorProduct.name.label("cp_name"),
+                CompetitorProduct.last_price,
+                CompetitorProduct.url,
+                CompetitorProduct.last_checked_at,
+                Competitor.marketplace,
+                Competitor.website_url,
+                Product.name.label("product_name"),
+                Product.currency,
+            )
+            .select_from(CompetitorProduct)
+            .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+            .join(Product, CompetitorProduct.product_id == Product.id)
+            .where(
+                Competitor.user_id == self.user_id,
+                CompetitorProduct.is_active.is_(True),
+            )
+        )
+        cp_rows = cp_result.all()
+
+        # 2. Get price_snapshots for last 30 days for all cp_ids
+        cp_ids = [r.id for r in cp_rows]
+        snapshots_by_cp: dict[UUID, list[tuple[datetime, Decimal]]] = {
+            cp_id: [] for cp_id in cp_ids
+        }
+
+        if cp_ids:
+            snap_result = await self.db.execute(
+                select(
+                    PriceSnapshot.competitor_product_id,
+                    PriceSnapshot.price,
+                    PriceSnapshot.scraped_at,
+                )
+                .where(
+                    PriceSnapshot.competitor_product_id.in_(cp_ids),
+                    PriceSnapshot.scraped_at >= days_30_ago,
+                )
+                .order_by(
+                    PriceSnapshot.competitor_product_id,
+                    PriceSnapshot.scraped_at.asc(),
+                )
+            )
+            for row in snap_result.all():
+                snapshots_by_cp[row.competitor_product_id].append(
+                    (row.scraped_at, row.price)
+                )
+
+        # 3. Build items with aggregated data
+        items: list[dict] = []
+        for r in cp_rows:
+            snaps = snapshots_by_cp.get(r.id, [])
+            current_price = float(r.last_price) if r.last_price else 0.0
+            if snaps:
+                current_price = float(snaps[-1][1])
+            last_updated = r.last_checked_at
+            if snaps:
+                last_updated = snaps[-1][0]
+
+            # Daily prices for sparkline (last 30 days, one per day)
+            day_to_price: dict[str, float] = {}
+            for scraped_at, price in snaps:
+                day_key = scraped_at.strftime("%Y-%m-%d")
+                day_to_price[day_key] = float(price)
+            sparkline_data: list[float] = []
+            last_val: float | None = None
+            for i in range(30):
+                day_key = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+                val = day_to_price.get(day_key)
+                if val is not None:
+                    last_val = val
+                sparkline_data.append(last_val if last_val is not None else 0.0)
+
+            def price_at(cutoff: datetime) -> float | None:
+                for scraped_at, price in reversed(snaps):
+                    if scraped_at <= cutoff:
+                        return float(price)
+                return None
+
+            def pct_change(prev: float | None) -> float | None:
+                if prev is None or prev <= 0 or current_price <= 0:
+                    return None
+                return round((current_price - prev) / prev * 100, 2)
+
+            change_24h = pct_change(price_at(day_ago))
+            change_3d = pct_change(price_at(days_3_ago))
+            change_1w = pct_change(price_at(week_ago))
+            change_1m = pct_change(price_at(month_ago))
+
+            # marketplace_domain
+            mp_id = (r.marketplace or "custom").lower()
+            domain = all_domains.get(mp_id, "")
+            if not domain and r.url:
+                try:
+                    parsed = urlparse(r.url)
+                    domain = parsed.netloc or ""
+                except Exception:
+                    domain = ""
+            if not domain and r.website_url:
+                try:
+                    parsed = urlparse(r.website_url)
+                    domain = parsed.netloc or ""
+                except Exception:
+                    pass
+
+            product_name = r.cp_name or r.product_name or ""
+
+            items.append({
+                "id": str(r.id),
+                "marketplace": r.marketplace or "custom",
+                "marketplace_domain": domain or "",
+                "product_name": product_name,
+                "price": round(current_price, 2),
+                "currency": r.currency or "RUB",
+                "change_24h": change_24h,
+                "change_3d": change_3d,
+                "change_1w": change_1w,
+                "change_1m": change_1m,
+                "sparkline_data": [round(v, 2) for v in sparkline_data],
+                "last_updated": last_updated.isoformat() if last_updated else "",
+            })
+
+        # 4. Sort
+        if sort == "volatile":
+            items.sort(
+                key=lambda x: max(
+                    abs(x["change_24h"] or 0),
+                    abs(x["change_3d"] or 0),
+                ),
+                reverse=True,
+            )
+        elif sort == "trending":
+            items.sort(
+                key=lambda x: abs(x["change_24h"] or 0),
+                reverse=True,
+            )
+        elif sort == "gainers":
+            items = [i for i in items if (i["change_24h"] or 0) > 0]
+            items.sort(key=lambda x: x["change_24h"] or 0, reverse=True)
+        elif sort == "losers":
+            items = [i for i in items if (i["change_24h"] or 0) < 0]
+            items.sort(key=lambda x: x["change_24h"] or 0)
+        elif sort == "recent":
+            items.sort(
+                key=lambda x: x["last_updated"] or "",
+                reverse=True,
+            )
+        else:
+            items.sort(
+                key=lambda x: max(
+                    abs(x["change_24h"] or 0),
+                    abs(x["change_3d"] or 0),
+                ),
+                reverse=True,
+            )
+
+        total = len(items)
+
+        # 5. Limit
+        items = items[:limit]
+
+        return {
+            "items": items,
+            "total": total,
+            "sort": sort,
         }
 
     async def get_dashboard_summary(self) -> dict:
