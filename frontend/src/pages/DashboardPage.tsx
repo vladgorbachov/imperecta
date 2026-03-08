@@ -1,9 +1,9 @@
 // MOBILE-2026: fully responsive + bottom nav + drawer
-// Bloomberg-style layout: KPI, MarketDataTable, CompetitorBenchmark, AnomalyFeed, ScenarioSimulator
+// Layout: KPI, MarketDataTable (left 60%) | CompetitorBenchmark, AnomalyFeed, ScenarioSimulator (right 40%)
 
 /**
  * AI Market Command Center dashboard.
- * Bloomberg-style: KPI, MarketDataTable, CompetitorBenchmark, AnomalyFeed, ScenarioSimulator.
+ * Grid: MarketDataTable spans full left column; right column: Benchmark, Anomalies, Simulator.
  */
 
 import { motion } from "framer-motion";
@@ -29,20 +29,22 @@ export function DashboardPage() {
         <KPIOverview />
       </motion.div>
 
-      {/* Row 2: MarketDataTable (60%) | CompetitorBenchmark + AnomalyFeed (40%) */}
+      {/* Row 2: MarketDataTable (col-span-3, row-span-3) | Right column: Benchmark, Anomalies, Simulator */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="min-w-0 lg:col-span-3">
+        <div className="flex min-w-0 flex-col lg:col-span-3 lg:row-span-3">
           <MarketDataTable />
         </div>
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
-          <CompetitorBenchmark />
-          <AnomalyFeed />
+          <div className="max-h-[300px] overflow-y-auto">
+            <CompetitorBenchmark />
+          </div>
+          <div className="max-h-[200px] overflow-y-auto">
+            <AnomalyFeed />
+          </div>
+          <div className="max-h-[150px] shrink-0">
+            <ScenarioSimulator />
+          </div>
         </div>
-      </div>
-
-      {/* Row 3: ScenarioSimulator (full width) */}
-      <div className="min-w-0">
-        <ScenarioSimulator />
       </div>
     </div>
   );

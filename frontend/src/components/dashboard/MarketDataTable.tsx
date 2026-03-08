@@ -1,9 +1,10 @@
 /**
  * Bloomberg-style market data table for dashboard.
- * Data from GET /api/dashboard/market-overview
+ * Data from GET /api/dashboard/market-overview or global market data fallback.
+ * Table always shows data (API or global ticker).
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,7 +14,12 @@ import {
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { analyticsApi, type MarketOverviewItem } from "@/api/analytics";
+import { analyticsApi } from "@/api/analytics";
+import {
+  generateGlobalMarketData,
+  sortMarketData,
+  type MarketDataItem,
+} from "@/data/globalMarketData";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
@@ -156,8 +162,12 @@ export function MarketDataTable() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const [activeTab, setActiveTab] = useState<SortTab>("volatile");
+  const [displayData, setDisplayData] = useState<MarketDataItem[]>(() =>
+    sortMarketData(generateGlobalMarketData(), "volatile")
+  );
+  const [fading, setFading] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data: apiData, isLoading } = useQuery({
     queryKey: ["dashboard", "market-overview", SORT_MAP[activeTab]],
     queryFn: async () => {
       const { data: res } = await analyticsApi.getMarketOverview(
@@ -166,10 +176,41 @@ export function MarketDataTable() {
       );
       return res;
     },
+    staleTime: 5 * 60 * 1000,
+    retry: false,
   });
 
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
+  useEffect(() => {
+    if (apiData?.items?.length) {
+      setDisplayData(
+        apiData.items.map((r) => ({
+          ...r,
+          change_24h: r.change_24h ?? 0,
+          change_3d: r.change_3d ?? 0,
+          change_1w: r.change_1w ?? 0,
+          change_1m: r.change_1m ?? 0,
+        }))
+      );
+    } else {
+      setDisplayData(sortMarketData(generateGlobalMarketData(), SORT_MAP[activeTab]));
+    }
+  }, [apiData, activeTab]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!apiData?.items?.length) {
+        setFading(true);
+        setTimeout(() => {
+          setDisplayData(sortMarketData(generateGlobalMarketData(), SORT_MAP[activeTab]));
+          setFading(false);
+        }, 500);
+      }
+    }, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [apiData?.items?.length, activeTab]);
+
+  const items = displayData.length ? displayData : generateGlobalMarketData();
+  const total = apiData?.total ?? items.length;
   const lastUpdated = items[0]?.last_updated;
   const relativeTime = lastUpdated
     ? formatRelativeTime(lastUpdated, locale)
@@ -183,25 +224,8 @@ export function MarketDataTable() {
     { key: "recent", i18nKey: "dashboard.market.recentlyUpdated" },
   ];
 
-  if (isLoading) {
-    return (
-      <div className="rounded-xl border border-border bg-card/60 p-4 backdrop-blur dark:border-border">
-        <div className="mb-4 flex gap-2">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-9 w-24 rounded-md" />
-          ))}
-        </div>
-        <div className="space-y-2">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <Skeleton key={i} className="h-11 w-full rounded" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="rounded-xl border border-border bg-card/60 backdrop-blur dark:border-border">
+    <div className="flex min-h-[600px] flex-1 flex-col rounded-xl border border-border bg-card/60 backdrop-blur dark:border-border">
       <h3 className="mb-4 px-4 pt-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {t("dashboard.market.title")}
       </h3>
@@ -226,7 +250,12 @@ export function MarketDataTable() {
       </div>
 
       {/* Table */}
-      <div className="max-h-[500px] overflow-y-auto">
+      <div
+        className={cn(
+          "max-h-[500px] flex-1 overflow-y-auto transition-opacity duration-500",
+          fading ? "opacity-0" : "opacity-100"
+        )}
+      >
         <AnimatePresence mode="wait">
           {items.length === 0 ? (
             <motion.div
