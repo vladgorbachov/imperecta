@@ -125,4 +125,27 @@ export const analyticsApi = {
       "/analytics/market-forecast",
       { params: { days: days ?? 7 } }
     ),
+  getMarketOverview: (sort?: string, limit?: number) =>
+    apiClient.get<{
+      items: MarketOverviewItem[];
+      total: number;
+      sort: string;
+    }>("/dashboard/market-overview", {
+      params: { sort: sort ?? "volatile", limit: limit ?? 50 },
+    }),
 };
+
+export interface MarketOverviewItem {
+  id: string;
+  marketplace: string;
+  marketplace_domain: string;
+  product_name: string;
+  price: number;
+  currency: string;
+  change_24h: number | null;
+  change_3d: number | null;
+  change_1w: number | null;
+  change_1m: number | null;
+  sparkline_data: number[];
+  last_updated: string;
+}
