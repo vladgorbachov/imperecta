@@ -290,7 +290,7 @@ export function SettingsPage() {
                       disabled
                       className="flex-1 bg-muted dark:bg-muted"
                     />
-                    <Badge className="bg-green-500/15 text-green-700 border-green-500/30 dark:bg-green-500/20 dark:text-green-400 dark:border-green-500/40">
+                    <Badge className="border bg-[var(--color-price-down-bg)] text-[var(--color-price-down)] border-[var(--color-price-down-border)]">
                       {t("settings.emailVerified")}
                     </Badge>
                   </div>
@@ -508,9 +508,9 @@ export function SettingsPage() {
                 <Badge
                   className={cn(
                     plan === "trial" &&
-                      "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/40",
+                      "bg-[var(--color-promo-bg)] text-[var(--color-promo)] border-[var(--color-promo-border)]",
                     plan === "starter" &&
-                      "bg-blue-500/15 text-blue-700 border-blue-500/30 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/40",
+                      "bg-[var(--accent-bg)] text-[var(--accent)] border-[var(--accent-border)]",
                     (plan === "business" || plan === "pro") &&
                       "bg-primary/15 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary dark:border-primary/40"
                   )}
@@ -526,7 +526,7 @@ export function SettingsPage() {
               </div>
               {plan === "trial" && trialDaysLeft > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm text-amber-600 dark:text-amber-500">
+                  <p className="text-sm" style={{ color: "var(--color-promo)" }}>
                     {t("settings.trialDaysLeft", { count: trialDaysLeft })}
                   </p>
                   <Progress

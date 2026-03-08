@@ -124,7 +124,7 @@ function ClaudeStatusCard() {
       : status === "error" || status === "auth_error"
         ? "bg-red-500"
         : status === "timeout" || status === "rate_limited" || status === "overloaded"
-          ? "bg-amber-500"
+          ? "bg-[var(--color-promo)]"
           : "bg-muted-foreground";
 
   return (
@@ -241,10 +241,10 @@ export function AdminPage() {
 
   const errorRateColor =
     stats && stats.error_rate_today < 5
-      ? "text-green-600 dark:text-green-400"
+      ? "text-[var(--color-price-down)]"
       : stats && stats.error_rate_today <= 15
-        ? "text-amber-600 dark:text-amber-400"
-        : "text-red-600 dark:text-red-400";
+        ? "text-[var(--color-promo)]"
+        : "text-[var(--color-price-up)]";
 
   return (
     <div className="space-y-8">

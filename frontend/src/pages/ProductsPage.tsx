@@ -246,7 +246,7 @@ export function ProductsPage() {
       />
 
       {/* Toolbar */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <div className="glass-card flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-2 lg:w-auto">
           <div className="relative flex-1 lg:max-w-72">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground dark:text-muted-foreground" />
@@ -288,7 +288,13 @@ export function ProductsPage() {
 
       {/* Bulk actions when selection */}
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 dark:border-border dark:bg-muted/20">
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
+          style={{
+            borderColor: "var(--glass-border)",
+            background: "var(--glass-bg)",
+          }}
+        >
           <span className="text-sm font-medium">
             {t("products.selectedCount", { count: selectedIds.size })}
           </span>
@@ -311,7 +317,15 @@ export function ProductsPage() {
       {/* Top 5 at-risk widget */}
       {!isLoading && atRiskItems.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-muted-foreground dark:text-muted-foreground">
+          <h3
+            className="text-sm font-medium"
+            style={{
+              background: "linear-gradient(135deg, var(--foreground), var(--foreground-muted))",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              fontFamily: "var(--font-display)",
+            }}
+          >
             {t("products.topAtRisk")}
           </h3>
           <div className="flex gap-3 overflow-x-auto pb-2">
@@ -320,16 +334,16 @@ export function ProductsPage() {
                 key={product.id}
                 type="button"
                 onClick={() => navigate(`/products/${product.id}`)}
-                className="flex min-w-[200px] shrink-0 flex-col gap-1 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/50 dark:border-border dark:bg-card dark:hover:bg-muted/30"
+                className="glass-card flex min-w-[200px] shrink-0 flex-col gap-1 rounded-xl p-3 text-left transition-colors hover:border-[var(--glass-border-hover)]"
               >
                 <span className="truncate text-sm font-medium">{product.name}</span>
                 <div className="flex items-center gap-2">
                   <Badge
                     variant={risk === "high" ? "destructive" : "secondary"}
                     className={cn(
-                      "text-xs",
+                      "text-xs border",
                       risk === "medium" &&
-                        "bg-amber-500/15 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+                        "bg-[var(--color-promo-bg)] text-[var(--color-promo)] border-[var(--color-promo-border)]"
                     )}
                   >
                     {risk === "high"
@@ -337,7 +351,7 @@ export function ProductsPage() {
                       : t("products.riskMedium")}
                   </Badge>
                 </div>
-                <span className="text-xs text-muted-foreground dark:text-muted-foreground">
+                <span className="text-xs" style={{ color: "var(--foreground-muted)" }}>
                   {t(`products.reason.${reason}`)}
                 </span>
               </button>
@@ -348,7 +362,7 @@ export function ProductsPage() {
 
       {/* Table (desktop) / Cards (mobile) */}
       <div className="mt-4 min-w-0 flex-1 space-y-4">
-        <div className="overflow-hidden rounded-lg border border-border dark:border-border">
+        <div className="glass-card overflow-hidden rounded-xl">
           {isLoading ? (
             <div className="p-4">
               <div className="grid grid-cols-2 gap-3 md:hidden">
@@ -514,11 +528,6 @@ function ProductCard({
   const minPrice = product.min_competitor_price;
   const change7d = computePricePosition(product.current_price, minPrice);
   const rec = computeRecommendation(product.current_price, minPrice);
-  const recBadgeClasses = {
-    lower: "bg-price-down/15 text-price-down dark:bg-price-down/20 dark:text-price-down",
-    keep: "bg-muted text-muted-foreground dark:bg-muted/80 dark:text-muted-foreground",
-    raise: "bg-primary/15 text-primary dark:bg-primary/20 dark:text-primary",
-  };
   const recLabelKey =
     rec.type === "lower"
       ? "products.recommendationLower5"
@@ -530,7 +539,7 @@ function ProductCard({
     <button
       type="button"
       onClick={onRowClick}
-      className="flex min-h-[120px] flex-col items-stretch gap-2 rounded-lg border border-border bg-card p-3 text-left transition-colors active:scale-[0.98] hover:bg-muted/50 dark:border-border dark:bg-card dark:hover:bg-muted/30"
+      className="glass-card flex min-h-[120px] flex-col items-stretch gap-2 rounded-xl p-3 text-left transition-colors active:scale-[0.98] hover:border-[var(--glass-border-hover)]"
     >
       <div className="flex items-start justify-between gap-1">
         <Checkbox
@@ -540,13 +549,43 @@ function ProductCard({
           aria-label={t("products.selectProduct", { name: product.name })}
           className="shrink-0"
         />
-        <Badge variant="secondary" className={cn("text-[10px]", recBadgeClasses[rec.type])}>
+        <span
+          className={cn(
+            "rounded-md border px-1.5 py-0 text-[10px] font-medium",
+            rec.type === "lower" && "border-[var(--color-price-down-border)]",
+            rec.type === "raise" && "border-[var(--accent-border)]",
+            rec.type === "keep" && "border-[var(--glass-border)]"
+          )}
+          style={{
+            background:
+              rec.type === "lower"
+                ? "var(--color-price-down-bg)"
+                : rec.type === "raise"
+                  ? "var(--accent-bg)"
+                  : "var(--glass-bg)",
+            color:
+              rec.type === "lower"
+                ? "var(--color-price-down)"
+                : rec.type === "raise"
+                  ? "var(--accent)"
+                  : "var(--foreground-muted)",
+            boxShadow:
+              rec.type === "lower"
+                ? "0 0 8px var(--glow-green)"
+                : rec.type === "raise"
+                  ? "0 0 8px var(--accent-glow)"
+                  : undefined,
+          }}
+        >
           {t(recLabelKey)}
-        </Badge>
+        </span>
       </div>
       <span className="line-clamp-2 text-sm font-medium">{product.name}</span>
       <div className="mt-auto flex items-center justify-between">
-        <span className="text-sm font-semibold">
+        <span
+          className="text-sm font-semibold"
+          style={{ fontFamily: "var(--font-display)", color: "var(--foreground)" }}
+        >
           {formatPrice(product.current_price, "RUB", locale)}
         </span>
         <TrendBadge trend={change7d.trend} value={change7d.value} size="sm" />
@@ -573,12 +612,6 @@ function ProductTableRow({
   const change7d = computePricePosition(product.current_price, minPrice);
   const rec = computeRecommendation(product.current_price, minPrice);
   const marginForecast = computeMarginPercent(product.current_price, minPrice);
-
-  const recBadgeClasses = {
-    lower: "bg-price-down/15 text-price-down border-price-down/30 dark:bg-price-down/20 dark:text-price-down",
-    keep: "bg-muted text-muted-foreground border-border dark:bg-muted/80 dark:text-muted-foreground",
-    raise: "bg-primary/15 text-primary border-primary/30 dark:bg-primary/20 dark:text-primary",
-  };
 
   const recLabelKey =
     rec.type === "lower"
@@ -626,9 +659,36 @@ function ProductTableRow({
         {marginForecast != null ? `${marginForecast}%` : t("common.dash")}
       </TableCell>
       <TableCell>
-        <Badge variant="secondary" className={cn("text-xs", recBadgeClasses[rec.type])}>
+        <span
+          className={cn(
+            "inline-flex rounded-md border px-2 py-0.5 text-xs font-medium",
+            rec.type === "lower" && "border-[var(--color-price-down-border)]",
+            rec.type === "raise" && "border-[var(--accent-border)]",
+            rec.type === "keep" && "border-[var(--glass-border)]"
+          )}
+          style={{
+            background:
+              rec.type === "lower"
+                ? "var(--color-price-down-bg)"
+                : rec.type === "raise"
+                  ? "var(--accent-bg)"
+                  : "var(--glass-bg)",
+            color:
+              rec.type === "lower"
+                ? "var(--color-price-down)"
+                : rec.type === "raise"
+                  ? "var(--accent)"
+                  : "var(--foreground-muted)",
+            boxShadow:
+              rec.type === "lower"
+                ? "0 0 8px var(--glow-green)"
+                : rec.type === "raise"
+                  ? "0 0 8px var(--accent-glow)"
+                  : undefined,
+          }}
+        >
           {t(recLabelKey)}
-        </Badge>
+        </span>
       </TableCell>
       <TableCell onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>

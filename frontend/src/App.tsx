@@ -139,7 +139,19 @@ export function App() {
                   </Route>
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>
-                <Toaster position="top-center" richColors closeButton />
+                <Toaster
+          position="top-center"
+          richColors
+          closeButton
+          toastOptions={{
+            style: {
+              background: "var(--background-elevated)",
+              border: "1px solid var(--glass-border)",
+              backdropFilter: "blur(16px)",
+              color: "var(--foreground)",
+            },
+          }}
+        />
               </BrowserRouter>
             </Suspense>
           </TooltipProvider>

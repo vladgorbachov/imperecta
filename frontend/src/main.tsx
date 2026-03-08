@@ -6,6 +6,8 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import "@/api/setupAuth";
 import "@/i18n";
 import "./index.css";
+import "./styles/glass.css";
+import "./styles/components.css";
 
 function AppWithInit() {
   const restoreSession = useAuthStore((s) => s.restoreSession);

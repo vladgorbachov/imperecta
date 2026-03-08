@@ -1,7 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { TrendBadge } from "./TrendBadge";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +25,8 @@ export interface StatCardProps {
 }
 
 /**
- * Dashboard stat card with large value, optional icon, TrendBadge, and loading state.
- * Responsive: full-width mobile, 4-col grid desktop. Hover: subtle border transition.
+ * Dashboard stat card with glassmorphism design.
+ * Ambient glow, display font value, TrendBadge, shimmer loading.
  */
 export function StatCard({
   title,
@@ -44,47 +42,74 @@ export function StatCard({
   const badges = trendBadges ?? (trend ? [trend] : undefined);
 
   return (
-    <Card
+    <div
       style={style}
       className={cn(
-        "transition-colors hover:border-primary/30 dark:hover:border-primary/40",
-        "w-full min-w-0",
+        "glass-card relative overflow-hidden rounded-xl p-5",
+        isLoading && "shimmer",
         className
       )}
     >
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+      {/* Ambient glow blob — positioned top-right */}
+      <div
+        className="absolute -top-8 -right-8 h-24 w-24 rounded-full opacity-20 blur-2xl"
+        style={{ background: "var(--accent)" }}
+      />
+
+      {/* Top row: title + icon */}
+      <div className="mb-3 flex items-center justify-between">
         {isLoading ? (
-          <Skeleton className="h-4 w-24" />
+          <div className="h-4 w-24 animate-pulse rounded bg-[var(--glass-bg)]" />
         ) : (
-          <p className="text-sm font-medium text-muted-foreground dark:text-muted-foreground">
+          <span
+            className="text-xs font-medium uppercase tracking-wider"
+            style={{ color: "var(--foreground-muted)" }}
+          >
             {t(title)}
-          </p>
+          </span>
         )}
         {Icon && !isLoading && (
-          <Icon className="size-4 shrink-0 text-muted-foreground dark:text-muted-foreground" />
-        )}
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <Skeleton className="h-8 w-16" />
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="text-2xl font-bold">{value}</div>
-            {badges && badges.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {badges.map((b, i) => (
-                  <TrendBadge
-                    key={i}
-                    trend={b.direction}
-                    value={b.value}
-                    size="sm"
-                  />
-                ))}
-              </div>
-            )}
+          <div
+            className="rounded-lg border p-2"
+            style={{
+              background: "var(--glass-bg)",
+              borderColor: "var(--glass-border)",
+            }}
+          >
+            <Icon
+              className="size-4"
+              style={{
+                color: "var(--accent)",
+                filter: "drop-shadow(0 0 6px var(--accent-glow))",
+              }}
+            />
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+
+      {/* Value — large, display font */}
+      {isLoading ? (
+        <div className="mb-2 h-8 w-16 animate-pulse rounded bg-[var(--glass-bg)]" />
+      ) : (
+        <div
+          className="text-3xl font-bold"
+          style={{ color: "var(--foreground)", fontFamily: "var(--font-display)" }}
+        >
+          {value}
+        </div>
+      )}
+
+      {/* Trend badge */}
+      {badges && badges.length > 0 && !isLoading && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {badges.map((b, i) => (
+            <TrendBadge key={i} trend={b.direction} value={b.value} size="sm" />
+          ))}
+        </div>
+      )}
+
+      {/* Bottom accent line */}
+      <div className="accent-line absolute bottom-0 left-0 right-0" />
+    </div>
   );
 }

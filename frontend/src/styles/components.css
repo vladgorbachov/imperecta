@@ -1,0 +1,117 @@
+/* shadcn component overrides — glassmorphism design system */
+
+/* Card */
+.card {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-card) !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+.card:hover {
+  border-color: var(--glass-border-hover) !important;
+  box-shadow: var(--shadow-hover) !important;
+  transform: translateY(-1px);
+}
+
+/* Button — primary / default */
+.btn-primary,
+button[data-variant="default"],
+[data-slot="button"][data-variant="default"] {
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent)) !important;
+  box-shadow: 0 0 16px var(--accent-glow), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.btn-primary:hover,
+button[data-variant="default"]:hover,
+[data-slot="button"][data-variant="default"]:hover {
+  box-shadow: 0 0 24px var(--accent-glow-strong), 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+/* Input */
+input,
+select,
+textarea {
+  background: var(--glass-bg) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--foreground) !important;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 3px var(--accent-glow) !important;
+  outline: none !important;
+}
+
+/* Table */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+thead th {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--foreground-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+tbody tr:hover {
+  background: var(--glass-bg-hover);
+}
+
+/* Badge */
+.badge {
+  border-radius: var(--radius-sm) !important;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px !important;
+}
+
+/* Sidebar */
+[data-sidebar] {
+  background: var(--background-mid) !important;
+  border-right: 1px solid var(--glass-border) !important;
+}
+
+/* Stagger entrance animation */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-slide-up {
+  animation: fadeSlideUp 0.4s ease-out forwards;
+}
+
+/* Sonner toasts */
+[data-sonner-toaster] [data-sonner-toast] {
+  background: var(--background-elevated) !important;
+  border: 1px solid var(--glass-border) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--foreground) !important;
+}

@@ -1,8 +1,12 @@
-// MOBILE-2026: fully responsive + bottom nav + drawer
+/**
+ * Main dashboard layout: sidebar + main area with ambient glow.
+ * Glassmorphism design. Light theme: reduced blob opacity.
+ */
 
 import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { useTheme } from "next-themes";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { MobileSidebar } from "./MobileSidebar";
@@ -10,28 +14,41 @@ import { BottomNavigation } from "./BottomNavigation";
 import { SessionExpiryWarning } from "@/components/SessionExpiryWarning";
 import { useSidebar } from "@/hooks/useSidebar";
 
-/**
- * Main dashboard layout: CSS Grid with sidebar + main area.
- * Sidebar hidden on mobile (< md), visible md and above.
- * Bottom nav visible only on mobile (< md).
- * RTL: document.dir=rtl flips layout; border-inline-end for logical placement.
- */
 export function DashboardLayout() {
   const { isCollapsed, toggle } = useSidebar();
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const location = useLocation();
+  const { resolvedTheme } = useTheme();
+  const isLight = resolvedTheme === "light";
+  const blobOpacity1 = isLight ? "0.04" : "0.06";
+  const blobOpacity2 = isLight ? "0.02" : "0.04";
 
   return (
-    <div className="grid h-[100dvh] min-h-screen grid-cols-[auto_1fr] grid-rows-[auto_1fr] bg-background text-foreground dark:bg-background dark:text-foreground">
-      <aside className="col-span-1 row-span-2 hidden border-e border-border dark:border-border md:block">
-        <Sidebar
-          collapsed={isCollapsed}
-          onToggle={toggle}
-        />
+    <div
+      className="grid h-[100dvh] min-h-screen grid-cols-[auto_1fr] grid-rows-[auto_1fr]"
+      style={{
+        background: "var(--background)",
+        color: "var(--foreground)",
+      }}
+    >
+      <aside className="col-span-1 row-span-2 hidden border-e md:block" style={{ borderColor: "var(--glass-border)" }}>
+        <Sidebar collapsed={isCollapsed} onToggle={toggle} />
       </aside>
       <Header onMenuClick={() => setMobileSheetOpen(true)} />
-      <main className="col-span-1 min-h-0 overflow-auto px-4 pb-20 pt-4 sm:px-5 sm:pb-6 md:px-6 md:pb-6 safe-area-bottom-margin scrollbar-hide md:pb-6">
-        <div className="mx-auto max-w-7xl">
+      <main className="relative z-10 col-span-1 min-h-0 overflow-auto px-4 pb-20 pt-4 safe-area-bottom-margin sm:px-5 sm:pb-6 md:px-6 md:pb-6">
+        {/* Ambient background — decorative only */}
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+          <div
+            className="glow-dot glow-dot-accent"
+            style={{ top: "-10%", right: "10%", opacity: blobOpacity1 }}
+          />
+          <div
+            className="glow-dot glow-dot-accent2"
+            style={{ bottom: "20%", left: "5%", opacity: blobOpacity2 }}
+          />
+        </div>
+
+        <div className="relative z-[1] mx-auto max-w-7xl">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
@@ -45,10 +62,7 @@ export function DashboardLayout() {
           </AnimatePresence>
         </div>
       </main>
-      <MobileSidebar
-        open={mobileSheetOpen}
-        onOpenChange={setMobileSheetOpen}
-      />
+      <MobileSidebar open={mobileSheetOpen} onOpenChange={setMobileSheetOpen} />
       <BottomNavigation />
       <SessionExpiryWarning />
     </div>

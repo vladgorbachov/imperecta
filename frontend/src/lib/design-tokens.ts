@@ -3,31 +3,38 @@
  * Hex values used where CSS variables cannot be consumed (e.g. Recharts).
  */
 
-/** Primary/accent color for "my price" line (teal, matches --primary) */
-export const CHART_PRIMARY = "#0d9488";
+/** Primary/accent color for "my price" line (sky-400, matches --accent) */
+export const CHART_PRIMARY = "#38bdf8";
 
-/** 7 distinct chart line colors — avoid red/green (reserved for semantic price indicators) */
-export const CHART_COLORS: string[] = [
-  "#06b6d4", /* cyan */
-  "#3b82f6", /* blue */
-  "#8b5cf6", /* violet */
-  "#f59e0b", /* amber */
-  "#ec4899", /* pink */
-  "#14b8a6", /* teal */
-  "#0ea5e9", /* sky */
-];
+export const CHART_COLORS = [
+  "#38bdf8",
+  "#818cf8",
+  "#34d399",
+  "#fb923c",
+  "#e879f9",
+  "#fbbf24",
+  "#94a3b8",
+] as const;
 
-/** Marketplace brand colors for badges and indicators */
-export const MARKETPLACE_COLORS: Record<"ozon" | "wildberries" | "kaspi" | "custom", string> = {
-  ozon: "#f97316",
-  wildberries: "#3b82f6",
-  kaspi: "#dc2626",
-  custom: "#64748b",
-};
+export const CHART_COLORS_LIGHT = [
+  "#0284c7",
+  "#6366f1",
+  "#059669",
+  "#ea580c",
+  "#a21caf",
+  "#ca8a04",
+  "#64748b",
+] as const;
 
-/** Breakpoints in pixels (mobile-first) */
+export const MARKETPLACE_COLORS = {
+  ozon: { bg: "#005BFF", glow: "rgba(0,91,255,0.3)" },
+  wildberries: { bg: "#CB11AB", glow: "rgba(203,17,171,0.3)" },
+  kaspi: { bg: "#F14635", glow: "rgba(241,70,53,0.3)" },
+  custom: { bg: "#64748b", glow: "rgba(100,116,139,0.3)" },
+} as const;
+
 export const BREAKPOINTS = {
-  mobile: 0,
-  tablet: 768,
-  desktop: 1024,
+  mobile: 768,
+  tablet: 1024,
+  desktop: 1280,
 } as const;

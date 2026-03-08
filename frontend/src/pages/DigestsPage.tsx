@@ -216,8 +216,8 @@ function DigestCard({
             variant="secondary"
             className={
               isDaily
-                ? "bg-blue-500/15 text-blue-700 border-blue-500/30 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/40"
-                : "bg-purple-500/15 text-purple-700 border-purple-500/30 dark:bg-purple-500/20 dark:text-purple-400 dark:border-purple-500/40"
+                ? "border bg-[var(--accent-bg)] text-[var(--accent)] border-[var(--accent-border)]"
+                : "border bg-[var(--accent2-bg)] text-[var(--accent2)] border-[var(--accent2-border)]"
             }
           >
             {isDaily ? t("digests.typeDaily") : t("digests.typeWeekly")}
@@ -226,8 +226,8 @@ function DigestCard({
             variant="secondary"
             className={
               isSent
-                ? "bg-green-500/15 text-green-700 border-green-500/30 dark:bg-green-500/20 dark:text-green-400 dark:border-green-500/40"
-                : "bg-neutral-500/15 text-neutral-600 border-neutral-500/30 dark:bg-neutral-500/20 dark:text-neutral-400 dark:border-neutral-500/40"
+                ? "border bg-[var(--color-price-down-bg)] text-[var(--color-price-down)] border-[var(--color-price-down-border)]"
+                : "border bg-[var(--color-muted-bg)] text-[var(--foreground-muted)] border-[var(--glass-border)]"
             }
           >
             {isSent ? t("digests.sent") : t("digests.draft")}

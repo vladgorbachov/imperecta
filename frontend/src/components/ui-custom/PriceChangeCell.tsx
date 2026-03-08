@@ -35,11 +35,13 @@ export function PriceChangeCell({
 
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-2", className)}>
-      <span className="line-through text-muted-foreground dark:text-muted-foreground">
+      <span className="line-through" style={{ color: "var(--foreground-muted)" }}>
         {formatPrice(oldPrice, currency, locale)}
       </span>
-      <span className="text-muted-foreground dark:text-muted-foreground">{arrow}</span>
-      <span className="font-medium">{formatPrice(newPrice, currency, locale)}</span>
+      <span style={{ color: "var(--foreground-muted)" }}>{arrow}</span>
+      <span className="font-medium" style={{ color: "var(--foreground)" }}>
+        {formatPrice(newPrice, currency, locale)}
+      </span>
       <TrendBadge trend={trend} value={Math.abs(percent)} size="sm" />
     </span>
   );

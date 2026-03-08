@@ -20,12 +20,12 @@ export function Progress({
   ...props
 }: ProgressProps) {
   const percent = Math.min(100, Math.max(0, max > 0 ? (value / max) * 100 : 0));
-  const barClass =
+  const barStyle =
     variant === "danger"
-      ? "bg-red-500 dark:bg-red-500"
+      ? { background: "var(--color-price-up)" }
       : variant === "warning"
-        ? "bg-amber-500 dark:bg-amber-500"
-        : "bg-primary";
+        ? { background: "var(--color-promo)" }
+        : undefined;
   return (
     <div
       role="progressbar"
@@ -39,8 +39,11 @@ export function Progress({
       {...props}
     >
       <div
-        className={cn("h-full transition-all duration-300 ease-in-out", barClass)}
-        style={{ width: `${percent}%` }}
+        className={cn(
+          "h-full transition-all duration-300 ease-in-out",
+          !barStyle && "bg-primary"
+        )}
+        style={{ width: `${percent}%`, ...barStyle }}
       />
     </div>
   );

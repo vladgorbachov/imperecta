@@ -1,74 +1,128 @@
-@import url("https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
 :root {
-  /* Brand accent — deep teal/cyan (competitive intelligence: sharp, analytical) */
-  --color-accent: hsl(185 80% 35%);
-  --color-accent-foreground: hsl(0 0% 100%);
+  color-scheme: dark;
 
-  /* Backgrounds — light mode, slight warm tint */
-  --background: hsl(40 20% 98%);
-  --foreground: hsl(220 15% 12%);
-  --card: hsl(0 0% 100%);
-  --card-foreground: hsl(220 15% 12%);
-  --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(220 15% 12%);
+  /* === Backgrounds === */
+  --background: #0a0e1a;
+  --background-mid: #0d1224;
+  --background-surface: #111827;
+  --background-elevated: #161e30;
 
-  /* Muted — darker for readable contrast on light cards */
-  --muted: hsl(40 15% 95%);
-  --muted-foreground: hsl(220 14% 32%);
+  /* === Glass effect layers === */
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-bg-hover: rgba(255, 255, 255, 0.07);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.15);
 
-  /* Borders and inputs */
-  --border: hsl(220 15% 90%);
-  --input: hsl(220 15% 90%);
-  --ring: 185 80% 40%;
+  /* === Brand / Accent === */
+  --accent: #38bdf8;
+  --accent-bright: #7dd3fc;
+  --accent-dim: #0ea5e9;
+  --accent-glow: rgba(56, 189, 248, 0.25);
+  --accent-glow-strong: rgba(56, 189, 248, 0.45);
 
-  /* Primary (brand accent) — darker for contrast on light backgrounds */
-  --primary: 185 80% 32%;
-  --primary-foreground: hsl(0 0% 100%);
+  /* === Secondary accent === */
+  --accent2: #818cf8;
+  --accent2-glow: rgba(129, 140, 248, 0.25);
+  --accent2-bg: rgba(129, 140, 248, 0.15);
+  --accent2-border: rgba(129, 140, 248, 0.3);
 
-  /* Secondary */
-  --secondary: hsl(40 15% 93%);
-  --secondary-foreground: hsl(220 15% 15%);
+  /* === Text === */
+  --foreground: #f0f6ff;
+  --foreground-muted: #8899aa;
+  --foreground-subtle: #4a5568;
 
-  /* Accent (interactive hover states) */
-  --accent: hsl(185 60% 95%);
-  --accent-foreground: hsl(185 80% 22%);
+  /* === Semantic colors === */
+  --color-price-down: #34d399;
+  --color-price-up: #f87171;
+  --color-promo: #fbbf24;
+  --color-stable: #94a3b8;
+  --color-out-of-stock: #64748b;
 
-  /* Semantic colors */
-  --color-price-up: hsl(0 72% 51%);
-  --color-price-down: hsl(160 84% 39%);
-  --color-out-of-stock: hsl(220 10% 55%);
-  --color-promo: hsl(38 92% 50%);
-  --color-stable: hsl(220 10% 45%);
+  /* Glow versions */
+  --glow-green: rgba(52, 211, 153, 0.3);
+  --glow-red: rgba(248, 113, 113, 0.3);
+  --glow-amber: rgba(251, 191, 36, 0.3);
 
-  /* Destructive */
+  /* Semantic badge/background variants */
+  --color-price-down-bg: rgba(52, 211, 153, 0.15);
+  --color-price-down-border: rgba(52, 211, 153, 0.3);
+  --color-price-up-bg: rgba(248, 113, 113, 0.15);
+  --color-price-up-border: rgba(248, 113, 113, 0.3);
+  --color-promo-bg: rgba(251, 191, 36, 0.15);
+  --color-promo-border: rgba(251, 191, 36, 0.3);
+  --color-muted-bg: rgba(148, 163, 184, 0.1);
+  --accent-bg: rgba(56, 189, 248, 0.15);
+  --accent-border: rgba(56, 189, 248, 0.3);
+  --accent-bg-subtle: rgba(56, 189, 248, 0.12);
+  --row-tint-green: rgba(52, 211, 153, 0.08);
+  --row-tint-red: rgba(248, 113, 113, 0.08);
+  --gradient-accent-subtle: radial-gradient(ellipse at top right, rgba(56,189,248,0.04) 0%, transparent 60%);
+  --background-elevated-subtle: rgba(255, 255, 255, 0.03);
+
+  /* Comparison matrix cell backgrounds */
+  --cell-green-80: rgba(52, 211, 153, 0.8);
+  --cell-green-60: rgba(52, 211, 153, 0.6);
+  --cell-green-40: rgba(52, 211, 153, 0.4);
+  --cell-amber-60: rgba(251, 191, 36, 0.6);
+  --cell-amber-40: rgba(251, 191, 36, 0.4);
+  --cell-red-80: rgba(248, 113, 113, 0.8);
+
+  /* === Borders === */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(56, 189, 248, 0.6);
+
+  /* === Chart line colors === */
+  --chart-1: #38bdf8;
+  --chart-2: #818cf8;
+  --chart-3: #34d399;
+  --chart-4: #fb923c;
+  --chart-5: #e879f9;
+  --chart-6: #fbbf24;
+  --chart-7: #94a3b8;
+
+  /* === Shadows & glows === */
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  --shadow-hover: 0 8px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  --shadow-accent: 0 0 20px var(--accent-glow), 0 0 60px rgba(56, 189, 248, 0.1);
+  --shadow-glow-sm: 0 0 12px var(--accent-glow);
+
+  /* === Border radius === */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* === Typography === */
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* === Compatibility for Tailwind / existing components === */
+  --card: var(--background-surface);
+  --card-foreground: var(--foreground);
+  --muted: var(--background-mid);
+  --muted-foreground: var(--foreground-muted);
+  --popover: var(--background-elevated);
+  --popover-foreground: var(--foreground);
+  --sidebar: var(--background-mid);
+  --sidebar-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --primary: 199 89% 48%;
+  --primary-foreground: #ffffff;
+  --secondary: var(--background-mid);
+  --secondary-foreground: var(--foreground);
   --destructive: 0 72% 51%;
-  --destructive-foreground: hsl(0 0% 98%);
-
-  /* Sidebar — light mode: matches background */
-  --sidebar: hsl(40 20% 98%);
-  --sidebar-foreground: hsl(220 15% 12%);
-
-  /* Marketplace badge colors (task spec: Ozon blue, WB purple, Kaspi yellow, Custom slate) */
-  --color-marketplace-ozon: hsl(217 91% 60%);
-  --color-marketplace-wildberries: hsl(263 70% 58%);
-  --color-marketplace-kaspi: hsl(45 93% 47%);
-  --color-marketplace-custom: hsl(215 16% 47%);
-
-  /* Chart line colors (for reference; Recharts uses design-tokens.ts) */
-  --chart-1: hsl(187 85% 43%);
-  --chart-2: hsl(217 91% 60%);
-  --chart-3: hsl(263 70% 58%);
-  --chart-4: hsl(38 92% 50%);
-  --chart-5: hsl(330 81% 60%);
-  --chart-6: hsl(174 72% 40%);
-  --chart-7: hsl(199 89% 48%);
-
-  /* Typography */
-  --font-display: "Unbounded", system-ui, sans-serif;
-  --font-body: "Golos Text", system-ui, sans-serif;
+  --destructive-foreground: #f8fafc;
+  --input: var(--glass-border);
+  --ring: 199 89% 48%;
+  --color-marketplace-ozon: #005bff;
+  --color-marketplace-wildberries: #cb11ab;
+  --color-marketplace-kaspi: #f14635;
+  --color-marketplace-custom: #64748b;
 
   /* Type scale */
   --text-xs: 0.75rem;
@@ -89,65 +143,87 @@
   --text-4xl--line-height: 2.5rem;
 }
 
-.dark {
-  /* Backgrounds — deep slate */
-  --background: hsl(220 25% 8%);
-  --foreground: hsl(0 0% 95%);
-  --card: hsl(220 20% 11%);
-  --card-foreground: hsl(0 0% 95%);
-  --popover: hsl(220 20% 11%);
-  --popover-foreground: hsl(0 0% 95%);
+.light {
+  color-scheme: light;
 
-  /* Muted — lighter for readable contrast on dark cards */
-  --muted: hsl(220 15% 15%);
-  --muted-foreground: hsl(220 8% 72%);
+  --background: #f0f4ff;
+  --background-mid: #ffffff;
+  --background-surface: #f8faff;
+  --background-elevated: #ffffff;
 
-  /* Borders and inputs */
-  --border: hsl(220 15% 18%);
-  --input: hsl(220 15% 18%);
-  --ring: 185 70% 45%;
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg-hover: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(148, 163, 184, 0.25);
+  --glass-border-hover: rgba(56, 189, 248, 0.4);
 
-  /* Primary */
-  --primary: 185 70% 45%;
-  --primary-foreground: hsl(0 0% 100%);
+  --accent: #0284c7;
+  --accent-bright: #0ea5e9;
+  --accent-dim: #0369a1;
+  --accent-glow: rgba(2, 132, 199, 0.15);
+  --accent-glow-strong: rgba(2, 132, 199, 0.3);
 
-  /* Secondary */
-  --secondary: hsl(220 15% 18%);
-  --secondary-foreground: hsl(0 0% 95%);
+  --accent2: #6366f1;
+  --accent2-glow: rgba(99, 102, 241, 0.15);
+  --accent2-bg: rgba(99, 102, 241, 0.12);
+  --accent2-border: rgba(99, 102, 241, 0.25);
 
-  /* Accent */
-  --accent: hsl(185 40% 18%);
-  --accent-foreground: hsl(185 75% 78%);
+  --foreground: #0f172a;
+  --foreground-muted: #475569;
+  --foreground-subtle: #94a3b8;
 
-  /* Semantic colors — dark variants */
-  --color-price-up: hsl(0 72% 55%);
-  --color-price-down: hsl(160 70% 45%);
-  --color-out-of-stock: hsl(220 10% 50%);
-  --color-promo: hsl(38 92% 55%);
-  --color-stable: hsl(220 10% 60%);
+  --color-price-down: #059669;
+  --color-price-up: #dc2626;
+  --color-promo: #d97706;
 
-  /* Destructive */
-  --destructive: 0 72% 55%;
-  --destructive-foreground: hsl(0 0% 98%);
+  --glow-green: rgba(5, 150, 105, 0.15);
+  --glow-red: rgba(220, 38, 38, 0.15);
+  --glow-amber: rgba(217, 119, 6, 0.15);
 
-  /* Sidebar */
-  --sidebar: hsl(220 25% 10%);
-  --sidebar-foreground: hsl(0 0% 95%);
+  --color-price-down-bg: rgba(5, 150, 105, 0.12);
+  --color-price-down-border: rgba(5, 150, 105, 0.25);
+  --color-price-up-bg: rgba(220, 38, 38, 0.12);
+  --color-price-up-border: rgba(220, 38, 38, 0.25);
+  --color-promo-bg: rgba(217, 119, 6, 0.12);
+  --color-promo-border: rgba(217, 119, 6, 0.25);
+  --color-muted-bg: rgba(148, 163, 184, 0.08);
+  --accent-bg: rgba(2, 132, 199, 0.12);
+  --accent-border: rgba(2, 132, 199, 0.25);
+  --accent-bg-subtle: rgba(2, 132, 199, 0.08);
+  --row-tint-green: rgba(5, 150, 105, 0.06);
+  --row-tint-red: rgba(220, 38, 38, 0.06);
+  --gradient-accent-subtle: radial-gradient(ellipse at top right, rgba(2,132,199,0.03) 0%, transparent 60%);
+  --background-elevated-subtle: rgba(255, 255, 255, 0.5);
 
-  /* Marketplace badge colors — dark variants */
-  --color-marketplace-ozon: hsl(217 91% 65%);
-  --color-marketplace-wildberries: hsl(263 70% 65%);
-  --color-marketplace-kaspi: hsl(45 93% 55%);
-  --color-marketplace-custom: hsl(215 16% 55%);
+  --cell-green-80: rgba(5, 150, 105, 0.7);
+  --cell-green-60: rgba(5, 150, 105, 0.5);
+  --cell-green-40: rgba(5, 150, 105, 0.35);
+  --cell-amber-60: rgba(217, 119, 6, 0.5);
+  --cell-amber-40: rgba(217, 119, 6, 0.35);
+  --cell-red-80: rgba(220, 38, 38, 0.7);
 
-  /* Chart colors */
-  --chart-1: hsl(187 85% 50%);
-  --chart-2: hsl(217 91% 65%);
-  --chart-3: hsl(263 70% 65%);
-  --chart-4: hsl(38 92% 55%);
-  --chart-5: hsl(330 81% 65%);
-  --chart-6: hsl(174 72% 48%);
-  --chart-7: hsl(199 89% 55%);
+  --border: rgba(148, 163, 184, 0.2);
+  --border-focus: rgba(2, 132, 199, 0.5);
+
+  --chart-1: #0284c7;
+  --chart-2: #6366f1;
+  --chart-3: #059669;
+  --chart-4: #ea580c;
+  --chart-5: #a21caf;
+  --chart-6: #ca8a04;
+  --chart-7: #64748b;
+
+  --shadow-card: 0 2px 16px rgba(15, 23, 42, 0.08), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  --shadow-hover: 0 8px 32px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  --shadow-accent: 0 0 20px var(--accent-glow), 0 4px 12px rgba(2, 132, 199, 0.1);
+  --shadow-glow-sm: 0 0 8px var(--accent-glow);
+
+  --card: var(--background-surface);
+  --muted: #f1f5f9;
+  --color-accent: var(--accent);
+  --primary: 199 89% 42%;
+  --secondary: #f1f5f9;
+  --input: var(--glass-border);
+  --ring: 199 89% 42%;
 }
 
 @theme inline {
@@ -161,8 +237,8 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--color-accent);
+  --color-accent-foreground: var(--color-accent-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: hsl(var(--ring));
@@ -184,7 +260,7 @@
   --font-display: var(--font-display);
   --font-body: var(--font-body);
   --font-sans: var(--font-body);
-  --font-mono: ui-monospace, monospace;
+  --font-mono: var(--font-mono);
   --text-xs: var(--text-xs);
   --text-xs--line-height: var(--text-xs--line-height);
   --text-sm: var(--text-sm);
@@ -205,20 +281,38 @@
 
 @layer base {
   * {
+    box-sizing: border-box;
     @apply border-border;
   }
-  html {
-    @apply bg-background text-foreground antialiased;
-    font-family: var(--font-body);
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  html::-webkit-scrollbar,
-  body::-webkit-scrollbar {
-    display: none;
-  }
+
   body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
     @apply bg-background text-foreground;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--glass-border);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-dim);
+  }
+
+  /* Selection */
+  ::selection {
+    background: var(--accent-glow);
+    color: var(--foreground);
   }
 }
 
@@ -243,7 +337,7 @@
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 700;
-  color: var(--color-accent);
+  color: var(--accent);
   margin-bottom: 0.75rem;
 }
 .digest-content h2 {
@@ -271,7 +365,7 @@
   font-weight: 600;
 }
 .digest-content code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875em;
   padding: 0.125rem 0.25rem;
   border-radius: 0.25rem;
@@ -292,7 +386,8 @@
 }
 
 @keyframes grid-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -312,13 +407,4 @@
 
 .animate-shimmer {
   animation: shimmer 2s infinite;
-}
-
-/* Hide scrollbar visually, keep scroll functionality */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
 }

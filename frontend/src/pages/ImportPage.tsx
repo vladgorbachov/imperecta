@@ -366,7 +366,7 @@ export function ImportPage() {
                           <TableHead
                             key={header}
                             className={cn(
-                              requiredUnmapped && "bg-amber-500/15 dark:bg-amber-500/20"
+                              requiredUnmapped && "bg-[var(--color-promo-bg)]"
                             )}
                           >
                             <div className="flex flex-col gap-1">
@@ -389,7 +389,7 @@ export function ImportPage() {
                                       <span className="flex items-center gap-2">
                                         {t(COLUMN_KEYS[col])}
                                         {autoMapColumn(header) === col && (
-                                          <CheckCircle className="size-3.5 text-green-600 dark:text-green-500" />
+                                          <CheckCircle className="size-3.5" style={{ color: "var(--color-price-down)" }} />
                                         )}
                                       </span>
                                     </SelectItem>
@@ -488,7 +488,7 @@ export function ImportPage() {
       {hasResult && result && (
         <Card>
           <CardContent className="space-y-4 pt-6">
-            <div className="flex items-center gap-2 text-green-600 dark:text-green-500">
+            <div className="flex items-center gap-2" style={{ color: "var(--color-price-down)" }}>
               <CheckCircle className="size-5 shrink-0" />
               <span className="font-medium">
                 {t("import.imported")}: {result.imported}

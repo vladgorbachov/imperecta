@@ -1,6 +1,6 @@
 /**
  * Competitor benchmark: table or grid view.
- * Data: GET /api/analytics/competitor-benchmark
+ * Glass-card container, gradient title.
  */
 
 import { useState } from "react";
@@ -28,9 +28,9 @@ function toMarketplaceDisplay(m: string): string {
 }
 
 function getBarColor(index: number): string {
-  if (index <= 40) return "bg-price-down";
-  if (index <= 70) return "bg-amber-500";
-  return "bg-price-up";
+  if (index <= 40) return "var(--color-price-down)";
+  if (index <= 70) return "var(--color-promo)";
+  return "var(--color-price-up)";
 }
 
 export function CompetitorBenchmark() {
@@ -59,7 +59,7 @@ export function CompetitorBenchmark() {
 
   if (isLoading) {
     return (
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border">
+      <div className="glass-card rounded-xl p-4">
         <Skeleton className="mb-4 h-6 w-48" />
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
@@ -75,10 +75,19 @@ export function CompetitorBenchmark() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.2, duration: 0.3 }}
-      className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border"
+      className="glass-card rounded-xl p-4"
     >
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3
+          className="text-sm font-semibold uppercase tracking-wider"
+          style={{
+            background: "linear-gradient(135deg, var(--foreground), var(--foreground-muted))",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+            fontFamily: "var(--font-display)",
+          }}
+        >
           {t("dashboard.benchmark.title")}
         </h3>
         <div className="flex gap-1">
@@ -104,7 +113,7 @@ export function CompetitorBenchmark() {
       </div>
 
       {benchmarks.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
+        <p className="py-6 text-center text-sm" style={{ color: "var(--foreground-muted)" }}>
           {t("dashboard.benchmark.noData")}
         </p>
       ) : viewMode === "table" ? (
@@ -112,7 +121,11 @@ export function CompetitorBenchmark() {
           {benchmarks.map((b) => (
             <div
               key={b.id}
-              className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-3 dark:border-border"
+              className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
+              style={{
+                borderColor: "var(--glass-border)",
+                background: "var(--glass-bg)",
+              }}
             >
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{b.name}</p>
@@ -121,21 +134,27 @@ export function CompetitorBenchmark() {
                 </Badge>
               </div>
               <div className="w-24">
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-2 overflow-hidden rounded-full"
+                  style={{ background: "var(--glass-bg)" }}
+                >
                   <div
-                    className={cn("h-full rounded-full transition-all", getBarColor(b.priceIndex))}
-                    style={{ width: `${b.priceIndex}%` }}
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${b.priceIndex}%`,
+                      background: getBarColor(b.priceIndex),
+                    }}
                   />
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-xs" style={{ color: "var(--foreground-muted)" }}>
                   {b.priceIndex} {t("dashboard.benchmark.priceIndex")}
                 </p>
               </div>
               <p
-                className={cn(
-                  "text-sm font-medium",
-                  b.lastChange >= 0 ? "text-price-up" : "text-price-down"
-                )}
+                className="text-sm font-medium"
+                style={{
+                  color: b.lastChange >= 0 ? "var(--color-price-up)" : "var(--color-price-down)",
+                }}
               >
                 {b.lastChange >= 0 ? "+" : ""}
                 {b.lastChange.toFixed(1)}%
@@ -154,24 +173,34 @@ export function CompetitorBenchmark() {
           {benchmarks.map((b) => (
             <div
               key={b.id}
-              className="rounded-lg border border-border bg-muted/30 p-3 dark:border-border"
+              className="rounded-lg border p-3"
+              style={{
+                borderColor: "var(--glass-border)",
+                background: "var(--glass-bg)",
+              }}
             >
               <p className="font-medium">{b.name}</p>
               <Badge variant="secondary" className="mt-1 text-xs">
                 {b.marketplace}
               </Badge>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className="mt-2 h-2 overflow-hidden rounded-full"
+                style={{ background: "var(--glass-bg)" }}
+              >
                 <div
-                  className={cn("h-full rounded-full", getBarColor(b.priceIndex))}
-                  style={{ width: `${b.priceIndex}%` }}
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${b.priceIndex}%`,
+                    background: getBarColor(b.priceIndex),
+                  }}
                 />
               </div>
               <div className="mt-2 flex items-center justify-between">
                 <span
-                  className={cn(
-                    "text-sm",
-                    b.lastChange >= 0 ? "text-price-up" : "text-price-down"
-                  )}
+                  className="text-sm font-medium"
+                  style={{
+                    color: b.lastChange >= 0 ? "var(--color-price-up)" : "var(--color-price-down)",
+                  }}
                 >
                   {b.lastChange >= 0 ? "+" : ""}
                   {b.lastChange.toFixed(1)}%

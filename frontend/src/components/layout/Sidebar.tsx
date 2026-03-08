@@ -1,15 +1,12 @@
-// MOBILE-2026: fully responsive + bottom nav + drawer
-// Desktop only: hidden on md and below, shown via MobileSidebar (Sheet) on mobile
-
 /**
- * Sectional sidebar with glass effect.
+ * Sectional sidebar with glassmorphism design.
  * Sections: Core, Market Intelligence, Tools, Account, Admin (superuser).
  * Collapsed state persisted in localStorage "imperecta_sidebar_collapsed".
  */
 
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { motion } from "framer-motion";
+import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   Package,
@@ -55,24 +52,36 @@ function SidebarLogo({
   onNavigate?: () => void;
 }) {
   const showLabels = !collapsed || isMobile;
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const logoSrc = isDark ? "/images/logo-dark.png" : "/images/logo-light.png";
 
   return (
     <Link
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-16 shrink-0 items-center gap-2 border-b border-border/50 px-4 transition-colors hover:bg-accent/30 dark:border-border/50",
+        "flex h-16 shrink-0 items-center gap-2 border-b px-4 transition-colors",
+        "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
     >
-      <span
-        className={cn(
-          "font-display font-bold tracking-tight text-foreground",
-          showLabels ? "text-lg" : "text-sm truncate"
-        )}
-      >
-        {showLabels ? "Imperecta" : "I"}
-      </span>
+      <div className="relative flex items-center justify-center">
+        <img
+          src={logoSrc}
+          alt="Imperecta"
+          className={cn("h-8 w-auto object-contain", showLabels ? "" : "h-6")}
+        />
+        <div
+          className="absolute -bottom-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-full opacity-40 blur-sm"
+          style={{ background: "var(--accent)", boxShadow: "0 0 12px var(--accent-glow)" }}
+        />
+      </div>
+      {showLabels && (
+        <span className="font-display text-lg font-bold tracking-tight text-[var(--foreground)]">
+          Imperecta
+        </span>
+      )}
     </Link>
   );
 }
@@ -80,7 +89,8 @@ function SidebarLogo({
 function SparklesBadge({ className }: { className?: string }) {
   return (
     <Sparkles
-      className={cn("size-3.5 shrink-0 text-primary group-hover:animate-pulse", className)}
+      className={cn("size-3.5 shrink-0 text-[var(--accent)]", className)}
+      style={{ filter: "drop-shadow(0 0 4px var(--accent-glow))" }}
       aria-hidden
     />
   );
@@ -114,21 +124,33 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-3 rounded-md py-2.5 text-sm transition-colors",
+        "group relative flex items-center gap-3 rounded-md py-2.5 text-sm transition-all duration-200",
         showLabels ? "ps-3 pe-3" : "justify-center ps-2 pe-2",
         isActive
-          ? "bg-accent font-medium text-accent-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
+          : "text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
       )}
     >
       {isActive && (
-        <motion.div
-          layoutId="sidebar-active-indicator"
-          className="absolute inset-y-1.5 start-0 w-[3px] rounded-e-full bg-primary"
-          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+        <div
+          className="absolute inset-y-1.5 start-0 w-[3px] rounded-e-full"
+          style={{
+            background: "var(--accent)",
+            boxShadow: "0 0 8px var(--accent-glow)",
+          }}
         />
       )}
-      <Icon className="size-5 shrink-0" />
+      <Icon
+        className={cn(
+          "size-5 shrink-0",
+          isActive && "text-[var(--accent)]"
+        )}
+        style={
+          isActive
+            ? { filter: "drop-shadow(0 0 6px var(--accent-glow))" }
+            : undefined
+        }
+      />
       {showLabels && (
         <>
           <span className="truncate flex-1">{label}</span>
@@ -142,7 +164,9 @@ function SidebarItem({
     return (
       <Tooltip>
         <TooltipTrigger asChild>{content}</TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
+        <TooltipContent side="right" className="glass-card border-[var(--glass-border)]">
+          {label}
+        </TooltipContent>
       </Tooltip>
     );
   }
@@ -165,7 +189,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
       {showLabels && (
         <div className="flex w-full items-center justify-between gap-2 py-2">
           <CollapsibleTrigger
-            className="flex flex-1 items-center text-left text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            className="flex flex-1 items-center text-left text-xs font-medium uppercase tracking-wider text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
             {label}
           </CollapsibleTrigger>
@@ -197,26 +221,54 @@ function SidebarFooter({
     ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
     : 0;
   const isTrial = (user?.plan ?? "trial").toLowerCase() === "trial";
+  const maxDays = 14;
+  const progress = Math.min(100, (trialDaysLeft / maxDays) * 100);
 
   return (
-    <div className="shrink-0 border-t border-border/50 p-3 dark:border-border/50">
+    <div className="shrink-0 border-t border-[var(--glass-border)] p-3">
       {isTrial && (
-        <p
-          className={cn(
-            "mb-2 text-xs text-muted-foreground",
-            !showLabels && "text-center"
-          )}
-        >
-          {showLabels
-            ? t("layout.trialDaysLeft", { count: trialDaysLeft })
-            : trialDaysLeft}
-        </p>
+        <div className="glass-card overflow-hidden p-3">
+          <p
+            className={cn(
+              "mb-2 text-xs text-[var(--foreground-muted)]",
+              !showLabels && "text-center"
+            )}
+          >
+            {showLabels
+              ? t("layout.trialDaysLeft", { count: trialDaysLeft })
+              : trialDaysLeft}
+          </p>
+          <div
+            className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--glass-bg)]"
+            style={{ border: "1px solid var(--glass-border)" }}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${progress}%`,
+                background: "linear-gradient(90deg, var(--accent), var(--accent2))",
+                boxShadow: "0 0 8px var(--accent-glow)",
+              }}
+            />
+          </div>
+          <Button
+            className="w-full font-semibold"
+            style={{
+              background: "linear-gradient(135deg, var(--accent-dim), var(--accent))",
+              boxShadow: "0 0 16px var(--accent-glow)",
+              border: "none",
+              color: "var(--primary-foreground)",
+            }}
+          >
+            {t("layout.upgrade")}
+          </Button>
+        </div>
       )}
       {!isMobile && collapsed && (
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-full text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          className="h-8 w-full text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
           onClick={onToggle}
           aria-label={t("common.expand")}
         >
@@ -242,15 +294,16 @@ export function Sidebar({
 
   return (
     <aside
+      data-sidebar
       className={cn(
-        "sidebar flex flex-col bg-card text-foreground transition-[width] duration-300 ease-in-out",
-        "border-e border-border/50 dark:border-border/50",
+        "flex flex-col text-[var(--foreground)] transition-[width] duration-300 ease-in-out",
+        "border-e border-[var(--glass-border)]",
         isMobile ? "w-full" : collapsed ? "w-16" : "w-[256px]"
       )}
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
-      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4 scrollbar-hide">
+      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4">
         <SidebarSection
           label={t("nav.section.core")}
           collapsed={collapsed}
@@ -259,7 +312,7 @@ export function Sidebar({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                className="h-7 w-7 shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
                 onClick={onToggle}
                 aria-label={collapsed ? t("common.expand") : t("common.collapse")}
               >
