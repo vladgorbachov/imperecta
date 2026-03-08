@@ -64,9 +64,11 @@ class UserResponse(BaseModel):
     trial_ends_at: datetime | None
     language: str
     ai_tone: str = "balanced"
+    is_superuser: bool = False
     created_at: datetime
     telegram_chat_id: int | None = None
     avatar_url: str | None = None
+    
 
     class Config:
         from_attributes = True
