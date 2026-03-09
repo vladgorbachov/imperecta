@@ -54,34 +54,23 @@ function SidebarLogo({
   const showLabels = !collapsed || isMobile;
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const logoSrc = isDark ? "/images/logo-dark.png" : "/images/logo-light.png";
+  const logoSrc = isDark ? "/images/logo_dark.png" : "/images/logo_light.png";
 
   return (
     <Link
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-16 shrink-0 items-center gap-2 border-b px-4 transition-colors",
+        "flex h-16 shrink-0 items-center justify-center border-b px-4 transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
     >
-      <div className="relative flex items-center justify-center">
-        <img
-          src={logoSrc}
-          alt="Imperecta"
-          className={cn("h-8 w-auto object-contain", showLabels ? "" : "h-6")}
-        />
-        <div
-          className="absolute -bottom-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-full opacity-40 blur-sm"
-          style={{ background: "var(--accent)", boxShadow: "0 0 12px var(--accent-glow)" }}
-        />
-      </div>
-      {showLabels && (
-        <span className="font-display text-lg font-bold tracking-tight text-[var(--foreground)]">
-          Imperecta
-        </span>
-      )}
+      <img
+        src={logoSrc}
+        alt="Imperecta"
+        className={cn("h-8 w-auto object-contain", !showLabels && "h-6")}
+      />
     </Link>
   );
 }

@@ -26,10 +26,7 @@ function LandingHeader() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 backdrop-blur-md">
       <div className="flex items-center gap-2">
-        <img src="/images/logo-dark.png" alt="Imperecta" className="h-8 w-auto" />
-        <span className="font-display text-lg font-bold tracking-tight text-white">
-          Imperecta
-        </span>
+        <img src="/images/logo_dark.png" alt="Imperecta" className="h-8 w-auto" />
       </div>
       <div className="flex items-center gap-4">
         <Link
@@ -59,7 +56,17 @@ function HeroSection() {
 
   return (
     <section className="relative min-h-[90vh] overflow-hidden px-6 pt-36 pb-24">
-      <div className="absolute inset-0" style={{ background: LANDING_GRADIENT }} />
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/images/Home.png)" }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(5,8,16,0.75) 0%, rgba(10,14,26,0.6) 50%, rgba(13,21,37,0.5) 100%)",
+        }}
+      />
       <div
         className="absolute -top-40 -right-40 h-96 w-96 rounded-full opacity-20 blur-[100px]"
         style={{ background: LANDING_ACCENT }}
@@ -200,8 +207,19 @@ function WhatImperectaDoes() {
   ];
 
   return (
-    <section className="relative overflow-hidden px-6 py-28" style={{ background: LANDING_GRADIENT }}>
-      <div className="mx-auto max-w-7xl">
+    <section className="relative overflow-hidden px-6 py-28">
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/images/Services.png)" }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(5,8,16,0.75) 0%, rgba(10,14,26,0.6) 50%, rgba(13,21,37,0.5) 100%)",
+        }}
+      />
+      <div className="relative mx-auto max-w-7xl">
         <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
           Platform capabilities
         </p>
@@ -286,8 +304,19 @@ function WhyTeamsChoose() {
   ];
 
   return (
-    <section className="relative overflow-hidden px-6 py-28" style={{ background: LANDING_GRADIENT }}>
-      <div className="mx-auto max-w-7xl">
+    <section className="relative overflow-hidden px-6 py-28">
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/images/FAQs.png)" }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(5,8,16,0.75) 0%, rgba(10,14,26,0.6) 50%, rgba(13,21,37,0.5) 100%)",
+        }}
+      />
+      <div className="relative mx-auto max-w-7xl">
         <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
           Business impact
         </p>
@@ -432,9 +461,14 @@ function CTASection() {
   return (
     <section className="relative overflow-hidden px-6 py-32">
       <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/images/Contact.png)" }}
+      />
+      <div
         className="absolute inset-0"
         style={{
-          background: `linear-gradient(135deg, rgba(6, 78, 159, 0.25) 0%, rgba(14, 165, 233, 0.15) 50%, transparent 100%)`,
+          background:
+            "linear-gradient(135deg, rgba(5,8,16,0.7) 0%, rgba(6,78,159,0.2) 50%, rgba(14,165,233,0.1) 100%)",
         }}
       />
       <div className="relative mx-auto max-w-3xl text-center">
@@ -474,8 +508,7 @@ function LandingFooter() {
         <div className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <img src="/images/logo-dark.png" alt="Imperecta" className="h-6 w-auto" />
-              <span className="font-display text-lg font-bold text-white">Imperecta</span>
+              <img src="/images/logo_dark.png" alt="Imperecta" className="h-6 w-auto" />
             </div>
             <p className="mt-3 max-w-xs text-sm text-white/55">
               AI Market Intelligence for e-commerce teams. Faster visibility, sharper competitive context, more confident commercial decisions.

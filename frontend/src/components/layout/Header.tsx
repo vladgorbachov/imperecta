@@ -5,7 +5,7 @@
 
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Menu, LogOut, Bell, Sun, Moon, Settings } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -22,38 +22,6 @@ import { cn } from "@/lib/utils";
 interface HeaderProps {
   onMenuClick?: () => void;
   notificationCount?: number;
-}
-
-const routeLabels: Record<string, string> = {
-  "/dashboard": "nav.dashboard",
-  "/products": "nav.products",
-  "/competitors": "nav.competitors",
-  "/alerts": "nav.alerts",
-  "/digests": "nav.digests",
-  "/import": "nav.import",
-  "/analytics": "nav.analytics",
-  "/ai": "nav.ai",
-  "/settings": "nav.settings",
-  "/admin": "nav.admin",
-};
-
-function Breadcrumb() {
-  const { t } = useTranslation();
-  const location = useLocation();
-  const pathSegments = location.pathname.split("/").filter(Boolean);
-  const currentLabel = routeLabels[`/${pathSegments[0]}`] ?? pathSegments[0];
-
-  return (
-    <nav className="hidden items-center gap-1.5 text-sm text-[var(--foreground-muted)] sm:flex">
-      <span>{t("nav.dashboard")}</span>
-      {pathSegments.length > 0 && pathSegments[0] !== "dashboard" && (
-        <>
-          <span>/</span>
-          <span className="text-[var(--foreground)]">{t(currentLabel)}</span>
-        </>
-      )}
-    </nav>
-  );
 }
 
 export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
@@ -97,7 +65,6 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
             <Menu className="size-5" />
           </Button>
         )}
-        <Breadcrumb />
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <Button
