@@ -3,6 +3,8 @@
  * Used by authStore and api client.
  */
 
+import { clearAuthCookie } from "./authCookie";
+
 export const STORAGE_KEY = "imperecta_auth";
 export const SESSION_STORAGE_KEY = "imperecta_auth_session";
 
@@ -38,6 +40,7 @@ export function loadTokens(): SavedAuth | null {
 export function clearStoredTokens(): void {
   localStorage.removeItem(STORAGE_KEY);
   sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  clearAuthCookie();
 }
 
 export function getStoredToken(): string | null {

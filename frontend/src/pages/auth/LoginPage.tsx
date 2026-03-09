@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate, useLocation, Navigate } from "react-router-dom";
+import { getReturnPath } from "@/lib/routes";
 import { useTranslation } from "react-i18next";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
@@ -24,7 +25,10 @@ export function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const accessToken = useAuthStore((s) => s.accessToken);
 
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? "/dashboard";
+  const returnPath = getReturnPath(
+    new URLSearchParams(location.search),
+    location.state as { from?: { pathname: string } } | undefined
+  );
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -36,7 +40,7 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   if (accessToken) {
-    return <Navigate to={from} replace />;
+    return <Navigate to={returnPath} replace />;
   }
 
   const validateEmail = (value: string) => {
@@ -68,7 +72,7 @@ export function LoginPage() {
       if (result.forcePasswordChange) {
         navigate("/change-password", { replace: true });
       } else {
-        navigate(from, { replace: true });
+        navigate(returnPath, { replace: true });
       }
     } catch (err: unknown) {
       const message =
@@ -187,7 +191,10 @@ export function LoginPage() {
           </div>
           <p className="text-center text-sm text-muted-foreground dark:text-muted-foreground">
             {t("auth.noAccount")}{" "}
-            <Link to="/register" className="font-medium text-primary hover:underline dark:text-primary">
+            <Link
+              to={location.search ? `/register${location.search}` : "/register"}
+              className="font-medium text-primary hover:underline dark:text-primary"
+            >
               {t("auth.register")}
             </Link>
           </p>

@@ -1,10 +1,11 @@
 import { Navigate } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
+import { getLoginUrl } from "@/lib/routes";
 
 /**
  * Route for /change-password: requires auth and force_password_change.
- * Not logged in -> /login
+ * Not logged in -> /login?next=/change-password
  * Logged in but force_password_change=false -> /dashboard (already changed)
  */
 export function ChangePasswordRoute() {
@@ -19,7 +20,7 @@ export function ChangePasswordRoute() {
   }
 
   if (!accessToken) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={getLoginUrl("/change-password")} replace />;
   }
 
   if (!user?.force_password_change) {

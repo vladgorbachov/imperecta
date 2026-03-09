@@ -53,6 +53,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
+import { SearchableMarketplaceSelect } from "@/components/ui-custom/SearchableMarketplaceSelect";
+import type { MarketplaceId } from "@/components/ui-custom/SearchableMarketplaceSelect";
 import { TrendBadge } from "@/components/ui-custom/TrendBadge";
 import { CircularScore } from "@/components/ui-custom/CircularScore";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
@@ -62,7 +64,7 @@ import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
 
-type Marketplace = "ozon" | "wildberries" | "kaspi" | "custom";
+type Marketplace = "ozon" | "wildberries" | "kaspi";
 type ScraperType = "auto" | "ozon_api" | "wb_api" | "css_selector" | "json_api";
 type ViewMode = "grid" | "table";
 
@@ -198,7 +200,7 @@ export function CompetitorsPage() {
   const [competitorForm, setCompetitorForm] = useState({
     name: "",
     website_url: "",
-    marketplace: "custom" as Marketplace,
+    marketplace: "" as MarketplaceId | "",
   });
   const [productForm, setProductForm] = useState({
     product_id: "",
@@ -248,7 +250,7 @@ export function CompetitorsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["competitors"] });
       setAddCompetitorOpen(false);
-      setCompetitorForm({ name: "", website_url: "", marketplace: "custom" });
+      setCompetitorForm({ name: "", website_url: "", marketplace: "" });
       toast.success(t("competitors.addSuccess"));
     },
     onError: () => toast.error(t("competitors.addError")),
@@ -277,6 +279,10 @@ export function CompetitorsPage() {
 
   const handleAddCompetitor = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!competitorForm.marketplace) {
+      toast.error(t("common.error"));
+      return;
+    }
     const url = competitorForm.website_url.trim();
     if (url && !/^https?:\/\/.+/.test(url)) {
       toast.error(t("common.error"));
@@ -856,42 +862,11 @@ function AddCompetitorDialog({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">{t("competitors.marketplace")}</label>
-              <Select
+              <SearchableMarketplaceSelect
                 value={form.marketplace}
-                onValueChange={(v) =>
-                  setForm((f) => ({ ...f, marketplace: v as Marketplace }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ozon">
-                    <span className="flex items-center gap-2">
-                      <MarketplaceBadge marketplace="ozon" size="sm" />
-                      {t("competitors.marketplaceOzon")}
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="wildberries">
-                    <span className="flex items-center gap-2">
-                      <MarketplaceBadge marketplace="wildberries" size="sm" />
-                      {t("competitors.marketplaceWb")}
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="kaspi">
-                    <span className="flex items-center gap-2">
-                      <MarketplaceBadge marketplace="kaspi" size="sm" />
-                      {t("competitors.marketplaceKaspi")}
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="custom">
-                    <span className="flex items-center gap-2">
-                      <MarketplaceBadge marketplace="custom" size="sm" />
-                      {t("competitors.marketplaceCustom")}
-                    </span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                onChange={(v) => setForm((f) => ({ ...f, marketplace: v }))}
+                placeholder={t("competitors.selectMarketplace")}
+              />
             </div>
           </div>
           <DialogFooter>
