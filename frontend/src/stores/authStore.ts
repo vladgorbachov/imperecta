@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import i18n from "i18next";
 import { authApi } from "@/api/auth";
+import { setAuthCookie } from "@/lib/authCookie";
 import {
   loadTokens,
   saveTokens,
@@ -103,6 +104,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       expiresAt: data.expires_at ?? null,
       user: null as unknown,
     });
+    setAuthCookie(persistent);
     const user = await get().fetchUser();
     if (user) {
       if (data.force_password_change !== undefined) {
@@ -115,6 +117,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         expiresAt: data.expires_at ?? null,
         user: { ...user, force_password_change: data.force_password_change } as User,
       });
+      setAuthCookie(persistent);
       if (user.language) applyUserLanguage(user.language);
     }
     return {
@@ -152,6 +155,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       expiresAt,
       user: null as unknown,
     });
+    setAuthCookie(persistent);
     await get().fetchUser();
   },
 
@@ -189,6 +193,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       expiresAt: data.expires_at ?? null,
       user: get().user as unknown,
     });
+    setAuthCookie(persistent);
   },
 
   fetchUser: async () => {
@@ -223,6 +228,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         expiresAt: data.expires_at ?? null,
         user: get().user as unknown,
       });
+      setAuthCookie(persistent);
       return true;
     } catch {
       return false;

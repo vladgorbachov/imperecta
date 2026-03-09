@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
+import { getLoginUrl, LANDING_PATH } from "@/lib/routes";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -18,7 +19,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   }
 
   if (!accessToken) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    const pathname = location.pathname.replace(/\/$/, "") || "/";
+    if (pathname === "/") {
+      return <Navigate to={LANDING_PATH} replace />;
+    }
+    return <Navigate to={getLoginUrl(location.pathname + location.search)} replace />;
   }
 
   if (user?.force_password_change) {

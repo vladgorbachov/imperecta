@@ -4,7 +4,8 @@
  */
 
 import { useState } from "react";
-import { Link, useNavigate, Navigate } from "react-router-dom";
+import { Link, useNavigate, useLocation, Navigate } from "react-router-dom";
+import { getReturnPath } from "@/lib/routes";
 import { useTranslation } from "react-i18next";
 import { User, Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
@@ -34,8 +35,14 @@ function getPasswordStrength(pwd: string): PasswordStrength {
 export function RegisterPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const register = useAuthStore((s) => s.register);
   const accessToken = useAuthStore((s) => s.accessToken);
+
+  const returnPath = getReturnPath(
+    new URLSearchParams(location.search),
+    location.state as { from?: { pathname: string } } | undefined
+  );
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -50,7 +57,7 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false);
 
   if (accessToken) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={returnPath} replace />;
   }
 
   const passwordStrength = getPasswordStrength(password);
@@ -109,7 +116,7 @@ export function RegisterPage() {
       const raw = (i18n.language ?? "en").split("-")[0];
       const lang = ["en", "ar", "es", "zh", "ru", "fr"].includes(raw) ? raw : "en";
       await register(email, password, name, undefined, lang);
-      navigate("/dashboard", { replace: true });
+      navigate(returnPath, { replace: true });
     } catch (err: unknown) {
       const message =
         err && typeof err === "object" && "response" in err
@@ -281,7 +288,10 @@ export function RegisterPage() {
 
         <p className="text-center text-sm text-muted-foreground dark:text-muted-foreground">
           {t("auth.hasAccount")}{" "}
-          <Link to="/login" className="font-medium text-primary hover:underline dark:text-primary">
+          <Link
+            to={location.search ? `/login${location.search}` : "/login"}
+            className="font-medium text-primary hover:underline dark:text-primary"
+          >
             {t("auth.login")}
           </Link>
         </p>

@@ -293,20 +293,15 @@
     @apply bg-background text-foreground;
   }
 
-  /* Scrollbar styling */
-  ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+  /* Scrollbar: hidden visually, scrolling preserved */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: var(--glass-border);
-    border-radius: 2px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-dim);
+  *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   /* Selection */

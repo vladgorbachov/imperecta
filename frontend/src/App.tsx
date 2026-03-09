@@ -90,9 +90,19 @@ import { AdminPage } from "@/pages/AdminPage";
 import { AnalyticsPage } from "@/pages/AnalyticsPage";
 import { AIAnalystPage } from "@/pages/AIAnalystPage";
 import { ChangePasswordRoute } from "@/components/ChangePasswordRoute";
+import { PublicAuthRoute } from "@/components/PublicAuthRoute";
 import { SuperuserRoute } from "@/components/SuperuserRoute";
+import { LandingPage } from "@/pages/landing/LandingPage";
+import { useAuthStore } from "@/stores/authStore";
 
 const queryClient = new QueryClient();
+
+/** Redirects authenticated users from landing to app root. */
+function LandingRoute({ children }: { children: React.ReactNode }) {
+  const hasAuth = useAuthStore((s) => !!(s.accessToken ?? s.user));
+  if (hasAuth) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 export function App() {
   return (
@@ -103,9 +113,38 @@ export function App() {
             <Suspense fallback={<LoadingScreen />}>
               <BrowserRouter>
                 <Routes>
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route path="/register" element={<RegisterPage />} />
-                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                  <Route
+                    path="/ai.market.intelligence.agent"
+                    element={
+                      <LandingRoute>
+                        <LandingPage />
+                      </LandingRoute>
+                    }
+                  />
+                  <Route
+                    path="/login"
+                    element={
+                      <PublicAuthRoute>
+                        <LoginPage />
+                      </PublicAuthRoute>
+                    }
+                  />
+                  <Route
+                    path="/register"
+                    element={
+                      <PublicAuthRoute>
+                        <RegisterPage />
+                      </PublicAuthRoute>
+                    }
+                  />
+                  <Route
+                    path="/forgot-password"
+                    element={
+                      <PublicAuthRoute>
+                        <ForgotPasswordPage />
+                      </PublicAuthRoute>
+                    }
+                  />
                   <Route path="/change-password" element={<ChangePasswordRoute />} />
                   <Route
                     path="/"

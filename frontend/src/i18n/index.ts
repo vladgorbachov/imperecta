@@ -10,6 +10,8 @@ export const SUPPORTED_LANGUAGES = [
   { code: "zh", name: "中文", flag: "🇨🇳", dir: "ltr" as const },
   { code: "ru", name: "Русский", flag: "🇷🇺", dir: "ltr" as const },
   { code: "fr", name: "Français", flag: "🇫🇷", dir: "ltr" as const },
+  { code: "ro", name: "Română", flag: "🇷🇴", dir: "ltr" as const },
+  { code: "uk", name: "Українська", flag: "🇺🇦", dir: "ltr" as const },
 ] as const;
 
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]["code"];
