@@ -29,10 +29,11 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Recharts** — графики цен (PriceChart, ComparisonChart, TrendBadge)
 - **TanStack Query v5** — серверное состояние и кеширование
 - **Zustand v5** — клиентское состояние (auth, persist: localStorage / sessionStorage)
+- **framer-motion** — анимации и переходы
 - **Axios** — HTTP-клиент
-- **react-i18next** — локализация (ru.json, en.json)
+- **react-i18next** — локализация (en, ru, ar, zh, es, fr в public/locales)
 - **Sonner** — toast-уведомления
-- **next-themes** — переключение темы (light/dark)
+- **next-themes** — переключение темы (light/dark, по умолчанию dark)
 
 ### Безопасность
 - **Snyk** — сканирование зависимостей и кода
@@ -271,15 +272,17 @@ imperecta/
 │   │   ├── database.py          # SQLAlchemy async engine, session, Base
 │   │   ├── models/              # User, UserPlan, Product, Competitor, CompetitorProduct,
 │   │   │                         # PriceSnapshot, Alert, AlertEvent, Digest,
-│   │   │                         # ScrapeLog, AdminMarketplace, ApiLog
+│   │   │                         # ScrapeLog, AdminMarketplace, ApiLog, AIChatSession, AIChatMessage
 │   │   ├── schemas/             # Pydantic request/response schemas
 │   │   ├── api/                 # auth, telegram, products, competitors, analytics,
-│   │   │                         # alerts, digests, import_export, admin (superuser only)
-│   │   ├── services/            # auth, price, alert, digest, ai, import, admin, claude_monitor
+│   │   │                         # alerts, digests, import_export, dashboard, admin (superuser only)
+│   │   ├── services/            # auth, price, alert, digest, ai, import, admin, claude_monitor,
+│   │   │                         # dashboard (get_kpi, get_anomalies, get_aggregate_trend,
+│   │   │                         # get_market_overview, get_dashboard_summary)
 │   │   ├── scrapers/            # engine (Ozon, WB, GenericWebScraper, ScraperFactory), proxy_manager
 │   │   ├── workers/             # celery_app, scrape_tasks, alert_tasks, digest_tasks, scheduler
 │   │   └── notifications/       # email_sender, telegram_bot
-│   ├── alembic/                 # migrations 001–005: initial, user_language, telegram, superuser+scrape_logs+admin_marketplaces+api_logs, last_login_at
+│   ├── alembic/                 # migrations 001–009: initial, user_language, telegram, superuser+scrape_logs+admin_marketplaces+api_logs, last_login_at, ai_chat, performance_indexes, digest_type+ai_tone, user_avatar_url
 │   ├── tests/                   # pytest (conftest, test_health)
 │   ├── requirements.txt
 │   ├── Dockerfile               # uvicorn only; tables via create_all in lifespan
@@ -291,24 +294,27 @@ imperecta/
 │   │   │                         # products, competitors, analytics, alerts, digests, import
 │   │   ├── lib/                 # utils.ts, authStorage.ts (localStorage/sessionStorage)
 │   │   ├── hooks/               # useAuth, useProducts, useCompetitors, useAnalytics, useAlerts, useAdmin
-│   │   ├── components/          # layout (Header, Sidebar, MobileSidebar, DashboardLayout), charts,
-│   │   │                         # products (FiltersPanel), tables, ui (shadcn, collapsible),
-│   │   │                         # auth (AuthLayout, AuthProvider), ProtectedRoute, SuperuserRoute,
-│   │   │                         # ChangePasswordRoute, SessionExpiryWarning, StubPage
+│   │   ├── components/          # layout (Header, Sidebar, MobileSidebar, BottomNavigation,
+│   │   │                         # DashboardLayout), dashboard (MarketDataTable, KPIOverview,
+│   │   │                         # PriceTrendChart, AnomalyFeed, CompetitorBenchmark,
+│   │   │                         # ScenarioSimulator), charts, products (FiltersPanel), tables,
+│   │   │                         # ui (shadcn, collapsible), auth (AuthLayout, AuthProvider),
+│   │   │                         # ProtectedRoute, SuperuserRoute, ChangePasswordRoute,
+│   │   │                         # SessionExpiryWarning, StubPage
 │   │   ├── pages/               # Login, Register, ForgotPassword, ForcePasswordChange, Dashboard,
 │   │   │                         # Products, ProductDetail, Competitors, Alerts, Digests, Import,
 │   │   │                         # Analytics, AIAnalyst, AdminPage (superuser), Settings, NotFound
 │   │   ├── stores/              # authStore (Zustand)
-│   │   ├── i18n/                # ru.json, en.json, index.ts
+│   │   ├── i18n/                # index.ts (i18next config)
 │   │   ├── data/                # mockFilters (legacy)
 │   │   └── types/               # filters, shared types
+│   ├── public/locales/          # en, ru, ar, zh, es, fr (translation.json)
 │   ├── vite.config.ts           # proxy /api → localhost:8000
 │   └── package.json
 ├── docker-compose.yml           # postgres, redis, backend, celery-worker, celery-beat, frontend
 ├── docker-compose.prod.yml
-├── wrangler.jsonc               # Cloudflare (assets: frontend)
 ├── .github/workflows/ci.yml     # ruff, pytest, eslint, build, security (bandit, safety, pip-audit, gitleaks, snyk)
-└── README.md
+└── Imperecta_Cursor_Project_Description.md
 ```
 
 ---
@@ -323,7 +329,8 @@ imperecta/
 | **telegram** | POST /webhook (Telegram callback); POST /generate-link-code, /unlink; GET /status |
 | **products** | GET /categories, GET/POST /, GET/PUT/DELETE /{id} |
 | **competitors** | GET/POST /; PUT/DELETE /{id}; POST /products; GET /products/{product_id}, /{competitor_id}/products; DELETE /products/{id} |
-| **analytics** | GET /products/{id}/price-history, /products/{id}/comparison; GET /dashboard/summary, /dashboard/anomalies |
+| **analytics** | GET /products/{id}/price-history, /products/{id}/comparison; GET /analytics/dashboard/summary, /analytics/dashboard/anomalies, /analytics/competitor-benchmark, /analytics/comparison-matrix, /analytics/market-forecast |
+| **dashboard** | GET /kpi, /anomalies, /aggregate-trend, /market-overview (Bloomberg-style: sort=volatile|trending|gainers|losers|recent, limit=50) |
 | **alerts** | GET/POST /; PUT/DELETE /{id}; GET /events |
 | **digests** | GET /, /{id} |
 | **import** | POST /products/preview, /products/csv; GET /products/template |
@@ -338,7 +345,7 @@ imperecta/
 | Маршрут | Страница | Функционал |
 |---------|----------|------------|
 | /login, /register, /forgot-password, /change-password | LoginPage, RegisterPage, ForgotPasswordPage, ForcePasswordChangePage | Аутентификация, JWT, «Запомнить меня», смена пароля суперюзера |
-| /dashboard | DashboardPage | Сводка: товары, конкуренты, алерты, изменения цен; аномалии |
+| /dashboard | DashboardPage | Bloomberg-style: KPI-карточки, MarketDataTable (обзор рынка с табами Most Volatile/Trending/Gainers/Losers/Recently Updated), CompetitorBenchmark, AnomalyFeed, ScenarioSimulator |
 | /products | ProductsPage | CRUD товаров, категории, поиск, пагинация, импорт CSV |
 | /products/:id | ProductDetailPage | График цен (7d/30d/90d), конкуренты, алерты |
 | /competitors | CompetitorsPage | CRUD конкурентов (Ozon, WB, Kaspi, Custom), привязка товаров |
@@ -346,11 +353,14 @@ imperecta/
 | /digests | DigestsPage | Список дайджестов, просмотр |
 | /import | ImportPage | Импорт товаров из CSV, preview, шаблон |
 | /analytics | AnalyticsPage | Тренды, прогнозы, матрица сравнения цен |
+| /ai | AIAnalystPage | AI-чат с контекстом товаров, конкурентов, алертов |
 | /admin | AdminPage | Админ-панель (только superuser): статистика, маркетплейсы, парсинг, Claude API, пользователи |
 | /settings | SettingsPage | Профиль (name, company_name), аватар (загрузка файлом или по URL), привязка Telegram |
 
 ### Sidebar и навигация
 
+- **Desktop (md+):** Sidebar (collapsible) с секциями Core, Market Intelligence, Tools, Admin
+- **Mobile (<768px):** Hamburger → Sheet (drawer) с навигацией; BottomNavigation (5 пунктов: Dashboard, Products, Analytics, AI, Alerts)
 - **Аналитика** (BarChart3) → /analytics — видна всем пользователям
 - **Администрирование** (Shield) → /admin — видна только при `user.is_superuser === true`
 - Остальные пункты: Dashboard, Products, Competitors, Alerts, Digests, Import
@@ -390,7 +400,9 @@ imperecta/
 - [x] Cloudflare Pages подключён
 - [x] Snyk подключён
 - [x] Backend: FastAPI, все API-роуты (включая telegram), Celery tasks, scrapers (engine: Ozon, WB, generic, ScraperFactory)
-- [x] Frontend: 15 страниц (Dashboard, Products, ProductDetail, Competitors, Alerts, Digests, Import, Analytics, AdminPage, Settings, Login, Register, ForgotPassword, ForcePasswordChange, NotFound), FiltersPanel, collapsible, SessionExpiryWarning
+- [x] Frontend: 15 страниц (Dashboard, Products, ProductDetail, Competitors, Alerts, Digests, Import, Analytics, AIAnalyst, AdminPage, Settings, Login, Register, ForgotPassword, ForcePasswordChange, NotFound), FiltersPanel, collapsible, SessionExpiryWarning
+- [x] Dashboard: Bloomberg-style MarketDataTable, KPIOverview, CompetitorBenchmark, AnomalyFeed, ScenarioSimulator; API GET /api/dashboard/market-overview
+- [x] Mobile UI: BottomNavigation, MobileSidebar (Sheet), responsive layout, touch targets 48px, safe-area, framer-motion transitions
 - [x] Backend: суперюзер, Admin API, scrape_logs, admin_marketplaces, api_logs, логирование Claude API
 - [x] Auth: «Запомнить меня», persistent-сессии (localStorage/sessionStorage), restoreSession при загрузке, 401 auto-refresh
 - [x] Локальная разработка: docker-compose (postgres, redis, backend, celery-worker, celery-beat, frontend)

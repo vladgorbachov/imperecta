@@ -51,7 +51,7 @@
  *   rowError, previewName, previewSku, previewPrice, previewUrl, previewCategory,
  *   columnName, columnSku, columnPrice, columnUrl, columnCategory, resultSummary
  *
- * settings: profile, profileDescription, emailConfirmed, telegram, telegramDescription,
+ * settings: profile, profileDescription, telegram, telegramDescription,
  *   telegramConnected, telegramDisconnected, telegramDisconnect, telegramDisconnectedSuccess,
  *   getLinkCode, codeInstruction, getCodeInstruction, notifications, notificationsDescription,
  *   channelEmail, channelTelegram, channelBoth, digestTime, digestTimeComingSoon, plan,
@@ -88,7 +88,7 @@ import { ImportPage } from "@/pages/ImportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { AnalyticsPage } from "@/pages/AnalyticsPage";
-import { AIAnalystPage } from "@/pages/AIAnalystPage";
+import { AIAnalystRoute } from "@/components/AIAnalystRoute";
 import { ChangePasswordRoute } from "@/components/ChangePasswordRoute";
 import { PublicAuthRoute } from "@/components/PublicAuthRoute";
 import { SuperuserRoute } from "@/components/SuperuserRoute";
@@ -163,7 +163,7 @@ export function App() {
                     <Route path="digests" element={<DigestsPage />} />
                     <Route path="import" element={<ImportPage />} />
                     <Route path="analytics" element={<AnalyticsPage />} />
-                    <Route path="ai" element={<AIAnalystPage />} />
+                    <Route path="ai" element={<AIAnalystRoute />} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Route>
                   <Route

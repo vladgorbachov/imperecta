@@ -19,6 +19,8 @@ import { Upload, Download, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet 
 import { useQueryClient } from "@tanstack/react-query";
 import { importApi } from "@/api/import";
 import { apiBaseUrl } from "@/api/client";
+import { usePlanLimits } from "@/hooks/usePlanLimits";
+import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -116,6 +118,7 @@ function formatFileSize(bytes: number): string {
 export function ImportPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { canAddProducts } = usePlanLimits();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
@@ -248,9 +251,14 @@ export function ImportPage() {
       if (data.errors?.length) {
         toast.error(t("import.errorsCount", { count: data.errors.length }));
       }
-    } catch {
-      toast.error(t("import.error"));
-      setResult({ imported: 0, errors: [{ row: 0, message: t("import.error") }] });
+    } catch (err: unknown) {
+      const detail =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      const msg = typeof detail === "string" ? detail : t("import.error");
+      toast.error(msg);
+      setResult({ imported: 0, errors: [{ row: 0, message: msg }] });
     } finally {
       setImporting(false);
       setImportProgress(0);
@@ -284,6 +292,7 @@ export function ImportPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      <PlanLimitBanner className="mb-4" />
       <PageHeader title="nav.import" />
 
       <input
@@ -301,22 +310,26 @@ export function ImportPage() {
               className={cn(
                 "flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-all duration-200",
                 "border-accent/30 bg-accent/5 dark:border-accent/40 dark:bg-accent/10",
-                dragOver && "scale-[1.02] border-accent bg-accent/10 dark:bg-accent/20"
+                dragOver && canAddProducts && "scale-[1.02] border-accent bg-accent/10 dark:bg-accent/20",
+                !canAddProducts && "pointer-events-none opacity-60"
               )}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
+              onDrop={canAddProducts ? handleDrop : undefined}
+              onDragOver={canAddProducts ? handleDragOver : undefined}
+              onDragLeave={canAddProducts ? handleDragLeave : undefined}
             >
               <Upload className="size-12 text-accent dark:text-accent" />
               <p className="text-center text-sm font-medium">
-                {t("import.dropzoneCsv")}
+                {canAddProducts ? t("import.dropzoneCsv") : t("planLimit.cannotAdd")}
               </p>
-              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                {t("import.or")}
-              </p>
+              {canAddProducts && (
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                  {t("import.or")}
+                </p>
+              )}
               <Button
                 variant="default"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => canAddProducts && fileInputRef.current?.click()}
+                disabled={!canAddProducts}
               >
                 {t("import.selectFile")}
               </Button>
@@ -464,7 +477,8 @@ export function ImportPage() {
               size="lg"
               className="w-full"
               onClick={handleImport}
-              disabled={!requiredMapped || productCount === 0}
+              disabled={!requiredMapped || productCount === 0 || !canAddProducts}
+              title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
             >
               {t("import.importProducts", { count: productCount })}
             </Button>
@@ -523,7 +537,13 @@ export function ImportPage() {
               </div>
             )}
 
-            <Button variant="outline" className="w-full" onClick={handleImportMore}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleImportMore}
+              disabled={!canAddProducts}
+              title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
+            >
               {t("import.importMore")}
             </Button>
           </CardContent>

@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.models import User
 from app.models.user import UserPlan
 from app.notifications.telegram_bot import BOT_URL
+from app.entitlements import get_entitlements_for_frontend
 from app.schemas.user import (
     ChangeInitialPasswordRequest,
     RefreshTokenRequest,
@@ -215,9 +216,8 @@ async def disconnect_telegram(
     return {"ok": True}
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_me(current_user: CurrentUser) -> UserResponse:
-    """Return current authenticated user."""
+def _build_user_response(current_user) -> UserResponse:
+    """Build UserResponse with entitlements."""
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
@@ -231,7 +231,17 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
         created_at=current_user.created_at,
         telegram_chat_id=current_user.telegram_chat_id,
         avatar_url=getattr(current_user, "avatar_url", None),
+        entitlements=get_entitlements_for_frontend(
+            current_user.plan,
+            trial_ends_at=current_user.trial_ends_at,
+        ),
     )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: CurrentUser) -> UserResponse:
+    """Return current authenticated user."""
+    return _build_user_response(current_user)
 
 
 @router.put("/me", response_model=UserResponse)
@@ -245,16 +255,4 @@ async def update_me(
     for key, value in update_data.items():
         setattr(current_user, key, value)
     await db.flush()
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.name,
-        company_name=current_user.company_name,
-        plan=current_user.plan.value,
-        trial_ends_at=current_user.trial_ends_at,
-        language=current_user.language,
-        ai_tone=getattr(current_user, "ai_tone", "balanced"),
-        created_at=current_user.created_at,
-        telegram_chat_id=current_user.telegram_chat_id,
-        avatar_url=getattr(current_user, "avatar_url", None),
-    )
+    return _build_user_response(current_user)

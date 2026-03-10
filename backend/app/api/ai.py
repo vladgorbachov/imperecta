@@ -1,6 +1,8 @@
-"""AI chat API endpoints."""
+"""AI chat API endpoints. Requires AI_ANALYST entitlement (excluded for Trial/Free)."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.entitlements import Feature, has_feature
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -26,7 +28,13 @@ async def post_chat(
 ) -> ChatResponse:
     """
     Send message to AI analyst. Creates new session or continues existing one.
+    Requires AI_ANALYST entitlement (Trial and Free tiers excluded).
     """
+    if not has_feature(current_user.plan, Feature.AI_ANALYST):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.",
+        )
     import logging
 
     logger = logging.getLogger(__name__)
@@ -55,7 +63,12 @@ async def list_sessions(
     current_user: CurrentUser,
     db: DbSession,
 ) -> list[SessionListItem]:
-    """List user's chat sessions (last 20), ordered by updated_at DESC."""
+    """List user's chat sessions. Requires AI_ANALYST entitlement."""
+    if not has_feature(current_user.plan, Feature.AI_ANALYST):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.",
+        )
     result = await db.execute(
         select(
             AIChatSession.id,
@@ -91,7 +104,12 @@ async def get_session(
     current_user: CurrentUser,
     db: DbSession,
 ) -> SessionDetailResponse:
-    """Get session with all messages. Requires ownership."""
+    """Get session with all messages. Requires AI_ANALYST entitlement and ownership."""
+    if not has_feature(current_user.plan, Feature.AI_ANALYST):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.",
+        )
     session_result = await db.execute(
         select(AIChatSession)
         .where(
@@ -130,7 +148,12 @@ async def delete_session(
     current_user: CurrentUser,
     db: DbSession,
 ) -> None:
-    """Delete chat session. Requires ownership."""
+    """Delete chat session. Requires AI_ANALYST entitlement and ownership."""
+    if not has_feature(current_user.plan, Feature.AI_ANALYST):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.",
+        )
     session_result = await db.execute(
         select(AIChatSession).where(
             AIChatSession.id == session_id,
