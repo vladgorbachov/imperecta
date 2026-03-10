@@ -61,7 +61,7 @@ function SidebarLogo({
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-16 shrink-0 items-center justify-center border-b px-4 transition-colors",
+        "flex h-16 shrink-0 items-stretch border-b px-2 transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
@@ -69,12 +69,7 @@ function SidebarLogo({
       <img
         src={logoSrc}
         alt="Imperecta"
-        className={cn(
-          "object-contain object-left",
-          showLabels
-            ? "h-12 max-h-[4.0rem] w-full max-w-[900px] min-w-0"
-            : "h-10 w-auto"
-        )}
+        className="h-full w-full object-fill object-left"
       />
     </Link>
   );
