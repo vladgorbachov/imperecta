@@ -72,7 +72,7 @@ function SidebarLogo({
         className={cn(
           "object-contain object-left",
           showLabels
-            ? "h-12 max-h-[3.5rem] w-full max-w-[900px] min-w-0"
+            ? "h-12 max-h-[4.0rem] w-full max-w-[900px] min-w-0"
             : "h-10 w-auto"
         )}
       />
