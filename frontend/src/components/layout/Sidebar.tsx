@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
-import { useEntitlements } from "@/hooks/useEntitlements";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -73,42 +72,11 @@ function SidebarLogo({
         className={cn(
           "object-contain object-left",
           showLabels
-            ? "h-12 max-h-[3.5rem] w-full max-w-[200px] min-w-0"
+            ? "h-12 max-h-[3.5rem] w-full max-w-[600px] min-w-0"
             : "h-10 w-auto"
         )}
       />
     </Link>
-  );
-}
-
-function SidebarAiItem({
-  collapsed,
-  isMobile,
-  onNavigate,
-  isActive,
-}: {
-  collapsed: boolean;
-  isMobile?: boolean;
-  onNavigate?: () => void;
-  isActive: boolean;
-}) {
-  const { t } = useTranslation();
-  const { hasAiAnalyst } = useEntitlements();
-  const showLabels = !collapsed || isMobile;
-  const badge = hasAiAnalyst ? <SparklesBadge /> : null;
-  const label = t("nav.ai");
-
-  return (
-    <SidebarItem
-      icon={Bot}
-      label={label}
-      to="/ai"
-      badge={badge}
-      collapsed={collapsed}
-      isMobile={isMobile}
-      onNavigate={onNavigate}
-      isActive={isActive}
-    />
   );
 }
 
@@ -123,7 +91,7 @@ function SparklesBadge({ className }: { className?: string }) {
 }
 
 interface SidebarItemProps {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   label: string;
   to: string;
   badge?: React.ReactNode;
@@ -412,7 +380,11 @@ export function Sidebar({
         </SidebarSection>
 
         <SidebarSection label={t("nav.section.tools")} collapsed={collapsed}>
-          <SidebarAiItem
+          <SidebarItem
+            icon={Bot}
+            label={t("nav.ai")}
+            to="/ai"
+            badge={<SparklesBadge />}
             collapsed={collapsed}
             isMobile={isMobile}
             onNavigate={onNavigate}
