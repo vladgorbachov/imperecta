@@ -1,0 +1,3 @@
+#!/bin/sh
+# Remove "Made-with: Cursor" from commit messages
+sed -i '/^Made-with: Cursor$/d' "$1"
