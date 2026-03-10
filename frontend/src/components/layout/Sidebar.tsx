@@ -61,7 +61,7 @@ function SidebarLogo({
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-16 shrink-0 items-stretch border-b px-2 transition-colors",
+        "flex h-16 shrink-0 items-stretch border-b px-0 transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
