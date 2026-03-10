@@ -44,3 +44,5 @@ pytest>=8.0.0
 pytest-asyncio>=0.23.0
 httpx>=0.27.0
 aiosqlite>=0.20.0
+starlette>=0.40.0 # not directly required, pinned by Snyk to avoid a vulnerability
+anyio>=4.4.0 # not directly required, pinned by Snyk to avoid a vulnerability
