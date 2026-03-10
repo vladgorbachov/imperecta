@@ -1,8 +1,10 @@
 """Import/Export API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
+
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import Product
@@ -11,6 +13,7 @@ from app.services.import_service import (
     parse_products_file,
     preview_products_file,
 )
+from app.services.plan_limits import get_product_limit, is_free_plan
 
 router = APIRouter()
 
@@ -78,6 +81,26 @@ async def upload_products_csv(
 
     if errors and not products_data:
         return {"imported": 0, "errors": errors}
+
+    if is_free_plan(current_user.plan):
+        limit = get_product_limit(current_user.plan)
+        count_result = await db.execute(
+            select(func.count()).select_from(Product).where(Product.user_id == current_user.id)
+        )
+        current_count = count_result.scalar() or 0
+        slots = max(0, limit - current_count)
+        if slots == 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Product limit reached. Free plan allows up to {limit} products. Upgrade to add more.",
+            )
+        original_count = len(products_data)
+        products_data = products_data[:slots]
+        if original_count > slots:
+            errors.insert(
+                0,
+                {"row": 0, "message": f"Only {slots} of {original_count} products imported. Free plan limit: {limit}."},
+            )
 
     imported = 0
     for data in products_data:

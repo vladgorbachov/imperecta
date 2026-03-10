@@ -78,7 +78,7 @@ async def test_me_returns_user_profile(client, auth_headers):
     assert "email" in data
     assert "name" in data
     assert "language" in data
-    assert data["language"] in ["en", "ar", "es", "zh", "ru", "fr"]
+    assert data["language"] in ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"]
 
 
 @pytest.mark.asyncio
@@ -101,3 +101,35 @@ async def test_register_invalid_language_422(client):
         },
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_me_updates_profile(client, auth_headers):
+    """PUT /api/auth/me updates profile and returns user."""
+    resp = await client.put(
+        "/api/auth/me",
+        headers=auth_headers,
+        json={
+            "name": "Updated Name",
+            "company_name": "Acme Corp",
+            "avatar_url": "https://example.com/avatar.png",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "Updated Name"
+    assert data["company_name"] == "Acme Corp"
+    assert data["avatar_url"] == "https://example.com/avatar.png"
+
+
+@pytest.mark.asyncio
+async def test_put_me_with_data_url_avatar(client, auth_headers):
+    """PUT /api/auth/me accepts data URL avatar (base64 image)."""
+    data_url = "data:image/png;base64,iVBORw0KGgo="  # minimal valid base64
+    resp = await client.put(
+        "/api/auth/me",
+        headers=auth_headers,
+        json={"avatar_url": data_url},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["avatar_url"] == data_url

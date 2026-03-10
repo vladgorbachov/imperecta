@@ -16,6 +16,14 @@ function applyUserLanguage(language: string): void {
   localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
 }
 
+export interface UserEntitlements {
+  service_tier: string;
+  features: Record<string, boolean>;
+  limits: Record<string, number>;
+  trial_duration_days?: number;
+  is_trial_expired?: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -24,11 +32,13 @@ export interface User {
   plan: string;
   trial_ends_at: string | null;
   language: string;
+  ai_tone?: string;
   created_at: string;
   telegram_chat_id?: number | null;
   avatar_url?: string | null;
   is_superuser?: boolean;
   force_password_change?: boolean;
+  entitlements?: UserEntitlements;
 }
 
 export interface LoginCredentials {

@@ -6,6 +6,7 @@
 import { motion } from "framer-motion";
 import { KPIOverview } from "@/components/dashboard/KPIOverview";
 import { MarketDataTable } from "@/components/dashboard/MarketDataTable";
+import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
 import { AnomalyFeed } from "@/components/dashboard/AnomalyFeed";
 import { CompetitorBenchmark } from "@/components/dashboard/CompetitorBenchmark";
 import { ScenarioSimulator } from "@/components/dashboard/ScenarioSimulator";
@@ -17,6 +18,7 @@ export function DashboardPage() {
       className="relative space-y-4 sm:space-y-6"
       style={{ background: "var(--gradient-accent-subtle)" }}
     >
+      <PlanLimitBanner className="mb-2" />
       <PageHeader title="nav.dashboard" />
 
       {/* Row 1: KPI Cards with stagger */}

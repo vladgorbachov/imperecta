@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -56,7 +56,7 @@ class User(Base):
         DateTime(timezone=True),
         nullable=True,
     )
-    avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(Text(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

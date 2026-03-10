@@ -20,13 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { LanguageSelector } from "@/components/ui/LanguageSelector";
 import type { LanguageCode } from "@/i18n";
 import { RadioGroup, RadioGroupItemStyled } from "@/components/ui/radio-group";
@@ -40,16 +33,15 @@ import { toast } from "sonner";
 const BOT_USERNAME = "@ImperectaBot";
 const BOT_URL = "https://t.me/ImperectaBot";
 const CODE_DURATION_SEC = 300;
+// Align with backend entitlements. Trial=full access; Free(starter)=50; Paid=business/pro
 const PLAN_LIMITS: Record<string, { products: number; competitors: number }> = {
-  trial: { products: 50, competitors: 15 },
+  trial: { products: 999, competitors: 999 },
   starter: { products: 50, competitors: 15 },
   business: { products: 100, competitors: 30 },
   pro: { products: 999, competitors: 999 },
 };
 
 const TRIAL_DAYS_TOTAL = 14;
-
-const DIGEST_HOURS = Array.from({ length: 13 }, (_, i) => i + 8);
 
 const AVATAR_MAX_SIZE_BYTES = 200 * 1024; // 200KB
 
@@ -64,8 +56,6 @@ export function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
   const [codeSecondsLeft, setCodeSecondsLeft] = useState(0);
-  const [notifChannel, setNotifChannel] = useState<"email" | "telegram" | "both">("both");
-  const [digestHour, setDigestHour] = useState("10");
   const [digestTone, setDigestTone] = useState<"conservative" | "balanced" | "aggressive">(
     "balanced"
   );
@@ -90,6 +80,10 @@ export function SettingsPage() {
     if (u) {
       setProfileForm({ name: u.name, company_name: u.company_name ?? "" });
       setAvatarUrl((u as { avatar_url?: string | null }).avatar_url ?? "");
+      const tone = (u as { ai_tone?: string }).ai_tone;
+      if (tone && ["conservative", "balanced", "aggressive"].includes(tone)) {
+        setDigestTone(tone as "conservative" | "balanced" | "aggressive");
+      }
     }
   }, [u?.id]);
 
@@ -106,6 +100,7 @@ export function SettingsPage() {
       company_name?: string;
       language?: string;
       avatar_url?: string | null;
+      ai_tone?: string;
     }) => {
       const res = await authApi.updateMe(data);
       return res.data;
@@ -115,7 +110,19 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["user", "me"] });
       toast.success(t("auth.profileUpdated"));
     },
-    onError: () => toast.error(t("auth.updateFailed")),
+    onError: (err: unknown) => {
+      const detail =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string | unknown[] } } }).response?.data?.detail
+          : null;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail) && detail.length > 0
+            ? String((detail[0] as { msg?: string })?.msg ?? detail[0])
+            : null;
+      toast.error(msg ?? t("auth.updateFailed"));
+    },
   });
 
   const telegramLinkMutation = useMutation({
@@ -141,7 +148,19 @@ export function SettingsPage() {
       setCodeSecondsLeft(0);
       toast.success(t("settings.telegramDisconnectedSuccess"));
     },
-    onError: () => toast.error(t("auth.updateFailed")),
+    onError: (err: unknown) => {
+      const detail =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string | unknown[] } } }).response?.data?.detail
+          : null;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail) && detail.length > 0
+            ? String((detail[0] as { msg?: string })?.msg ?? detail[0])
+            : null;
+      toast.error(msg ?? t("auth.updateFailed"));
+    },
   });
 
   const handleProfileSubmit = (e: React.FormEvent) => {
@@ -284,16 +303,11 @@ export function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t("auth.email")}</label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Input
-                      value={u?.email ?? ""}
-                      disabled
-                      className="flex-1 bg-muted dark:bg-muted"
-                    />
-                    <Badge className="border bg-[var(--color-price-down-bg)] text-[var(--color-price-down)] border-[var(--color-price-down-border)]">
-                      {t("settings.emailVerified")}
-                    </Badge>
-                  </div>
+                  <Input
+                    value={u?.email ?? ""}
+                    disabled
+                    className="flex-1 bg-muted dark:bg-muted"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t("auth.language")}</label>
@@ -405,44 +419,10 @@ export function SettingsPage() {
               <CardTitle>{t("settings.notifications")}</CardTitle>
               <CardDescription>{t("settings.notificationsDescription")}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t("alerts.channel")}</label>
-                <RadioGroup
-                  value={notifChannel}
-                  onValueChange={(v) => setNotifChannel(v as "email" | "telegram" | "both")}
-                  className="flex flex-wrap gap-4"
-                >
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <RadioGroupItemStyled value="email" />
-                    <span>{t("settings.channelEmail")}</span>
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <RadioGroupItemStyled value="telegram" />
-                    <span>{t("settings.channelTelegram")}</span>
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <RadioGroupItemStyled value="both" />
-                    <span>{t("settings.channelBoth")}</span>
-                  </label>
-                </RadioGroup>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t("settings.digestTime")}</label>
-                <Select value={digestHour} onValueChange={setDigestHour}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DIGEST_HOURS.map((h) => (
-                      <SelectItem key={h} value={String(h)}>
-                        {h.toString().padStart(2, "0")}:00
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button>{t("common.save")}</Button>
+            <CardContent>
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
+                {t("settings.digestTimeComingSoon")}
+              </p>
             </CardContent>
           </Card>
 
@@ -492,7 +472,13 @@ export function SettingsPage() {
                   </label>
                 </RadioGroup>
               </div>
-              {/* TODO: save to user profile, use in Claude prompt */}
+              <Button
+                type="button"
+                onClick={() => updateMutation.mutate({ ai_tone: digestTone })}
+                disabled={updateMutation.isPending}
+              >
+                {updateMutation.isPending ? t("common.loading") : t("common.save")}
+              </Button>
             </CardContent>
           </Card>
 
@@ -562,9 +548,13 @@ export function SettingsPage() {
                   variant={competitorsVariant}
                 />
               </div>
-              <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" size="lg">
+              <Button
+                className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
+                size="lg"
+                disabled
+              >
                 <Zap className="mr-2 size-4" />
-                {t("settings.upgradePlan")}
+                {t("settings.upgradeComingSoon")}
               </Button>
             </CardContent>
           </Card>

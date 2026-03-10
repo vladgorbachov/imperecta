@@ -20,6 +20,8 @@ import { toast } from "sonner";
 import { formatPrice } from "@/lib/formatters";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useProducts, useProductCategories } from "@/hooks/useProducts";
+import { usePlanLimits } from "@/hooks/usePlanLimits";
+import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -146,6 +148,7 @@ export function ProductsPage() {
   const search = useDebounce(searchRaw, 300);
   const categoryParam = category && category !== "all" ? category : undefined;
 
+  const { canAddProducts } = usePlanLimits();
   const { products: apiProducts, total: apiTotal, isLoading } = useProducts({
     search: search || undefined,
     category: categoryParam,
@@ -229,15 +232,27 @@ export function ProductsPage() {
 
   return (
     <div className="flex h-full flex-col">
+      <PlanLimitBanner className="mb-4" />
       <PageHeader
         title="nav.products"
         actions={
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-            <Button variant="outline" size="sm" onClick={handleImportCsv}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportCsv}
+              disabled={!canAddProducts}
+              title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
+            >
               <Upload className="mr-2 size-4" />
               {t("products.importCsv")}
             </Button>
-            <Button size="sm" onClick={handleAddProduct}>
+            <Button
+              size="sm"
+              onClick={handleAddProduct}
+              disabled={!canAddProducts}
+              title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
+            >
               <Plus className="mr-2 size-4" />
               {t("products.addProduct")}
             </Button>
@@ -381,7 +396,11 @@ export function ProductsPage() {
               title="products.noProducts"
               description="products.noProductsHint"
               icon={Package}
-              action={{ label: "products.addProduct", onClick: handleAddProduct }}
+              action={
+                canAddProducts
+                  ? { label: "products.addProduct", onClick: handleAddProduct }
+                  : undefined
+              }
             />
           ) : isEmpty && hasFilters ? (
             <div className="flex flex-col items-center justify-center gap-4 px-4 py-12">

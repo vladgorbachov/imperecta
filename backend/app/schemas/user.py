@@ -5,8 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-# UN official languages only
-SUPPORTED_LANGUAGES = ["en", "ar", "es", "zh", "ru", "fr"]
+# UN official languages + Romanian, Ukrainian
+SUPPORTED_LANGUAGES = ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"]
 ALLOWED_LANGUAGE_CODES = frozenset(SUPPORTED_LANGUAGES)
 
 AI_TONE_VALUES = frozenset({"conservative", "balanced", "aggressive"})
@@ -68,7 +68,8 @@ class UserResponse(BaseModel):
     created_at: datetime
     telegram_chat_id: int | None = None
     avatar_url: str | None = None
-    
+    # Plan entitlements for frontend (service_tier, features, limits)
+    entitlements: dict | None = None
 
     class Config:
         from_attributes = True

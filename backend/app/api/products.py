@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession
 from app.models import CompetitorProduct, Product
+from app.services.plan_limits import get_product_limit, is_free_plan
 from app.schemas.product import (
     CompetitorProductBrief,
     ProductCreate,
@@ -204,6 +205,18 @@ async def create_product(
     db: DbSession,
 ) -> ProductResponse:
     """Create new product."""
+    if is_free_plan(current_user.plan):
+        limit = get_product_limit(current_user.plan)
+        count_result = await db.execute(
+            select(func.count()).select_from(Product).where(Product.user_id == current_user.id)
+        )
+        current_count = count_result.scalar() or 0
+        if current_count >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Product limit reached. Free plan allows up to {limit} products. Upgrade to add more.",
+            )
+
     product = Product(
         user_id=current_user.id,
         name=data.name,
