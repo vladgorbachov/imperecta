@@ -202,6 +202,10 @@ export const marketsApi = {
 
   getOpportunities: () =>
     apiClient.get<MarketsOpportunitiesResponse>("/markets/opportunities"),
+
+  /** Trigger market data ingestion. Superuser only. Enqueues Celery task. */
+  triggerIngest: () =>
+    apiClient.post<{ status: string; task_id: string }>("/markets/ingest"),
 };
 
 // --- Query key helpers ---

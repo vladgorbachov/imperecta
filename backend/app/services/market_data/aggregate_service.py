@@ -131,6 +131,11 @@ class MarketDataAggregateService:
                     "currency": r.unit or "USD",
                 })
 
+            if not items:
+                await self._log_success(log_id)
+                logger.info("Ticker materialization skipped: no source data (forex/crypto/commodities empty)")
+                return 0
+
             await self.db.execute(delete(MarketsTickerItem))
             for it in items[:50]:
                 stmt = insert(MarketsTickerItem).values(
@@ -218,6 +223,11 @@ class MarketDataAggregateService:
                     "change_1m": None,
                     "sparkline_data": [],
                 })
+
+            if not items:
+                await self._log_success(log_id)
+                logger.info("Overview materialization skipped: no source data (forex/crypto/commodities empty)")
+                return 0
 
             await self.db.execute(delete(MarketsOverviewItem))
             for it in items[:100]:
