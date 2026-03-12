@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
+
+MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 from app.models import Product
 from app.services.import_service import (
     get_csv_template,
@@ -18,11 +20,20 @@ from app.services.plan_limits import get_product_limit, is_free_plan
 router = APIRouter()
 
 
+class AutoCategorizeProductItem(BaseModel):
+    """Single product item for auto-categorize."""
+
+    name: str | None = Field(None, max_length=500)
+    sku: str | None = Field(None, max_length=100)
+    price: float | None = Field(None, ge=0)
+
+
 class AutoCategorizeRequest(BaseModel):
     """Request body for auto-categorize."""
 
-    products: list[dict] = Field(
+    products: list[AutoCategorizeProductItem] = Field(
         ...,
+        max_length=100,
         description="List of {name, sku, price}",
     )
 
@@ -39,7 +50,8 @@ async def post_auto_categorize(
 
     logger = logging.getLogger(__name__)
     try:
-        return await auto_categorize(body.products)
+        items = [p.model_dump() for p in body.products]
+        return await auto_categorize(items)
     except Exception as e:
         logger.warning("auto_categorize failed: %s", e)
         raise HTTPException(
@@ -57,7 +69,12 @@ async def preview_products_csv(
     Preview first 5 rows of CSV/Excel file.
     Returns: { preview: [...], errors: [...] }
     """
-    content = await file.read()
+    content = await file.read(MAX_IMPORT_FILE_SIZE_BYTES + 1)
+    if len(content) > MAX_IMPORT_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum size is {MAX_IMPORT_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
+        )
     filename = file.filename or "upload.csv"
     preview, errors = preview_products_file(content, filename, limit=5)
     return {"preview": preview, "errors": errors}
@@ -74,7 +91,12 @@ async def upload_products_csv(
     Columns: name, sku, price, url, category.
     Returns: { imported: N, errors: [{row: N, message: "..."}] }
     """
-    content = await file.read()
+    content = await file.read(MAX_IMPORT_FILE_SIZE_BYTES + 1)
+    if len(content) > MAX_IMPORT_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum size is {MAX_IMPORT_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
+        )
     filename = file.filename or "upload.csv"
 
     products_data, errors = parse_products_file(content, filename, current_user.id)

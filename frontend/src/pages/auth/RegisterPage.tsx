@@ -89,7 +89,8 @@ export function RegisterPage() {
 
   const validateConfirm = (value: string) => {
     if (!value) return t("auth.fieldRequired");
-    if (value !== password) return t("auth.passwordMismatch");
+    const matches = value.length === password.length && value === password;
+    if (!matches) return t("auth.passwordMismatch");
     return "";
   };
 

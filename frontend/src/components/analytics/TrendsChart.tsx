@@ -20,31 +20,34 @@ import { formatChartDate } from "@/lib/formatters";
 
 type Period = "7d" | "30d" | "90d";
 
-const PERIOD_DAYS: Record<Period, number> = { "7d": 7, "30d": 30, "90d": 90 };
+function getPeriodDays(period: Period): number {
+  switch (period) {
+    case "7d":
+      return 7;
+    case "30d":
+      return 30;
+    case "90d":
+      return 90;
+  }
+}
 
 interface TrendsChartProps {
   period: Period;
-  category: string;
-  competitorIds: string[];
-  products: { id: string; name: string }[];
-  competitors: { id: string; name: string }[];
+  category?: string;
+  competitorIds?: string[];
+  products?: { id: string; name: string }[];
+  competitors?: { id: string; name: string }[];
 }
 
-export function TrendsChart({
-  period,
-  category: _category,
-  competitorIds: _competitorIds,
-  products: _products,
-  competitors: _competitors,
-}: TrendsChartProps) {
+export function TrendsChart({ period }: TrendsChartProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
-  const days = PERIOD_DAYS[period];
+  const days = getPeriodDays(period);
 
   const { data: trendData, isLoading } = useQuery({
     queryKey: ["dashboard", "aggregate-trend", days],
     queryFn: async () => {
-      const { data } = await analyticsApi.getAggregateTrend(days, 0);
+      const { data } = await analyticsApi.getAggregateTrend(days, 1);
       return data;
     },
   });
@@ -53,8 +56,8 @@ export function TrendsChart({
     trendData?.labels?.map((date, i) => ({
       date,
       dateLabel: formatChartDate(new Date(date), locale),
-      myAvg: trendData.my_products_avg[i] ?? 0,
-      competitorAvg: trendData.competitors_avg[i] ?? 0,
+      myAvg: trendData.my_products_avg.at(i) ?? 0,
+      competitorAvg: trendData.competitors_avg.at(i) ?? 0,
     })) ?? [];
 
   if (isLoading) {
@@ -91,13 +94,15 @@ export function TrendsChart({
           <Tooltip
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
-              const p = payload[0]?.payload as Record<string, unknown>;
+              const first = payload.at(0);
+              const p = first?.payload as { dateLabel?: unknown } | undefined;
+              const dateLabel = p && "dateLabel" in p ? String(p.dateLabel) : "";
               return (
                 <div className="rounded-lg border border-border bg-card p-3 shadow-lg">
-                  <p className="mb-2 text-sm font-medium">{String(p.dateLabel)}</p>
+                  <p className="mb-2 text-sm font-medium">{dateLabel}</p>
                   <div className="space-y-1 text-xs">
-                    {payload.map((item) => (
-                      <p key={String(item.dataKey)}>
+                    {payload.map((item, idx) => (
+                      <p key={idx}>
                         {item.name}: {item.value != null ? new Intl.NumberFormat(locale).format(Number(item.value)) : "—"}
                       </p>
                     ))}

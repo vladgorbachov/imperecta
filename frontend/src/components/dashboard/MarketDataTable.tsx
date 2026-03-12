@@ -1,9 +1,9 @@
 /**
- * Bloomberg-style market data table for dashboard.
- * Glass-card container, gradient title, row tints with CSS vars.
+ * Market Overview widget for Markets page.
+ * Uses markets API only. No mock fallback. Empty state when no data.
  */
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,24 +13,27 @@ import {
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { analyticsApi } from "@/api/analytics";
-import {
-  generateGlobalMarketData,
-  sortMarketData,
-  type MarketDataItem,
-} from "@/data/globalMarketData";
+import { Package } from "lucide-react";
+import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 type SortTab = "volatile" | "trending" | "gainers" | "losers" | "recent";
 
-const SORT_MAP: Record<SortTab, string> = {
-  volatile: "volatile",
-  trending: "trending",
-  gainers: "gainers",
-  losers: "losers",
-  recent: "recent",
-};
+function getSortKey(tab: SortTab): string {
+  switch (tab) {
+    case "volatile":
+      return "volatile";
+    case "trending":
+      return "trending";
+    case "gainers":
+      return "gainers";
+    case "losers":
+      return "losers";
+    case "recent":
+      return "recent";
+  }
+}
 
 function formatPrice(price: number, currency: string): string {
   const locale =
@@ -103,7 +106,8 @@ function TrendBar({ change1m }: { change1m: number | null }) {
 }
 
 function ChangeCell({ value }: { value: number | null }) {
-  if (value === null) return <span style={{ color: "var(--foreground-muted)" }}>—</span>;
+  if (value === null)
+    return <span style={{ color: "var(--foreground-muted)" }}>—</span>;
   const isPositive = value > 0;
   const isZero = value === 0;
   return (
@@ -163,59 +167,61 @@ function MarketplaceLogo({
   );
 }
 
+function ProductThumbnail({
+  thumbnailUrl,
+  productName,
+}: {
+  thumbnailUrl: string | null | undefined;
+  productName: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const showImage = thumbnailUrl && !imgError;
+
+  if (showImage) {
+    return (
+      <div className="relative size-10 shrink-0 overflow-hidden rounded">
+        <img
+          src={thumbnailUrl}
+          alt={productName}
+          className="size-10 rounded object-cover"
+          onError={() => setImgError(true)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex size-10 shrink-0 items-center justify-center rounded"
+      style={{
+        background: "var(--glass-bg)",
+        color: "var(--foreground-muted)",
+      }}
+      aria-hidden
+    >
+      <Package className="size-5" />
+    </div>
+  );
+}
+
 export function MarketDataTable() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const [activeTab, setActiveTab] = useState<SortTab>("volatile");
-  const [displayData, setDisplayData] = useState<MarketDataItem[]>(() =>
-    sortMarketData(generateGlobalMarketData(), "volatile")
-  );
-  const [fading, setFading] = useState(false);
 
+  const sortKey = getSortKey(activeTab);
   const { data: apiData, isLoading } = useQuery({
-    queryKey: ["dashboard", "market-overview", SORT_MAP[activeTab]],
+    queryKey: marketsQueryKeys.overview(sortKey, 50),
     queryFn: async () => {
-      const { data: res } = await analyticsApi.getMarketOverview(
-        SORT_MAP[activeTab],
-        50
-      );
-      return res;
+      const { data } = await marketsApi.getOverview(sortKey, 50);
+      return data;
     },
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
 
-  useEffect(() => {
-    if (apiData?.items?.length) {
-      setDisplayData(
-        apiData.items.map((r) => ({
-          ...r,
-          change_24h: r.change_24h ?? 0,
-          change_3d: r.change_3d ?? 0,
-          change_1w: r.change_1w ?? 0,
-          change_1m: r.change_1m ?? 0,
-        }))
-      );
-    } else {
-      setDisplayData(sortMarketData(generateGlobalMarketData(), SORT_MAP[activeTab]));
-    }
-  }, [apiData, activeTab]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!apiData?.items?.length) {
-        setFading(true);
-        setTimeout(() => {
-          setDisplayData(sortMarketData(generateGlobalMarketData(), SORT_MAP[activeTab]));
-          setFading(false);
-        }, 500);
-      }
-    }, 10 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [apiData?.items?.length, activeTab]);
-
-  const items = displayData.length ? displayData : generateGlobalMarketData();
-  const total = apiData?.total ?? items.length;
+  const items: MarketsOverviewItem[] = apiData?.items ?? [];
+  const total = apiData?.total ?? 0;
   const lastUpdated = items[0]?.last_updated;
   const relativeTime = lastUpdated
     ? formatRelativeTime(lastUpdated, locale)
@@ -234,7 +240,8 @@ export function MarketDataTable() {
       <h3
         className="mb-4 px-4 pt-4 text-sm font-semibold uppercase tracking-wider"
         style={{
-          background: "linear-gradient(135deg, var(--foreground), var(--foreground-muted))",
+          background:
+            "linear-gradient(135deg, var(--foreground), var(--foreground-muted))",
           WebkitBackgroundClip: "text",
           WebkitTextFillColor: "transparent",
           backgroundClip: "text",
@@ -272,145 +279,196 @@ export function MarketDataTable() {
       </div>
 
       {/* Table */}
-      <div
-        className={cn(
-          "max-h-[500px] flex-1 overflow-y-auto transition-opacity duration-500",
-          fading ? "opacity-0" : "opacity-100"
-        )}
-      >
-        <AnimatePresence mode="wait">
-          {items.length === 0 ? (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="px-4 py-12 text-center text-sm"
-              style={{ color: "var(--foreground-muted)" }}
-            >
-              {t("dashboard.market.noData")}
-            </motion.div>
-          ) : (
-            <motion.table
-              key={activeTab}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="w-full min-w-[700px]"
-            >
-              <thead
-                className="sticky top-0 z-10 backdrop-blur"
-                style={{
-                  background: "var(--background-elevated-subtle)",
-                }}
+      <div className="max-h-[500px] flex-1 overflow-y-auto">
+        {isLoading ? (
+          <div className="space-y-3 px-4 py-8">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-full" />
+            ))}
+          </div>
+        ) : (
+          <AnimatePresence mode="wait">
+            {items.length === 0 ? (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex flex-col items-center justify-center px-4 py-16 text-center"
+                style={{ color: "var(--foreground-muted)" }}
               >
-                <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                  <th className="w-8 px-3 py-2 text-left" />
-                  <th className="w-[100px] px-3 py-2 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    {t("dashboard.market.marketplace")}
-                  </th>
-                  <th className="min-w-[120px] px-3 py-2 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    {t("dashboard.market.product")}
-                  </th>
-                  <th className="w-20 px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    24h
-                  </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    3d
-                  </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    1w
-                  </th>
-                  <th className="w-[70px] px-3 py-2 text-right text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    1m
-                  </th>
-                  <th className="w-20 px-3 py-2 text-center text-xs font-medium uppercase tracking-wider" style={{ color: "var(--foreground-muted)" }}>
-                    —
-                  </th>
-                  <th className="w-10 px-3 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row, i) => {
-                  const ch24 = row.change_24h ?? 0;
-                  const ch1m = row.change_1m ?? 0;
-                  const sparkColor =
-                    ch1m > 0
-                      ? "var(--color-price-down)"
-                      : ch1m < 0
-                        ? "var(--color-price-up)"
-                        : "var(--foreground-muted)";
-                  const rowBg =
-                    ch24 > 5
-                      ? "var(--row-tint-green)"
-                      : ch24 < -5
-                        ? "var(--row-tint-red)"
-                        : "transparent";
-
-                  return (
-                    <motion.tr
-                      key={row.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: Math.min(i * 0.02, 0.2) }}
-                      className="h-11 transition-colors hover:bg-[var(--glass-bg-hover)]"
-                      style={{
-                        borderBottom: "1px solid var(--border)",
-                        background: rowBg,
-                      }}
+                <Package className="mb-4 size-12 opacity-50" />
+                <p className="text-sm font-medium">{t("dashboard.market.noData")}</p>
+              </motion.div>
+            ) : (
+              <motion.table
+                key={activeTab}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="w-full min-w-[700px]"
+              >
+                <thead
+                  className="sticky top-0 z-10 backdrop-blur"
+                  style={{
+                    background: "var(--background-elevated-subtle)",
+                  }}
+                >
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                    <th className="w-8 px-2 pl-4 py-2" />
+                    <th
+                      className="w-[100px] px-2 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
                     >
-                      <td className="px-3 py-2">
-                        <MarketplaceLogo
-                          domain={row.marketplace_domain}
-                          name={row.marketplace}
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-xs" style={{ color: "var(--foreground-muted)" }}>
-                        {row.marketplace}
-                      </td>
-                      <td className="max-w-[200px] px-3 py-2">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="block truncate text-sm">
-                              {row.product_name}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent className="glass-card border-[var(--glass-border)]">
-                            <p className="max-w-xs">{row.product_name}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-sm font-medium">
-                        {formatPrice(row.price, row.currency)}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <ChangeCell value={row.change_24h} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <ChangeCell value={row.change_3d} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <ChangeCell value={row.change_1w} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <ChangeCell value={row.change_1m} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex justify-center">
-                          <Sparkline data={row.sparkline_data} color={sparkColor} />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <TrendBar change1m={row.change_1m} />
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </tbody>
-            </motion.table>
-          )}
-        </AnimatePresence>
+                      {t("dashboard.market.marketplace")}
+                    </th>
+                    <th className="w-12 px-2 py-2" />
+                    <th
+                      className="min-w-[120px] px-2 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      {t("dashboard.market.product")}
+                    </th>
+                    <th
+                      className="w-20 px-2 py-2 text-right text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      {t("dashboard.market.price")}
+                    </th>
+                    <th
+                      className="w-[70px] px-2 py-2 text-right text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      24h
+                    </th>
+                    <th
+                      className="w-[70px] px-2 py-2 text-right text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      3d
+                    </th>
+                    <th
+                      className="w-[70px] px-2 py-2 text-right text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      1w
+                    </th>
+                    <th
+                      className="w-[70px] px-2 py-2 text-right text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      1m
+                    </th>
+                    <th
+                      className="w-20 px-2 py-2 text-center text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      {t("dashboard.market.sparkline")}
+                    </th>
+                    <th
+                      className="w-20 px-2 py-2 text-center text-xs font-medium uppercase tracking-wider"
+                      style={{ color: "var(--foreground-muted)" }}
+                    >
+                      {t("dashboard.market.momentum")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((row, i) => {
+                    const ch24 = row.change_24h ?? 0;
+                    const ch1m = row.change_1m ?? 0;
+                    const sparkColor =
+                      ch1m > 0
+                        ? "var(--color-price-down)"
+                        : ch1m < 0
+                          ? "var(--color-price-up)"
+                          : "var(--foreground-muted)";
+                    const rowBg =
+                      ch24 > 5
+                        ? "var(--row-tint-green)"
+                        : ch24 < -5
+                          ? "var(--row-tint-red)"
+                          : "transparent";
+
+                    return (
+                      <motion.tr
+                        key={row.id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(i * 0.02, 0.2) }}
+                        className="h-11 transition-colors hover:bg-[var(--glass-bg-hover)]"
+                        style={{
+                          borderBottom: "1px solid var(--border)",
+                          background: rowBg,
+                        }}
+                      >
+                        <td className="px-2 pl-4 py-2">
+                          <MarketplaceLogo
+                            domain={row.marketplace_domain}
+                            name={row.marketplace}
+                          />
+                        </td>
+                        <td
+                          className="px-2 py-2 text-xs"
+                          style={{ color: "var(--foreground-muted)" }}
+                        >
+                          {row.marketplace}
+                        </td>
+                        <td className="px-2 py-2">
+                          <ProductThumbnail
+                            thumbnailUrl={row.thumbnail_url}
+                            productName={row.product_name}
+                          />
+                        </td>
+                        <td className="max-w-[200px] px-2 py-2">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="block truncate text-sm">
+                                {row.product_name}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="glass-card border-[var(--glass-border)]">
+                              <p className="max-w-xs">{row.product_name}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono text-sm font-medium">
+                          {formatPrice(row.price, row.currency)}
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <ChangeCell value={row.change_24h} />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <ChangeCell value={row.change_3d} />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <ChangeCell value={row.change_1w} />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <ChangeCell value={row.change_1m} />
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex justify-center">
+                            <Sparkline
+                              data={row.sparkline_data ?? []}
+                              color={sparkColor}
+                            />
+                          </div>
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex justify-center">
+                            <TrendBar change1m={row.change_1m} />
+                          </div>
+                        </td>
+                      </motion.tr>
+                    );
+                  })}
+                </tbody>
+              </motion.table>
+            )}
+          </AnimatePresence>
+        )}
       </div>
 
       {items.length > 0 && (

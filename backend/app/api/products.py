@@ -245,6 +245,11 @@ async def create_product(
     )
 
 
+ALLOWED_PRODUCT_UPDATE_FIELDS = frozenset(
+    {"name", "sku", "current_price", "currency", "url", "category", "is_active"}
+)
+
+
 @router.put("/{id}", response_model=ProductResponse)
 async def update_product(
     id: UUID,
@@ -252,7 +257,7 @@ async def update_product(
     current_user: CurrentUser,
     db: DbSession,
 ) -> ProductResponse:
-    """Update product."""
+    """Update product. Only allowed fields are applied."""
     result = await db.execute(
         select(Product).where(Product.id == id, Product.user_id == current_user.id)
     )
@@ -262,7 +267,8 @@ async def update_product(
 
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
-        setattr(product, key, value)
+        if key in ALLOWED_PRODUCT_UPDATE_FIELDS:
+            setattr(product, key, value)
 
     await db.flush()
 

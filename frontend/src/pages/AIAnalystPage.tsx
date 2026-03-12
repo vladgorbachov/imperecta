@@ -36,7 +36,7 @@ export function AIAnalystPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, isTyping]);
 
-  const handleSend = async (content: string, _presetKey?: string) => {
+  const handleSend = async (content: string) => {
     const userMsg: ChatMessage = { role: "user", content, timestamp: Date.now() };
     setMessages((m) => [...m, userMsg]);
     setIsTyping(true);

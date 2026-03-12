@@ -11,7 +11,7 @@ export function NotFoundPage() {
         {t("common.notFound")}
       </h1>
       <Button asChild>
-        <Link to="/dashboard">{t("common.backToDashboard")}</Link>
+        <Link to="/dashboard">{t("common.backToMarkets")}</Link>
       </Button>
     </div>
   );

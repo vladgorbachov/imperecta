@@ -8,17 +8,21 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
-import { cn } from "@/lib/utils";
 
 export type MarketplaceId = "kaspi" | "ozon" | "wildberries";
 
 const MARKETPLACE_IDS: MarketplaceId[] = ["kaspi", "ozon", "wildberries"];
 
-const I18N_KEYS: Record<MarketplaceId, string> = {
-  kaspi: "competitors.marketplaceKaspi",
-  ozon: "competitors.marketplaceOzon",
-  wildberries: "competitors.marketplaceWb",
-};
+function getMarketplaceI18nKey(id: MarketplaceId): string {
+  switch (id) {
+    case "kaspi":
+      return "competitors.marketplaceKaspi";
+    case "ozon":
+      return "competitors.marketplaceOzon";
+    case "wildberries":
+      return "competitors.marketplaceWb";
+  }
+}
 
 interface SearchableMarketplaceSelectProps {
   value: MarketplaceId | "";
@@ -37,11 +41,11 @@ export function SearchableMarketplaceSelect({
   const ref = useRef<HTMLDivElement>(null);
 
   const sorted = [...MARKETPLACE_IDS].sort((a, b) =>
-    t(I18N_KEYS[a]).localeCompare(t(I18N_KEYS[b]))
+    t(getMarketplaceI18nKey(a)).localeCompare(t(getMarketplaceI18nKey(b)))
   );
 
   const filtered = sorted.filter((id) =>
-    t(I18N_KEYS[id]).toLowerCase().includes(search.toLowerCase())
+    t(getMarketplaceI18nKey(id)).toLowerCase().includes(search.toLowerCase())
   );
 
   const selectedId = value || null;
@@ -66,7 +70,7 @@ export function SearchableMarketplaceSelect({
           {selectedId ? (
             <span className="flex items-center gap-2">
               <MarketplaceBadge marketplace={selectedId} size="sm" />
-              {t(I18N_KEYS[selectedId])}
+              {t(getMarketplaceI18nKey(selectedId))}
             </span>
           ) : (
             placeholder ?? t("competitors.selectMarketplace")
@@ -95,7 +99,7 @@ export function SearchableMarketplaceSelect({
                 }}
               >
                 <MarketplaceBadge marketplace={id} size="sm" />
-                {t(I18N_KEYS[id])}
+                {t(getMarketplaceI18nKey(id))}
               </button>
             ))}
             {filtered.length === 0 && (

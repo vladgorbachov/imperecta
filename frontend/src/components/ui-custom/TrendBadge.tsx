@@ -19,6 +19,47 @@ export interface TrendBadgeProps {
  * Badge displaying price trend with icon and optional percentage.
  * Up: red glow | Down: emerald glow | Stable: muted.
  */
+type TrendConfig = {
+  icon: typeof TrendingUp;
+  style: object;
+  iconStyle?: object;
+};
+
+function getTrendConfig(trend: TrendDirection): TrendConfig {
+  switch (trend) {
+    case "up":
+      return {
+        icon: TrendingUp,
+        style: {
+          background: "var(--color-price-up-bg)",
+          border: "1px solid var(--color-price-up-border)",
+          color: "var(--color-price-up)",
+        },
+        iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-red))" },
+      };
+    case "down":
+      return {
+        icon: TrendingDown,
+        style: {
+          background: "rgba(52, 211, 153, 0.15)",
+          border: "1px solid rgba(52, 211, 153, 0.3)",
+          color: "var(--color-price-down)",
+        },
+        iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-green))" },
+      };
+    case "stable":
+      return {
+        icon: Minus,
+        style: {
+          background: "var(--color-muted-bg)",
+          border: "1px solid var(--glass-border)",
+          color: "var(--foreground-muted)",
+        },
+        iconStyle: undefined,
+      };
+  }
+}
+
 export function TrendBadge({ trend, value, size = "md", className }: TrendBadgeProps) {
   const { t } = useTranslation();
 
@@ -29,36 +70,7 @@ export function TrendBadge({ trend, value, size = "md", className }: TrendBadgeP
         ? t("ui.trendPercentNegative", { value: Math.abs(value).toFixed(1) })
         : t("ui.trendPercentZero");
 
-  const config = {
-    up: {
-      icon: TrendingUp,
-      style: {
-        background: "var(--color-price-up-bg)",
-        border: "1px solid var(--color-price-up-border)",
-        color: "var(--color-price-up)",
-      },
-      iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-red))" },
-    },
-    down: {
-      icon: TrendingDown,
-      style: {
-        background: "rgba(52, 211, 153, 0.15)",
-        border: "1px solid rgba(52, 211, 153, 0.3)",
-        color: "var(--color-price-down)",
-      },
-      iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-green))" },
-    },
-    stable: {
-      icon: Minus,
-      style: {
-        background: "var(--color-muted-bg)",
-        border: "1px solid var(--glass-border)",
-        color: "var(--foreground-muted)",
-      },
-      iconStyle: undefined,
-    },
-  }[trend];
-
+  const config = getTrendConfig(trend);
   const Icon = config.icon;
   const sizeClasses = size === "sm" ? "gap-1 px-1.5 py-0 text-xs" : "gap-1.5 px-2 py-0.5 text-sm";
 

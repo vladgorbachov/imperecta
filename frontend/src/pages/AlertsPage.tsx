@@ -59,25 +59,31 @@ type AlertType = "price_drop" | "price_increase" | "out_of_stock" | "new_promo";
 type AlertChannel = "email" | "telegram" | "both";
 type Priority = "critical" | "important" | "info";
 
-const ALERT_TYPE_KEYS: Record<AlertType, string> = {
-  price_drop: "alerts.typePriceDrop",
-  price_increase: "alerts.typePriceIncrease",
-  out_of_stock: "alerts.typeOutOfStock",
-  new_promo: "alerts.typeNewPromo",
-};
+function getAlertTypeKey(type: AlertType): string {
+  switch (type) {
+    case "price_drop": return "alerts.typePriceDrop";
+    case "price_increase": return "alerts.typePriceIncrease";
+    case "out_of_stock": return "alerts.typeOutOfStock";
+    case "new_promo": return "alerts.typeNewPromo";
+  }
+}
 
-const ALERT_TYPE_ICONS: Record<AlertType, typeof TrendingDown> = {
-  price_drop: TrendingDown,
-  price_increase: TrendingUp,
-  out_of_stock: PackageX,
-  new_promo: Tag,
-};
+function getAlertTypeIcon(type: AlertType): typeof TrendingDown {
+  switch (type) {
+    case "price_drop": return TrendingDown;
+    case "price_increase": return TrendingUp;
+    case "out_of_stock": return PackageX;
+    case "new_promo": return Tag;
+  }
+}
 
-const PRIORITY_STRIPE: Record<Priority, string> = {
-  critical: "border-l-red-500 dark:border-l-red-500",
-  important: "border-l-orange-500 dark:border-l-orange-500",
-  info: "border-l-blue-500 dark:border-l-blue-500",
-};
+function getPriorityStripe(priority: Priority): string {
+  switch (priority) {
+    case "critical": return "border-l-red-500 dark:border-l-red-500";
+    case "important": return "border-l-orange-500 dark:border-l-orange-500";
+    case "info": return "border-l-blue-500 dark:border-l-blue-500";
+  }
+}
 
 function getEventType(ev: AlertEvent): AlertType {
   if (ev.old_price != null && ev.new_price != null) {
@@ -97,26 +103,40 @@ function getEventPriority(ev: AlertEvent, type: AlertType): Priority {
   return "info";
 }
 
+function getDayName(dayIndex: number): string {
+  const idx = dayIndex === 0 ? 6 : dayIndex - 1;
+  switch (idx) {
+    case 0: return "Mon";
+    case 1: return "Tue";
+    case 2: return "Wed";
+    case 3: return "Thu";
+    case 4: return "Fri";
+    case 5: return "Sat";
+    case 6: return "Sun";
+    default: return "Mon";
+  }
+}
+
 function groupEventsByDay(events: AlertEvent[]): Array<{ day: string; count: number }> {
-  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const counts: Record<string, number> = {};
+  const counts = new Map<string, number>();
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    counts[key] = 0;
+    counts.set(d.toISOString().slice(0, 10), 0);
   }
   for (const ev of events) {
     const key = ev.triggered_at?.slice(0, 10) ?? "";
-    if (key in counts) counts[key]++;
+    if (counts.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   const result: Array<{ day: string; count: number }> = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
-    const dayName = dayNames[d.getDay() === 0 ? 6 : d.getDay() - 1];
-    result.push({ day: dayName, count: counts[key] ?? 0 });
+    result.push({
+      day: getDayName(d.getDay()),
+      count: counts.get(key) ?? 0,
+    });
   }
   return result;
 }
@@ -330,7 +350,7 @@ export function AlertsPage() {
 
   const showThreshold = form.type === "price_drop" || form.type === "price_increase";
 
-  const handleAutoResponse = (_ev: AlertEvent) => {
+  const handleAutoResponse = () => {
     toast.info(t("alerts.autoResponseSuggested"));
     // TODO: POST /api/ai/auto-response
   };
@@ -497,9 +517,9 @@ export function AlertsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(ALERT_TYPE_KEYS) as AlertType[]).map((typeKey) => (
+                    {(["price_drop", "price_increase", "out_of_stock", "new_promo"] as const).map((typeKey) => (
                       <SelectItem key={typeKey} value={typeKey}>
-                        {t(ALERT_TYPE_KEYS[typeKey])}
+                        {t(getAlertTypeKey(typeKey))}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -602,11 +622,11 @@ function TimelineCard({
   const { t } = useTranslation();
   const type = getEventType(event);
   const priority = getEventPriority(event, type);
-  const Icon = ALERT_TYPE_ICONS[type];
-  const stripeClass = PRIORITY_STRIPE[priority];
+  const Icon = getAlertTypeIcon(type);
+  const stripeClass = getPriorityStripe(priority);
   const aiExplanation = event.message ?? null;
 
-  let titleKey = ALERT_TYPE_KEYS[type];
+  let titleKey = getAlertTypeKey(type);
   let title: string;
   if (type === "price_drop" && event.old_price != null && event.new_price != null) {
     const pct = (((event.old_price - event.new_price) / event.old_price) * 100).toFixed(0);
@@ -691,7 +711,7 @@ function AlertRuleCompact({
     <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background/50 px-3 py-2 dark:border-border dark:bg-background/30">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">
-          {t(ALERT_TYPE_KEYS[type] ?? alert.type)}
+          {t(getAlertTypeKey(type) ?? alert.type)}
         </p>
         <p className="truncate text-xs text-muted-foreground">
           {alert.product_name ?? t("alerts.allProducts")}

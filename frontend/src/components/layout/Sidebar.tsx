@@ -316,7 +316,7 @@ export function Sidebar({
         >
           <SidebarItem
             icon={LayoutDashboard}
-            label={t("nav.dashboard")}
+            label={t("nav.markets")}
             to="/dashboard"
             collapsed={collapsed}
             isMobile={isMobile}

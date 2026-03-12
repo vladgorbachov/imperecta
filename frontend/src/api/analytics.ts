@@ -59,20 +59,9 @@ export interface ComparisonResponse {
   competitors: ComparisonCompetitor[];
 }
 
-export interface AnomalyItem {
-  product_name: string;
-  competitor_name: string;
-  old_price: number;
-  new_price: number;
-  change_percent: number;
-  detected_at: string;
-}
-
 export const analyticsApi = {
   getDashboardSummary: () =>
     apiClient.get<DashboardSummary>("/analytics/dashboard/summary"),
-  getDashboardAnomalies: () =>
-    apiClient.get<{ items: AnomalyItem[] }>("/analytics/dashboard/anomalies"),
   getCompetitorBenchmark: () =>
     apiClient.get<
       Array<{
@@ -103,17 +92,6 @@ export const analyticsApi = {
     apiClient.get<ComparisonResponse>(
       `/analytics/products/${productId}/comparison`
     ),
-  getKpi: () =>
-    apiClient.get<{
-      total_products: number;
-      total_competitors: number;
-      avg_price_change_24h: number;
-      active_alerts_count: number;
-      critical_alerts_count: number;
-      revenue_impact_percent: number;
-      revenue_impact_confidence: number;
-      trend_vs_last_week: { products: number; price_change: number; alerts: number };
-    }>("/dashboard/kpi"),
   getComparisonMatrix: () =>
     apiClient.get<{
       products: { id: string; name: string }[];
@@ -125,27 +103,4 @@ export const analyticsApi = {
       "/analytics/market-forecast",
       { params: { days: days ?? 7 } }
     ),
-  getMarketOverview: (sort?: string, limit?: number) =>
-    apiClient.get<{
-      items: MarketOverviewItem[];
-      total: number;
-      sort: string;
-    }>("/dashboard/market-overview", {
-      params: { sort: sort ?? "volatile", limit: limit ?? 50 },
-    }),
 };
-
-export interface MarketOverviewItem {
-  id: string;
-  marketplace: string;
-  marketplace_domain: string;
-  product_name: string;
-  price: number;
-  currency: string;
-  change_24h: number | null;
-  change_3d: number | null;
-  change_1w: number | null;
-  change_1m: number | null;
-  sparkline_data: number[];
-  last_updated: string;
-}

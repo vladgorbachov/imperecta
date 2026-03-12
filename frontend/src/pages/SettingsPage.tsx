@@ -33,13 +33,15 @@ import { toast } from "sonner";
 const BOT_USERNAME = "@ImperectaBot";
 const BOT_URL = "https://t.me/ImperectaBot";
 const CODE_DURATION_SEC = 300;
-// Align with backend entitlements. Trial=full access; Free(starter)=50; Paid=business/pro
-const PLAN_LIMITS: Record<string, { products: number; competitors: number }> = {
-  trial: { products: 999, competitors: 999 },
-  starter: { products: 50, competitors: 15 },
-  business: { products: 100, competitors: 30 },
-  pro: { products: 999, competitors: 999 },
-};
+function getPlanLimits(plan: string): { products: number; competitors: number } {
+  switch (plan) {
+    case "trial": return { products: 999, competitors: 999 };
+    case "starter": return { products: 50, competitors: 15 };
+    case "business": return { products: 100, competitors: 30 };
+    case "pro": return { products: 999, competitors: 999 };
+    default: return { products: 999, competitors: 999 };
+  }
+}
 
 const TRIAL_DAYS_TOTAL = 14;
 
@@ -85,7 +87,7 @@ export function SettingsPage() {
         setDigestTone(tone as "conservative" | "balanced" | "aggressive");
       }
     }
-  }, [u?.id]);
+  }, [u]);
 
   useEffect(() => {
     if (telegramCode && codeSecondsLeft > 0) {
@@ -206,7 +208,7 @@ export function SettingsPage() {
   };
 
   const plan = (u?.plan ?? "trial").toLowerCase();
-  const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
+  const limits = getPlanLimits(plan);
   const productsCount = summary?.total_products ?? 0;
   const competitorsCount = summary?.total_competitors ?? 0;
   const productsPercent = limits.products > 0 ? (productsCount / limits.products) * 100 : 0;

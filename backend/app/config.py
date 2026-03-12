@@ -1,6 +1,6 @@
 """Application settings loaded from environment variables."""
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -16,10 +16,17 @@ class Settings(BaseSettings):
     jwt_refresh_expiration_days_remember: int = 30  # "Remember me" refresh token TTL
 
     claude_api_key: str | None = None
+    market_data_forex_url: str = "https://api.frankfurter.app/latest"
+    market_data_crypto_url: str = "https://api.coingecko.com/api/v3/coins/markets"
+    market_data_commodities_url: str = ""
+    market_data_fuel_url: str = ""
+    market_data_timeout_seconds: int = 15
+    market_data_retry_attempts: int = 3
     claude_model: str = "claude-sonnet-4-20250514"
     resend_api_key: str | None = None
     email_from: str = "noreply@imperecta.com"
     telegram_bot_token: str | None = None
+    telegram_webhook_secret: str | None = None  # Validates X-Telegram-Bot-Api-Secret-Token
     app_url: str = "https://imperecta-production.up.railway.app"
 
     proxy_list: str = ""
@@ -39,6 +46,16 @@ class Settings(BaseSettings):
         if not v.startswith("postgresql+asyncpg://"):
             raise ValueError("DATABASE_URL must start with postgresql+asyncpg://")
         return v
+
+    @model_validator(mode="after")
+    def validate_telegram_webhook_secret(self) -> "Settings":
+        """When Telegram bot is enabled, webhook secret is required (all environments)."""
+        if self.telegram_bot_token and not self.telegram_webhook_secret:
+            raise ValueError(
+                "TELEGRAM_WEBHOOK_SECRET must be set when TELEGRAM_BOT_TOKEN is configured. "
+                "Configure both in environment for webhook security."
+            )
+        return self
 
     @property
     def proxy_url(self) -> str | None:

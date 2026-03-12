@@ -49,6 +49,8 @@ export function getLoginUrl(returnPath: string): string {
  * Priority: next param > state.from > default.
  * Rejects public auth routes (login, register, etc.) to avoid redirect loops.
  */
+const UNSAFE_REDIRECT_PREFIXES = ["javascript:", "data:", "vbscript:", "file:"];
+
 export function getReturnPath(
   searchParams: URLSearchParams,
   state?: { from?: { pathname: string } } | null
@@ -57,7 +59,14 @@ export function getReturnPath(
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) {
     return DEFAULT_AUTH_RETURN;
   }
-  const pathname = raw.split("?")[0].split("#")[0];
+  const pathname = raw.split("?")[0].split("#")[0].trim();
+  const pathLower = pathname.toLowerCase();
+  if (UNSAFE_REDIRECT_PREFIXES.some((p) => pathLower.startsWith(p))) {
+    return DEFAULT_AUTH_RETURN;
+  }
+  if (pathname.includes(":")) {
+    return DEFAULT_AUTH_RETURN;
+  }
   if (isPublicRoute(pathname)) {
     return DEFAULT_AUTH_RETURN;
   }

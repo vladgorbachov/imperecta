@@ -1,5 +1,6 @@
 """Telegram webhook and account linking API."""
 
+import hmac
 import logging
 import random
 import string
@@ -9,12 +10,29 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.config import Settings
 from app.database import get_db
 from app.models.user import User
 from app.notifications.telegram_bot import send_message
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+settings = Settings()
+
+
+def _verify_telegram_webhook_secret(request: Request) -> bool:
+    """
+    Verify X-Telegram-Bot-Api-Secret-Token header.
+    When webhook is enabled (bot token set), config validator ensures secret is configured.
+    Uses constant-time comparison. Never logs the secret.
+    """
+    secret = settings.telegram_webhook_secret
+    if not secret:
+        return False
+    received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not received:
+        return False
+    return hmac.compare_digest(secret.encode(), received.encode())
 
 
 @router.post("/webhook")
@@ -25,7 +43,12 @@ async def telegram_webhook(
     """
     Receive updates from Telegram.
     Called by Telegram servers when users message the bot.
+    Validates X-Telegram-Bot-Api-Secret-Token when TELEGRAM_WEBHOOK_SECRET is set.
     """
+    if not _verify_telegram_webhook_secret(request):
+        logger.warning("Telegram webhook rejected: invalid or missing secret header")
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+
     try:
         data = await request.json()
     except Exception:
