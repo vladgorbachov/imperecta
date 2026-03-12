@@ -28,7 +28,41 @@ import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { FileText, MessageCircle, Sparkles, Lock } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { sanitizeHtml } from "@/lib/sanitize";
 import type { Digest } from "@/api/digests";
+
+/** Wrap consecutive <li>...</li> blocks in <ul>. Safe alternative to regex. */
+function wrapConsecutiveLiBlocks(html: string): string {
+  const liClose = "</li>";
+  let result = "";
+  let i = 0;
+  while (i < html.length) {
+    const liStart = html.indexOf("<li>", i);
+    if (liStart === -1) {
+      result += html.slice(i);
+      break;
+    }
+    result += html.slice(i, liStart);
+    let liEnd = html.indexOf(liClose, liStart);
+    if (liEnd === -1) {
+      result += html.slice(liStart);
+      break;
+    }
+    liEnd += liClose.length;
+    let groupEnd = liEnd;
+    while (true) {
+      const next = html.slice(groupEnd).match(/^\s*<li>/);
+      if (!next) break;
+      const nextLiStart = groupEnd + next[0].length;
+      const nextLiEnd = html.indexOf(liClose, nextLiStart);
+      if (nextLiEnd === -1) break;
+      groupEnd = nextLiEnd + liClose.length;
+    }
+    result += `<ul class="digest-ul">${html.slice(liStart, groupEnd)}</ul>`;
+    i = groupEnd;
+  }
+  return result;
+}
 
 function renderMarkdown(md: string): string {
   if (!md) return "";
@@ -43,7 +77,7 @@ function renderMarkdown(md: string): string {
     .replace(/\*(.*?)\*/g, "<em>$1</em>")
     .replace(/`(.*?)`/g, '<code class="digest-code">$1</code>')
     .replace(/^- (.*)$/gm, "<li>$1</li>");
-  out = out.replace(/(<li>.*?<\/li>\n?)+/gs, (m) => `<ul class="digest-ul">${m}</ul>`);
+  out = wrapConsecutiveLiBlocks(out);
   out = out.replace(/\n\n+/g, "<br/><br/>").replace(/\n/g, "<br/>");
   return out;
 }
@@ -312,7 +346,7 @@ function DigestModal({
 
         <div
           className="digest-content max-h-[60vh] overflow-y-auto rounded-md border border-border bg-muted/30 p-4 dark:bg-muted/20"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdown(content)) }}
         />
 
         <DialogFooter>

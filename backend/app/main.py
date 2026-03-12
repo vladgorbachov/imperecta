@@ -12,11 +12,18 @@ from app.api import api_router
 from app.api.admin import router as admin_router
 from app.api.ai import router as ai_router
 from app.api.dashboard import router as dashboard_router
+from app.api.markets import router as markets_router
 from app.config import Settings
 from app.database import Base, engine
 
 logger = logging.getLogger(__name__)
 settings = Settings()
+
+DEFAULT_JWT_SECRET = "change-me-in-production"
+if settings.app_env == "production" and settings.jwt_secret == DEFAULT_JWT_SECRET:
+    logger.warning(
+        "JWT_SECRET is default value. Set JWT_SECRET in production for security."
+    )
 
 if settings.sentry_dsn:
     import sentry_sdk
@@ -58,9 +65,12 @@ async def _setup_telegram_webhook() -> None:
         return
     webhook_url = f"{settings.app_url}/api/telegram/webhook"
     api_url = f"https://api.telegram.org/bot{token}/setWebhook"
+    payload: dict = {"url": webhook_url}
+    if settings.telegram_webhook_secret:
+        payload["secret_token"] = settings.telegram_webhook_secret
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(api_url, json={"url": webhook_url})
+            resp = await client.post(api_url, json=payload)
             data = resp.json()
             if data.get("ok"):
                 logger.info("Telegram webhook set: %s", webhook_url)
@@ -97,6 +107,7 @@ app.include_router(api_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
+app.include_router(markets_router, prefix="/api")
 
 
 @app.get("/health")

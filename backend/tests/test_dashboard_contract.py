@@ -1,4 +1,4 @@
-"""Dashboard API contract tests — verify shapes for dashboard components."""
+"""Dashboard API contract tests. KPI, anomalies, aggregate-trend. Market overview uses /api/markets/overview."""
 
 import pytest
 

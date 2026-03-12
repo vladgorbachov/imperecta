@@ -13,13 +13,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 
 interface ComparisonMatrixProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  products: { id: string; name: string }[];
-  competitors: { id: string; name: string }[];
+  products?: { id: string; name: string }[];
+  competitors?: { id: string; name: string }[];
 }
 
 function toMarketplaceDisplay(m: string): string {
@@ -35,8 +34,6 @@ function toMarketplaceDisplay(m: string): string {
 export function ComparisonMatrix({
   open,
   onOpenChange,
-  products: _products,
-  competitors: _competitors,
 }: ComparisonMatrixProps) {
   const { t } = useTranslation();
 
@@ -107,7 +104,7 @@ export function ComparisonMatrix({
                     {p.name}
                   </div>,
                   ...competitors.map((c, ci) => {
-                    const diff = matrix[pi]?.[ci];
+                    const diff = matrix.at(pi)?.at(ci);
                     if (diff == null)
                       return (
                         <div key={`${p.id}-${c.id}`} className="bg-background p-1" />

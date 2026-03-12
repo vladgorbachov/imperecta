@@ -34,12 +34,17 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { TrendsChart } from "@/components/analytics/TrendsChart";
-import { AdvancedScenarioSimulator } from "@/components/analytics/AdvancedScenarioSimulator";
 import { MarketComparisonSection } from "@/components/analytics/MarketComparisonSection";
 
 type Period = "7d" | "30d" | "90d";
 
-const PERIOD_DAYS: Record<Period, number> = { "7d": 7, "30d": 30, "90d": 90 };
+function getPeriodDays(period: Period): number {
+  switch (period) {
+    case "7d": return 7;
+    case "30d": return 30;
+    case "90d": return 90;
+  }
+}
 
 export function AnalyticsPage() {
   const { t, i18n } = useTranslation();
@@ -49,7 +54,7 @@ export function AnalyticsPage() {
   const [category, setCategory] = useState<string>("all");
   const [competitorFilter, setCompetitorFilter] = useState<string[]>([]);
 
-  const days = PERIOD_DAYS[period];
+  const days = getPeriodDays(period);
 
   const { data: productsData } = useQuery({
     queryKey: ["products", "analytics"],
@@ -105,7 +110,7 @@ export function AnalyticsPage() {
     trendData?.forecast_labels?.map((date, i) => ({
       date,
       dateLabel: formatChartDate(new Date(date), locale),
-      forecast: trendData.forecast[i] ?? 0,
+      forecast: trendData.forecast.at(i) ?? 0,
     })) ?? [];
 
   const marketText = marketForecast?.summary ?? marketForecast?.text ?? "";
@@ -272,7 +277,6 @@ export function AnalyticsPage() {
             </div>
           </div>
 
-          <AdvancedScenarioSimulator />
         </TabsContent>
 
         <TabsContent value="comparison" className="mt-6">

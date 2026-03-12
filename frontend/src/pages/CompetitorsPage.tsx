@@ -69,23 +69,25 @@ type ScraperType = "auto" | "ozon_api" | "wb_api" | "css_selector" | "json_api";
 type ViewMode = "grid" | "table";
 
 function mapScraperToApi(type: ScraperType): string {
-  const map: Record<ScraperType, string> = {
-    auto: "auto",
-    ozon_api: "ozon",
-    wb_api: "wildberries",
-    css_selector: "generic",
-    json_api: "generic",
-  };
-  return map[type] ?? "auto";
+  switch (type) {
+    case "auto": return "auto";
+    case "ozon_api": return "ozon";
+    case "wb_api": return "wildberries";
+    case "css_selector": return "generic";
+    case "json_api": return "generic";
+    default: return "auto";
+  }
 }
 
-const SCRAPER_KEYS: Record<ScraperType, string> = {
-  auto: "competitors.scraperAuto",
-  ozon_api: "competitors.scraperOzonApi",
-  wb_api: "competitors.scraperWbApi",
-  css_selector: "competitors.scraperCss",
-  json_api: "competitors.scraperJsonApi",
-};
+function getScraperLabel(type: ScraperType): string {
+  switch (type) {
+    case "auto": return "competitors.scraperAuto";
+    case "ozon_api": return "competitors.scraperOzonApi";
+    case "wb_api": return "competitors.scraperWbApi";
+    case "css_selector": return "competitors.scraperCss";
+    case "json_api": return "competitors.scraperJsonApi";
+  }
+}
 
 function detectScraperFromUrl(url: string): ScraperType {
   const lower = url.toLowerCase();
@@ -313,7 +315,7 @@ export function CompetitorsPage() {
     setProductForm((f) => ({ ...f, scraper_type: detected }));
   };
 
-  const handleWhatIsDoingNow = (_competitor: Competitor) => {
+  const handleWhatIsDoingNow = () => {
     toast.info(t("competitors.aiAnalyzing"));
     // TODO: POST /api/ai/competitor-analysis
   };
@@ -946,9 +948,9 @@ function AddCompetitorProductDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(SCRAPER_KEYS) as ScraperType[]).map((k) => (
+                    {(["auto", "ozon_api", "wb_api", "css_selector", "json_api"] as const).map((k) => (
                       <SelectItem key={k} value={k}>
-                        {t(SCRAPER_KEYS[k])}
+                        {t(getScraperLabel(k))}
                       </SelectItem>
                     ))}
                   </SelectContent>

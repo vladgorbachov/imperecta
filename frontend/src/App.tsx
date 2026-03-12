@@ -5,7 +5,7 @@
  *
  * common: save, cancel, delete, loading, error, back, next, search, noData, confirm, close,
  *   add, edit, actions, status, date, price, name, comingSoon, underDevelopment, currency,
- *   dash, copy, copied, notFound, backToDashboard
+ *   dash, copy, copied, notFound, backToMarkets
  *
  * nav: dashboard, products, competitors, alerts, digests, import, settings, logo
  *

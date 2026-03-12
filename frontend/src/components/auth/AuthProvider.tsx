@@ -3,31 +3,11 @@
  * Exposes: isAuthenticated, user, login, logout.
  */
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAuthStore } from "@/stores/authStore";
+import { AuthContext } from "./authContext";
 
-export interface AuthUser {
-  name: string;
-  email: string;
-  plan: string;
-  trialDaysLeft: number;
-}
-
-interface AuthContextValue {
-  isAuthenticated: boolean;
-  user: AuthUser | null;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+export type { AuthUser } from "./authContext";
 
 function computeTrialDaysLeft(trialEndsAt: string | null): number {
   if (!trialEndsAt) return 0;
@@ -69,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = "/login";
   }, [logoutStore]);
 
-  const value: AuthContextValue = {
+  const value = {
     isAuthenticated: !!accessToken,
     user,
     login,
@@ -77,12 +57,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
-  return ctx;
 }

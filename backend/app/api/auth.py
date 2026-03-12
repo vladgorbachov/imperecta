@@ -244,15 +244,19 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
     return _build_user_response(current_user)
 
 
+ALLOWED_USER_UPDATE_FIELDS = frozenset({"name", "company_name", "language", "ai_tone", "avatar_url"})
+
+
 @router.put("/me", response_model=UserResponse)
 async def update_me(
     data: UserUpdate,
     current_user: CurrentUser,
     db: DbSession,
 ) -> UserResponse:
-    """Update current user profile."""
+    """Update current user profile. Only allowed fields are applied."""
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
-        setattr(current_user, key, value)
+        if key in ALLOWED_USER_UPDATE_FIELDS:
+            setattr(current_user, key, value)
     await db.flush()
     return _build_user_response(current_user)

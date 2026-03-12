@@ -36,7 +36,8 @@ import { CHART_COLORS, CHART_PRIMARY } from "@/lib/design-tokens";
 import { analyticsApi } from "@/api/analytics";
 import { useProduct } from "@/hooks/useProducts";
 import { useAlerts } from "@/hooks/useAlerts";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -126,26 +127,49 @@ export function ProductDetailPage() {
     [alerts, id]
   );
 
+  const forecastData = useMemo(() => {
+    const days = 14;
+    const data: Array<{ date: string; dateLabel: string; forecast: number; low: number; high: number }> = [];
+    const base = 120;
+    const now = new Date();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const trend = i * 2;
+      const noise = () => (Math.random() - 0.5) * 15;
+      const f = Math.round(base + trend + noise());
+      data.push({
+        date: dateStr,
+        dateLabel: formatChartDate(d, locale),
+        forecast: f,
+        low: Math.max(0, f - 20),
+        high: f + 25,
+      });
+    }
+    return data;
+  }, [locale]);
+
   const chartData = useMemo((): ChartDataPoint[] => {
     if (!priceHistory || !product) return [];
     const myPrice = Number(priceHistory.my_price);
-    const dateToPoint: Record<string, ChartDataPoint> = {};
+    const dateToPoint = new Map<string, ChartDataPoint>();
 
     priceHistory.competitors.forEach((comp) => {
+      const name = String(comp.competitor_name ?? "").slice(0, 100);
+      if (!name) return;
       comp.data_points.forEach((dp) => {
         const dateStr = typeof dp.date === "string" ? dp.date.slice(0, 10) : String(dp.date).slice(0, 10);
-        if (!dateToPoint[dateStr]) {
-          dateToPoint[dateStr] = {
-            date: dateStr,
-            dateLabel: "",
-            myPrice,
-          };
+        let point = dateToPoint.get(dateStr);
+        if (!point) {
+          point = { date: dateStr, dateLabel: "", myPrice };
+          dateToPoint.set(dateStr, point);
         }
-        (dateToPoint[dateStr] as Record<string, unknown>)[comp.competitor_name] = Number(dp.price);
+        Object.defineProperty(point, name, { value: Number(dp.price), enumerable: true });
       });
     });
 
-    const points = Object.values(dateToPoint).sort(
+    const points = Array.from(dateToPoint.values()).sort(
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
     return points.map((p) => ({
@@ -235,30 +259,6 @@ export function ProductDetailPage() {
       : aiRecType === "raise"
         ? "productDetail.aiRecommendationRaise"
         : "productDetail.aiRecommendationKeep";
-
-  // TODO: GET /api/products/{id}/forecast
-  const forecastData = useMemo(() => {
-    const days = 14;
-    const data: Array<{ date: string; dateLabel: string; forecast: number; low: number; high: number }> = [];
-    const base = 120;
-    const now = new Date();
-    for (let i = 0; i < days; i++) {
-      const d = new Date(now);
-      d.setDate(d.getDate() + i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const trend = i * 2;
-      const noise = () => (Math.random() - 0.5) * 15;
-      const f = Math.round(base + trend + noise());
-      data.push({
-        date: dateStr,
-        dateLabel: formatChartDate(d, locale),
-        forecast: f,
-        low: Math.max(0, f - 20),
-        high: f + 25,
-      });
-    }
-    return data;
-  }, [locale]);
 
   return (
     <div className="space-y-6">
@@ -457,13 +457,13 @@ export function ProductDetailPage() {
                     );
                   }}
                 />
-                {forecastData.map((_, i) => (
+                {forecastData.map((item, i) => (
                   <ReferenceArea
                     key={i}
                     x1={i - 0.5}
                     x2={i + 0.5}
-                    y1={forecastData[i]?.low ?? 0}
-                    y2={forecastData[i]?.high ?? 0}
+                    y1={item?.low ?? 0}
+                    y2={item?.high ?? 0}
                     fill="var(--accent)"
                     fillOpacity={0.15}
                   />

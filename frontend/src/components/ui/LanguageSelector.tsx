@@ -11,8 +11,6 @@ import {
   SUPPORTED_LANGUAGE_CODES,
   type LanguageCode,
 } from "@/i18n";
-import { authApi } from "@/api/auth";
-import { useAuthStore } from "@/stores/authStore";
 
 const STORAGE_KEY = "imperecta_language";
 
@@ -65,34 +63,4 @@ export function LanguageSelector({
       </SelectContent>
     </Select>
   );
-}
-
-export function useLanguage() {
-  const { i18n } = useTranslation();
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const setUser = useAuthStore((s) => s.setUser);
-
-  const currentLanguage =
-    SUPPORTED_LANGUAGES.find((l) => l.code === i18n.language) ??
-    SUPPORTED_LANGUAGES.find((l) => l.code === "en")!;
-
-  const changeLanguage = async (code: LanguageCode) => {
-    i18n.changeLanguage(code);
-    localStorage.setItem(STORAGE_KEY, code);
-
-    if (accessToken) {
-      try {
-        const { data } = await authApi.updateMe({ language: code });
-        if (data) setUser(data);
-      } catch {
-        // Silently ignore API errors; local language change still applied
-      }
-    }
-  };
-
-  return {
-    currentLanguage,
-    changeLanguage,
-    languages: SUPPORTED_LANGUAGES,
-  };
 }

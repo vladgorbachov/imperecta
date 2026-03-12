@@ -15,46 +15,55 @@ export interface PromoBadgeProps {
 /**
  * Badge for product promo states: promo/discount (amber glow), out_of_stock (muted), new (accent).
  */
+type PromoConfig = { label: string; style: object };
+
+function getPromoConfig(type: PromoType, label: string | undefined, t: (k: string, opts?: object) => string): PromoConfig {
+  switch (type) {
+    case "promo":
+      return {
+        label: label ?? t("ui.promo"),
+        style: {
+          background: "var(--color-promo-bg)",
+          border: "1px solid var(--color-promo-border)",
+          color: "var(--color-promo)",
+          boxShadow: "0 0 8px var(--glow-amber)",
+        },
+      };
+    case "discount":
+      return {
+        label: label != null ? t("ui.discount", { percent: label }) : t("ui.promo"),
+        style: {
+          background: "var(--color-promo-bg)",
+          border: "1px solid var(--color-promo-border)",
+          color: "var(--color-promo)",
+          boxShadow: "0 0 8px var(--glow-amber)",
+        },
+      };
+    case "out_of_stock":
+      return {
+        label: label ?? t("ui.outOfStock"),
+        style: {
+          background: "var(--color-muted-bg)",
+          border: "1px solid var(--glass-border)",
+          color: "var(--color-out-of-stock)",
+        },
+      };
+    case "new":
+      return {
+        label: label ?? t("ui.new"),
+        style: {
+          background: "var(--accent-bg)",
+          border: "1px solid var(--accent-border)",
+          color: "var(--accent)",
+          boxShadow: "0 0 8px var(--accent-glow)",
+        },
+      };
+  }
+}
+
 export function PromoBadge({ type, label, className }: PromoBadgeProps) {
   const { t } = useTranslation();
-
-  const config = {
-    promo: {
-      label: label ?? t("ui.promo"),
-      style: {
-        background: "var(--color-promo-bg)",
-        border: "1px solid var(--color-promo-border)",
-        color: "var(--color-promo)",
-        boxShadow: "0 0 8px var(--glow-amber)",
-      },
-    },
-    discount: {
-      label: label != null ? t("ui.discount", { percent: label }) : t("ui.promo"),
-      style: {
-        background: "var(--color-promo-bg)",
-        border: "1px solid var(--color-promo-border)",
-        color: "var(--color-promo)",
-        boxShadow: "0 0 8px var(--glow-amber)",
-      },
-    },
-    out_of_stock: {
-      label: label ?? t("ui.outOfStock"),
-      style: {
-        background: "var(--color-muted-bg)",
-        border: "1px solid var(--glass-border)",
-        color: "var(--color-out-of-stock)",
-      },
-    },
-    new: {
-      label: label ?? t("ui.new"),
-      style: {
-        background: "var(--accent-bg)",
-        border: "1px solid var(--accent-border)",
-        color: "var(--accent)",
-        boxShadow: "0 0 8px var(--accent-glow)",
-      },
-    },
-  }[type];
+  const config = getPromoConfig(type, label, t);
 
   return (
     <span

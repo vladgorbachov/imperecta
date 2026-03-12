@@ -28,19 +28,18 @@ test.describe("Dashboard", () => {
     expect(errors.length).toBe(0);
   });
 
-  test("should show KPI cards", async ({ page }) => {
-    const testEmail = `e2e_kpi_${Date.now()}@test.com`;
+  test("should show Markets page content", async ({ page }) => {
+    const testEmail = `e2e_markets_${Date.now()}@test.com`;
     await page.goto("/register");
-    await page.fill('input[name="name"]', "E2E KPI");
+    await page.fill('input[name="name"]', "E2E Markets");
     await page.fill('input[type="email"]', testEmail);
     await page.fill('input[type="password"]', "E2eTestPass123!");
     await page.click('button[type="submit"]');
     await page.waitForURL(/dashboard/, { timeout: 10_000 });
 
     await page.waitForTimeout(3000);
-    const cards = page.locator("[class*='card'], [class*='Card']");
-    const count = await cards.count();
-    expect(count).toBeGreaterThan(0);
+    const marketOverview = page.getByText(/Market Overview|Market overview/i);
+    await expect(marketOverview).toBeVisible({ timeout: 5000 });
   });
 
   test("sidebar navigation works", async ({ page }) => {

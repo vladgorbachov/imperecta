@@ -1,16 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi } from "@/api/analytics";
 
-export function useDashboardSummary() {
-  return useQuery({
-    queryKey: ["analytics", "dashboard", "summary"],
-    queryFn: async () => {
-      const { data } = await analyticsApi.getDashboardSummary();
-      return data;
-    },
-  });
-}
-
 export function usePriceHistory(
   productId: string | undefined,
   period: "7d" | "30d" | "90d" = "7d"

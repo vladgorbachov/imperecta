@@ -68,18 +68,25 @@ import {
 import { formatRelativeTime } from "@/lib/formatters";
 import type { AdminMarketplace as AdminMarketplaceType } from "@/api/admin";
 
-const COUNTRY_FLAGS: Record<string, string> = {
-  RU: "🇷🇺",
-  KZ: "🇰🇿",
-  BY: "🇧🇾",
-  UA: "🇺🇦",
-  DE: "🇩🇪",
-  PL: "🇵🇱",
-  XX: "🌐",
-};
-
 function getCountryFlag(country: string): string {
-  return COUNTRY_FLAGS[country] ?? country;
+  switch (country) {
+    case "RU":
+      return "🇷🇺";
+    case "KZ":
+      return "🇰🇿";
+    case "BY":
+      return "🇧🇾";
+    case "UA":
+      return "🇺🇦";
+    case "DE":
+      return "🇩🇪";
+    case "PL":
+      return "🇵🇱";
+    case "XX":
+      return "🌐";
+    default:
+      return country;
+  }
 }
 
 function ClaudeStatusCard() {
@@ -381,28 +388,20 @@ export function AdminPage() {
           ) : (
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={scrapeActivity.labels.map((l, i) => ({
-                  date: l,
-                  [scrapeActivity.datasets[0]?.label ?? "Успешно"]:
-                    scrapeActivity.datasets[0]?.data[i] ?? 0,
-                  [scrapeActivity.datasets[1]?.label ?? "Ошибки"]:
-                    scrapeActivity.datasets[1]?.data[i] ?? 0,
-                }))}>
+                <BarChart
+                  data={scrapeActivity.labels.map((l, i) => ({
+                    date: l,
+                    success: scrapeActivity.datasets[0]?.data.at(i) ?? 0,
+                    errors: scrapeActivity.datasets[1]?.data.at(i) ?? 0,
+                  }))}
+                >
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Legend />
-                  <Bar
-                    dataKey={scrapeActivity.datasets[0]?.label ?? "Успешно"}
-                    fill="#22c55e"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar
-                    dataKey={scrapeActivity.datasets[1]?.label ?? "Ошибки"}
-                    fill="#ef4444"
-                    radius={[4, 4, 0, 0]}
-                  />
+                  <Bar dataKey="success" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="errors" fill="#ef4444" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -425,7 +424,7 @@ export function AdminPage() {
                   <Pie
                     data={errorDistribution.labels.map((l, i) => ({
                       name: l,
-                      value: errorDistribution.data[i] ?? 0,
+                      value: errorDistribution.data.at(i) ?? 0,
                     }))}
                     cx="50%"
                     cy="50%"

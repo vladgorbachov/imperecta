@@ -7,12 +7,6 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi } from "@/api/analytics";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-
-interface MarketComparisonSectionProps {
-  products: { id: string; name: string }[];
-  competitors: { id: string; name: string }[];
-}
 
 function toMarketplaceDisplay(m: string): string {
   const map: Record<string, string> = {
@@ -24,10 +18,7 @@ function toMarketplaceDisplay(m: string): string {
   return map[m?.toLowerCase() ?? ""] ?? m;
 }
 
-export function MarketComparisonSection({
-  products: _products,
-  competitors: _competitors,
-}: MarketComparisonSectionProps) {
+export function MarketComparisonSection() {
   const { t } = useTranslation();
 
   const { data: matrixData, isLoading } = useQuery({
@@ -106,7 +97,7 @@ export function MarketComparisonSection({
               {p.name}
             </div>,
             ...competitors.map((c, ci) => {
-              const diff = matrix[pi]?.[ci];
+              const diff = matrix.at(pi)?.at(ci);
               if (diff == null) return <div key={`${p.id}-${c.id}`} className="bg-background p-1" />;
               return (
                 <div

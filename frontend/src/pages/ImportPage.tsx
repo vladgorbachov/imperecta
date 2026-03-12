@@ -46,13 +46,15 @@ import { toast } from "sonner";
 
 const KNOWN_COLUMNS = ["name", "sku", "price", "url", "category"] as const;
 const REQUIRED_COLUMNS = ["name", "price"] as const;
-const COLUMN_KEYS: Record<(typeof KNOWN_COLUMNS)[number], string> = {
-  name: "import.columnName",
-  sku: "import.columnSku",
-  price: "import.columnPrice",
-  url: "import.columnUrl",
-  category: "import.columnCategory",
-};
+function getColumnLabel(col: (typeof KNOWN_COLUMNS)[number]): string {
+  switch (col) {
+    case "name": return "import.columnName";
+    case "sku": return "import.columnSku";
+    case "price": return "import.columnPrice";
+    case "url": return "import.columnUrl";
+    case "category": return "import.columnCategory";
+  }
+}
 
 function parseCsv(
   text: string
@@ -64,7 +66,7 @@ function parseCsv(
     let current = "";
     let inQuotes = false;
     for (let i = 0; i < line.length; i++) {
-      const c = line[i];
+      const c = line.charAt(i);
       if (c === '"') {
         inQuotes = !inQuotes;
       } else if ((c === "," && !inQuotes) || (c === ";" && !inQuotes)) {
@@ -83,30 +85,19 @@ function parseCsv(
   return { headers, rows, allRows, totalRows: allRows.length };
 }
 
+const COLUMN_ALIASES = new Map<string, (typeof KNOWN_COLUMNS)[number]>([
+  ["name", "name"], ["nazvanie", "name"], ["название", "name"], ["product", "name"],
+  ["title", "name"], ["product_name", "name"],
+  ["sku", "sku"], ["артикул", "sku"], ["article", "sku"],
+  ["price", "price"], ["цена", "price"], ["cost", "price"],
+  ["url", "url"], ["link", "url"], ["ссылка", "url"],
+  ["category", "category"], ["категория", "category"], ["marketplace", "category"],
+]);
+
 function autoMapColumn(header: string): (typeof KNOWN_COLUMNS)[number] | null {
   const lower = header.toLowerCase().trim();
-  const aliases: Record<string, (typeof KNOWN_COLUMNS)[number]> = {
-    name: "name",
-    nazvanie: "name",
-    название: "name",
-    product: "name",
-    title: "name",
-    product_name: "name",
-    sku: "sku",
-    артикул: "sku",
-    article: "sku",
-    price: "price",
-    цена: "price",
-    cost: "price",
-    url: "url",
-    link: "url",
-    ссылка: "url",
-    category: "category",
-    категория: "category",
-    marketplace: "category",
-  };
   const normalized = lower.replace(/\s+/g, "_");
-  return aliases[normalized] ?? aliases[lower] ?? null;
+  return COLUMN_ALIASES.get(normalized) ?? COLUMN_ALIASES.get(lower) ?? null;
 }
 
 function formatFileSize(bytes: number): string {
@@ -126,7 +117,7 @@ export function ImportPage() {
   const [rows, setRows] = useState<string[][]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [totalRows, setTotalRows] = useState(0);
-  const [columnMap, setColumnMap] = useState<Record<string, string>>({});
+  const [columnMap, setColumnMap] = useState<Map<string, string>>(new Map());
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [result, setResult] = useState<{
@@ -152,11 +143,10 @@ export function ImportPage() {
       setRows(r);
       setAllRows(ar);
       setTotalRows(tr);
-      const map: Record<string, string> = {};
+      const map = new Map<string, string>();
       h.forEach((header) => {
         const mapped = autoMapColumn(header);
-        if (mapped) map[header] = mapped;
-        else map[header] = "";
+        map.set(header, mapped ?? "");
       });
       setColumnMap(map);
       setAutoCategorizeDismissed(false);
@@ -189,7 +179,7 @@ export function ImportPage() {
     setHeaders([]);
     setRows([]);
     setAllRows([]);
-    setColumnMap({});
+    setColumnMap(new Map());
     setResult(null);
     setProductsWithoutCategory(0);
     setAutoCategorizeDismissed(false);
@@ -199,18 +189,22 @@ export function ImportPage() {
   // Recompute productsWithoutCategory when column mapping changes
   useEffect(() => {
     if (headers.length === 0 || allRows.length === 0) return;
-    const catHeader = headers.find((h) => columnMap[h] === "category") ?? null;
+    const catHeader = headers.find((h) => columnMap.get(h) === "category") ?? null;
     const catIdx = catHeader ? headers.indexOf(catHeader) : -1;
     const count =
-      catIdx >= 0 ? allRows.filter((row) => !(row[catIdx] ?? "").trim()).length : 0;
+      catIdx >= 0 ? allRows.filter((row) => !(row.at(catIdx) ?? "").trim()).length : 0;
     setProductsWithoutCategory(count);
   }, [headers, columnMap, allRows]);
 
   const handleMappingChange = (header: string, value: string) => {
-    setColumnMap((prev) => ({ ...prev, [header]: value }));
+    setColumnMap((prev) => {
+      const next = new Map(prev);
+      next.set(header, value);
+      return next;
+    });
   };
 
-  const mappedColumns = Object.values(columnMap).filter(Boolean);
+  const mappedColumns = Array.from(columnMap.values()).filter(Boolean);
   const requiredMapped = REQUIRED_COLUMNS.every((r) => mappedColumns.includes(r));
   const productCount = totalRows;
 
@@ -223,20 +217,20 @@ export function ImportPage() {
       setImportProgress(30);
       const text = await file.text();
       const { headers: h, allRows } = parseCsv(text);
-      const revMap: Record<string, string> = {};
+      const revMap = new Map<string, string>();
       h.forEach((header) => {
-        const target = columnMap[header];
-        if (target) revMap[target] = header;
+        const target = columnMap.get(header);
+        if (target) revMap.set(target, header);
       });
       const csvLines: string[] = [KNOWN_COLUMNS.join(",")];
       for (const row of allRows) {
-        const obj: Record<string, string> = {};
+        const obj = new Map<string, string>();
         h.forEach((header, i) => {
-          obj[header] = row[i] ?? "";
+          obj.set(header, row.at(i) ?? "");
         });
         const mappedRow = KNOWN_COLUMNS.map((col) => {
-          const src = revMap[col];
-          return src ? (obj[src] ?? "") : "";
+          const src = revMap.get(col);
+          return src ? (obj.get(src) ?? "") : "";
         });
         csvLines.push(mappedRow.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
       }
@@ -373,7 +367,7 @@ export function ImportPage() {
                   <TableHeader>
                     <TableRow>
                       {headers.map((header) => {
-                        const mapped = columnMap[header];
+                        const mapped = columnMap.get(header);
                         const requiredUnmapped = !requiredMapped;
                         return (
                           <TableHead
@@ -400,7 +394,7 @@ export function ImportPage() {
                                   {KNOWN_COLUMNS.map((col) => (
                                     <SelectItem key={col} value={col}>
                                       <span className="flex items-center gap-2">
-                                        {t(COLUMN_KEYS[col])}
+                                        {t(getColumnLabel(col))}
                                         {autoMapColumn(header) === col && (
                                           <CheckCircle className="size-3.5" style={{ color: "var(--color-price-down)" }} />
                                         )}
@@ -423,7 +417,7 @@ export function ImportPage() {
                             key={header}
                             className="max-w-32 truncate text-sm"
                           >
-                            {row[j] ?? ""}
+                            {row.at(j) ?? ""}
                           </TableCell>
                         ))}
                       </TableRow>

@@ -21,4 +21,8 @@ celery_app.conf.beat_schedule = {
         "task": "cleanup_old_data",
         "schedule": crontab(minute=0, hour=4, day_of_week=0),
     },
+    "ingest-market-data": {
+        "task": "ingest_market_data",
+        "schedule": crontab(minute=0, hour="*/2"),
+    },
 }

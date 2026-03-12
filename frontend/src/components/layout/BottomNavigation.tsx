@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { path: "/dashboard", icon: LayoutDashboard, i18nKey: "nav.dashboard" },
+  { path: "/dashboard", icon: LayoutDashboard, i18nKey: "nav.markets" },
   { path: "/products", icon: Package, i18nKey: "nav.products" },
   { path: "/analytics", icon: TrendingUp, i18nKey: "nav.analytics" },
   { path: "/ai", icon: Bot, i18nKey: "nav.ai" },
