@@ -1,6 +1,7 @@
 /**
  * ISO 3166-1 alpha-2 country codes with display names and local currency.
  * Used for country selector and ticker bar FX/fuel prioritization.
+ * Display names are English fallback; use i18n (countries.CODE) for localized labels.
  */
 
 export interface CountryInfo {
@@ -9,7 +10,7 @@ export interface CountryInfo {
   currency: string;
 }
 
-/** Countries supported for Markets ticker. Sorted alphabetically by name. */
+/** Countries supported for Markets ticker. Sorted alphabetically by English name. */
 export const COUNTRIES: CountryInfo[] = [
   { code: "AE", name: "United Arab Emirates", currency: "AED" },
   { code: "AR", name: "Argentina", currency: "ARS" },

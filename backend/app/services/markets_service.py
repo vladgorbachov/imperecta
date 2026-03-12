@@ -1,9 +1,12 @@
 """Markets domain service. Reads from markets tables. Supports 2-hour scheduled refresh."""
 
+import logging
 from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -115,6 +118,8 @@ class MarketsService:
         )
         rows = result.scalars().unique().all()
         last_at = rows[0].refreshed_at if rows else None
+        if not rows:
+            logger.debug("get_forex: no rows in markets_forex")
         return {
             "items": [
                 {
@@ -137,6 +142,8 @@ class MarketsService:
         )
         rows = result.scalars().unique().all()
         last_at = rows[0].refreshed_at if rows else None
+        if not rows:
+            logger.debug("get_crypto: no rows in markets_crypto")
         return {
             "items": [
                 {
@@ -258,6 +265,8 @@ class MarketsService:
         total = len(rows)
         rows = rows[:limit]
         last_at = rows[0].refreshed_at if rows else None
+        if total == 0:
+            logger.debug("get_overview: no rows in markets_overview")
         return {
             "items": [
                 {

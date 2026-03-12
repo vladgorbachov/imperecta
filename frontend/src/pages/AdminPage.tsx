@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import {
   Users,
   Store,
@@ -64,9 +65,11 @@ import {
   useClaudeStatus,
   useAddMarketplace,
   useDeleteMarketplace,
+  useMarketsIngest,
 } from "@/hooks/useAdmin";
 import { formatRelativeTime } from "@/lib/formatters";
 import type { AdminMarketplace as AdminMarketplaceType } from "@/api/admin";
+import { marketsApi, marketsQueryKeys } from "@/api/markets";
 
 function getCountryFlag(country: string): string {
   switch (country) {
@@ -196,6 +199,72 @@ function ClaudeStatusCard() {
             </Button>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MarketsRefreshCard() {
+  const { t, i18n } = useTranslation();
+  const ingest = useMarketsIngest();
+  const { data: refreshMetadata } = useQuery({
+    queryKey: marketsQueryKeys.refreshMetadata(),
+    queryFn: async () => {
+      const { data } = await marketsApi.getRefreshMetadata();
+      return data;
+    },
+  });
+
+  const lastSuccess = refreshMetadata?.items?.find(
+    (i) => i.refresh_type === "forex" || i.refresh_type === "crypto"
+  )?.last_successful_refresh;
+  const lastError = refreshMetadata?.items?.find(
+    (i) => i.refresh_type === "forex" || i.refresh_type === "crypto"
+  )?.last_failed_refresh;
+
+  const handleRefresh = async () => {
+    try {
+      await ingest.mutateAsync();
+      toast.success(t("admin.markets.refreshEnqueued"));
+    } catch {
+      toast.error(t("admin.markets.refreshError"));
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("admin.markets.title")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground">
+            {lastSuccess ? (
+              <span>
+                {t("admin.markets.lastRefresh")}:{" "}
+                {formatRelativeTime(lastSuccess, i18n.language || "en")}
+              </span>
+            ) : lastError ? (
+              <span className="text-destructive">
+                {t("admin.markets.lastRefresh")}: {t("admin.claude.error")}
+              </span>
+            ) : (
+              <span>{t("markets.analytics.noData")}</span>
+            )}
+          </div>
+          <Button
+            onClick={handleRefresh}
+            disabled={ingest.isPending}
+            variant="outline"
+          >
+            {ingest.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4" />
+            )}{" "}
+            {t("admin.markets.refresh")}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -376,6 +445,8 @@ export function AdminPage() {
           </div>
         </CardContent>
       </Card>
+
+      <MarketsRefreshCard />
 
       {/* Scrape activity chart */}
       <Card>

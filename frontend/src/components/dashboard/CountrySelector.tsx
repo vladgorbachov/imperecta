@@ -1,14 +1,17 @@
 /**
  * Searchable country dropdown for Markets page.
  * Saves selection to user preferences. First 10 visible, full scroll list.
+ * Country names localized via i18n. Search works in all 8 app languages.
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { COUNTRIES, type CountryInfo } from "@/lib/countries";
+import { COUNTRY_NAMES_EN } from "@/lib/countryNames";
+import { matchesCountrySearch } from "@/lib/countrySearch";
 import { cn } from "@/lib/utils";
 
 const INITIAL_VISIBLE = 10;
@@ -26,28 +29,43 @@ export function CountrySelector({
   onSave,
   disabled,
 }: CountrySelectorProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language ?? "en";
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [pendingCode, setPendingCode] = useState<string | null>(value);
   const ref = useRef<HTMLDivElement>(null);
 
+  const localizedCountries = useMemo(
+    () =>
+      COUNTRIES.map((c) => ({
+        ...c,
+        name: t(`countries.${c.code}`, { defaultValue: COUNTRY_NAMES_EN[c.code] ?? c.name }),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- locale required: t() ref is stable, must recompute on language change
+    [t, locale]
+  );
+
   useEffect(() => {
-    if (open) setPendingCode(value);
+    if (open) {
+      setPendingCode(value);
+      setSearch("");
+    }
   }, [open, value]);
 
-  const filtered = search.trim()
-    ? COUNTRIES.filter((c) =>
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.code.toLowerCase().includes(search.toLowerCase())
-      )
-    : COUNTRIES;
+  const filtered = useMemo(() => {
+    const q = search.trim();
+    if (!q) return localizedCountries;
+    return localizedCountries.filter((c) =>
+      matchesCountrySearch(c.name, c.code, q, locale)
+    );
+  }, [search, localizedCountries, locale]);
 
   const displayList = filtered.slice(0, open ? undefined : INITIAL_VISIBLE);
   const hasMore = filtered.length > INITIAL_VISIBLE && !search.trim();
 
   const pendingCountry = pendingCode
-    ? COUNTRIES.find((c) => c.code === pendingCode)
+    ? localizedCountries.find((c) => c.code === pendingCode)
     : null;
 
   useEffect(() => {

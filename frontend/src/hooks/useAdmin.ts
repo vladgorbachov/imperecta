@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as adminApi from "@/api/admin";
+import { marketsApi, marketsQueryKeys } from "@/api/markets";
 
 export const useAdminStats = () =>
   useQuery({
@@ -58,5 +59,16 @@ export const useDeleteMarketplace = () => {
   return useMutation({
     mutationFn: (id: string) => adminApi.deleteMarketplace(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+};
+
+export const useMarketsIngest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => marketsApi.triggerIngest().then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: marketsQueryKeys.all });
+      qc.invalidateQueries({ queryKey: marketsQueryKeys.refreshMetadata() });
+    },
   });
 };

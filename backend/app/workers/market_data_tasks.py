@@ -24,13 +24,23 @@ def _run_async(coro):
 async def _run_full_pipeline() -> dict[str, int]:
     """Run ingestion then aggregate materialization."""
     async with async_session_maker() as db:
-        ingest_svc = MarketDataIngestionService(db)
-        ingest_results = await ingest_svc.ingest_all()
+        try:
+            ingest_svc = MarketDataIngestionService(db)
+            ingest_results = await ingest_svc.ingest_all()
 
-        agg_svc = MarketDataAggregateService(db)
-        agg_results = await agg_svc.materialize_all()
+            agg_svc = MarketDataAggregateService(db)
+            agg_results = await agg_svc.materialize_all()
 
-        return {**ingest_results, **agg_results}
+            await db.commit()
+            logger.info(
+                "Market data pipeline committed: ingest=%s aggregate=%s",
+                ingest_results,
+                agg_results,
+            )
+            return {**ingest_results, **agg_results}
+        except Exception:
+            await db.rollback()
+            raise
 
 
 @celery_app.task(name="ingest_market_data", bind=True)
