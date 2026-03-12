@@ -1,10 +1,13 @@
 /**
- * Build ticker bar display items from forex + commodities.
- * Prioritizes: fuel (gasoline, diesel, LPG) for active country, then FX pairs.
+ * Build ticker bar display items from forex + crypto + commodities.
+ * Prioritizes: fuel (gasoline, diesel, LPG) for active country, then FX pairs, then crypto.
  */
 
-import type { MarketsForexItem } from "@/api/markets";
-import type { MarketsCommodityItem } from "@/api/markets";
+import type {
+  MarketsForexItem,
+  MarketsCryptoItem,
+  MarketsCommodityItem,
+} from "@/api/markets";
 import { getCurrencyForCountry } from "./countries";
 
 export interface TickerBarItem {
@@ -13,7 +16,7 @@ export interface TickerBarItem {
   price: number;
   change_24h: number | null;
   currency: string | null;
-  type: "fuel" | "forex";
+  type: "fuel" | "forex" | "crypto";
 }
 
 /** Fuel symbols (case-insensitive). */
@@ -46,7 +49,8 @@ function normalizePair(s: string): string {
 export function buildTickerBarItems(
   forexItems: MarketsForexItem[],
   commodityItems: MarketsCommodityItem[],
-  countryCode: string
+  countryCode: string,
+  cryptoItems: MarketsCryptoItem[] = []
 ): TickerBarItem[] {
   const local = getCurrencyForCountry(countryCode);
   const result: TickerBarItem[] = [];
@@ -116,6 +120,18 @@ export function buildTickerBarItems(
       change_24h: f.change_24h,
       currency: "USD",
       type: "forex",
+    });
+  }
+
+  // 4. Crypto: top symbols
+  for (const c of cryptoItems.slice(0, 8)) {
+    result.push({
+      symbol: c.symbol,
+      name: c.symbol,
+      price: c.price,
+      change_24h: c.change_24h,
+      currency: "USD",
+      type: "crypto",
     });
   }
 

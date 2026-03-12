@@ -1,15 +1,17 @@
 """Markets domain service. Reads from markets tables. Supports 2-hour scheduled refresh."""
 
 import logging
-from datetime import datetime
-from uuid import UUID
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
-
-logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    AdminMarketplace,
+    Competitor,
+    CompetitorProduct,
     MarketsCategoryAnalytics,
     MarketsCommodity,
     MarketsCrypto,
@@ -22,7 +24,17 @@ from app.models import (
     MarketsRefreshStatus,
     MarketsRefreshType,
     MarketsTickerItem,
+    PriceSnapshot,
+    Product,
 )
+
+logger = logging.getLogger(__name__)
+
+MARKETPLACE_DOMAIN: dict[str, str] = {
+    "ozon": "ozon.ru",
+    "wildberries": "wildberries.ru",
+    "kaspi": "kaspi.kz",
+}
 
 
 class MarketsService:
@@ -204,87 +216,161 @@ class MarketsService:
 
     async def get_overview(self, sort: str = "volatile", limit: int = 50) -> dict:
         """
-        Market Overview tabbed table data. Deterministic ranking, no mock/random.
-
-        Formulas:
-        - volatile: max(|change_24h|, |change_3d|) DESC
-        - trending: |change_24h| DESC
-        - gainers: change_24h > 0 only, change_24h DESC
-        - losers: change_24h < 0 only, change_24h ASC
-        - recent: refreshed_at DESC
-
-        Tie-break: id ASC (UUID lexicographic) for determinism.
-        Sparse data: null change treated as 0; gainers/losers exclude null/zero.
+        Market Overview: marketplace products from user's competitor products.
+        Returns products from Ozon, Wildberries, Kaspi, etc. with price changes.
         """
-        result = await self.db.execute(
-            select(MarketsOverviewItemModel).order_by(
-                MarketsOverviewItemModel.refreshed_at.desc()
+        now = datetime.now(timezone.utc)
+        day_ago = now - timedelta(hours=24)
+        three_d_ago = now - timedelta(days=3)
+        week_ago = now - timedelta(days=7)
+        month_ago = now - timedelta(days=30)
+
+        cp_result = await self.db.execute(
+            select(
+                CompetitorProduct.id,
+                CompetitorProduct.last_price,
+                CompetitorProduct.last_checked_at,
+                CompetitorProduct.name.label("cp_name"),
+                Product.name.label("product_name"),
+                Competitor.marketplace,
+            )
+            .join(Product, CompetitorProduct.product_id == Product.id)
+            .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+            .where(
+                Product.user_id == self.user_id,
+                Product.is_active.is_(True),
+                CompetitorProduct.is_active.is_(True),
+                CompetitorProduct.last_price.isnot(None),
             )
         )
-        rows = list(result.scalars().unique().all())
+        cp_rows = cp_result.all()
+        cp_ids = [r.id for r in cp_rows]
 
-        def _tie_key(r: MarketsOverviewItemModel) -> str:
-            return str(r.id)
+        admin_mp_result = await self.db.execute(
+            select(AdminMarketplace.marketplace_id, AdminMarketplace.domain).where(
+                AdminMarketplace.is_active.is_(True)
+            )
+        )
+        domain_map = dict(MARKETPLACE_DOMAIN)
+        for row in admin_mp_result.all():
+            if row.domain:
+                domain_map[row.marketplace_id] = row.domain
+
+        snapshots_by_cp: dict[UUID, list[tuple[float, datetime]]] = {}
+        if cp_ids:
+            snap_result = await self.db.execute(
+                select(
+                    PriceSnapshot.competitor_product_id,
+                    PriceSnapshot.price,
+                    PriceSnapshot.scraped_at,
+                )
+                .where(
+                    PriceSnapshot.competitor_product_id.in_(cp_ids),
+                    PriceSnapshot.scraped_at >= month_ago,
+                )
+                .order_by(
+                    PriceSnapshot.competitor_product_id,
+                    PriceSnapshot.scraped_at.desc(),
+                )
+            )
+            for row in snap_result.all():
+                cp_id = row.competitor_product_id
+                if cp_id not in snapshots_by_cp:
+                    snapshots_by_cp[cp_id] = []
+                snapshots_by_cp[cp_id].append((float(row.price), row.scraped_at))
+
+        items: list[dict] = []
+        for r in cp_rows:
+            price_now = float(r.last_price) if r.last_price else 0
+            product_name = (r.product_name or r.cp_name or "Product")[:500]
+            marketplace = r.marketplace or "unknown"
+            domain = domain_map.get(marketplace, "")
+
+            change_24h = None
+            change_3d = None
+            change_1w = None
+            change_1m = None
+            sparkline_data: list[float] = []
+
+            snaps = snapshots_by_cp.get(r.id, [])
+            if snaps:
+                sparkline_data = [p for p, _ in reversed(snaps[:20])]
+
+                def price_at(cutoff: datetime) -> float | None:
+                    for p, t in snaps:
+                        if t <= cutoff:
+                            return p
+                    return None
+
+                p24 = price_at(day_ago)
+                p3d = price_at(three_d_ago)
+                p1w = price_at(week_ago)
+                p1m = price_at(month_ago)
+
+                if p24 and p24 > 0:
+                    change_24h = round((price_now - p24) / p24 * 100, 2)
+                if p3d and p3d > 0:
+                    change_3d = round((price_now - p3d) / p3d * 100, 2)
+                if p1w and p1w > 0:
+                    change_1w = round((price_now - p1w) / p1w * 100, 2)
+                if p1m and p1m > 0:
+                    change_1m = round((price_now - p1m) / p1m * 100, 2)
+
+            items.append({
+                "id": str(uuid4()),
+                "marketplace": marketplace,
+                "marketplace_domain": domain,
+                "product_name": product_name,
+                "price": price_now,
+                "currency": "RUB",
+                "change_24h": change_24h,
+                "change_3d": change_3d,
+                "change_1w": change_1w,
+                "change_1m": change_1m,
+                "sparkline_data": sparkline_data,
+                "last_updated": r.last_checked_at or now,
+            })
+
+        def _tie_key(x: dict) -> str:
+            return f"{x['marketplace']}_{x['product_name']}"
 
         if sort == "volatile":
-            rows.sort(
+            items.sort(
                 key=lambda x: (
-                    -max(abs(x.change_24h or 0), abs(x.change_3d or 0)),
+                    -max(abs(x["change_24h"] or 0), abs(x["change_3d"] or 0)),
                     _tie_key(x),
                 ),
             )
         elif sort == "trending":
-            rows.sort(
-                key=lambda x: (-abs(x.change_24h or 0), _tie_key(x)),
-            )
+            items.sort(key=lambda x: (-abs(x["change_24h"] or 0), _tie_key(x)))
         elif sort == "gainers":
-            rows = [r for r in rows if (r.change_24h or 0) > 0]
-            rows.sort(
-                key=lambda x: (-(x.change_24h or 0), _tie_key(x)),
-            )
+            items = [x for x in items if (x["change_24h"] or 0) > 0]
+            items.sort(key=lambda x: (-(x["change_24h"] or 0), _tie_key(x)))
         elif sort == "losers":
-            rows = [r for r in rows if (r.change_24h or 0) < 0]
-            rows.sort(
-                key=lambda x: ((x.change_24h or 0), _tie_key(x)),
-            )
+            items = [x for x in items if (x["change_24h"] or 0) < 0]
+            items.sort(key=lambda x: ((x["change_24h"] or 0), _tie_key(x)))
         elif sort == "recent":
-            rows.sort(
+            items.sort(
                 key=lambda x: (
-                    -(x.refreshed_at.timestamp() if x.refreshed_at else 0),
+                    -(x["last_updated"].timestamp() if x["last_updated"] else 0),
                     _tie_key(x),
                 ),
             )
         else:
-            rows.sort(
+            items.sort(
                 key=lambda x: (
-                    -max(abs(x.change_24h or 0), abs(x.change_3d or 0)),
+                    -max(abs(x["change_24h"] or 0), abs(x["change_3d"] or 0)),
                     _tie_key(x),
                 ),
             )
 
-        total = len(rows)
-        rows = rows[:limit]
-        last_at = rows[0].refreshed_at if rows else None
+        total = len(items)
+        items = items[:limit]
+        last_at = items[0]["last_updated"] if items else None
         if total == 0:
-            logger.debug("get_overview: no rows in markets_overview")
+            logger.debug("get_overview: no marketplace products for user")
         return {
-            "items": [
-                {
-                    "id": str(r.id),
-                    "marketplace": r.marketplace,
-                    "marketplace_domain": r.marketplace_domain,
-                    "product_name": r.product_name,
-                    "price": float(r.price),
-                    "currency": r.currency,
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "change_3d": float(r.change_3d) if r.change_3d is not None else None,
-                    "change_1w": float(r.change_1w) if r.change_1w is not None else None,
-                    "change_1m": float(r.change_1m) if r.change_1m is not None else None,
-                    "sparkline_data": [float(v) for v in (r.sparkline_data or [])],
-                    "last_updated": r.refreshed_at,
-                }
-                for r in rows
-            ],
+            "items": items,
             "total": total,
             "sort": sort,
             "last_refreshed_at": last_at,
