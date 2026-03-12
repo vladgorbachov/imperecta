@@ -22,7 +22,7 @@ function formatPrice(price: number, currency: string | null): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: cur,
-    minimumFractionDigits: 2,
+    minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(price);
 }
