@@ -83,6 +83,14 @@ export function MarketsTickerBar() {
     },
   });
 
+  const { data: cryptoData } = useQuery({
+    queryKey: marketsQueryKeys.crypto(),
+    queryFn: async () => {
+      const { data } = await marketsApi.getCrypto();
+      return data;
+    },
+  });
+
   const updatePrefs = useMutation({
     mutationFn: (countryCode: string) =>
       marketsApi.updatePreferences({ preferred_country_code: countryCode }),
@@ -96,7 +104,8 @@ export function MarketsTickerBar() {
     const country = resolveActiveCountry(saved, manualSelection, i18n.language);
     const forex = forexData?.items ?? [];
     const commodities = commoditiesData?.items ?? [];
-    const tickerItems = buildTickerBarItems(forex, commodities, country);
+    const crypto = cryptoData?.items ?? [];
+    const tickerItems = buildTickerBarItems(forex, commodities, country, crypto);
     const fuelItems = tickerItems.filter((i) => i.type === "fuel");
     const fuelAvailable = fuelItems.length > 0;
 
@@ -104,9 +113,9 @@ export function MarketsTickerBar() {
       countryCode: country,
       items: tickerItems,
       fuelAvailable,
-      isLoading: !prefs && !forexData && !commoditiesData,
+      isLoading: !prefs && !forexData && !commoditiesData && !cryptoData,
     };
-  }, [prefs, forexData, commoditiesData, i18n.language, manualSelection]);
+  }, [prefs, forexData, commoditiesData, cryptoData, i18n.language, manualSelection]);
 
   const handleSaveCountry = (code: string) => {
     updatePrefs.mutate(code);
