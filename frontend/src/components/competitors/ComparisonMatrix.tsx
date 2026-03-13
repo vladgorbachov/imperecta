@@ -5,6 +5,7 @@
  */
 
 import { useTranslation } from "react-i18next";
+import { safeFixed } from "@/lib/safeNumber";
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi } from "@/api/analytics";
 import {
@@ -114,10 +115,10 @@ export function ComparisonMatrix({
                         key={`${p.id}-${c.id}`}
                         className="flex min-h-[44px] cursor-default items-center justify-center p-1 text-xs transition-colors hover:ring-2 hover:ring-ring"
                         style={{ background: getCellColor(diff) }}
-                        title={`${c.name}: ${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`}
+                        title={`${c.name}: ${diff > 0 ? "+" : ""}${safeFixed(diff, 1)}%`}
                       >
                         {diff > 0 ? "+" : ""}
-                        {diff.toFixed(0)}%
+                        {safeFixed(diff, 0)}%
                       </div>
                     );
                   }),

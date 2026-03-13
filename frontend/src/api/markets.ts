@@ -41,9 +41,11 @@ export interface MarketsRefreshMetadata {
 
 export interface MarketsForexItem {
   symbol: string;
-  bid: number;
-  ask: number;
-  spread: number;
+  /** Backend may return "rate" or "bid". Use rate ?? bid for compatibility. */
+  rate?: number;
+  bid?: number;
+  ask?: number;
+  spread?: number;
   change_24h: number | null;
   refreshed_at: string;
 }

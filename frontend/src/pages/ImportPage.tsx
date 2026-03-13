@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
+import { safeFixed } from "@/lib/safeNumber";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -102,8 +103,8 @@ function autoMapColumn(header: string): (typeof KNOWN_COLUMNS)[number] | null {
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024) return `${safeFixed(bytes / 1024, 1)} KB`;
+  return `${safeFixed(bytes / (1024 * 1024), 1)} MB`;
 }
 
 export function ImportPage() {

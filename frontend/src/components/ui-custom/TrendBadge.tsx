@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { safeFixed } from "@/lib/safeNumber";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -65,9 +66,9 @@ export function TrendBadge({ trend, value, size = "md", className }: TrendBadgeP
 
   const label =
     trend === "up" && value != null
-      ? t("ui.trendPercentPositive", { value: Math.abs(value).toFixed(1) })
+      ? t("ui.trendPercentPositive", { value: safeFixed(Math.abs(value), 1) })
       : trend === "down" && value != null
-        ? t("ui.trendPercentNegative", { value: Math.abs(value).toFixed(1) })
+        ? t("ui.trendPercentNegative", { value: safeFixed(Math.abs(value), 1) })
         : t("ui.trendPercentZero");
 
   const config = getTrendConfig(trend);

@@ -13,15 +13,16 @@ import {
   marketsQueryKeys,
 } from "@/api/markets";
 import { resolveActiveCountry } from "@/lib/countryResolution";
+import { safeFixed, safeNumber } from "@/lib/safeNumber";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 const STALE_2H = 2 * 60 * 60 * 1000;
 
-function formatForexRate(rate: number, pair: string): string {
+function formatForexRate(rate: number | undefined, pair: string): string {
   const quote = pair.split("/")[1] ?? "";
   const decimals = ["USD", "GBP", "CHF", "JPY"].includes(quote) ? 4 : 2;
-  return rate.toFixed(decimals);
+  return safeFixed(rate, decimals);
 }
 
 function formatCryptoPrice(price: number): string {
@@ -30,7 +31,7 @@ function formatCryptoPrice(price: number): string {
     currency: "USD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(price);
+  }).format(safeNumber(price));
 }
 
 function useFavorites(): {
@@ -119,7 +120,7 @@ function ForexWidget() {
             <li key={f.symbol} className="flex items-center justify-between gap-2 text-sm">
               <span>{f.symbol}</span>
               <div className="flex items-center gap-4">
-                <span className="font-mono">{formatForexRate(f.bid, f.symbol)}</span>
+                <span className="font-mono">{formatForexRate(f.rate ?? f.bid, f.symbol)}</span>
                 {f.change_24h != null && (
                   <span
                     className={cn(
@@ -128,7 +129,7 @@ function ForexWidget() {
                     )}
                   >
                     {f.change_24h > 0 ? "+" : ""}
-                    {f.change_24h.toFixed(1)}%
+                    {safeFixed(f.change_24h, 1)}%
                   </span>
                 )}
                 <button
@@ -193,7 +194,7 @@ function CryptoWidget() {
                     )}
                   >
                     {c.change_24h > 0 ? "+" : ""}
-                    {c.change_24h.toFixed(1)}%
+                    {safeFixed(c.change_24h, 1)}%
                   </span>
                 )}
                 <button
@@ -256,7 +257,7 @@ function CommoditiesWidget() {
             <span>{c.name ?? c.symbol}</span>
             <div className="flex items-center gap-4">
               <span className="font-mono">
-                ${c.price.toFixed(2)}/{c.unit ?? "oz"}
+                ${safeFixed(c.price, 2)}/{c.unit ?? "oz"}
               </span>
               {c.change_24h != null && (
                 <span
@@ -266,7 +267,7 @@ function CommoditiesWidget() {
                   )}
                 >
                   {c.change_24h > 0 ? "+" : ""}
-                  {c.change_24h.toFixed(1)}%
+                  {safeFixed(c.change_24h, 1)}%
                 </span>
               )}
               <button
@@ -349,21 +350,21 @@ function FuelWidget() {
         <li className="flex justify-between text-sm">
           <span>{t("widgets.fuel.gasoline")}</span>
           <span className="font-mono">
-            {gasoline_95.toFixed(1)}
+            {safeFixed(gasoline_95, 1)}
             {suffix}
           </span>
         </li>
         <li className="flex justify-between text-sm">
           <span>{t("widgets.fuel.diesel")}</span>
           <span className="font-mono">
-            {diesel.toFixed(1)}
+            {safeFixed(diesel, 1)}
             {suffix}
           </span>
         </li>
         <li className="flex justify-between text-sm">
           <span>{t("widgets.fuel.lpg")}</span>
           <span className="font-mono">
-            {lpg.toFixed(1)}
+            {safeFixed(lpg, 1)}
             {suffix}
           </span>
         </li>
