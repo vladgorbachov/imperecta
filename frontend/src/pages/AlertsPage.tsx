@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { safeFixed } from "@/lib/safeNumber";
 import {
   Plus,
   Pencil,
@@ -629,11 +630,11 @@ function TimelineCard({
   let titleKey = getAlertTypeKey(type);
   let title: string;
   if (type === "price_drop" && event.old_price != null && event.new_price != null) {
-    const pct = (((event.old_price - event.new_price) / event.old_price) * 100).toFixed(0);
+    const pct = safeFixed(((event.old_price - event.new_price) / event.old_price) * 100, 0);
     titleKey = "alerts.titlePriceDropped";
     title = t(titleKey, { percent: pct });
   } else if (type === "price_increase" && event.old_price != null && event.new_price != null) {
-    const pct = (((event.new_price - event.old_price) / event.old_price) * 100).toFixed(0);
+    const pct = safeFixed(((event.new_price - event.old_price) / event.old_price) * 100, 0);
     titleKey = "alerts.titlePriceIncreased";
     title = t(titleKey, { percent: pct });
   } else {

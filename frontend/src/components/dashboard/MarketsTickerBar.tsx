@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Globe } from "lucide-react";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
+import { safeFixed, safeNumber } from "@/lib/safeNumber";
 import { resolveActiveCountry } from "@/lib/countryResolution";
 import { CountrySelector } from "./CountrySelector";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,18 +29,18 @@ function formatTickerValue(
   if (isForex) {
     const quote = sym.split("/")[1] ?? "";
     const decimals = ["USD", "GBP", "CHF", "JPY"].includes(quote) ? 4 : 2;
-    return item.price.toFixed(decimals);
+    return safeFixed(item.price, decimals);
   }
   if (isFuel) {
     const cur = item.currency ?? "UAH";
-    return `${item.price.toFixed(1)} ${cur}/L`;
+    return `${safeFixed(item.price, 1)} ${cur}/L`;
   }
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: item.currency ?? "USD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(item.price);
+  }).format(safeNumber(item.price));
 }
 
 function TickerItem({
@@ -65,7 +66,7 @@ function TickerItem({
           )}
         >
           {isPositive ? "+" : ""}
-          {ch.toFixed(1)}%
+          {safeFixed(ch, 1)}%
         </span>
       )}
     </span>

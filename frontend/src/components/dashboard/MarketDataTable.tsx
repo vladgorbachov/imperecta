@@ -18,6 +18,7 @@ import { Package } from "lucide-react";
 import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
 import { generateGlobalMarketData } from "@/data/globalMarketData";
 import { formatRelativeTime } from "@/lib/formatters";
+import { safeFixed, safeNumber } from "@/lib/safeNumber";
 import { cn } from "@/lib/utils";
 
 function stringToColor(str: string): string {
@@ -57,7 +58,7 @@ function formatPrice(price: number, currency: string): string {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
-  }).format(price);
+  }).format(safeNumber(price));
 }
 
 function Sparkline({
@@ -131,7 +132,7 @@ function ChangeCell({ value }: { value: number | null }) {
       }}
     >
       {isPositive ? "+" : ""}
-      {value.toFixed(1)}%
+      {safeFixed(value, 1)}%
     </span>
   );
 }

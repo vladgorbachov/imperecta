@@ -87,7 +87,7 @@ export function buildTickerBarItems(
       result.push({
         symbol: f.symbol,
         name: f.symbol,
-        price: f.bid,
+        price: f.rate ?? f.bid ?? 0,
         change_24h: f.change_24h,
         currency: "USD",
         type: "forex",
@@ -102,7 +102,7 @@ export function buildTickerBarItems(
       result.push({
         symbol: f.symbol,
         name: f.symbol,
-        price: f.bid,
+        price: f.rate ?? f.bid ?? 0,
         change_24h: f.change_24h,
         currency: "USD",
         type: "forex",
@@ -116,7 +116,7 @@ export function buildTickerBarItems(
     result.push({
       symbol: f.symbol,
       name: f.symbol,
-      price: f.bid,
+      price: f.rate ?? f.bid ?? 0,
       change_24h: f.change_24h,
       currency: "USD",
       type: "forex",

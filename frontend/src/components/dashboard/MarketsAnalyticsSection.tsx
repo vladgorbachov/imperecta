@@ -14,11 +14,12 @@ import {
   type MarketsOpportunityBlockItem,
 } from "@/api/markets";
 import { Skeleton } from "@/components/ui/skeleton";
+import { safeFixed } from "@/lib/safeNumber";
 import { cn } from "@/lib/utils";
 
 function formatChange(v: number): string {
   const sign = v >= 0 ? "+" : "";
-  return `${sign}${v.toFixed(1)}%`;
+  return `${sign}${safeFixed(v, 1)}%`;
 }
 
 export function MarketsAnalyticsSection() {

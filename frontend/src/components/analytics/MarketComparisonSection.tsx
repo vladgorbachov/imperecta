@@ -4,6 +4,7 @@
  */
 
 import { useTranslation } from "react-i18next";
+import { safeFixed } from "@/lib/safeNumber";
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi } from "@/api/analytics";
 import { Button } from "@/components/ui/button";
@@ -105,7 +106,7 @@ export function MarketComparisonSection() {
                   className="flex min-h-[44px] cursor-default items-center justify-center p-1 text-xs transition-colors hover:ring-2 hover:ring-ring"
                   style={{ background: getCellColor(diff) }}
                 >
-                  {diff > 0 ? "+" : ""}{diff.toFixed(0)}%
+                  {diff > 0 ? "+" : ""}{safeFixed(diff, 0)}%
                 </div>
               );
             }),
