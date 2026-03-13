@@ -1,26 +1,38 @@
 /**
  * Searchable country dropdown for Markets page.
- * Saves selection to user preferences. First 10 visible, full scroll list.
- * Country names localized via i18n. Search works in all 8 app languages.
+ * Fetches countries from API. Meta options (Europe, CIS) first, then separator, then countries.
+ * Saves selection to markets preferences.
  */
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { COUNTRIES, type CountryInfo } from "@/lib/countries";
+import { marketsApi, marketsQueryKeys, type CountryItem } from "@/api/markets";
 import { COUNTRY_NAMES_EN } from "@/lib/countryNames";
 import { matchesCountrySearch } from "@/lib/countrySearch";
 import { cn } from "@/lib/utils";
 
 const INITIAL_VISIBLE = 10;
+const LIST_MAX_HEIGHT = 300;
 
 interface CountrySelectorProps {
   value: string | null;
   onSelect: (code: string) => void;
   onSave: (code: string) => void;
   disabled?: boolean;
+}
+
+function getDisplayName(item: CountryItem, t: (key: string) => string, locale: string): string {
+  if (item.is_region) {
+    return item.code === "EUROPE"
+      ? t("countries.region.europe")
+      : t("countries.region.cis");
+  }
+  const key = `countries.${item.code}`;
+  return t(key, { defaultValue: item.name_local ?? item.name ?? COUNTRY_NAMES_EN[item.code] ?? item.name });
 }
 
 export function CountrySelector({
@@ -36,15 +48,39 @@ export function CountrySelector({
   const [pendingCode, setPendingCode] = useState<string | null>(value);
   const ref = useRef<HTMLDivElement>(null);
 
-  const localizedCountries = useMemo(
-    () =>
-      COUNTRIES.map((c) => ({
-        ...c,
-        name: t(`countries.${c.code}`, { defaultValue: COUNTRY_NAMES_EN[c.code] ?? c.name }),
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- locale required: t() ref is stable, must recompute on language change
-    [t, locale]
+  const { data: countriesData = [] } = useQuery({
+    queryKey: marketsQueryKeys.countries(),
+    queryFn: async () => {
+      const { data } = await marketsApi.getCountries();
+      return data;
+    },
+  });
+
+  const metaOptions = useMemo(
+    () => countriesData.filter((c) => c.is_region),
+    [countriesData]
   );
+  const separator = useMemo(
+    () => countriesData.find((c) => c.separator),
+    [countriesData]
+  );
+  const countryItems = useMemo(
+    () => countriesData.filter((c) => !c.is_region && !c.separator),
+    [countriesData]
+  );
+
+  const filteredCountries = useMemo(() => {
+    const q = search.trim();
+    if (!q) return countryItems;
+    return countryItems.filter((c) =>
+      matchesCountrySearch(
+        c.name,
+        c.code,
+        q,
+        locale
+      ) || matchesCountrySearch(c.name_local ?? "", c.code, q, locale)
+    );
+  }, [search, countryItems, locale]);
 
   useEffect(() => {
     if (open) {
@@ -53,19 +89,14 @@ export function CountrySelector({
     }
   }, [open, value]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim();
-    if (!q) return localizedCountries;
-    return localizedCountries.filter((c) =>
-      matchesCountrySearch(c.name, c.code, q, locale)
-    );
-  }, [search, localizedCountries, locale]);
+  const displayList = filteredCountries.slice(0, open ? undefined : INITIAL_VISIBLE);
+  const hasMore = filteredCountries.length > INITIAL_VISIBLE && !search.trim();
 
-  const displayList = filtered.slice(0, open ? undefined : INITIAL_VISIBLE);
-  const hasMore = filtered.length > INITIAL_VISIBLE && !search.trim();
-
-  const pendingCountry = pendingCode
-    ? localizedCountries.find((c) => c.code === pendingCode)
+  const pendingItem = pendingCode
+    ? countriesData.find((c) => c.code === pendingCode)
+    : null;
+  const pendingDisplay = pendingItem
+    ? getDisplayName(pendingItem, t, locale)
     : null;
 
   useEffect(() => {
@@ -87,6 +118,11 @@ export function CountrySelector({
     }
   };
 
+  const handleSelectMeta = (code: string) => {
+    setPendingCode(code);
+    onSelect(code);
+  };
+
   return (
     <div ref={ref} className="relative">
       <button
@@ -101,10 +137,8 @@ export function CountrySelector({
           open && "ring-2 ring-ring ring-offset-2"
         )}
       >
-        <span className={cn(!pendingCountry && "text-muted-foreground")}>
-          {pendingCountry
-            ? pendingCountry.name
-            : t("markets.countrySelector.placeholder")}
+        <span className={cn(!pendingDisplay && "text-muted-foreground")}>
+          {pendingDisplay ?? t("markets.countrySelector.placeholder")}
         </span>
         <ChevronDown
           className={cn("size-4 shrink-0 opacity-50", open && "rotate-180")}
@@ -118,7 +152,7 @@ export function CountrySelector({
         >
           <div className="border-b p-2">
             <Input
-              placeholder={t("markets.countrySelector.search")}
+              placeholder={t("countries.search")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-9"
@@ -126,28 +160,58 @@ export function CountrySelector({
             />
           </div>
 
-          <div className="flex-1 overflow-y-auto p-1">
-            {displayList.length === 0 ? (
+          <div
+            className="flex-1 overflow-y-auto p-1"
+            style={{ maxHeight: LIST_MAX_HEIGHT }}
+          >
+            {metaOptions.length > 0 && (
+              <div className="space-y-0.5 py-1">
+                {metaOptions.map((item) => (
+                  <button
+                    key={item.code}
+                    type="button"
+                    onClick={() => handleSelectMeta(item.code)}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors",
+                      "hover:bg-accent hover:text-accent-foreground",
+                      pendingCode === item.code && "bg-accent/80"
+                    )}
+                  >
+                    <span>{item.flag}</span>
+                    <span>{getDisplayName(item, t, locale)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {separator && (
+              <div className="my-1 border-t border-border" />
+            )}
+
+            {displayList.length === 0 && !search.trim() ? null : displayList.length === 0 ? (
               <p className="px-2 py-4 text-center text-sm text-muted-foreground">
                 {t("markets.countrySelector.noResults")}
               </p>
             ) : (
-              displayList.map((c) => (
-                <CountryOption
-                  key={c.code}
-                  country={c}
-                  selected={pendingCode === c.code}
-                  onSelect={() => {
-                    setPendingCode(c.code);
-                    onSelect(c.code);
-                  }}
-                />
-              ))
-            )}
-            {hasMore && (
-              <p className="px-2 py-1 text-center text-xs text-muted-foreground">
-                {t("markets.countrySelector.scrollForMore")}
-              </p>
+              <div className="space-y-0.5">
+                {displayList.map((c) => (
+                  <CountryOption
+                    key={c.code}
+                    item={c}
+                    displayName={getDisplayName(c, t, locale)}
+                    selected={pendingCode === c.code}
+                    onSelect={() => {
+                      setPendingCode(c.code);
+                      onSelect(c.code);
+                    }}
+                  />
+                ))}
+                {hasMore && (
+                  <p className="px-2 py-1 text-center text-xs text-muted-foreground">
+                    {t("markets.countrySelector.scrollForMore")}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -158,7 +222,7 @@ export function CountrySelector({
               onClick={handleSave}
               disabled={!pendingCode}
             >
-              {t("markets.countrySelector.save")}
+              {t("countries.save")}
             </Button>
           </div>
         </div>
@@ -168,11 +232,13 @@ export function CountrySelector({
 }
 
 function CountryOption({
-  country,
+  item,
+  displayName,
   selected,
   onSelect,
 }: {
-  country: CountryInfo;
+  item: CountryItem;
+  displayName: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -186,8 +252,15 @@ function CountryOption({
         selected && "bg-accent/80"
       )}
     >
-      <span>{country.name}</span>
-      <span className="text-xs text-muted-foreground">{country.code}</span>
+      <span className="flex items-center gap-2">
+        {item.flag && <span>{item.flag}</span>}
+        <span>{displayName}</span>
+      </span>
+      {selected ? (
+        <Check className="size-4 text-[var(--accent)]" />
+      ) : (
+        <span className="text-xs text-muted-foreground">{item.code}</span>
+      )}
     </button>
   );
 }

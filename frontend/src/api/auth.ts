@@ -62,6 +62,7 @@ export const authApi = {
     avatar_url?: string | null;
     ai_tone?: string;
   }) => apiClient.put("/auth/me", data),
+  deleteAvatar: () => apiClient.delete<{ message: string }>("/auth/avatar"),
   getTelegramLink: () =>
     apiClient.post<{ code: string; bot_url: string }>("/auth/telegram-link"),
   disconnectTelegram: () =>

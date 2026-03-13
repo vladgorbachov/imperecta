@@ -9,11 +9,17 @@ import { apiClient } from "./client";
 export interface MarketsPreferences {
   preferred_country_code: string | null;
   favorite_instrument_ids: string[];
+  favorite_forex?: string[];
+  favorite_crypto?: string[];
+  favorite_commodities?: string[];
 }
 
 export interface MarketsPreferencesUpdate {
   preferred_country_code?: string | null;
   favorite_instrument_ids?: string[];
+  favorite_forex?: string[];
+  favorite_crypto?: string[];
+  favorite_commodities?: string[];
 }
 
 // --- Refresh metadata ---
@@ -76,6 +82,18 @@ export interface MarketsCommodityItem {
 export interface MarketsCommoditiesResponse {
   items: MarketsCommodityItem[];
   last_refreshed_at: string | null;
+}
+
+// --- Fuel ---
+
+export interface FuelResponse {
+  country?: string;
+  gasoline_95: number;
+  diesel: number;
+  lpg: number;
+  currency: string;
+  unit: string;
+  updated?: string;
 }
 
 // --- Ticker ---
@@ -167,7 +185,20 @@ export interface MarketsOpportunitiesResponse {
 
 // --- API ---
 
+export interface CountryItem {
+  code: string;
+  name: string;
+  name_local?: string;
+  flag?: string;
+  region?: string;
+  is_region?: boolean;
+  separator?: boolean;
+}
+
 export const marketsApi = {
+  getCountries: () =>
+    apiClient.get<CountryItem[]>("/markets/countries"),
+
   getPreferences: () =>
     apiClient.get<MarketsPreferences>("/markets/preferences"),
 
@@ -186,8 +217,13 @@ export const marketsApi = {
   getCommodities: () =>
     apiClient.get<MarketsCommoditiesResponse>("/markets/commodities"),
 
-  getTicker: () =>
-    apiClient.get<MarketsTickerResponse>("/markets/ticker"),
+  getTicker: (country?: string) =>
+    apiClient.get<MarketsTickerResponse>("/markets/ticker", {
+      params: country ? { country } : undefined,
+    }),
+
+  getFuel: (country: string) =>
+    apiClient.get<FuelResponse>(`/markets/fuel?country=${encodeURIComponent(country)}`),
 
   getOverview: (sort?: string, limit?: number) =>
     apiClient.get<MarketsOverviewResponse>("/markets/overview", {
@@ -212,12 +248,16 @@ export const marketsApi = {
 
 export const marketsQueryKeys = {
   all: ["markets"] as const,
+  countries: () => [...marketsQueryKeys.all, "countries"] as const,
   preferences: () => [...marketsQueryKeys.all, "preferences"] as const,
   refreshMetadata: () => [...marketsQueryKeys.all, "refresh-metadata"] as const,
   forex: () => [...marketsQueryKeys.all, "forex"] as const,
   crypto: () => [...marketsQueryKeys.all, "crypto"] as const,
   commodities: () => [...marketsQueryKeys.all, "commodities"] as const,
-  ticker: () => [...marketsQueryKeys.all, "ticker"] as const,
+  ticker: (country?: string) =>
+    [...marketsQueryKeys.all, "ticker", country ?? ""] as const,
+  fuel: (country: string) =>
+    [...marketsQueryKeys.all, "fuel", country] as const,
   overview: (sort?: string, limit?: number) =>
     [...marketsQueryKeys.all, "overview", sort ?? "volatile", limit ?? 50] as const,
   categoryAnalytics: () => [...marketsQueryKeys.all, "category-analytics"] as const,

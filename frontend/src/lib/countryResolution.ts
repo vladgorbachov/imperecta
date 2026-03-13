@@ -19,11 +19,13 @@ const LOCALE_MAP = new Map<string, string>([
   ["uk-UA", "UA"],
   ["kk", "KZ"],
   ["kk-KZ", "KZ"],
-  ["en", "US"],
-  ["en-US", "US"],
-  ["en-GB", "GB"],
   ["de", "DE"],
   ["de-DE", "DE"],
+  ["pl", "PL"],
+  ["pl-PL", "PL"],
+  ["en", "EUROPE"],
+  ["en-US", "EUROPE"],
+  ["en-GB", "GB"],
   ["fr", "FR"],
   ["fr-FR", "FR"],
   ["es", "ES"],
@@ -32,17 +34,15 @@ const LOCALE_MAP = new Map<string, string>([
   ["it-IT", "IT"],
   ["pt", "PT"],
   ["pt-PT", "PT"],
-  ["pl", "PL"],
-  ["pl-PL", "PL"],
-  ["zh", "CN"],
-  ["zh-CN", "CN"],
-  ["ar", "AE"],
-  ["ar-AE", "AE"],
+  ["zh", "EUROPE"],
+  ["zh-CN", "EUROPE"],
+  ["ar", "EUROPE"],
+  ["ar-AE", "EUROPE"],
   ["ro", "RO"],
   ["ro-RO", "RO"],
 ]);
 
-const FALLBACK_COUNTRY = "US";
+const FALLBACK_COUNTRY = "EUROPE";
 
 /**
  * Resolve country from locale (i18n language).
@@ -63,14 +63,18 @@ export function resolveActiveCountry(
   manualSelection: string | null,
   locale: string
 ): string {
-  if (savedCountry && getCountryByCode(savedCountry)) {
-    return savedCountry.toUpperCase();
+  if (savedCountry) {
+    const upper = savedCountry.toUpperCase();
+    if (upper === "EUROPE" || upper === "CIS" || getCountryByCode(upper)) return upper;
   }
-  if (manualSelection && getCountryByCode(manualSelection)) {
-    return manualSelection.toUpperCase();
+  if (manualSelection) {
+    const upper = manualSelection.toUpperCase();
+    if (upper === "EUROPE" || upper === "CIS" || getCountryByCode(upper)) return upper;
   }
   const fromLocale = resolveCountryFromLocale(locale);
-  return getCountryByCode(fromLocale) ? fromLocale : FALLBACK_COUNTRY;
+  return fromLocale === "EUROPE" || fromLocale === "CIS" || getCountryByCode(fromLocale)
+    ? fromLocale
+    : FALLBACK_COUNTRY;
 }
 
 export { FALLBACK_COUNTRY };

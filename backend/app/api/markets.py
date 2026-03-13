@@ -1,8 +1,73 @@
 """Markets API. Typed responses, no generic dicts."""
 
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import CurrentUser, CurrentSuperuser, DbSession
+from app.services.market_data_service import (
+    fetch_commodities,
+    fetch_crypto_prices,
+    fetch_forex_rates,
+    get_fuel_prices,
+    get_ticker_data,
+)
+
+# Europe + CIS countries only. Alphabetical by English name.
+COUNTRIES = [
+    {"code": "AM", "name": "Armenia", "name_local": "Армения", "flag": "🇦🇲", "region": "cis"},
+    {"code": "AZ", "name": "Azerbaijan", "name_local": "Азербайджан", "flag": "🇦🇿", "region": "cis"},
+    {"code": "BY", "name": "Belarus", "name_local": "Беларусь", "flag": "🇧🇾", "region": "cis"},
+    {"code": "GE", "name": "Georgia", "name_local": "Грузия", "flag": "🇬🇪", "region": "cis"},
+    {"code": "KZ", "name": "Kazakhstan", "name_local": "Казахстан", "flag": "🇰🇿", "region": "cis"},
+    {"code": "KG", "name": "Kyrgyzstan", "name_local": "Кыргызстан", "flag": "🇰🇬", "region": "cis"},
+    {"code": "MD", "name": "Moldova", "name_local": "Молдова", "flag": "🇲🇩", "region": "cis"},
+    {"code": "RU", "name": "Russia", "name_local": "Россия", "flag": "🇷🇺", "region": "cis"},
+    {"code": "TJ", "name": "Tajikistan", "name_local": "Таджикистан", "flag": "🇹🇯", "region": "cis"},
+    {"code": "TM", "name": "Turkmenistan", "name_local": "Туркменистан", "flag": "🇹🇲", "region": "cis"},
+    {"code": "UA", "name": "Ukraine", "name_local": "Украина", "flag": "🇺🇦", "region": "cis"},
+    {"code": "UZ", "name": "Uzbekistan", "name_local": "Узбекистан", "flag": "🇺🇿", "region": "cis"},
+    {"code": "AL", "name": "Albania", "name_local": "Албания", "flag": "🇦🇱", "region": "europe"},
+    {"code": "AD", "name": "Andorra", "name_local": "Андорра", "flag": "🇦🇩", "region": "europe"},
+    {"code": "AT", "name": "Austria", "name_local": "Австрия", "flag": "🇦🇹", "region": "europe"},
+    {"code": "BE", "name": "Belgium", "name_local": "Бельгия", "flag": "🇧🇪", "region": "europe"},
+    {"code": "BA", "name": "Bosnia and Herzegovina", "name_local": "Босния", "flag": "🇧🇦", "region": "europe"},
+    {"code": "BG", "name": "Bulgaria", "name_local": "Болгария", "flag": "🇧🇬", "region": "europe"},
+    {"code": "HR", "name": "Croatia", "name_local": "Хорватия", "flag": "🇭🇷", "region": "europe"},
+    {"code": "CY", "name": "Cyprus", "name_local": "Кипр", "flag": "🇨🇾", "region": "europe"},
+    {"code": "CZ", "name": "Czech Republic", "name_local": "Чехия", "flag": "🇨🇿", "region": "europe"},
+    {"code": "DK", "name": "Denmark", "name_local": "Дания", "flag": "🇩🇰", "region": "europe"},
+    {"code": "EE", "name": "Estonia", "name_local": "Эстония", "flag": "🇪🇪", "region": "europe"},
+    {"code": "FI", "name": "Finland", "name_local": "Финляндия", "flag": "🇫🇮", "region": "europe"},
+    {"code": "FR", "name": "France", "name_local": "Франция", "flag": "🇫🇷", "region": "europe"},
+    {"code": "DE", "name": "Germany", "name_local": "Германия", "flag": "🇩🇪", "region": "europe"},
+    {"code": "GR", "name": "Greece", "name_local": "Греция", "flag": "🇬🇷", "region": "europe"},
+    {"code": "HU", "name": "Hungary", "name_local": "Венгрия", "flag": "🇭🇺", "region": "europe"},
+    {"code": "IS", "name": "Iceland", "name_local": "Исландия", "flag": "🇮🇸", "region": "europe"},
+    {"code": "IE", "name": "Ireland", "name_local": "Ирландия", "flag": "🇮🇪", "region": "europe"},
+    {"code": "IT", "name": "Italy", "name_local": "Италия", "flag": "🇮🇹", "region": "europe"},
+    {"code": "XK", "name": "Kosovo", "name_local": "Косово", "flag": "🇽🇰", "region": "europe"},
+    {"code": "LV", "name": "Latvia", "name_local": "Латвия", "flag": "🇱🇻", "region": "europe"},
+    {"code": "LI", "name": "Liechtenstein", "name_local": "Лихтенштейн", "flag": "🇱🇮", "region": "europe"},
+    {"code": "LT", "name": "Lithuania", "name_local": "Литва", "flag": "🇱🇹", "region": "europe"},
+    {"code": "LU", "name": "Luxembourg", "name_local": "Люксембург", "flag": "🇱🇺", "region": "europe"},
+    {"code": "MT", "name": "Malta", "name_local": "Мальта", "flag": "🇲🇹", "region": "europe"},
+    {"code": "ME", "name": "Montenegro", "name_local": "Черногория", "flag": "🇲🇪", "region": "europe"},
+    {"code": "NL", "name": "Netherlands", "name_local": "Нидерланды", "flag": "🇳🇱", "region": "europe"},
+    {"code": "MK", "name": "North Macedonia", "name_local": "Сев. Македония", "flag": "🇲🇰", "region": "europe"},
+    {"code": "NO", "name": "Norway", "name_local": "Норвегия", "flag": "🇳🇴", "region": "europe"},
+    {"code": "PL", "name": "Poland", "name_local": "Польша", "flag": "🇵🇱", "region": "europe"},
+    {"code": "PT", "name": "Portugal", "name_local": "Португалия", "flag": "🇵🇹", "region": "europe"},
+    {"code": "RO", "name": "Romania", "name_local": "Румыния", "flag": "🇷🇴", "region": "europe"},
+    {"code": "RS", "name": "Serbia", "name_local": "Сербия", "flag": "🇷🇸", "region": "europe"},
+    {"code": "SK", "name": "Slovakia", "name_local": "Словакия", "flag": "🇸🇰", "region": "europe"},
+    {"code": "SI", "name": "Slovenia", "name_local": "Словения", "flag": "🇸🇮", "region": "europe"},
+    {"code": "ES", "name": "Spain", "name_local": "Испания", "flag": "🇪🇸", "region": "europe"},
+    {"code": "SE", "name": "Sweden", "name_local": "Швеция", "flag": "🇸🇪", "region": "europe"},
+    {"code": "CH", "name": "Switzerland", "name_local": "Швейцария", "flag": "🇨🇭", "region": "europe"},
+    {"code": "TR", "name": "Turkey", "name_local": "Турция", "flag": "🇹🇷", "region": "europe"},
+    {"code": "GB", "name": "United Kingdom", "name_local": "Великобритания", "flag": "🇬🇧", "region": "europe"},
+]
 from app.schemas.markets import (
     MarketsCategoryAnalyticsResponse,
     MarketsCommoditiesResponse,
@@ -22,6 +87,22 @@ from app.services.markets_service import MarketsService
 router = APIRouter(prefix="/markets", tags=["markets"])
 
 OVERVIEW_SORT = ("volatile", "trending", "gainers", "losers", "recent")
+
+
+@router.get("/countries")
+async def get_countries(
+    current_user: CurrentUser,
+) -> list[dict]:
+    """
+    Countries list: Europe + CIS only.
+    Meta options (Europe, CIS) first, separator, then countries alphabetically.
+    """
+    meta = [
+        {"code": "EUROPE", "name": "Europe", "name_local": "Европа", "flag": "🇪🇺", "region": "meta", "is_region": True},
+        {"code": "CIS", "name": "CIS", "name_local": "СНГ", "flag": "🌍", "region": "meta", "is_region": True},
+        {"separator": True},
+    ]
+    return meta + COUNTRIES
 
 
 @router.get("/preferences", response_model=MarketsPreferencesResponse)
@@ -72,44 +153,107 @@ async def get_refresh_metadata(
     return MarketsRefreshMetadataResponse(items=items)
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @router.get("/forex", response_model=MarketsForexResponse)
-async def get_forex(
-    current_user: CurrentUser,
-    db: DbSession,
-) -> MarketsForexResponse:
-    """Forex widget data."""
-    service = MarketsService(db, current_user.id)
-    return MarketsForexResponse(**await service.get_forex())
+async def get_forex(current_user: CurrentUser) -> MarketsForexResponse:
+    """Forex widget data from ExchangeRate-API."""
+    raw = await fetch_forex_rates("EUR")
+    if not raw:
+        raise HTTPException(503, "Forex data temporarily unavailable")
+    now = _now()
+    items = [
+        {
+            "symbol": p["pair"],
+            "bid": p["rate"],
+            "ask": p["rate"],
+            "spread": 0,
+            "change_24h": p.get("change_24h"),
+            "refreshed_at": now,
+        }
+        for p in raw
+    ]
+    return MarketsForexResponse(items=items, last_refreshed_at=now)
 
 
 @router.get("/crypto", response_model=MarketsCryptoResponse)
-async def get_crypto(
-    current_user: CurrentUser,
-    db: DbSession,
-) -> MarketsCryptoResponse:
-    """Crypto widget data."""
-    service = MarketsService(db, current_user.id)
-    return MarketsCryptoResponse(**await service.get_crypto())
+async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
+    """Crypto widget data from CoinGecko."""
+    raw = await fetch_crypto_prices()
+    if not raw:
+        raise HTTPException(503, "Crypto data temporarily unavailable")
+    now = _now()
+    items = [
+        {
+            "symbol": c["symbol"],
+            "price": c["price"],
+            "change_24h": c.get("change_24h"),
+            "market_cap": c.get("market_cap"),
+            "refreshed_at": now,
+        }
+        for c in raw
+    ]
+    return MarketsCryptoResponse(items=items, last_refreshed_at=now)
 
 
 @router.get("/commodities", response_model=MarketsCommoditiesResponse)
-async def get_commodities(
+async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesResponse:
+    """Resources/commodities widget data from metals.dev + static oil/gas/fuel."""
+    raw = await fetch_commodities()
+    now = _now()
+    items = [
+        {
+            "symbol": c["symbol"],
+            "name": c.get("name"),
+            "price": c["price"],
+            "change_24h": c.get("change_24h"),
+            "unit": c.get("unit"),
+            "refreshed_at": now,
+        }
+        for c in raw
+    ]
+    return MarketsCommoditiesResponse(items=items, last_refreshed_at=now)
+
+
+@router.get("/fuel")
+async def get_fuel(
     current_user: CurrentUser,
-    db: DbSession,
-) -> MarketsCommoditiesResponse:
-    """Resources/commodities widget data."""
-    service = MarketsService(db, current_user.id)
-    return MarketsCommoditiesResponse(**await service.get_commodities())
+    country: str = Query("UA", description="Country code or EUROPE/CIS"),
+) -> dict:
+    """Fuel prices for a country or region."""
+    data = await get_fuel_prices(country)
+    if not data:
+        raise HTTPException(404, f"No fuel data for country: {country}")
+    return data
 
 
 @router.get("/ticker", response_model=MarketsTickerResponse)
 async def get_ticker(
     current_user: CurrentUser,
-    db: DbSession,
+    country: str = Query("UA", description="Country code for fuel data"),
 ) -> MarketsTickerResponse:
-    """Ticker bar data."""
-    service = MarketsService(db, current_user.id)
-    return MarketsTickerResponse(**await service.get_ticker())
+    """Ticker bar data: forex + crypto + commodities + fuel."""
+    raw = await get_ticker_data(country)
+    now = _now()
+    items = []
+    for r in raw:
+        currency = "USD"
+        suffix = r.get("suffix") or ""
+        if suffix and " " in str(suffix):
+            parts = str(suffix).strip().split()
+            if parts:
+                currency = parts[0]
+        items.append({
+            "symbol": r.get("label", ""),
+            "name": r.get("label"),
+            "price": r.get("value", 0),
+            "change_24h": r.get("change"),
+            "currency": currency,
+            "refreshed_at": now,
+        })
+    return MarketsTickerResponse(items=items, last_refreshed_at=now)
 
 
 @router.get("/overview", response_model=MarketsOverviewResponse)
