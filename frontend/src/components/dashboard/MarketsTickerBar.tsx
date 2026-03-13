@@ -1,44 +1,62 @@
 /**
- * Ticker bar for Markets page: fuel prices + FX pairs for active country.
- * Country selector integrated. Degraded state when fuel data unavailable.
+ * Ticker bar for Markets page: forex + crypto + commodities + fuel.
+ * Uses GET /api/markets/ticker?country=... for data.
+ * Marquee animation, pause on hover. Hidden when empty.
  */
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData } from "@tanstack/react-query";
 import { Globe } from "lucide-react";
-import {
-  marketsApi,
-  marketsQueryKeys,
-} from "@/api/markets";
+import { marketsApi, marketsQueryKeys } from "@/api/markets";
 import { resolveActiveCountry } from "@/lib/countryResolution";
-import { buildTickerBarItems, type TickerBarItem } from "@/lib/tickerBarData";
 import { CountrySelector } from "./CountrySelector";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-function formatPrice(price: number, currency: string | null): string {
-  const cur = currency ?? "USD";
+const STALE_2H = 2 * 60 * 60 * 1000;
+
+function formatTickerValue(
+  item: { symbol: string; name: string | null; price: number; change_24h: number | null; currency: string | null }
+): string {
+  const sym = item.symbol ?? "";
+  const isForex = sym.includes("/");
+  const isFuel = /gasoline|diesel|lpg|petrol|fuel/i.test(sym);
+
+  if (isForex) {
+    const quote = sym.split("/")[1] ?? "";
+    const decimals = ["USD", "GBP", "CHF", "JPY"].includes(quote) ? 4 : 2;
+    return item.price.toFixed(decimals);
+  }
+  if (isFuel) {
+    const cur = item.currency ?? "UAH";
+    return `${item.price.toFixed(1)} ${cur}/L`;
+  }
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: cur,
+    currency: item.currency ?? "USD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(price);
+  }).format(item.price);
 }
 
-function TickerItem({ item }: { item: TickerBarItem }) {
+function TickerItem({
+  item,
+}: {
+  item: { symbol: string; name: string | null; price: number; change_24h: number | null; currency: string | null };
+}) {
   const ch = item.change_24h ?? 0;
   const isZero = ch === 0;
   const isPositive = ch > 0;
+  const label = item.name ?? item.symbol ?? "";
+  const value = formatTickerValue(item);
 
   return (
-    <div
-      className="flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5"
-      style={{ background: "var(--glass-bg)" }}
-    >
-      <span className="text-xs font-medium">{item.name}</span>
-      <span className="font-mono text-sm">{formatPrice(item.price, item.currency)}</span>
+    <span className="inline-flex shrink-0 items-center gap-2">
+      <span className="text-xs font-medium">{label}</span>
+      <span className="font-mono text-sm">{value}</span>
       {item.change_24h != null && (
         <span
           className={cn(
@@ -50,7 +68,7 @@ function TickerItem({ item }: { item: TickerBarItem }) {
           {ch.toFixed(1)}%
         </span>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -61,72 +79,46 @@ export function MarketsTickerBar() {
 
   const { data: prefs } = useQuery({
     queryKey: marketsQueryKeys.preferences(),
-    queryFn: async () => {
-      const { data } = await marketsApi.getPreferences();
-      return data;
-    },
+    queryFn: () => marketsApi.getPreferences().then((r) => r.data),
+    staleTime: 60_000,
   });
 
-  const { data: forexData } = useQuery({
-    queryKey: marketsQueryKeys.forex(),
-    queryFn: async () => {
-      const { data } = await marketsApi.getForex();
-      return data;
-    },
+  const saved = prefs?.preferred_country_code ?? null;
+  const country = useMemo(
+    () => resolveActiveCountry(saved, manualSelection, i18n.language),
+    [saved, manualSelection, i18n.language]
+  );
+
+  const { data: tickerData, isLoading } = useQuery({
+    queryKey: marketsQueryKeys.ticker(country),
+    queryFn: () => marketsApi.getTicker(country).then((r) => r.data),
+    staleTime: STALE_2H,
+    refetchInterval: STALE_2H,
+    placeholderData: keepPreviousData,
+    enabled: !!country,
   });
 
-  const { data: commoditiesData } = useQuery({
-    queryKey: marketsQueryKeys.commodities(),
-    queryFn: async () => {
-      const { data } = await marketsApi.getCommodities();
-      return data;
-    },
-  });
-
-  const { data: cryptoData } = useQuery({
-    queryKey: marketsQueryKeys.crypto(),
-    queryFn: async () => {
-      const { data } = await marketsApi.getCrypto();
-      return data;
-    },
-  });
+  const items = tickerData?.items ?? [];
+  const showTicker = items.length > 0;
 
   const updatePrefs = useMutation({
-    mutationFn: (countryCode: string) =>
-      marketsApi.updatePreferences({ preferred_country_code: countryCode }),
-    onSuccess: () => {
+    mutationFn: (code: string) =>
+      marketsApi.updatePreferences({ preferred_country_code: code }),
+    onSuccess: (_, code) => {
       queryClient.invalidateQueries({ queryKey: marketsQueryKeys.preferences() });
+      queryClient.invalidateQueries({ queryKey: marketsQueryKeys.ticker(code) });
+      queryClient.invalidateQueries({ queryKey: marketsQueryKeys.fuel(code) });
+      queryClient.invalidateQueries({ queryKey: marketsQueryKeys.forex() });
+      toast.success(t("countries.saved"));
+      setManualSelection(null);
     },
   });
-
-  const { countryCode, items, fuelAvailable, isLoading } = useMemo(() => {
-    const saved = prefs?.preferred_country_code ?? null;
-    const country = resolveActiveCountry(saved, manualSelection, i18n.language);
-    const forex = forexData?.items ?? [];
-    const commodities = commoditiesData?.items ?? [];
-    const crypto = cryptoData?.items ?? [];
-    const tickerItems = buildTickerBarItems(forex, commodities, country, crypto);
-    const fuelItems = tickerItems.filter((i) => i.type === "fuel");
-    const fuelAvailable = fuelItems.length > 0;
-
-    return {
-      countryCode: country,
-      items: tickerItems,
-      fuelAvailable,
-      isLoading: !prefs && !forexData && !commoditiesData && !cryptoData,
-    };
-  }, [prefs, forexData, commoditiesData, cryptoData, i18n.language, manualSelection]);
 
   const handleSaveCountry = (code: string) => {
     updatePrefs.mutate(code);
-    setManualSelection(null);
   };
 
-  const handleSelectCountry = (code: string) => {
-    setManualSelection(code);
-  };
-
-  if (isLoading) {
+  if (isLoading && !prefs) {
     return (
       <div className="flex items-center gap-4 rounded-xl p-4" style={{ background: "var(--glass-bg)" }}>
         <Skeleton className="h-10 w-48" />
@@ -144,31 +136,28 @@ export function MarketsTickerBar() {
         <div className="flex items-center gap-2">
           <Globe className="size-4 text-muted-foreground" />
           <CountrySelector
-            value={manualSelection ?? prefs?.preferred_country_code ?? countryCode}
-            onSelect={handleSelectCountry}
+            value={manualSelection ?? saved ?? country}
+            onSelect={setManualSelection}
             onSave={handleSaveCountry}
             disabled={updatePrefs.isPending}
           />
         </div>
-
-        {!fuelAvailable && items.length > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {t("markets.ticker.fuelUnavailable")}
-          </span>
-        )}
-
-        {items.length === 0 && (
-          <span className="text-sm text-muted-foreground">
-            {t("markets.ticker.noData")}
-          </span>
-        )}
       </div>
 
-      <div className="flex overflow-x-auto gap-2 pb-1 scrollbar-thin">
-        {items.map((item) => (
-          <TickerItem key={`${item.type}-${item.symbol}`} item={item} />
-        ))}
-      </div>
+      {showTicker && (
+        <div className="group flex max-w-full overflow-hidden">
+          <div className="flex animate-marquee gap-10 whitespace-nowrap group-hover:[animation-play-state:paused]">
+            {[...items, ...items].map((item, i) => (
+              <span key={`${item.symbol}-${i}`} className="flex shrink-0 items-center gap-2">
+                <TickerItem item={item} />
+                <span className="shrink-0 text-muted-foreground" style={{ width: 40 }}>
+                  |
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

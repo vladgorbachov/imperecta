@@ -82,7 +82,7 @@ class UserUpdate(BaseModel):
     company_name: str | None = Field(None, max_length=255)
     language: str | None = Field(None, max_length=5)
     ai_tone: str | None = Field(None, max_length=20)
-    avatar_url: str | None = Field(None, max_length=5000)
+    avatar_url: str | None = Field(None, max_length=500000)
 
     @field_validator("language")
     @classmethod

@@ -45,7 +45,12 @@ function getPlanLimits(plan: string): { products: number; competitors: number } 
 
 const TRIAL_DAYS_TOTAL = 14;
 
-const AVATAR_MAX_SIZE_BYTES = 200 * 1024; // 200KB
+const AVATAR_MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
+
+function isValidAvatarUrl(url: string): boolean {
+  const trimmed = url.trim();
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+}
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
@@ -174,15 +179,38 @@ export function SettingsPage() {
     });
   };
 
+  const handleSaveAvatarUrl = () => {
+    const url = avatarUrl.trim();
+    if (!url) return;
+    if (!isValidAvatarUrl(url)) {
+      toast.error(t("settings.avatar.invalidUrl"));
+      return;
+    }
+    updateMutation.mutate({ avatar_url: url });
+  };
+
+  const handleDeleteAvatar = () => {
+    if (!window.confirm(t("settings.avatar.deleteConfirm"))) return;
+    authApi.deleteAvatar().then(async () => {
+      setAvatarUrl("");
+      const { data } = await authApi.getMe();
+      setUser(data);
+      queryClient.invalidateQueries({ queryKey: ["user", "me"] });
+      toast.success(t("settings.avatar.deleted"));
+    }).catch(() => {
+      updateMutation.mutate({ avatar_url: "" });
+    });
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      toast.error(t("settings.avatarInvalidType"));
+      toast.error(t("settings.avatar.invalidType"));
       return;
     }
     if (file.size > AVATAR_MAX_SIZE_BYTES) {
-      toast.error(t("settings.avatarTooLarge"));
+      toast.error(t("settings.avatar.maxSize"));
       return;
     }
     const reader = new FileReader();
@@ -244,7 +272,7 @@ export function SettingsPage() {
               <form onSubmit={handleProfileSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{t("settings.avatar")}</label>
-                  <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start">
                     <Avatar className="size-16 shrink-0">
                       <AvatarImage src={avatarUrl || undefined} alt={u?.name} />
                       <AvatarFallback className="bg-primary/20 text-primary">
@@ -257,7 +285,7 @@ export function SettingsPage() {
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col gap-2">
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <input
                           ref={fileInputRef}
                           type="file"
@@ -272,17 +300,38 @@ export function SettingsPage() {
                           onClick={() => fileInputRef.current?.click()}
                         >
                           <Upload className="me-2 size-4" />
-                          {t("settings.avatarUpload")}
+                          {t("settings.avatar.upload")}
                         </Button>
-                        <div className="flex items-center gap-2">
-                          <LinkIcon className="size-4 shrink-0 text-muted-foreground" />
-                          <Input
-                            placeholder={t("settings.avatarUrlPlaceholder")}
-                            value={avatarUrl.startsWith("data:") ? "" : avatarUrl}
-                            onChange={(e) => setAvatarUrl(e.target.value.trim())}
-                            className="w-full max-w-xs sm:max-w-xs"
-                          />
-                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSaveAvatarUrl}
+                          disabled={updateMutation.isPending || !avatarUrl.trim()}
+                        >
+                          <LinkIcon className="me-2 size-4" />
+                          {t("common.save")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                          onClick={handleDeleteAvatar}
+                        >
+                          {t("settings.avatar.delete")}
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder={t("settings.avatar.urlPlaceholder")}
+                          value={avatarUrl.startsWith("data:") ? "" : avatarUrl}
+                          onChange={(e) => setAvatarUrl(e.target.value)}
+                          className="w-full max-w-xs sm:max-w-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {t("settings.avatar.maxSize")}
+                        </span>
                       </div>
                     </div>
                   </div>

@@ -408,17 +408,25 @@ class MarketsService:
         )
         rows = result.scalars().unique().all()
         last_at = rows[0].refreshed_at if rows else None
+        items = [
+            {
+                "id": str(r.id),
+                "marketplace_id": r.marketplace_id,
+                "marketplace_name": r.marketplace_name,
+                "metrics": r.metrics or {},
+                "refreshed_at": r.refreshed_at,
+            }
+            for r in rows
+        ]
+        # Sort by product count DESC, then name ASC
+        items.sort(
+            key=lambda x: (
+                -(x["metrics"].get("item_count") or 0),
+                (x["marketplace_name"] or "").lower(),
+            )
+        )
         return {
-            "items": [
-                {
-                    "id": str(r.id),
-                    "marketplace_id": r.marketplace_id,
-                    "marketplace_name": r.marketplace_name,
-                    "metrics": r.metrics or {},
-                    "refreshed_at": r.refreshed_at,
-                }
-                for r in rows
-            ],
+            "items": items,
             "last_refreshed_at": last_at,
         }
 

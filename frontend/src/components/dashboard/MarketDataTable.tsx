@@ -1,11 +1,12 @@
 /**
  * Market Overview widget for Markets page.
- * Uses markets API only. No mock fallback. Empty state when no data.
+ * Uses markets API with fallback. Client-side sorting by tab. Fade on update.
  */
 
-import { useState } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
+import { keepPreviousData } from "@tanstack/react-query";
 import {
   Tooltip,
   TooltipContent,
@@ -15,8 +16,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { Package } from "lucide-react";
 import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
+import { generateGlobalMarketData } from "@/data/globalMarketData";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+
+function stringToColor(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  const h = Math.abs(hash) % 360;
+  return `hsl(${h}, 55%, 45%)`;
+}
 
 type SortTab = "volatile" | "trending" | "gainers" | "losers" | "recent";
 
@@ -167,39 +176,16 @@ function MarketplaceLogo({
   );
 }
 
-function ProductThumbnail({
-  thumbnailUrl,
-  productName,
-}: {
-  thumbnailUrl: string | null | undefined;
-  productName: string;
-}) {
-  const [imgError, setImgError] = useState(false);
-  const showImage = thumbnailUrl && !imgError;
-
-  if (showImage) {
-    return (
-      <div className="relative size-10 shrink-0 overflow-hidden rounded">
-        <img
-          src={thumbnailUrl}
-          alt={productName}
-          className="size-10 rounded object-cover"
-          onError={() => setImgError(true)}
-        />
-      </div>
-    );
-  }
-
+function ProductThumbnailPlaceholder({ productName }: { productName: string }) {
+  const letter = productName?.charAt(0)?.toUpperCase() ?? "?";
+  const bg = stringToColor(productName ?? "");
   return (
     <div
-      className="flex size-10 shrink-0 items-center justify-center rounded"
-      style={{
-        background: "var(--glass-bg)",
-        color: "var(--foreground-muted)",
-      }}
+      className="flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+      style={{ backgroundColor: bg }}
       aria-hidden
     >
-      <Package className="size-5" />
+      {letter}
     </div>
   );
 }
@@ -208,24 +194,69 @@ export function MarketDataTable() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const [activeTab, setActiveTab] = useState<SortTab>("volatile");
+  const [fading, setFading] = useState(false);
+  const prevDataRef = useRef<MarketsOverviewItem[]>([]);
 
-  const sortKey = getSortKey(activeTab);
   const { data: apiData, isLoading } = useQuery({
-    queryKey: marketsQueryKeys.overview(sortKey, 50),
+    queryKey: marketsQueryKeys.overview("volatile", 50),
     queryFn: async () => {
-      const { data } = await marketsApi.getOverview(sortKey, 50);
+      const { data } = await marketsApi.getOverview("volatile", 50);
       return data;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
     retry: false,
+    placeholderData: keepPreviousData,
   });
 
-  const items: MarketsOverviewItem[] = apiData?.items ?? [];
-  const total = apiData?.total ?? 0;
-  const lastUpdated = items[0]?.last_updated;
-  const relativeTime = lastUpdated
-    ? formatRelativeTime(lastUpdated, locale)
-    : "";
+  const displayData = useMemo(() => {
+    if ((apiData?.items?.length ?? 0) > 0) return apiData!.items;
+    return generateGlobalMarketData();
+  }, [apiData]);
+
+  const sortedData = useMemo(() => {
+    const sorted = [...displayData];
+    switch (activeTab) {
+      case "volatile":
+        return sorted.sort(
+          (a, b) =>
+            Math.max(Math.abs(b.change_24h ?? 0), Math.abs(b.change_3d ?? 0)) -
+            Math.max(Math.abs(a.change_24h ?? 0), Math.abs(a.change_3d ?? 0))
+        );
+      case "trending":
+        return sorted.sort((a, b) => Math.abs(b.change_24h ?? 0) - Math.abs(a.change_24h ?? 0));
+      case "gainers":
+        return sorted
+          .filter((i) => (i.change_24h ?? 0) > 0)
+          .sort((a, b) => (b.change_24h ?? 0) - (a.change_24h ?? 0));
+      case "losers":
+        return sorted
+          .filter((i) => (i.change_24h ?? 0) < 0)
+          .sort((a, b) => (a.change_24h ?? 0) - (b.change_24h ?? 0));
+      case "recent":
+        return sorted.sort(
+          (a, b) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime()
+        );
+      default:
+        return sorted;
+    }
+  }, [displayData, activeTab]);
+
+  useEffect(() => {
+    if (prevDataRef.current !== displayData) {
+      setFading(true);
+      const timer = setTimeout(() => {
+        setFading(false);
+        prevDataRef.current = displayData;
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [displayData]);
+
+  const items = sortedData;
+  const total = displayData.length;
+  const lastUpdated = displayData[0]?.last_updated;
+  const relativeTime = lastUpdated ? formatRelativeTime(lastUpdated, locale) : "";
 
   const tabs: { key: SortTab; i18nKey: string }[] = [
     { key: "volatile", i18nKey: "dashboard.market.mostVolatile" },
@@ -248,7 +279,7 @@ export function MarketDataTable() {
           fontFamily: "var(--font-display)",
         }}
       >
-        {t("dashboard.market.title")}
+        {t("market.overview.title")}
       </h3>
 
       {/* Tabs */}
@@ -298,9 +329,10 @@ export function MarketDataTable() {
                 style={{ color: "var(--foreground-muted)" }}
               >
                 <Package className="mb-4 size-12 opacity-50" />
-                <p className="text-sm font-medium">{t("dashboard.market.noData")}</p>
+                <p className="text-sm font-medium">{t("market.overview.noItems")}</p>
               </motion.div>
             ) : (
+              <div className={cn("transition-opacity duration-400", fading ? "opacity-30" : "opacity-100")}>
               <motion.table
                 key={activeTab}
                 initial={{ opacity: 0 }}
@@ -318,12 +350,12 @@ export function MarketDataTable() {
                   <tr style={{ borderBottom: "1px solid var(--border)" }}>
                     <th className="w-8 px-2 pl-4 py-2" />
                     <th
-                      className="w-[100px] px-2 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                      className="w-[100px] pl-4 py-2 text-left text-xs font-medium uppercase tracking-wider"
                       style={{ color: "var(--foreground-muted)" }}
                     >
                       {t("dashboard.market.marketplace")}
                     </th>
-                    <th className="w-12 px-2 py-2" />
+                    <th className="w-10 px-2 py-2" style={{ width: 40 }} />
                     <th
                       className="min-w-[120px] px-2 py-2 text-left text-xs font-medium uppercase tracking-wider"
                       style={{ color: "var(--foreground-muted)" }}
@@ -364,13 +396,13 @@ export function MarketDataTable() {
                       className="w-20 px-2 py-2 text-center text-xs font-medium uppercase tracking-wider"
                       style={{ color: "var(--foreground-muted)" }}
                     >
-                      {t("dashboard.market.sparkline")}
+                      {t("market.overview.thirtyDayChart")}
                     </th>
                     <th
                       className="w-20 px-2 py-2 text-center text-xs font-medium uppercase tracking-wider"
                       style={{ color: "var(--foreground-muted)" }}
                     >
-                      {t("dashboard.market.momentum")}
+                      {t("market.overview.trend")}
                     </th>
                   </tr>
                 </thead>
@@ -410,16 +442,13 @@ export function MarketDataTable() {
                           />
                         </td>
                         <td
-                          className="px-2 py-2 text-xs"
+                          className="pl-4 py-2 text-left text-xs"
                           style={{ color: "var(--foreground-muted)" }}
                         >
                           {row.marketplace}
                         </td>
-                        <td className="px-2 py-2">
-                          <ProductThumbnail
-                            thumbnailUrl={row.thumbnail_url}
-                            productName={row.product_name}
-                          />
+                        <td className="w-10 px-2 py-2" style={{ width: 40 }}>
+                          <ProductThumbnailPlaceholder productName={row.product_name} />
                         </td>
                         <td className="max-w-[200px] px-2 py-2">
                           <Tooltip>
@@ -466,6 +495,7 @@ export function MarketDataTable() {
                   })}
                 </tbody>
               </motion.table>
+              </div>
             )}
           </AnimatePresence>
         )}
@@ -479,16 +509,11 @@ export function MarketDataTable() {
             color: "var(--foreground-muted)",
           }}
         >
-          {t("dashboard.market.showing", {
+          {t("market.overview.showing", {
             count: items.length,
             total,
+            time: relativeTime,
           })}
-          {relativeTime && (
-            <>
-              {" • "}
-              {t("dashboard.market.updated", { time: relativeTime })}
-            </>
-          )}
         </div>
       )}
     </div>

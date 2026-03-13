@@ -213,6 +213,7 @@ async def admin_marketplaces(db: DbSession) -> list[dict]:
             "products_count": products_count,
         })
 
+    result_list.sort(key=lambda x: (x["name"].lower(),))
     return result_list
 
 

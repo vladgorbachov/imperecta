@@ -257,6 +257,20 @@ async def update_me(
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         if key in ALLOWED_USER_UPDATE_FIELDS:
-            setattr(current_user, key, value)
+            if key == "avatar_url" and value == "":
+                setattr(current_user, key, None)
+            else:
+                setattr(current_user, key, value)
     await db.flush()
     return _build_user_response(current_user)
+
+
+@router.delete("/avatar")
+async def delete_avatar(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Remove user avatar. Sets avatar_url to None."""
+    current_user.avatar_url = None
+    await db.flush()
+    return {"message": "Avatar removed"}
