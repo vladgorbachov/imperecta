@@ -211,7 +211,7 @@ async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
 
 @router.get("/commodities", response_model=MarketsCommoditiesResponse)
 async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesResponse:
-    """Resources/commodities widget data from metals.dev + static oil/gas/fuel. Never 503."""
+    """Resources/commodities widget data from goldapi.io + static oil/gas/fuel. Never 503."""
     now = _now()
     try:
         raw = await fetch_commodities()
@@ -232,10 +232,10 @@ async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesRespon
             cached=False,
             last_refreshed_at=now,
         )
-    except Exception:
+    except Exception as e:
         return MarketsCommoditiesResponse(
             items=[],
-            error="Metals API unauthorized (401). Check API key.",
+            error=str(e)[:200] or "Commodities API error.",
             cached=False,
             last_refreshed_at=now,
         )
