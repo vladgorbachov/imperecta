@@ -1,10 +1,11 @@
 /**
  * Market Overview widget for Markets page.
- * Uses markets API with fallback. Client-side sorting by tab. Fade on update.
+ * Uses markets API only. Client-side sorting by tab. Fade on update.
  */
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { keepPreviousData } from "@tanstack/react-query";
 import {
@@ -14,9 +15,8 @@ import {
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { Package } from "lucide-react";
+import { Database } from "lucide-react";
 import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
-import { generateGlobalMarketData } from "@/data/globalMarketData";
 import { formatRelativeTime } from "@/lib/formatters";
 import { safeFixed, safeNumber } from "@/lib/safeNumber";
 import { cn } from "@/lib/utils";
@@ -193,6 +193,7 @@ function ProductThumbnailPlaceholder({ productName }: { productName: string }) {
 
 export function MarketDataTable() {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const locale = i18n.language;
   const [activeTab, setActiveTab] = useState<SortTab>("volatile");
   const [fading, setFading] = useState(false);
@@ -210,10 +211,7 @@ export function MarketDataTable() {
     placeholderData: keepPreviousData,
   });
 
-  const displayData = useMemo(() => {
-    if ((apiData?.items?.length ?? 0) > 0) return apiData!.items;
-    return generateGlobalMarketData();
-  }, [apiData]);
+  const displayData = apiData?.items ?? [];
 
   const sortedData = useMemo(() => {
     const sorted = [...displayData];
@@ -329,8 +327,28 @@ export function MarketDataTable() {
                 className="flex flex-col items-center justify-center px-4 py-16 text-center"
                 style={{ color: "var(--foreground-muted)" }}
               >
-                <Package className="mb-4 size-12 opacity-50" />
-                <p className="text-sm font-medium">{t("market.overview.noItems")}</p>
+                {displayData.length === 0 ? (
+                  <>
+                    <Database className="mb-4 size-12 opacity-50" />
+                    <p className="mb-1 text-sm font-medium">{t("market.overview.noData")}</p>
+                    <p className="mb-4 max-w-sm text-xs">
+                      {t("market.overview.noDataDescription")}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/products")}
+                      className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                      style={{
+                        background: "var(--accent)",
+                        color: "var(--accent-foreground)",
+                      }}
+                    >
+                      {t("market.overview.goToProducts")}
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-sm font-medium">{t("market.overview.noItems")}</p>
+                )}
               </motion.div>
             ) : (
               <div className={cn("transition-opacity duration-400", fading ? "opacity-30" : "opacity-100")}>

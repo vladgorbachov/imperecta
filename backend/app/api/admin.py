@@ -6,12 +6,14 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl
+
+from app.services.seed_service import seed_products_for_user
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import DbSession, get_current_superuser
+from app.api.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.models import AdminMarketplace, Competitor, CompetitorProduct, ScrapeLog, User
 from app.models.product import Product
 from app.services.claude_monitor import check_claude_api_health, get_claude_api_stats
@@ -240,6 +242,32 @@ async def admin_marketplace_logs(marketplace_id: str, db: DbSession) -> list[dic
         }
         for log in logs
     ]
+
+
+class SeedProductsRequest(BaseModel):
+    """Request body for seed-products endpoint."""
+
+    limit: int = 20
+
+
+@router.post("/seed-products")
+async def admin_seed_products(
+    db: DbSession,
+    current_user: CurrentSuperuser,
+    data: SeedProductsRequest | None = Body(default=None),
+) -> dict:
+    """Seed current superuser account with real products for scraping test."""
+    limit = data.limit if data else 20
+    return await seed_products_for_user(db, current_user.id, limit=limit)
+
+
+@router.post("/trigger-scrape")
+async def admin_trigger_scrape() -> dict:
+    """Manually trigger scraping for all active competitor_products."""
+    from app.workers.scrape_tasks import scrape_all
+
+    task = scrape_all.delay()
+    return {"message": "Scrape task queued", "task_id": str(task.id)}
 
 
 class AddMarketplaceRequest(BaseModel):

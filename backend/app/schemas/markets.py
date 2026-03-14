@@ -136,9 +136,12 @@ class MarketsOverviewItem(BaseModel):
     id: UUID
     marketplace: str
     marketplace_domain: str
+    marketplace_id: str | None = None
     product_name: str
+    product_url: str | None = None
     price: Decimal
     currency: str
+    category: str | None = None
     change_24h: float | None
     change_3d: float | None
     change_1w: float | None
