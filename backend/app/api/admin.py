@@ -270,6 +270,122 @@ async def admin_trigger_scrape() -> dict:
     return {"message": "Scrape task queued", "task_id": str(task.id)}
 
 
+@router.post("/seed-competitors")
+async def admin_seed_competitors(
+    db: DbSession,
+    current_user: CurrentSuperuser,
+) -> dict:
+    """Create competitor entries and competitor_products for existing products using admin_marketplaces."""
+    products_result = await db.execute(
+        select(Product)
+        .where(Product.user_id == current_user.id, Product.is_active.is_(True))
+        .limit(50)
+    )
+    products = products_result.scalars().all()
+
+    if not products:
+        return {"error": "No products found"}
+
+    marketplaces_result = await db.execute(
+        select(AdminMarketplace).where(AdminMarketplace.is_active.is_(True)).limit(10)
+    )
+    marketplaces = marketplaces_result.scalars().all()
+
+    if not marketplaces:
+        return {"error": "No marketplaces found"}
+
+    competitors_created = 0
+    cps_created = 0
+
+    for mp in marketplaces:
+        existing_result = await db.execute(
+            select(Competitor).where(
+                Competitor.user_id == current_user.id,
+                Competitor.marketplace == mp.marketplace_id,
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            competitor = existing
+        else:
+            competitor = Competitor(
+                user_id=current_user.id,
+                name=mp.name,
+                marketplace=mp.marketplace_id,
+                website_url=mp.base_url,
+            )
+            db.add(competitor)
+            await db.flush()
+            competitors_created += 1
+
+        for product in products[:5]:
+            exists_result = await db.execute(
+                select(CompetitorProduct).where(
+                    CompetitorProduct.product_id == product.id,
+                    CompetitorProduct.competitor_id == competitor.id,
+                )
+            )
+            if exists_result.scalar_one_or_none():
+                continue
+
+            cp = CompetitorProduct(
+                product_id=product.id,
+                competitor_id=competitor.id,
+                url=f"{mp.base_url}/search?q={(product.name or '').replace(' ', '+')}",
+                name=product.name,
+                scraper_type=mp.scraper_type,
+                is_active=True,
+            )
+            db.add(cp)
+            cps_created += 1
+
+    await db.commit()
+    return {
+        "competitors_created": competitors_created,
+        "competitor_products_created": cps_created,
+        "message": f"Created {competitors_created} competitors, {cps_created} scraping targets",
+    }
+
+
+@router.post("/trigger-scrape-user")
+async def admin_trigger_scrape_user(
+    db: DbSession,
+    current_user: CurrentSuperuser,
+) -> dict:
+    """Manually trigger scraping for current user's active competitor_products."""
+    from app.workers.scrape_tasks import scrape_single
+
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(CompetitorProduct)
+        .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+        .where(
+            Competitor.user_id == current_user.id,
+            CompetitorProduct.is_active.is_(True),
+        )
+    )
+    count = count_result.scalar() or 0
+
+    if count == 0:
+        return {"error": "No competitor products to scrape. Run /seed-competitors first."}
+
+    cps_result = await db.execute(
+        select(CompetitorProduct.id)
+        .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+        .where(
+            Competitor.user_id == current_user.id,
+            CompetitorProduct.is_active.is_(True),
+        )
+    )
+    cps = cps_result.all()
+
+    for (cp_id,) in cps:
+        scrape_single.delay(str(cp_id))
+
+    return {"message": f"Queued {len(cps)} scrape tasks", "count": len(cps)}
+
+
 class AddMarketplaceRequest(BaseModel):
     """Request body for adding marketplace by URL."""
 
