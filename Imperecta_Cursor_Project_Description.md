@@ -82,7 +82,8 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **markets** | GET | /api/markets/forex | Forex (виджет) |
 | **markets** | GET | /api/markets/crypto | Крипто (виджет) |
 | **markets** | GET | /api/markets/commodities | Сырьё (виджет) |
-| **markets** | GET | /api/markets/ticker | Бегущая строка (forex+crypto+commodities) |
+| **markets** | GET | /api/markets/ticker?country=UA | Бегущая строка (forex+crypto+commodities+fuel по стране) |
+| **markets** | GET | /api/markets/fuel?country=UA | Цены на топливо (бензин, дизель, LPG) |
 | **markets** | GET | /api/markets/overview | Market Overview (маркетплейсы, товары) |
 | **markets** | GET | /api/markets/category-analytics | Аналитика по категориям |
 | **markets** | GET | /api/markets/marketplace-analytics | Аналитика по маркетплейсам |
@@ -217,6 +218,7 @@ imperecta/
 │   │       ├── 011_reset_trial_ends_at.py
 │   │       ├── 012_add_markets_tables.py
 │   │       ├── 013_markets_refresh_log_metadata.py
+│   │       ├── 014_avatar_url_text_preferred_country.py
 │   │       └── .gitkeep
 │   ├── alembic.ini                   # Alembic config
 │   ├── app/
@@ -280,6 +282,7 @@ imperecta/
 │   │   │   └── proxy_manager.py      # Proxy rotation
 │   │   ├── services/
 │   │   │   ├── admin_service.py      # ensure_superuser, marketplace ops
+│   │   │   ├── market_data_service.py # Real-time forex, crypto, commodities, fuel (fetch from APIs)
 │   │   │   ├── ai_chat_service.py    # AI chat logic
 │   │   │   ├── ai_service.py         # Claude API wrapper
 │   │   │   ├── alert_ai_service.py   # Alert explanation, auto-response
@@ -471,7 +474,8 @@ imperecta/
 │   │   │       ├── StatCard.tsx
 │   │   │       └── TrendBadge.tsx
 │   │   ├── data/
-│   │   │   └── filters.ts
+│   │   │   ├── filters.ts
+│   │   │   └── globalMarketData.ts   # Fallback data for Market Overview when API empty
 │   │   ├── hooks/
 │   │   │   ├── useAdmin.ts
 │   │   │   ├── useAlerts.ts
@@ -497,6 +501,7 @@ imperecta/
 │   │   │   ├── design-tokens.ts
 │   │   │   ├── formatters.ts
 │   │   │   ├── routes.ts              # PUBLIC_ROUTES, getLoginUrl, getReturnPath
+│   │   │   ├── safeNumber.ts         # safeFixed, safeNumber — null-safe formatting
 │   │   │   ├── sanitize.ts
 │   │   │   ├── sanitize.test.ts
 │   │   │   ├── tickerBarData.ts       # buildTickerBarItems (forex+crypto+commodities)
@@ -554,11 +559,13 @@ imperecta/
 
 ### Dashboard (страница Рынки)
 
-- **MarketsTickerBar** — бегущая строка: forex, crypto, commodities (по выбранной стране)
-- **MarketsWidgetsSection** — 4 виджета над Market Overview: Forex, Crypto, Commodities, Fuel
-- **MarketDataTable** — Market Overview: маркетплейсы (Ozon, Wildberries, Kaspi) и товары пользователя с change_24h, change_3d, change_1w, change_1m, sparkline
+- **MarketsTickerBar** — бегущая строка: GET /api/markets/ticker?country=, marquee-анимация, пауза при hover
+- **MarketsWidgetsSection** — 4 виджета: Forex, Crypto, Commodities, Fuel
+  - Forex/Crypto/Commodities: избранное (звёздочка), API: forex, crypto, commodities
+  - Fuel: GET /api/markets/fuel?country=, gasoline_95, diesel, lpg
+- **MarketDataTable** — Market Overview: маркетплейсы и товары пользователя, табы (volatile, trending, gainers, losers, recent), клиентская сортировка, fallback (globalMarketData), миниатюра товара (hash-цвет + first letter), колонки 30D, TREND
 - **MarketsAnalyticsSection** — category-analytics, marketplace-analytics, opportunities
-- **CountrySelector** — выбор страны для отображения данных
+- **CountrySelector** — выбор страны (preferred_country_code), поиск, мета-опции Europe/CIS, при Save — invalidate ticker/fuel/forex
 
 ### Entitlements (планы и лимиты)
 
@@ -589,10 +596,10 @@ imperecta/
 - [x] Frontend: Landing, 15+ страниц, entitlements, AIAnalystRoute (locked), PlanLimitBanner
 - [x] Auth: JWT, «Запомнить меня», telegram-link/disconnect в auth
 - [x] Entitlements: Trial/Free/Paid Full, AI Analyst только для Paid
-- [x] Миграции 001–013 (markets tables)
+- [x] Миграции 001–014 (markets tables, avatar_url, preferred_country)
 - [x] Локальная разработка: docker-compose
 - [x] CI: ruff, pytest, eslint, vitest, build, security
-- [x] Markets: 4 виджета (Forex, Crypto, Commodities, Fuel), ticker bar, Market Overview (маркетплейсы), analytics
+- [x] Markets: 4 виджета (Forex, Crypto, Commodities, Fuel), ticker bar (getTicker API), fuel API, Market Overview (client-side sort, fallback, thumbnail column), favorites (star), safeNumber (null-safe toFixed)
 - [x] Security: Telegram webhook secret, DOMPurify (DigestsPage), security tests
 - [ ] Успешный деплой backend (Railway)
 - [ ] Успешный деплой frontend (Cloudflare)

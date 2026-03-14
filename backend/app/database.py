@@ -3,12 +3,28 @@
 import ssl
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import Settings
 
 settings = Settings()
+
+# Sync URL for Celery workers (psycopg2)
+_sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+sync_engine = create_engine(
+    _sync_url,
+    pool_size=3,
+    max_overflow=5,
+    pool_pre_ping=True,
+)
+sync_session_factory = sessionmaker(
+    bind=sync_engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
 
 # Disable asyncpg statement cache for PgBouncer (Supabase pooler) transaction mode.
 _connect_args: dict = {

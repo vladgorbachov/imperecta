@@ -28,11 +28,13 @@ from app.scrapers.proxy_manager import proxy_manager
 class ScrapeResult:
     """Result of price scraping."""
 
-    price: Decimal
-    old_price: Decimal | None
-    promo_label: str | None
-    in_stock: bool
-    product_name: str | None
+    price: Decimal | None = None
+    old_price: Decimal | None = None
+    promo_label: str | None = None
+    in_stock: bool | None = None
+    product_name: str | None = None
+    image_url: str | None = None
+    currency: str | None = None
 
 
 # -----------------------------------------------------------------------------
