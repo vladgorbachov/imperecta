@@ -84,7 +84,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **markets** | GET | /api/markets/commodities | Сырьё (виджет) |
 | **markets** | GET | /api/markets/ticker?country=UA | Бегущая строка (forex+crypto+commodities+fuel по стране) |
 | **markets** | GET | /api/markets/fuel?country=UA | Цены на топливо (бензин, дизель, LPG) |
-| **markets** | GET | /api/markets/overview | Market Overview (маркетплейсы, товары) |
+| **markets** | GET | /api/markets/overview?sort=&limit= | Market Overview (реальные данные из price_snapshots) |
 | **markets** | GET | /api/markets/category-analytics | Аналитика по категориям |
 | **markets** | GET | /api/markets/marketplace-analytics | Аналитика по маркетплейсам |
 | **markets** | GET | /api/markets/opportunities | Блоки возможностей |
@@ -98,6 +98,8 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **admin** | GET | /api/admin/error-distribution | Распределение ошибок |
 | **admin** | GET | /api/admin/users | Список пользователей |
 | **admin** | GET | /api/admin/claude-status | Статус Claude API |
+| **admin** | POST | /api/admin/seed-products | Сид продуктов для теста парсинга (superuser) |
+| **admin** | POST | /api/admin/trigger-scrape | Ручной запуск парсинга всех competitor_products |
 
 ### Frontend (React Router)
 
@@ -129,6 +131,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 ### Backend
 - **Python 3.12** + **FastAPI** — REST API
 - **SQLAlchemy 2.0 (async)** + **asyncpg** — ORM и подключение к PostgreSQL
+- **SQLAlchemy (sync)** + **psycopg2** — sync_session_factory для Celery workers
 - **Alembic** — миграции БД
 - **Celery** + **Redis** — фоновые задачи (парсинг, алерты, дайджесты)
 - **Playwright** — headless-браузер для парсинга JS-rendered страниц (Ozon)
@@ -238,7 +241,7 @@ imperecta/
 │   │   │   ├── products.py           # Products CRUD, categories, at-risk
 │   │   │   └── telegram.py           # Webhook, generate-link-code, unlink, status
 │   │   ├── config.py                 # Pydantic Settings (env vars)
-│   │   ├── database.py               # SQLAlchemy async engine, session, Base
+│   │   ├── database.py               # SQLAlchemy async engine, session, sync_session_factory (Celery)
 │   │   ├── entitlements/
 │   │   │   ├── __init__.py
 │   │   │   └── plan.py               # ServiceTier, UserPlan, Feature, limits
@@ -277,7 +280,7 @@ imperecta/
 │   │   │   ├── product.py
 │   │   │   └── user.py
 │   │   ├── scrapers/
-│   │   │   ├── engine.py             # Ozon, WB, Kaspi, GenericWebScraper
+│   │   │   ├── engine.py             # ScrapeResult, Ozon, WB, GenericWebScraper
 │   │   │   ├── __init__.py
 │   │   │   └── proxy_manager.py      # Proxy rotation
 │   │   ├── services/
@@ -304,18 +307,19 @@ imperecta/
 │   │   │   │       ├── forex_adapter.py
 │   │   │   │       ├── fuel_adapter.py
 │   │   │   │       └── __init__.py
-│   │   │   ├── markets_service.py    # Forex, crypto, commodities, ticker, overview
+│   │   │   ├── markets_service.py    # Forex, crypto, commodities, ticker, overview (real price_snapshots)
 │   │   │   ├── plan_limits.py        # Plan limits check
 │   │   │   ├── price_service.py      # Price history, snapshots
-│   │   │   └── product_ai_service.py # AI recommendation
+│   │   │   ├── product_ai_service.py # AI recommendation
+│   │   │   └── seed_service.py      # Seed products for scraping test (admin)
 │   │   ├── workers/
 │   │   │   ├── celery_app.py         # Celery app config
 │   │   │   ├── alert_tasks.py        # check_alerts
-│   │   │   ├── cleanup_tasks.py      # cleanup_old_data
+│   │   │   ├── cleanup_tasks.py      # cleanup_old_data (30d snapshots/logs, 60d api_logs)
 │   │   │   ├── digest_tasks.py       # schedule_weekly/daily_digests
 │   │   │   ├── market_data_tasks.py  # ingest_market_data
 │   │   │   ├── scheduler.py          # Beat schedule
-│   │   │   ├── scrape_tasks.py       # scrape_single, scrape_user_products, scrape_all
+│   │   │   ├── scrape_tasks.py       # scrape_single (sync), scrape_all, price_snapshots + competitor_product
 │   │   │   └── __init__.py
 │   │   ├── __init__.py
 │   │   └── main.py                   # FastAPI app, CORS, lifespan, routers
@@ -419,7 +423,7 @@ imperecta/
 │   │   │   ├── ChangePasswordRoute.tsx
 │   │   │   ├── dashboard/
 │   │   │   │   ├── CountrySelector.tsx
-│   │   │   │   ├── MarketDataTable.tsx      # Market Overview table
+│   │   │   │   ├── MarketDataTable.tsx      # Market Overview (API only, empty state + Go to Products)
 │   │   │   │   ├── MarketsAnalyticsSection.tsx
 │   │   │   │   ├── MarketsTickerBar.tsx     # Бегущая строка
 │   │   │   │   └── MarketsWidgetsSection.tsx # 4 виджета: Forex, Crypto, Commodities, Fuel
@@ -474,8 +478,7 @@ imperecta/
 │   │   │       ├── StatCard.tsx
 │   │   │       └── TrendBadge.tsx
 │   │   ├── data/
-│   │   │   ├── filters.ts
-│   │   │   └── globalMarketData.ts   # Fallback data for Market Overview when API empty
+│   │   │   └── filters.ts
 │   │   ├── hooks/
 │   │   │   ├── useAdmin.ts
 │   │   │   ├── useAlerts.ts
@@ -563,8 +566,8 @@ imperecta/
 - **MarketsWidgetsSection** — 4 виджета: Forex, Crypto, Commodities, Fuel
   - Forex/Crypto/Commodities: избранное (звёздочка), API: forex, crypto, commodities
   - Fuel: GET /api/markets/fuel?country=, gasoline_95, diesel, lpg
-- **MarketDataTable** — Market Overview: маркетплейсы и товары пользователя, табы (volatile, trending, gainers, losers, recent), клиентская сортировка, fallback (globalMarketData), миниатюра товара (hash-цвет + first letter), колонки 30D, TREND
-- **MarketsAnalyticsSection** — category-analytics, marketplace-analytics, opportunities
+- **MarketDataTable** — Market Overview: только реальные данные из API (price_snapshots), табы (volatile, trending, gainers, losers, recent), empty state (Database icon, «Go to Products»), миниатюра товара (hash-цвет + first letter), колонки 30D, TREND
+- **MarketsAnalyticsSection** — category-analytics, marketplace-analytics, opportunities (только реальные данные, empty state при пустом API)
 - **CountrySelector** — выбор страны (preferred_country_code), поиск, мета-опции Europe/CIS, при Save — invalidate ticker/fuel/forex
 
 ### Entitlements (планы и лимиты)
@@ -579,11 +582,11 @@ imperecta/
 
 | Задача | Триггер | Описание |
 |--------|---------|----------|
-| scrape_single | API | Парсинг одного competitor_product |
-| scrape_user_products | API | Парсинг всех товаров пользователя |
-| scrape_all | Beat каждые 6 ч | Парсинг всех активных пользователей |
+| scrape_single | API / scrape_all | Парсинг одного competitor_product: fetch → extract → price_snapshots → competitor_product.last_price → ScrapeLog |
+| scrape_user_products | API | Парсинг всех товаров пользователя (stagger) |
+| scrape_all | Beat каждые 6 ч | Очередь scrape_single для всех активных competitor_products |
 | ingest_market_data | Beat каждые 2 ч | Загрузка forex, crypto, commodities |
-| cleanup_old_data | Beat вс 04:00 | Удаление старых данных |
+| cleanup_old_data | Beat вс 04:00 | Удаление: price_snapshots/scrape_logs 30 дн, api_logs 60 дн |
 | check_alerts | после scrape_single | Сравнение цен, email/Telegram |
 | schedule_weekly_digests | Beat пт 18:00 | Еженедельные дайджесты |
 | schedule_daily_digests | Beat ежедневно 08:00 | Ежедневные дайджесты (pro) |
@@ -599,7 +602,7 @@ imperecta/
 - [x] Миграции 001–014 (markets tables, avatar_url, preferred_country)
 - [x] Локальная разработка: docker-compose
 - [x] CI: ruff, pytest, eslint, vitest, build, security
-- [x] Markets: 4 виджета (Forex, Crypto, Commodities, Fuel), ticker bar (getTicker API), fuel API, Market Overview (client-side sort, fallback, thumbnail column), favorites (star), safeNumber (null-safe toFixed)
+- [x] Markets: 4 виджета (Forex, Crypto, Commodities, Fuel), ticker bar (getTicker API), fuel API, Market Overview (реальные price_snapshots, empty state, client-side sort), favorites (star), safeNumber (null-safe toFixed)
 - [x] Security: Telegram webhook secret, DOMPurify (DigestsPage), security tests
 - [ ] Успешный деплой backend (Railway)
 - [ ] Успешный деплой frontend (Cloudflare)
