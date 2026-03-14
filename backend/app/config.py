@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     market_data_forex_url: str = "https://api.frankfurter.app/latest"
     market_data_crypto_url: str = "https://api.coingecko.com/api/v3/coins/markets"
     market_data_commodities_url: str = ""
+    goldapi_key: str = ""  # For precious metals via goldapi.io
     market_data_fuel_url: str = ""
     market_data_timeout_seconds: int = 15
     market_data_retry_attempts: int = 3

@@ -4,11 +4,14 @@ Fetches forex, crypto, commodities, and fuel prices from free public APIs.
 All data is cached in-memory with 2-hour TTL to respect rate limits.
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
 
 import httpx
+
+from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -148,50 +151,78 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
 
 
 # ============================================================
-# COMMODITIES — metals.dev (free demo key) + static oil/gas
-# https://api.metals.dev/v1/latest?api_key=demo&currency=USD&unit=toz
+# COMMODITIES — goldapi.io (precious metals) + static oil/gas
+# https://www.goldapi.io/api/{symbol}/USD
 # ============================================================
+
+GOLDAPI_METALS: list[tuple[str, str]] = [
+    ("Gold", "XAU"),
+    ("Silver", "XAG"),
+    ("Platinum", "XPT"),
+    ("Palladium", "XPD"),
+]
+
+
+async def _fetch_one_metal(
+    client: httpx.AsyncClient,
+    symbol: str,
+    name: str,
+    api_key: str,
+) -> dict | None:
+    """Fetch single metal from goldapi.io. Returns None on error."""
+    try:
+        resp = await client.get(
+            f"https://www.goldapi.io/api/{symbol}/USD",
+            headers={"x-access-token": api_key},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        price = float(data.get("price", 0))
+        chp = data.get("chp")  # percent change
+        change_24h = round(float(chp), 2) if chp is not None else None
+        return {
+            "name": name,
+            "symbol": symbol,
+            "price": round(price, 2),
+            "unit": "oz",
+            "change_24h": change_24h,
+        }
+    except Exception as e:
+        logger.warning("GoldAPI %s fetch failed: %s", symbol, e)
+        return None
 
 
 async def fetch_commodities() -> list[dict]:
     """
-    Fetch commodity prices: precious metals from API, oil/gas static (updated weekly).
+    Fetch commodity prices: precious metals from goldapi.io, oil/gas static.
     Returns: [{"name": "Gold", "symbol": "XAU", "price": 2950.0, "unit": "oz",
-               "change_24h": null}, ...]
+               "change_24h": 0.17}, ...]
+    Raises when GOLDAPI_KEY is empty (no fake data).
     """
     cached = _get_cached("commodities")
     if cached is not None:
         return cached
 
+    settings = Settings()
+    api_key = (settings.goldapi_key or "").strip()
+    if not api_key:
+        raise ValueError("GOLDAPI_KEY not configured. Set GOLDAPI_KEY in environment.")
+
     result: list[dict] = []
 
-    # Precious metals from metals.dev (no fallback — raise on error)
+    # Batch fetch 4 metals in parallel
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            "https://api.metals.dev/v1/latest",
-            params={"api_key": "demo", "currency": "USD", "unit": "toz"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        tasks = [
+            _fetch_one_metal(client, symbol, name, api_key)
+            for name, symbol in GOLDAPI_METALS
+        ]
+        metals = await asyncio.gather(*tasks)
 
-    metals = data.get("metals", {})
-    metal_map = {
-        "gold": ("Gold", "XAU"),
-        "silver": ("Silver", "XAG"),
-        "platinum": ("Platinum", "XPT"),
-        "palladium": ("Palladium", "XPD"),
-    }
-    for key, (name, symbol) in metal_map.items():
-        if key in metals:
-            result.append({
-                "name": name,
-                "symbol": symbol,
-                "price": round(metals[key], 2),
-                "unit": "oz",
-                "change_24h": None,
-            })
+    for item in metals:
+        if item is not None:
+            result.append(item)
 
-    logger.info("Metals fetched: %d items", len(result))
+    logger.info("Metals fetched: %d items from goldapi.io", len(result))
 
     # Oil and Gas — static (no free reliable API; update via Celery task weekly)
     result.extend([

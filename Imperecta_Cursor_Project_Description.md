@@ -131,11 +131,11 @@ Imperecta — SaaS-платформа конкурентной разведки 
 ### Backend
 - **Python 3.12** + **FastAPI** — REST API
 - **SQLAlchemy 2.0 (async)** + **asyncpg** — ORM и подключение к PostgreSQL
-- **SQLAlchemy (sync)** + **psycopg2** — sync_session_factory для Celery workers
+- **SQLAlchemy (sync)** + **psycopg2** — sync_session_factory для Celery workers; ingest_market_data создаёт локальный async engine/session (не использует глобальный), чтобы избежать ошибки «different event loop» при повторном запуске
 - **Alembic** — миграции БД
 - **Celery** + **Redis** — фоновые задачи (парсинг, алерты, дайджесты)
 - **Playwright** — headless-браузер для парсинга JS-rendered страниц (Ozon)
-- **BeautifulSoup + httpx** — парсинг статических сайтов
+- **BeautifulSoup + httpx** — парсинг статических сайтов (httpx 0.27+: `proxy=` вместо `proxies=`)
 - **Anthropic Claude API** — генерация ИИ-дайджестов, AI-чат, авто-категоризация товаров
 - **Resend** — отправка email-уведомлений
 - **python-telegram-bot** — Telegram-бот для алертов
@@ -276,16 +276,16 @@ imperecta/
 │   │   │   ├── competitor.py
 │   │   │   ├── digest.py
 │   │   │   ├── __init__.py
-│   │   │   ├── markets.py
+│   │   │   ├── markets.py            # error, cached в Crypto/CommoditiesResponse
 │   │   │   ├── product.py
 │   │   │   └── user.py
 │   │   ├── scrapers/
-│   │   │   ├── engine.py             # ScrapeResult, Ozon, WB, GenericWebScraper
+│   │   │   ├── engine.py             # ScrapeResult, Ozon, WB, GenericWebScraper; httpx proxy=proxy_url
 │   │   │   ├── __init__.py
-│   │   │   └── proxy_manager.py      # Proxy rotation
+│   │   │   └── proxy_manager.py      # Decodo (SmartProxy) rotating residential proxies
 │   │   ├── services/
 │   │   │   ├── admin_service.py      # ensure_superuser, marketplace ops
-│   │   │   ├── market_data_service.py # Real-time forex, crypto, commodities, fuel (fetch from APIs)
+│   │   │   ├── market_data_service.py # Real-time forex, crypto, commodities, fuel; in-memory cache, graceful degradation (error/cached)
 │   │   │   ├── ai_chat_service.py    # AI chat logic
 │   │   │   ├── ai_service.py         # Claude API wrapper
 │   │   │   ├── alert_ai_service.py   # Alert explanation, auto-response
@@ -317,7 +317,7 @@ imperecta/
 │   │   │   ├── alert_tasks.py        # check_alerts
 │   │   │   ├── cleanup_tasks.py      # cleanup_old_data (30d snapshots/logs, 60d api_logs)
 │   │   │   ├── digest_tasks.py       # schedule_weekly/daily_digests
-│   │   │   ├── market_data_tasks.py  # ingest_market_data
+│   │   │   ├── market_data_tasks.py  # ingest_market_data (fresh engine+session per task, avoids event loop error)
 │   │   │   ├── scheduler.py          # Beat schedule
 │   │   │   ├── scrape_tasks.py       # scrape_single (sync), scrape_all, price_snapshots + competitor_product
 │   │   │   └── __init__.py
@@ -564,7 +564,7 @@ imperecta/
 
 - **MarketsTickerBar** — бегущая строка: GET /api/markets/ticker?country=, marquee-анимация, пауза при hover
 - **MarketsWidgetsSection** — 4 виджета: Forex, Crypto, Commodities, Fuel
-  - Forex/Crypto/Commodities: избранное (звёздочка), API: forex, crypto, commodities
+  - Forex/Crypto/Commodities: избранное (звёздочка), API: forex, crypto, commodities; error/cached в ответе при сбое API
   - Fuel: GET /api/markets/fuel?country=, gasoline_95, diesel, lpg
 - **MarketDataTable** — Market Overview: только реальные данные из API (price_snapshots), табы (volatile, trending, gainers, losers, recent), empty state (Database icon, «Go to Products»), миниатюра товара (hash-цвет + first letter), колонки 30D, TREND
 - **MarketsAnalyticsSection** — category-analytics, marketplace-analytics, opportunities (только реальные данные, empty state при пустом API)
@@ -585,7 +585,7 @@ imperecta/
 | scrape_single | API / scrape_all | Парсинг одного competitor_product: fetch → extract → price_snapshots → competitor_product.last_price → ScrapeLog |
 | scrape_user_products | API | Парсинг всех товаров пользователя (stagger) |
 | scrape_all | Beat каждые 6 ч | Очередь scrape_single для всех активных competitor_products |
-| ingest_market_data | Beat каждые 2 ч | Загрузка forex, crypto, commodities |
+| ingest_market_data | Beat каждые 2 ч | Загрузка forex, crypto, commodities; fresh engine+session per run (avoids asyncpg event loop error) |
 | cleanup_old_data | Beat вс 04:00 | Удаление: price_snapshots/scrape_logs 30 дн, api_logs 60 дн |
 | check_alerts | после scrape_single | Сравнение цен, email/Telegram |
 | schedule_weekly_digests | Beat пт 18:00 | Еженедельные дайджесты |
@@ -595,14 +595,14 @@ imperecta/
 
 ## Текущий статус
 
-- [x] Backend: FastAPI, все API-роуты, Celery, scrapers (Ozon, WB, Kaspi, Generic)
+- [x] Backend: FastAPI, все API-роуты, Celery, scrapers (Ozon, WB, Kaspi, Generic); ingest_market_data — fresh engine/session per task; httpx proxy= (не proxies=)
 - [x] Frontend: Landing, 15+ страниц, entitlements, AIAnalystRoute (locked), PlanLimitBanner
 - [x] Auth: JWT, «Запомнить меня», telegram-link/disconnect в auth
 - [x] Entitlements: Trial/Free/Paid Full, AI Analyst только для Paid
 - [x] Миграции 001–014 (markets tables, avatar_url, preferred_country)
 - [x] Локальная разработка: docker-compose
 - [x] CI: ruff, pytest, eslint, vitest, build, security
-- [x] Markets: 4 виджета (Forex, Crypto, Commodities, Fuel), ticker bar (getTicker API), fuel API, Market Overview (реальные price_snapshots, empty state, client-side sort), favorites (star), safeNumber (null-safe toFixed)
+- [x] Markets: 4 виджета (Forex, Crypto, Commodities, Fuel), ticker bar (getTicker API), fuel API, Market Overview (реальные price_snapshots, empty state, client-side sort), favorites (star), safeNumber (null-safe toFixed), error/cached в виджетах при сбое API
 - [x] Security: Telegram webhook secret, DOMPurify (DigestsPage), security tests
 - [ ] Успешный деплой backend (Railway)
 - [ ] Успешный деплой frontend (Cloudflare)
