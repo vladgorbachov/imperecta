@@ -211,34 +211,26 @@ async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
 
 @router.get("/commodities", response_model=MarketsCommoditiesResponse)
 async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesResponse:
-    """Resources/commodities widget data from goldapi.io + static oil/gas/fuel. Never 503."""
+    """Resources/commodities: metals (GoldAPI) + energy (Alpha Vantage). No static data. Never 503."""
     now = _now()
-    try:
-        raw = await fetch_commodities()
-        items = [
-            {
-                "symbol": c["symbol"],
-                "name": c.get("name"),
-                "price": c["price"],
-                "change_24h": c.get("change_24h"),
-                "unit": c.get("unit"),
-                "refreshed_at": now,
-            }
-            for c in raw
-        ]
-        return MarketsCommoditiesResponse(
-            items=items,
-            error=None,
-            cached=False,
-            last_refreshed_at=now,
-        )
-    except Exception as e:
-        return MarketsCommoditiesResponse(
-            items=[],
-            error=str(e)[:200] or "Commodities API error.",
-            cached=False,
-            last_refreshed_at=now,
-        )
+    raw_items, error_msg, cached = await fetch_commodities()
+    items = [
+        {
+            "symbol": c["symbol"],
+            "name": c.get("name"),
+            "price": c["price"],
+            "change_24h": c.get("change_24h"),
+            "unit": c.get("unit"),
+            "refreshed_at": now,
+        }
+        for c in raw_items
+    ]
+    return MarketsCommoditiesResponse(
+        items=items,
+        error=error_msg,
+        cached=cached,
+        last_refreshed_at=now,
+    )
 
 
 @router.get("/fuel")

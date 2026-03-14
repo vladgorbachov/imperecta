@@ -4,6 +4,8 @@ from celery.schedules import crontab
 
 from app.workers.celery_app import celery_app
 
+# ingest_market_data: metals (GoldAPI) refresh every 36h, energy (Alpha Vantage) every 24h.
+# Cache TTLs are enforced in market_data_service; Beat runs every 2h to catch both windows.
 celery_app.conf.beat_schedule = {
     "scrape-all-every-6h": {
         "task": "scrape_all",
