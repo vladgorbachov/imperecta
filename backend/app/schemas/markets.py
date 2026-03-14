@@ -79,9 +79,11 @@ class MarketsCryptoItem(BaseModel):
 
 
 class MarketsCryptoResponse(BaseModel):
-    """Crypto widget data."""
+    """Crypto widget data. Never 503 — returns items=[], error=msg on API failure."""
 
     items: list[MarketsCryptoItem]
+    error: str | None = None
+    cached: bool = False
     last_refreshed_at: datetime | None
 
 
@@ -100,9 +102,11 @@ class MarketsCommodityItem(BaseModel):
 
 
 class MarketsCommoditiesResponse(BaseModel):
-    """Resources/commodities widget data."""
+    """Resources/commodities widget data. Never 503 — returns items=[], error=msg on API failure."""
 
     items: list[MarketsCommodityItem]
+    error: str | None = None
+    cached: bool = False
     last_refreshed_at: datetime | None
 
 

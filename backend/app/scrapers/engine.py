@@ -311,10 +311,11 @@ class WildberriesScraper(BaseScraper):
         }
 
         proxy_dict = self.proxy_manager.get_proxy(country=self._get_proxy_country())
+        proxy_url = (proxy_dict.get("http") or proxy_dict.get("https")) if proxy_dict else None
 
         try:
             async with httpx.AsyncClient(
-                proxies=proxy_dict,
+                proxy=proxy_url,
                 timeout=15.0,
             ) as client:
                 response = await client.get(self.API_URL, params=params, headers=headers)
@@ -441,9 +442,10 @@ class GenericWebScraper(BaseScraper):
     async def _scrape_httpx(self, url: str) -> ScrapeResult | None:
         """Fetch via httpx + BeautifulSoup."""
         proxy_dict = self.proxy_manager.get_proxy(country=self._get_proxy_country())
+        proxy_url = (proxy_dict.get("http") or proxy_dict.get("https")) if proxy_dict else None
         try:
             async with httpx.AsyncClient(
-                proxies=proxy_dict,
+                proxy=proxy_url,
                 timeout=30.0,
                 follow_redirects=True,
                 headers={"User-Agent": _random_user_agent()},

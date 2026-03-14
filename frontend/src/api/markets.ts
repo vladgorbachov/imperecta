@@ -67,6 +67,8 @@ export interface MarketsCryptoItem {
 
 export interface MarketsCryptoResponse {
   items: MarketsCryptoItem[];
+  error: string | null;
+  cached: boolean;
   last_refreshed_at: string | null;
 }
 
@@ -83,6 +85,8 @@ export interface MarketsCommodityItem {
 
 export interface MarketsCommoditiesResponse {
   items: MarketsCommodityItem[];
+  error: string | null;
+  cached: boolean;
   last_refreshed_at: string | null;
 }
 

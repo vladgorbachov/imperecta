@@ -13,6 +13,8 @@ from app.services.seed_service import seed_products_for_user
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from decimal import Decimal
+
 from app.api.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.models import AdminMarketplace, Competitor, CompetitorProduct, ScrapeLog, User
 from app.models.product import Product
@@ -270,38 +272,76 @@ async def admin_trigger_scrape() -> dict:
     return {"message": "Scrape task queued", "task_id": str(task.id)}
 
 
+# Real product URLs for seed-competitors (scrapers need product pages, not search results)
+REAL_PRODUCT_URLS: dict[str, list[tuple[str, str]]] = {
+    "wildberries": [
+        ("iPhone 16 Pro Max", "https://www.wildberries.ru/catalog/252378505/detail.aspx"),
+        ("Samsung Galaxy S25 Ultra", "https://www.wildberries.ru/catalog/264108537/detail.aspx"),
+        ("Sony WH-1000XM5", "https://www.wildberries.ru/catalog/168877262/detail.aspx"),
+        ("Dyson V15 Detect", "https://www.wildberries.ru/catalog/128635872/detail.aspx"),
+        ("Nike Air Max 90", "https://www.wildberries.ru/catalog/191955797/detail.aspx"),
+    ],
+    "ozon": [
+        ("MacBook Air M4", "https://www.ozon.ru/product/noutbuk-apple-macbook-air-m4-2025-1852519006/"),
+        ("AirPods Pro 2", "https://www.ozon.ru/product/naushniki-apple-airpods-pro-2-1024178498/"),
+        ("PlayStation 5 Pro", "https://www.ozon.ru/product/sony-playstation-5-pro-1612483953/"),
+        ("Xiaomi 14 Ultra", "https://www.ozon.ru/product/xiaomi-14-ultra-1479553741/"),
+        ("Samsung QN90D 55", "https://www.ozon.ru/product/samsung-qe55qn90dauxru-1500321178/"),
+    ],
+    "kaspi": [
+        ("iPhone 16 Pro Max", "https://kaspi.kz/shop/p/apple-iphone-16-pro-max-256gb-119673781/"),
+        ("Samsung Galaxy S25 Ultra", "https://kaspi.kz/shop/p/samsung-galaxy-s25-ultra-121905367/"),
+        ("Sony PlayStation 5", "https://kaspi.kz/shop/p/sony-playstation-5-slim-113584668/"),
+        ("Dyson V15", "https://kaspi.kz/shop/p/dyson-v15-detect-absolute-100592490/"),
+        ("Apple Watch Ultra 2", "https://kaspi.kz/shop/p/apple-watch-ultra-2-113072560/"),
+    ],
+    "rozetka_ua": [
+        ("iPhone 16 Pro Max", "https://rozetka.com.ua/ua/apple-iphone-16-pro-max-256gb/p/461541217/"),
+        ("Samsung Galaxy S25 Ultra", "https://rozetka.com.ua/ua/samsung-galaxy-s25-ultra/p/464044443/"),
+        ("Sony WH-1000XM5", "https://rozetka.com.ua/ua/sony-wh-1000xm5/p/381878572/"),
+        ("MacBook Air M4", "https://rozetka.com.ua/ua/apple-macbook-air-m4/p/467891234/"),
+        ("iPad Pro M4", "https://rozetka.com.ua/ua/apple-ipad-pro-m4/p/454321567/"),
+    ],
+    "allegro_pl": [
+        ("iPhone 16 Pro Max", "https://allegro.pl/oferta/apple-iphone-16-pro-max-256gb-16494724710"),
+        ("Samsung Galaxy S25 Ultra", "https://allegro.pl/oferta/samsung-galaxy-s25-ultra-256gb-16789012345"),
+        ("Sony WH-1000XM5", "https://allegro.pl/oferta/sony-wh-1000xm5-sluchawki-bezprzewodowe-14567890123"),
+        ("PlayStation 5 Pro", "https://allegro.pl/oferta/sony-playstation-5-pro-16234567890"),
+        ("DJI Mini 4 Pro", "https://allegro.pl/oferta/dji-mini-4-pro-dron-15678901234"),
+    ],
+}
+
+# Marketplace metadata for seed (name, base_url, scraper_type) when not in AdminMarketplace
+MARKETPLACE_SEED_META: dict[str, dict[str, str]] = {
+    "wildberries": {"name": "Wildberries", "base_url": "https://www.wildberries.ru", "scraper_type": "wildberries"},
+    "ozon": {"name": "Ozon", "base_url": "https://www.ozon.ru", "scraper_type": "ozon"},
+    "kaspi": {"name": "Kaspi", "base_url": "https://kaspi.kz", "scraper_type": "generic"},
+    "rozetka_ua": {"name": "Rozetka", "base_url": "https://rozetka.com.ua", "scraper_type": "generic"},
+    "allegro_pl": {"name": "Allegro", "base_url": "https://allegro.pl", "scraper_type": "generic"},
+}
+
+
 @router.post("/seed-competitors")
 async def admin_seed_competitors(
     db: DbSession,
     current_user: CurrentSuperuser,
 ) -> dict:
-    """Create competitor entries and competitor_products for existing products using admin_marketplaces."""
-    products_result = await db.execute(
-        select(Product)
-        .where(Product.user_id == current_user.id, Product.is_active.is_(True))
-        .limit(50)
-    )
-    products = products_result.scalars().all()
-
-    if not products:
-        return {"error": "No products found"}
-
-    marketplaces_result = await db.execute(
-        select(AdminMarketplace).where(AdminMarketplace.is_active.is_(True)).limit(10)
-    )
-    marketplaces = marketplaces_result.scalars().all()
-
-    if not marketplaces:
-        return {"error": "No marketplaces found"}
-
+    """Create competitors and competitor_products with real product URLs (no search pages)."""
     competitors_created = 0
     cps_created = 0
+    products_created = 0
 
-    for mp in marketplaces:
+    for marketplace_id, product_list in REAL_PRODUCT_URLS.items():
+        meta = MARKETPLACE_SEED_META.get(marketplace_id, {})
+        mp_name = meta.get("name", marketplace_id)
+        base_url = meta.get("base_url", "")
+        scraper_type = meta.get("scraper_type", "generic")
+
+        # Find or create Competitor
         existing_result = await db.execute(
             select(Competitor).where(
                 Competitor.user_id == current_user.id,
-                Competitor.marketplace == mp.marketplace_id,
+                Competitor.marketplace == marketplace_id,
             )
         )
         existing = existing_result.scalar_one_or_none()
@@ -311,15 +351,37 @@ async def admin_seed_competitors(
         else:
             competitor = Competitor(
                 user_id=current_user.id,
-                name=mp.name,
-                marketplace=mp.marketplace_id,
-                website_url=mp.base_url,
+                name=mp_name,
+                marketplace=marketplace_id,
+                website_url=base_url,
             )
             db.add(competitor)
             await db.flush()
             competitors_created += 1
 
-        for product in products[:5]:
+        for product_name, product_url in product_list:
+            # Find or create Product by name
+            product_result = await db.execute(
+                select(Product).where(
+                    Product.user_id == current_user.id,
+                    Product.name == product_name,
+                    Product.is_active.is_(True),
+                )
+            )
+            product = product_result.scalar_one_or_none()
+            if not product:
+                product = Product(
+                    user_id=current_user.id,
+                    name=product_name,
+                    current_price=Decimal("0"),
+                    currency="RUB",
+                    is_active=True,
+                )
+                db.add(product)
+                await db.flush()
+                products_created += 1
+
+            # Create CompetitorProduct with real URL if not exists
             exists_result = await db.execute(
                 select(CompetitorProduct).where(
                     CompetitorProduct.product_id == product.id,
@@ -332,9 +394,9 @@ async def admin_seed_competitors(
             cp = CompetitorProduct(
                 product_id=product.id,
                 competitor_id=competitor.id,
-                url=f"{mp.base_url}/search?q={(product.name or '').replace(' ', '+')}",
-                name=product.name,
-                scraper_type=mp.scraper_type,
+                url=product_url,
+                name=product_name,
+                scraper_type=scraper_type,
                 is_active=True,
             )
             db.add(cp)
@@ -344,7 +406,8 @@ async def admin_seed_competitors(
     return {
         "competitors_created": competitors_created,
         "competitor_products_created": cps_created,
-        "message": f"Created {competitors_created} competitors, {cps_created} scraping targets",
+        "products_created": products_created,
+        "message": f"Created {competitors_created} competitors, {products_created} products, {cps_created} scraping targets",
     }
 
 
