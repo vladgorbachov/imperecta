@@ -178,7 +178,11 @@ function CryptoWidget() {
   return (
     <WidgetCard title={t("widgets.crypto.title")}>
       {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
+        data?.error ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{data.error}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
+        )
       ) : (
         <ul className="space-y-2">
           {items.slice(0, 6).map((c) => (
@@ -244,7 +248,11 @@ function CommoditiesWidget() {
   if (items.length === 0) {
     return (
       <WidgetCard title={t("widgets.commodities.title")}>
-        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+        {data?.error ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{data.error}</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
+        )}
       </WidgetCard>
     );
   }

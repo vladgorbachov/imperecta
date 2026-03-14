@@ -106,54 +106,45 @@ async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
 # ============================================================
 
 
-async def fetch_crypto_prices() -> list[dict]:
+async def fetch_crypto_prices() -> tuple[list[dict], bool]:
     """
     Fetch top 20 crypto prices by market cap.
-    Returns: [{"symbol": "BTC", "name": "Bitcoin", "price": 73459.0,
-               "change_24h": 5.1, "market_cap": 1450000000000, "volume_24h": ...}, ...]
+    Returns: (data, from_cache). Raises on API error (no fallback).
     """
     cached = _get_cached("crypto")
     if cached is not None:
-        return cached
+        return (cached, True)
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://api.coingecko.com/api/v3/coins/markets",
-                params={
-                    "vs_currency": "usd",
-                    "order": "market_cap_desc",
-                    "per_page": 20,
-                    "page": 1,
-                    "sparkline": "false",
-                    "price_change_percentage": "24h",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            "https://api.coingecko.com/api/v3/coins/markets",
+            params={
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": 20,
+                "page": 1,
+                "sparkline": "false",
+                "price_change_percentage": "24h",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
-        result = []
-        for coin in data:
-            result.append({
-                "symbol": (coin.get("symbol") or "").upper(),
-                "name": coin.get("name", ""),
-                "price": coin.get("current_price") or 0,
-                "change_24h": round(coin.get("price_change_percentage_24h") or 0, 2),
-                "market_cap": coin.get("market_cap") or 0,
-                "volume_24h": coin.get("total_volume") or 0,
-                "image": coin.get("image", ""),
-            })
+    result = []
+    for coin in data:
+        result.append({
+            "symbol": (coin.get("symbol") or "").upper(),
+            "name": coin.get("name", ""),
+            "price": coin.get("current_price") or 0,
+            "change_24h": round(coin.get("price_change_percentage_24h") or 0, 2),
+            "market_cap": coin.get("market_cap") or 0,
+            "volume_24h": coin.get("total_volume") or 0,
+            "image": coin.get("image", ""),
+        })
 
-        _set_cached("crypto", result)
-        logger.info("Crypto prices fetched: %d coins", len(result))
-        return result
-
-    except httpx.TimeoutException:
-        logger.error("CoinGecko API timeout")
-        return _get_cached("crypto", ttl=86400) or []
-    except Exception as e:
-        logger.error("CoinGecko API error: %s", e)
-        return _get_cached("crypto", ttl=86400) or []
+    _set_cached("crypto", result)
+    logger.info("Crypto prices fetched: %d coins", len(result))
+    return (result, False)
 
 
 # ============================================================
@@ -174,44 +165,33 @@ async def fetch_commodities() -> list[dict]:
 
     result: list[dict] = []
 
-    # Precious metals from metals.dev
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                "https://api.metals.dev/v1/latest",
-                params={"api_key": "demo", "currency": "USD", "unit": "toz"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+    # Precious metals from metals.dev (no fallback — raise on error)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            "https://api.metals.dev/v1/latest",
+            params={"api_key": "demo", "currency": "USD", "unit": "toz"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
-        metals = data.get("metals", {})
-        metal_map = {
-            "gold": ("Gold", "XAU"),
-            "silver": ("Silver", "XAG"),
-            "platinum": ("Platinum", "XPT"),
-            "palladium": ("Palladium", "XPD"),
-        }
-        for key, (name, symbol) in metal_map.items():
-            if key in metals:
-                result.append({
-                    "name": name,
-                    "symbol": symbol,
-                    "price": round(metals[key], 2),
-                    "unit": "oz",
-                    "change_24h": None,
-                })
+    metals = data.get("metals", {})
+    metal_map = {
+        "gold": ("Gold", "XAU"),
+        "silver": ("Silver", "XAG"),
+        "platinum": ("Platinum", "XPT"),
+        "palladium": ("Palladium", "XPD"),
+    }
+    for key, (name, symbol) in metal_map.items():
+        if key in metals:
+            result.append({
+                "name": name,
+                "symbol": symbol,
+                "price": round(metals[key], 2),
+                "unit": "oz",
+                "change_24h": None,
+            })
 
-        logger.info("Metals fetched: %d items", len(result))
-
-    except Exception as e:
-        logger.error("Metals API error: %s", e)
-        # Fallback: approximate recent prices so widget is never empty
-        result = [
-            {"name": "Gold", "symbol": "XAU", "price": 2950.00, "unit": "oz", "change_24h": None},
-            {"name": "Silver", "symbol": "XAG", "price": 33.50, "unit": "oz", "change_24h": None},
-            {"name": "Platinum", "symbol": "XPT", "price": 980.00, "unit": "oz", "change_24h": None},
-            {"name": "Palladium", "symbol": "XPD", "price": 960.00, "unit": "oz", "change_24h": None},
-        ]
+    logger.info("Metals fetched: %d items", len(result))
 
     # Oil and Gas — static (no free reliable API; update via Celery task weekly)
     result.extend([
@@ -326,28 +306,34 @@ async def get_ticker_data(country_code: str = "UA") -> list[dict]:
         })
 
     # Crypto top 5
-    crypto = await fetch_crypto_prices()
-    for coin in crypto[:5]:
-        items.append({
-            "type": "crypto",
-            "label": coin["symbol"],
-            "value": coin["price"],
-            "change": coin["change_24h"],
-            "prefix": "$",
-            "suffix": "",
-        })
+    try:
+        crypto_data, _ = await fetch_crypto_prices()
+        for coin in crypto_data[:5]:
+            items.append({
+                "type": "crypto",
+                "label": coin["symbol"],
+                "value": coin["price"],
+                "change": coin["change_24h"],
+                "prefix": "$",
+                "suffix": "",
+            })
+    except Exception:
+        pass  # Skip crypto on error
 
     # Commodities top 3
-    commodities = await fetch_commodities()
-    for item in commodities[:3]:
-        items.append({
-            "type": "commodity",
-            "label": item["name"],
-            "value": item["price"],
-            "change": item.get("change_24h"),
-            "prefix": "$",
-            "suffix": f"/{item['unit']}",
-        })
+    try:
+        commodities = await fetch_commodities()
+        for item in commodities[:3]:
+            items.append({
+                "type": "commodity",
+                "label": item["name"],
+                "value": item["price"],
+                "change": item.get("change_24h"),
+                "prefix": "$",
+                "suffix": f"/{item['unit']}",
+            })
+    except Exception:
+        pass  # Skip commodities on error
 
     # Fuel for selected country
     fuel = await get_fuel_prices(country_code)

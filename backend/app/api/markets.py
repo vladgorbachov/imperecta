@@ -180,41 +180,65 @@ async def get_forex(current_user: CurrentUser) -> MarketsForexResponse:
 
 @router.get("/crypto", response_model=MarketsCryptoResponse)
 async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
-    """Crypto widget data from CoinGecko."""
-    raw = await fetch_crypto_prices()
-    if not raw:
-        raise HTTPException(503, "Crypto data temporarily unavailable")
+    """Crypto widget data from CoinGecko. Never 503 — returns 200 with items=[], error on API failure."""
     now = _now()
-    items = [
-        {
-            "symbol": c["symbol"],
-            "price": c["price"],
-            "change_24h": c.get("change_24h"),
-            "market_cap": c.get("market_cap"),
-            "refreshed_at": now,
-        }
-        for c in raw
-    ]
-    return MarketsCryptoResponse(items=items, last_refreshed_at=now)
+    try:
+        raw, from_cache = await fetch_crypto_prices()
+        items = [
+            {
+                "symbol": c["symbol"],
+                "price": c["price"],
+                "change_24h": c.get("change_24h"),
+                "market_cap": c.get("market_cap"),
+                "refreshed_at": now,
+            }
+            for c in raw
+        ]
+        return MarketsCryptoResponse(
+            items=items,
+            error=None,
+            cached=from_cache,
+            last_refreshed_at=now,
+        )
+    except Exception:
+        return MarketsCryptoResponse(
+            items=[],
+            error="CoinGecko API rate limited (429). Retry in 2 hours.",
+            cached=False,
+            last_refreshed_at=now,
+        )
 
 
 @router.get("/commodities", response_model=MarketsCommoditiesResponse)
 async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesResponse:
-    """Resources/commodities widget data from metals.dev + static oil/gas/fuel."""
-    raw = await fetch_commodities()
+    """Resources/commodities widget data from metals.dev + static oil/gas/fuel. Never 503."""
     now = _now()
-    items = [
-        {
-            "symbol": c["symbol"],
-            "name": c.get("name"),
-            "price": c["price"],
-            "change_24h": c.get("change_24h"),
-            "unit": c.get("unit"),
-            "refreshed_at": now,
-        }
-        for c in raw
-    ]
-    return MarketsCommoditiesResponse(items=items, last_refreshed_at=now)
+    try:
+        raw = await fetch_commodities()
+        items = [
+            {
+                "symbol": c["symbol"],
+                "name": c.get("name"),
+                "price": c["price"],
+                "change_24h": c.get("change_24h"),
+                "unit": c.get("unit"),
+                "refreshed_at": now,
+            }
+            for c in raw
+        ]
+        return MarketsCommoditiesResponse(
+            items=items,
+            error=None,
+            cached=False,
+            last_refreshed_at=now,
+        )
+    except Exception:
+        return MarketsCommoditiesResponse(
+            items=[],
+            error="Metals API unauthorized (401). Check API key.",
+            cached=False,
+            last_refreshed_at=now,
+        )
 
 
 @router.get("/fuel")
