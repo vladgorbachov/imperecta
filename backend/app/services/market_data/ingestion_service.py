@@ -29,6 +29,9 @@ from app.services.market_data.dto import (
 from app.services.market_data.providers.commodities_adapter import (
     CommoditiesHttpAdapter,
 )
+from app.services.market_data.providers.commodities_goldapi_alphavantage import (
+    CommoditiesGoldAPIAlphaVantageAdapter,
+)
 from app.services.market_data.providers.crypto_adapter import CryptoCoingeckoAdapter
 from app.services.market_data.providers.forex_adapter import ForexFrankfurterAdapter
 
@@ -178,12 +181,16 @@ class MarketDataIngestionService:
         return len(items)
 
     async def ingest_commodities(self) -> int:
-        """Fetch commodities from provider, validate, persist. Returns count persisted."""
-        if not settings.market_data_commodities_url.strip():
-            logger.debug("Commodities URL not configured, skipping ingestion")
+        """Fetch commodities from GoldAPI + Alpha Vantage, validate, persist. Returns count persisted."""
+        # Prefer real APIs (GoldAPI + Alpha Vantage) over legacy HTTP URL
+        if settings.goldapi_key or settings.alpha_vantage_key:
+            adapter = CommoditiesGoldAPIAlphaVantageAdapter()
+        elif settings.market_data_commodities_url.strip():
+            adapter = CommoditiesHttpAdapter(timeout=float(self.timeout))
+        else:
+            logger.debug("Commodities: no GOLDAPI_KEY, ALPHA_VANTAGE_KEY, or MARKET_DATA_COMMODITIES_URL")
             return 0
 
-        adapter = CommoditiesHttpAdapter(timeout=float(self.timeout))
         items = await self._fetch_with_retry(
             adapter.fetch,
             MarketsRefreshType.commodities,

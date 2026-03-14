@@ -8,6 +8,9 @@ from app.services.market_data.providers.base import (
 from app.services.market_data.providers.commodities_adapter import (
     CommoditiesHttpAdapter,
 )
+from app.services.market_data.providers.commodities_goldapi_alphavantage import (
+    CommoditiesGoldAPIAlphaVantageAdapter,
+)
 from app.services.market_data.providers.crypto_adapter import CryptoCoingeckoAdapter
 from app.services.market_data.providers.forex_adapter import ForexFrankfurterAdapter
 
@@ -18,4 +21,5 @@ __all__ = [
     "ForexFrankfurterAdapter",
     "CryptoCoingeckoAdapter",
     "CommoditiesHttpAdapter",
+    "CommoditiesGoldAPIAlphaVantageAdapter",
 ]

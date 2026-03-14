@@ -151,9 +151,12 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
 
 
 # ============================================================
-# COMMODITIES — goldapi.io (precious metals) + static oil/gas
-# https://www.goldapi.io/api/{symbol}/USD
+# COMMODITIES — GoldAPI (metals) + Alpha Vantage (energy)
+# No static prices. Real API only or error.
 # ============================================================
+
+GOLDAPI_TTL = 129600  # 36 hours
+ALPHA_VANTAGE_TTL = 86400  # 24 hours
 
 GOLDAPI_METALS: list[tuple[str, str]] = [
     ("Gold", "XAU"),
@@ -192,54 +195,147 @@ async def _fetch_one_metal(
         return None
 
 
-async def fetch_commodities() -> list[dict]:
+async def fetch_metals() -> dict:
     """
-    Fetch commodity prices: precious metals from goldapi.io, oil/gas static.
-    Returns: [{"name": "Gold", "symbol": "XAU", "price": 2950.0, "unit": "oz",
-               "change_24h": 0.17}, ...]
-    Raises when GOLDAPI_KEY is empty (no fake data).
+    Fetch precious metals from GoldAPI.io (XAU, XAG, XPT, XPD).
+    Cache TTL: 36 hours.
+    Returns: {"items": [...], "error": str | None}
     """
-    cached = _get_cached("commodities")
+    cached = _get_cached("commodities_metals", ttl=GOLDAPI_TTL)
     if cached is not None:
         return cached
 
     settings = Settings()
     api_key = (settings.goldapi_key or "").strip()
     if not api_key:
-        raise ValueError("GOLDAPI_KEY not configured. Set GOLDAPI_KEY in environment.")
+        result = {"items": [], "error": "GOLDAPI_KEY not configured"}
+        _set_cached("commodities_metals", result)
+        return result
 
-    result: list[dict] = []
+    try:
+        result_items: list[dict] = []
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            tasks = [
+                _fetch_one_metal(client, symbol, name, api_key)
+                for name, symbol in GOLDAPI_METALS
+            ]
+            metals = await asyncio.gather(*tasks)
 
-    # Batch fetch 4 metals in parallel
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        tasks = [
-            _fetch_one_metal(client, symbol, name, api_key)
-            for name, symbol in GOLDAPI_METALS
-        ]
-        metals = await asyncio.gather(*tasks)
+        for item in metals:
+            if item is not None:
+                result_items.append(item)
 
-    for item in metals:
-        if item is not None:
-            result.append(item)
+        result = {"items": result_items, "error": None}
+        _set_cached("commodities_metals", result)
+        logger.info("Metals fetched: %d items from goldapi.io", len(result_items))
+        return result
+    except Exception as e:
+        err_msg = f"GoldAPI error: {e}"
+        result = {"items": [], "error": err_msg}
+        _set_cached("commodities_metals", result)
+        return result
 
-    logger.info("Metals fetched: %d items from goldapi.io", len(result))
 
-    # Oil and Gas — static (no free reliable API; update via Celery task weekly)
-    result.extend([
-        {"name": "Crude Oil (Brent)", "symbol": "BRENT", "price": 70.50, "unit": "bbl", "change_24h": None},
-        {"name": "Crude Oil (WTI)", "symbol": "WTI", "price": 67.20, "unit": "bbl", "change_24h": None},
-        {"name": "Natural Gas", "symbol": "NATGAS", "price": 4.20, "unit": "MMBtu", "change_24h": None},
-    ])
+# Alpha Vantage endpoints: WTI, BRENT, NATURAL_GAS
+ALPHA_VANTAGE_TICKERS: list[tuple[str, str, str]] = [
+    ("Crude Oil (WTI)", "WTI", "bbl"),
+    ("Crude Oil (Brent)", "BRENT", "bbl"),
+    ("Natural Gas", "NATGAS", "MMBtu"),
+]
+ALPHA_VANTAGE_FUNCTIONS: dict[str, str] = {
+    "WTI": "WTI",
+    "BRENT": "BRENT",
+    "NATGAS": "NATURAL_GAS",
+}
 
-    # Fuel — Europe avg (frontend filters by symbol gasoline/diesel/lpg)
-    result.extend([
-        {"name": "Gasoline 95 (Europe avg)", "symbol": "gasoline", "price": 1.72, "unit": "EUR/L", "change_24h": None},
-        {"name": "Diesel (Europe avg)", "symbol": "diesel", "price": 1.62, "unit": "EUR/L", "change_24h": None},
-        {"name": "LPG (Europe avg)", "symbol": "lpg", "price": 0.78, "unit": "EUR/L", "change_24h": None},
-    ])
 
-    _set_cached("commodities", result)
-    return result
+async def _fetch_alpha_vantage(
+    client: httpx.AsyncClient,
+    function: str,
+    name: str,
+    symbol: str,
+    unit: str,
+    api_key: str,
+) -> dict | None:
+    """Fetch single energy commodity from Alpha Vantage. Returns None on error."""
+    try:
+        url = f"https://www.alphavantage.co/query?function={function}&interval=daily&apikey={api_key}"
+        resp = await client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+        data_list = data.get("data")
+        if not isinstance(data_list, list) or len(data_list) < 2:
+            logger.warning("Alpha Vantage %s: insufficient data", symbol)
+            return None
+        latest = float(data_list[0].get("value", 0))
+        prev = float(data_list[1].get("value", 0))
+        if prev == 0:
+            change_24h = None
+        else:
+            change_24h = round(((latest - prev) / prev) * 100, 2)
+        return {
+            "name": name,
+            "symbol": symbol,
+            "price": round(latest, 2),
+            "unit": unit,
+            "change_24h": change_24h,
+        }
+    except Exception as e:
+        logger.warning("Alpha Vantage %s fetch failed: %s", symbol, e)
+        return None
+
+
+async def fetch_energy() -> dict:
+    """
+    Fetch oil and gas from Alpha Vantage (WTI, Brent, Natural Gas).
+    Cache TTL: 24 hours.
+    Returns: {"items": [...], "error": str | None}
+    """
+    cached = _get_cached("commodities_energy", ttl=ALPHA_VANTAGE_TTL)
+    if cached is not None:
+        return cached
+
+    settings = Settings()
+    api_key = (settings.alpha_vantage_key or "").strip()
+    if not api_key:
+        result = {"items": [], "error": "ALPHA_VANTAGE_KEY not configured"}
+        _set_cached("commodities_energy", result)
+        return result
+
+    try:
+        result_items: list[dict] = []
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for name, symbol, unit in ALPHA_VANTAGE_TICKERS:
+                func = ALPHA_VANTAGE_FUNCTIONS[symbol]
+                item = await _fetch_alpha_vantage(client, func, name, symbol, unit, api_key)
+                if item is not None:
+                    result_items.append(item)
+
+        result = {"items": result_items, "error": None}
+        _set_cached("commodities_energy", result)
+        logger.info("Energy fetched: %d items from Alpha Vantage", len(result_items))
+        return result
+    except Exception as e:
+        err_msg = f"Alpha Vantage error: {e}"
+        result = {"items": [], "error": err_msg}
+        _set_cached("commodities_energy", result)
+        return result
+
+
+async def fetch_commodities() -> tuple[list[dict], str | None, bool]:
+    """
+    Fetch commodities: metals (GoldAPI) + energy (Alpha Vantage).
+    No static prices. Real API only.
+    Returns: (items, error_message, cached)
+    """
+    metals = await fetch_metals()
+    energy = await fetch_energy()
+
+    all_items = metals.get("items", []) + energy.get("items", [])
+    errors = [e for e in [metals.get("error"), energy.get("error")] if e]
+    error_msg = "; ".join(errors) if errors else None
+
+    return (all_items, error_msg, False)
 
 
 # ============================================================
@@ -353,7 +449,7 @@ async def get_ticker_data(country_code: str = "UA") -> list[dict]:
 
     # Commodities top 3
     try:
-        commodities = await fetch_commodities()
+        commodities, _, _ = await fetch_commodities()
         for item in commodities[:3]:
             items.append({
                 "type": "commodity",
