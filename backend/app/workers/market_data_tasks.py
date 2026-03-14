@@ -3,7 +3,9 @@
 import asyncio
 import logging
 
-from app.database import async_session_maker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.config import Settings
 from app.services.market_data.aggregate_service import MarketDataAggregateService
 from app.services.market_data.ingestion_service import MarketDataIngestionService
 from app.workers.celery_app import celery_app
@@ -22,25 +24,47 @@ def _run_async(coro):
 
 
 async def _run_full_pipeline() -> dict[str, int]:
-    """Run ingestion then aggregate materialization."""
-    async with async_session_maker() as db:
-        try:
-            ingest_svc = MarketDataIngestionService(db)
-            ingest_results = await ingest_svc.ingest_all()
+    """
+    Run ingestion then aggregate materialization.
+    Creates fresh engine and session per task to avoid "different loop" error
+    when Celery reuses worker process with closed event loop.
+    """
+    settings = Settings()
+    engine = create_async_engine(
+        str(settings.database_url),
+        pool_size=2,
+        max_overflow=0,
+        pool_pre_ping=True,
+        connect_args={"statement_cache_size": 0},
+    )
+    async_session = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    try:
+        async with async_session() as db:
+            try:
+                ingest_svc = MarketDataIngestionService(db)
+                ingest_results = await ingest_svc.ingest_all()
 
-            agg_svc = MarketDataAggregateService(db)
-            agg_results = await agg_svc.materialize_all()
+                agg_svc = MarketDataAggregateService(db)
+                agg_results = await agg_svc.materialize_all()
 
-            await db.commit()
-            logger.info(
-                "Market data pipeline committed: ingest=%s aggregate=%s",
-                ingest_results,
-                agg_results,
-            )
-            return {**ingest_results, **agg_results}
-        except Exception:
-            await db.rollback()
-            raise
+                await db.commit()
+                logger.info(
+                    "Market data pipeline committed: ingest=%s aggregate=%s",
+                    ingest_results,
+                    agg_results,
+                )
+                return {**ingest_results, **agg_results}
+            except Exception:
+                await db.rollback()
+                raise
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(name="ingest_market_data", bind=True)
