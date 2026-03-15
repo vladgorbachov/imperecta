@@ -388,6 +388,7 @@
   "competitors.scraperCss": "CSS selector",
   "competitors.scraperJsonApi": "JSON API",
   "competitors.scraperGeneric": "Generic",
+  "competitors.scraperUniversal": "Универсальный",
   "competitors.noCompetitors": "Пока нет конкурентов. Добавьте первого.",
   "competitors.noProductsLinked": "Нет привязанных товаров. Нажмите «Привязать товар».",
   "competitors.addSuccess": "Конкурент добавлен",

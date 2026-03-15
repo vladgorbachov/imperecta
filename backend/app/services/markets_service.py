@@ -28,11 +28,8 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-MARKETPLACE_DOMAIN: dict[str, str] = {
-    "ozon": "ozon.ru",
-    "wildberries": "wildberries.ru",
-    "kaspi": "kaspi.kz",
-}
+# Domain fallback for marketplace display. Extended from AdminMarketplace when available.
+MARKETPLACE_DOMAIN: dict[str, str] = {}
 
 
 class MarketsService:

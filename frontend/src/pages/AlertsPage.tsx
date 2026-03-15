@@ -641,13 +641,7 @@ function TimelineCard({
     title = t(titleKey);
   }
 
-  const marketplace = event.competitor_name?.toLowerCase().includes("ozon")
-    ? "Ozon"
-    : event.competitor_name?.toLowerCase().includes("wb") || event.competitor_name?.toLowerCase().includes("wildberries")
-      ? "WB"
-      : event.competitor_name?.toLowerCase().includes("kaspi")
-        ? "Kaspi"
-        : event.competitor_name ?? "—";
+  const marketplace = event.competitor_name ?? "—";
 
   return (
     <div

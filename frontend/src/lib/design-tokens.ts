@@ -26,12 +26,8 @@ export const CHART_COLORS_LIGHT = [
   "#64748b",
 ] as const;
 
-export const MARKETPLACE_COLORS = {
-  ozon: { bg: "#005BFF", glow: "rgba(0,91,255,0.3)" },
-  wildberries: { bg: "#CB11AB", glow: "rgba(203,17,171,0.3)" },
-  kaspi: { bg: "#F14635", glow: "rgba(241,70,53,0.3)" },
-  custom: { bg: "#64748b", glow: "rgba(100,116,139,0.3)" },
-} as const;
+/** Marketplace colors: use hash from marketplace string. See MarketplaceBadge. */
+export const MARKETPLACE_COLORS = {} as const;
 
 export const BREAKPOINTS = {
   mobile: 768,

@@ -12,23 +12,16 @@ from app.scrapers import ScrapeResult, ScraperFactory
 
 
 def _detect_scraper_type(url: str, scraper_type_field: str | None) -> str:
-    """Auto-detect scraper type from URL or use field value."""
-    if scraper_type_field and scraper_type_field != "auto":
-        return scraper_type_field
-    url_lower = url.lower()
-    if "ozon.ru" in url_lower:
-        return "ozon"
-    if "wildberries.ru" in url_lower or "wb.ru" in url_lower:
-        return "wildberries"
-    return "generic"
+    """Always returns 'universal'. Kept for API compatibility."""
+    return "universal"
 
 
 def _get_scraper(scraper_type: str, css_selector_price: str | None):
-    """Get scraper instance by type."""
-    kwargs = {}
-    if scraper_type == "generic":
-        kwargs["css_selector_price"] = css_selector_price
-    return ScraperFactory.create(scraper_type, **kwargs)
+    """Get scraper instance. Always returns UniversalScraper."""
+    return ScraperFactory.create(
+        scraper_type,
+        css_selector_price=css_selector_price,
+    )
 
 
 async def scrape_competitor_product(
@@ -61,7 +54,7 @@ async def scrape_competitor_product(
         price=data.price,
         old_price=data.old_price,
         promo_label=data.promo_label,
-        in_stock=data.in_stock,
+        in_stock=data.in_stock if data.in_stock is not None else True,
     )
     db.add(snapshot)
     await db.flush()

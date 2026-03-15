@@ -119,9 +119,7 @@
   --destructive-foreground: #f8fafc;
   --input: var(--glass-border);
   --ring: 199 89% 48%;
-  --color-marketplace-ozon: #005bff;
-  --color-marketplace-wildberries: #cb11ab;
-  --color-marketplace-kaspi: #f14635;
+  /* Marketplace colors: generated from hash in MarketplaceBadge */
   --color-marketplace-custom: #64748b;
 
   /* Type scale */
@@ -253,9 +251,6 @@
   --color-stable: var(--color-stable);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-marketplace-ozon: var(--color-marketplace-ozon);
-  --color-marketplace-wildberries: var(--color-marketplace-wildberries);
-  --color-marketplace-kaspi: var(--color-marketplace-kaspi);
   --color-marketplace-custom: var(--color-marketplace-custom);
   --font-display: var(--font-display);
   --font-body: var(--font-body);

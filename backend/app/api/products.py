@@ -146,6 +146,7 @@ async def get_product(
                 "id": cp.id,
                 "competitor_id": cp.competitor_id,
                 "competitor_name": cp.competitor.name,
+                "marketplace": cp.competitor.marketplace,
                 "url": cp.url,
                 "name": cp.name,
                 "last_price": cp.last_price,

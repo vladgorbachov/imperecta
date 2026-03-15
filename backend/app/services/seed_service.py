@@ -150,14 +150,8 @@ SEED_PRODUCTS = [
 
 
 def _scraper_type_for_marketplace(marketplace_id: str) -> str:
-    """Determine scraper type from marketplace registry."""
-    if "wildberries" in marketplace_id:
-        return "wildberries"
-    if "ozon" in marketplace_id:
-        return "ozon"
-    if "kaspi" in marketplace_id:
-        return "kaspi"
-    return "generic"
+    """Always returns 'universal'. All marketplaces use the same scraper."""
+    return "universal"
 
 
 async def seed_products_for_user(

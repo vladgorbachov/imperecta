@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.api.admin import MARKETPLACE_REGISTRY
 from app.api.deps import CurrentUser, DbSession
-from app.models import Competitor, CompetitorProduct, Product
+from app.models import AdminMarketplace, Competitor, CompetitorProduct, Product
 from app.schemas.competitor import (
     CompetitorCreate,
     CompetitorProductCreate,
@@ -18,6 +19,35 @@ from app.schemas.competitor import (
 )
 
 router = APIRouter()
+
+
+@router.get("/marketplaces")
+async def list_marketplaces(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[dict]:
+    """List available marketplaces (registry + admin). Sorted alphabetically by name."""
+    items: list[dict] = []
+    for reg in MARKETPLACE_REGISTRY:
+        items.append({
+            "marketplace_id": reg["marketplace_id"],
+            "name": reg["name"],
+        })
+    result = await db.execute(
+        select(AdminMarketplace.marketplace_id, AdminMarketplace.name).where(
+            AdminMarketplace.is_active.is_(True)
+        )
+    )
+    seen = {r["marketplace_id"] for r in items}
+    for row in result.all():
+        if row.marketplace_id not in seen:
+            items.append({
+                "marketplace_id": row.marketplace_id,
+                "name": row.name or row.marketplace_id,
+            })
+            seen.add(row.marketplace_id)
+    items.sort(key=lambda x: x["name"].lower())
+    return items
 
 
 def _compute_price_diff(

@@ -23,13 +23,8 @@ interface ComparisonMatrixProps {
 }
 
 function toMarketplaceDisplay(m: string): string {
-  const map: Record<string, string> = {
-    ozon: "Ozon",
-    wildberries: "Wildberries",
-    kaspi: "Kaspi",
-    custom: "Custom",
-  };
-  return map[m?.toLowerCase() ?? ""] ?? m;
+  if (!m) return "";
+  return m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function ComparisonMatrix({

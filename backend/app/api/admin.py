@@ -28,7 +28,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_superuser)],
 )
 
-# Built-in marketplace registry (ozon, wildberries, kaspi)
+# Built-in marketplace registry for admin stats. All marketplaces treated equally.
 MARKETPLACE_REGISTRY: list[dict[str, Any]] = [
     {"marketplace_id": "ozon", "name": "Ozon", "domain": "ozon.ru", "country": "RU", "region": "cis"},
     {"marketplace_id": "wildberries", "name": "Wildberries", "domain": "wildberries.ru", "country": "RU", "region": "cis"},
@@ -311,13 +311,13 @@ REAL_PRODUCT_URLS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
-# Marketplace metadata for seed (name, base_url, scraper_type) when not in AdminMarketplace
+# Marketplace metadata for seed (name, base_url). All use universal scraper.
 MARKETPLACE_SEED_META: dict[str, dict[str, str]] = {
-    "wildberries": {"name": "Wildberries", "base_url": "https://www.wildberries.ru", "scraper_type": "wildberries"},
-    "ozon": {"name": "Ozon", "base_url": "https://www.ozon.ru", "scraper_type": "ozon"},
-    "kaspi": {"name": "Kaspi", "base_url": "https://kaspi.kz", "scraper_type": "generic"},
-    "rozetka_ua": {"name": "Rozetka", "base_url": "https://rozetka.com.ua", "scraper_type": "generic"},
-    "allegro_pl": {"name": "Allegro", "base_url": "https://allegro.pl", "scraper_type": "generic"},
+    "wildberries": {"name": "Wildberries", "base_url": "https://www.wildberries.ru"},
+    "ozon": {"name": "Ozon", "base_url": "https://www.ozon.ru"},
+    "kaspi": {"name": "Kaspi", "base_url": "https://kaspi.kz"},
+    "rozetka_ua": {"name": "Rozetka", "base_url": "https://rozetka.com.ua"},
+    "allegro_pl": {"name": "Allegro", "base_url": "https://allegro.pl"},
 }
 
 
@@ -335,7 +335,7 @@ async def admin_seed_competitors(
         meta = MARKETPLACE_SEED_META.get(marketplace_id, {})
         mp_name = meta.get("name", marketplace_id)
         base_url = meta.get("base_url", "")
-        scraper_type = meta.get("scraper_type", "generic")
+        scraper_type = "universal"
 
         # Find or create Competitor
         existing_result = await db.execute(
@@ -491,7 +491,7 @@ async def admin_add_marketplace(data: AddMarketplaceRequest, db: DbSession) -> d
         country=country,
         region=region,
         currency="USD",
-        scraper_type="generic",
+        scraper_type="universal",
         is_active=True,
     )
     db.add(am)
