@@ -5,9 +5,10 @@ Runs after raw ingestion. No provider calls.
 """
 
 import logging
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AdminMarketplace,
+    Competitor,
+    CompetitorProduct,
     MarketsCategoryAnalytics,
     MarketsCommodity,
     MarketsCrypto,
@@ -26,6 +29,8 @@ from app.models import (
     MarketsRefreshStatus,
     MarketsRefreshType,
     MarketsTickerItem,
+    PriceSnapshot,
+    Product,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,70 +172,121 @@ class MarketDataAggregateService:
             raise
 
     async def materialize_overview(self) -> int:
-        """Build Market Overview from forex + crypto + commodities. Returns count."""
+        """Build Market Overview from random marketplace products (competitor_products + price_snapshots). Returns count."""
         log_id = await self._log_start(MarketsRefreshType.overview, PROVIDER_AGGREGATE)
         try:
             now = datetime.now(timezone.utc)
+            month_ago = now - timedelta(days=30)
+            day_ago = now - timedelta(hours=24)
+            three_days_ago = now - timedelta(days=3)
+            week_ago = now - timedelta(days=7)
+
+            cp_result = await self.db.execute(
+                select(
+                    CompetitorProduct.id,
+                    CompetitorProduct.name.label("product_name"),
+                    CompetitorProduct.last_price,
+                    CompetitorProduct.last_checked_at,
+                    Competitor.name.label("competitor_name"),
+                    Competitor.marketplace,
+                    Product.currency,
+                )
+                .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+                .join(Product, CompetitorProduct.product_id == Product.id)
+                .where(
+                    CompetitorProduct.is_active.is_(True),
+                    CompetitorProduct.last_price.isnot(None),
+                    CompetitorProduct.last_price > 0,
+                )
+            )
+            cp_rows = cp_result.all()
+            if not cp_rows:
+                await self._log_success(log_id)
+                logger.info("Overview materialization skipped: no competitor products")
+                return 0
+
+            cp_ids = [r.id for r in cp_rows]
+            snap_result = await self.db.execute(
+                select(
+                    PriceSnapshot.competitor_product_id,
+                    PriceSnapshot.price,
+                    PriceSnapshot.scraped_at,
+                )
+                .where(
+                    PriceSnapshot.competitor_product_id.in_(cp_ids),
+                    PriceSnapshot.scraped_at >= month_ago,
+                )
+                .order_by(PriceSnapshot.scraped_at.asc())
+            )
+            snapshots_raw = snap_result.all()
+            snapshots_by_cp: dict[UUID, list[tuple[float, datetime]]] = {}
+            for row in snapshots_raw:
+                cp_id = row.competitor_product_id
+                if cp_id not in snapshots_by_cp:
+                    snapshots_by_cp[cp_id] = []
+                snapshots_by_cp[cp_id].append((float(row.price), row.scraped_at))
+
+            admin_mp = await self.db.execute(
+                select(AdminMarketplace.marketplace_id, AdminMarketplace.domain).where(
+                    AdminMarketplace.is_active.is_(True)
+                )
+            )
+            domain_map = {r.marketplace_id: r.domain or "" for r in admin_mp.all()}
+
             items: list[dict] = []
+            for r in cp_rows:
+                snaps = snapshots_by_cp.get(r.id, [])
+                if not snaps:
+                    continue
+                current_price = float(r.last_price)
+                prices_by_day: dict = {}
+                for snap in snaps:
+                    day_key = snap[1].date()
+                    prices_by_day[day_key] = snap[0]
 
-            forex_result = await self.db.execute(
-                select(MarketsForex).order_by(MarketsForex.refreshed_at.desc())
-            )
-            for r in forex_result.scalars().all():
-                items.append({
-                    "marketplace": "forex",
-                    "marketplace_domain": "frankfurter.app",
-                    "product_name": r.symbol,
-                    "price": float(r.bid),
-                    "currency": "USD",
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "change_3d": None,
-                    "change_1w": None,
-                    "change_1m": None,
-                    "sparkline_data": [],
-                })
+                def get_price_at(target_dt: datetime) -> float | None:
+                    target_date = target_dt.date()
+                    for i in range(3):
+                        check_date = target_date - timedelta(days=i)
+                        if check_date in prices_by_day:
+                            return prices_by_day[check_date]
+                    return None
 
-            crypto_result = await self.db.execute(
-                select(MarketsCrypto).order_by(MarketsCrypto.refreshed_at.desc())
-            )
-            for r in crypto_result.scalars().all():
-                items.append({
-                    "marketplace": "crypto",
-                    "marketplace_domain": "coingecko.com",
-                    "product_name": r.symbol,
-                    "price": float(r.price),
-                    "currency": "USD",
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "change_3d": None,
-                    "change_1w": None,
-                    "change_1m": None,
-                    "sparkline_data": [],
-                })
+                def calc_change(old_p: float | None, new_p: float) -> float | None:
+                    if old_p and old_p > 0:
+                        return round((new_p - old_p) / old_p * 100, 2)
+                    return None
 
-            commodity_result = await self.db.execute(
-                select(MarketsCommodity).order_by(MarketsCommodity.refreshed_at.desc())
-            )
-            for r in commodity_result.scalars().all():
+                price_24h = get_price_at(day_ago)
+                price_3d = get_price_at(three_days_ago)
+                price_1w = get_price_at(week_ago)
+                price_1m = get_price_at(month_ago)
+                sparkline = list(prices_by_day.values())[-30:]
+                domain = domain_map.get(r.marketplace, (r.marketplace or "").replace("_", "."))
+
                 items.append({
-                    "marketplace": "commodities",
-                    "marketplace_domain": "",
-                    "product_name": r.name or r.symbol,
-                    "price": float(r.price),
-                    "currency": r.unit or "USD",
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "change_3d": None,
-                    "change_1w": None,
-                    "change_1m": None,
-                    "sparkline_data": [],
+                    "marketplace": (r.competitor_name or r.marketplace or "")[:50],
+                    "marketplace_domain": (domain or "")[:255],
+                    "product_name": (r.product_name or "Unknown")[:500],
+                    "price": current_price,
+                    "currency": (r.currency or "RUB")[:5],
+                    "change_24h": calc_change(price_24h, current_price),
+                    "change_3d": calc_change(price_3d, current_price),
+                    "change_1w": calc_change(price_1w, current_price),
+                    "change_1m": calc_change(price_1m, current_price),
+                    "sparkline_data": sparkline if len(sparkline) >= 2 else [],
                 })
 
             if not items:
                 await self._log_success(log_id)
-                logger.info("Overview materialization skipped: no source data (forex/crypto/commodities empty)")
+                logger.info("Overview materialization skipped: no products with snapshots")
                 return 0
 
+            sample_size = min(100, len(items))
+            items = random.sample(items, sample_size)
+
             await self.db.execute(delete(MarketsOverviewItem))
-            for it in items[:100]:
+            for it in items:
                 stmt = insert(MarketsOverviewItem).values(
                     id=uuid4(),
                     marketplace=it["marketplace"],
@@ -239,9 +295,9 @@ class MarketDataAggregateService:
                     price=Decimal(str(it["price"])),
                     currency=it["currency"][:5],
                     change_24h=Decimal(str(it["change_24h"])) if it.get("change_24h") is not None else None,
-                    change_3d=it.get("change_3d"),
-                    change_1w=it.get("change_1w"),
-                    change_1m=it.get("change_1m"),
+                    change_3d=Decimal(str(it["change_3d"])) if it.get("change_3d") is not None else None,
+                    change_1w=Decimal(str(it["change_1w"])) if it.get("change_1w") is not None else None,
+                    change_1m=Decimal(str(it["change_1m"])) if it.get("change_1m") is not None else None,
                     sparkline_data=it.get("sparkline_data") or [],
                     refreshed_at=now,
                 )
@@ -249,8 +305,8 @@ class MarketDataAggregateService:
 
             await self.db.flush()
             await self._log_success(log_id)
-            logger.info("Materialized %d overview items", len(items[:100]))
-            return len(items[:100])
+            logger.info("Materialized %d overview items (marketplace products)", sample_size)
+            return sample_size
         except Exception as e:
             await self._log_error(log_id, str(e))
             logger.exception("Overview materialization failed: %s", e)

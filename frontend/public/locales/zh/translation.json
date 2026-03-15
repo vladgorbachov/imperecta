@@ -179,7 +179,7 @@
   "dashboard.market.noData": "暂无价格数据。请添加产品和竞争对手。",
   "dashboard.market.sparkline": "趋势",
   "dashboard.market.momentum": "1个月信号",
-  "widgets.forex.title": "外汇",
+  "widgets.forex.title": "货币",
   "widgets.forex.unavailable": "外汇数据不可用",
   "widgets.forex.retry": "重试",
   "widgets.crypto.title": "加密货币",
