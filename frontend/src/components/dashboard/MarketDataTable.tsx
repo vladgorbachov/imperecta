@@ -45,19 +45,24 @@ function getSortKey(tab: SortTab): string {
 }
 
 function formatPrice(price: number, currency: string): string {
+  const normalizedCurrency = (currency ?? "").trim().toUpperCase() || "USD";
   const locale =
-    currency === "RUB"
+    normalizedCurrency === "RUB"
       ? "ru-RU"
-      : currency === "EUR"
+      : normalizedCurrency === "EUR"
         ? "de-DE"
-        : currency === "KZT"
+        : normalizedCurrency === "KZT"
           ? "kk-KZ"
           : "en-US";
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(safeNumber(price));
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: normalizedCurrency,
+      maximumFractionDigits: 0,
+    }).format(safeNumber(price));
+  } catch {
+    return `${safeFixed(price, 0)} ${normalizedCurrency}`;
+  }
 }
 
 function Sparkline({

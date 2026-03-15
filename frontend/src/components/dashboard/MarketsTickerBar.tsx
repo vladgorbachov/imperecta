@@ -35,12 +35,17 @@ function formatTickerValue(
     const cur = item.currency ?? "UAH";
     return `${safeFixed(item.price, 1)} ${cur}/L`;
   }
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: item.currency ?? "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(safeNumber(item.price));
+  const normalizedCurrency = (item.currency ?? "USD").trim().toUpperCase();
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(safeNumber(item.price));
+  } catch {
+    return `${safeFixed(item.price, 0)} ${normalizedCurrency}`;
+  }
 }
 
 function TickerItem({
