@@ -261,6 +261,21 @@ export function CompetitorsPage() {
     onError: () => toast.error(t("competitors.linkError")),
   });
 
+  const manualScrapeMutation = useMutation({
+    mutationFn: (variables: { competitorProductId: string; competitorId: string }) =>
+      competitorsApi.triggerProductScrape(variables.competitorProductId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["competitors", variables.competitorId, "products"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["markets", "overview"] });
+      toast.success("Парсинг запущен");
+    },
+    onError: () => {
+      toast.error("Не удалось запустить парсинг");
+    },
+  });
+
   const handleAddCompetitor = (e: React.FormEvent) => {
     e.preventDefault();
     if (!competitorForm.marketplace) {
@@ -300,6 +315,13 @@ export function CompetitorsPage() {
   const handleWhatIsDoingNow = () => {
     toast.info(t("competitors.aiAnalyzing"));
     // TODO: POST /api/ai/competitor-analysis
+  };
+
+  const handleManualScrape = (competitorProductId: string, competitorId: string) => {
+    if (manualScrapeMutation.isPending) {
+      return;
+    }
+    manualScrapeMutation.mutate({ competitorProductId, competitorId });
   };
 
   return (
@@ -386,6 +408,8 @@ export function CompetitorsPage() {
                 setSelectedCompetitor(c);
                 setAddProductOpen(true);
               }}
+              onManualScrape={handleManualScrape}
+              isScrapePending={manualScrapeMutation.isPending}
             />
           ))}
         </div>
@@ -416,6 +440,8 @@ export function CompetitorsPage() {
                     setSelectedCompetitor(c);
                     setAddProductOpen(true);
                   }}
+                  onManualScrape={handleManualScrape}
+                  isScrapePending={manualScrapeMutation.isPending}
                 />
               ))}
             </TableBody>
@@ -465,6 +491,8 @@ function CompetitorCard({
   expanded,
   products,
   onAddProduct,
+  onManualScrape,
+  isScrapePending,
 }: {
   competitor: Competitor;
   benchmark?: { score: number; trend_30d: number[] };
@@ -473,6 +501,8 @@ function CompetitorCard({
   expanded: boolean;
   products: { id: string; name: string; sku: string | null }[];
   onAddProduct: () => void;
+  onManualScrape: (competitorProductId: string, competitorId: string) => void;
+  isScrapePending: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
@@ -578,6 +608,8 @@ function CompetitorCard({
                   cp={cp}
                   products={products}
                   locale={locale}
+                  onManualScrape={() => onManualScrape(cp.id, competitor.id)}
+                  isScrapePending={isScrapePending}
                 />
               ))}
             </div>
@@ -592,10 +624,14 @@ function LinkedProductRow({
   cp,
   products,
   locale,
+  onManualScrape,
+  isScrapePending,
 }: {
   cp: CompetitorProduct;
   products: { id: string; name: string; sku: string | null }[];
   locale: string;
+  onManualScrape: () => void;
+  isScrapePending: boolean;
 }) {
   const { t } = useTranslation();
   const productName =
@@ -633,6 +669,15 @@ function LinkedProductRow({
             size="sm"
           />
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={isScrapePending}
+          onClick={onManualScrape}
+        >
+          <Wand2 className="mr-2 size-4" />
+          Парсинг
+        </Button>
       </div>
     </div>
   );
@@ -645,6 +690,8 @@ function ExpandableCompetitorRow({
   expanded,
   onToggle,
   onAddProduct,
+  onManualScrape,
+  isScrapePending,
 }: {
   competitor: Competitor;
   benchmark?: { score: number; trend_30d: number[] };
@@ -652,6 +699,8 @@ function ExpandableCompetitorRow({
   expanded: boolean;
   onToggle: () => void;
   onAddProduct: () => void;
+  onManualScrape: (competitorProductId: string, competitorId: string) => void;
+  isScrapePending: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
@@ -743,6 +792,8 @@ function ExpandableCompetitorRow({
                         cp={cp}
                         products={products}
                         locale={locale}
+                        onManualScrape={() => onManualScrape(cp.id, competitor.id)}
+                        isScrapePending={isScrapePending}
                       />
                     ))}
                   </TableBody>
@@ -760,10 +811,14 @@ function TableLinkedProductRow({
   cp,
   products,
   locale,
+  onManualScrape,
+  isScrapePending,
 }: {
   cp: CompetitorProduct;
   products: { id: string; name: string; sku: string | null }[];
   locale: string;
+  onManualScrape: () => void;
+  isScrapePending: boolean;
 }) {
   const { t } = useTranslation();
   const productName =
@@ -798,6 +853,17 @@ function TableLinkedProductRow({
             size="sm"
           />
         )}
+        <div className="mt-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={isScrapePending}
+            onClick={onManualScrape}
+          >
+            <Wand2 className="mr-2 size-4" />
+            Парсинг
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

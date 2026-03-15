@@ -5,7 +5,6 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { keepPreviousData } from "@tanstack/react-query";
 import {
@@ -193,7 +192,6 @@ function ProductThumbnailPlaceholder({ productName }: { productName: string }) {
 
 export function MarketDataTable() {
   const { t, i18n } = useTranslation();
-  const navigate = useNavigate();
   const locale = i18n.language;
   const [activeTab, setActiveTab] = useState<SortTab>("volatile");
   const [fading, setFading] = useState(false);
@@ -331,20 +329,9 @@ export function MarketDataTable() {
                   <>
                     <Database className="mb-4 size-12 opacity-50" />
                     <p className="mb-1 text-sm font-medium">{t("market.overview.noData")}</p>
-                    <p className="mb-4 max-w-sm text-xs">
+                    <p className="max-w-sm text-xs">
                       {t("market.overview.noDataDescription")}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => navigate("/products")}
-                      className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-                      style={{
-                        background: "var(--accent)",
-                        color: "var(--accent-foreground)",
-                      }}
-                    >
-                      {t("market.overview.goToProducts")}
-                    </button>
                   </>
                 ) : (
                   <p className="text-sm font-medium">{t("market.overview.noItems")}</p>

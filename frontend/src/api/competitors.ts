@@ -34,6 +34,12 @@ export interface MarketplaceOption {
   name: string;
 }
 
+export interface ScrapeTriggerResponse {
+  status: string;
+  task_id: string;
+  competitor_product_id: string;
+}
+
 export const competitorsApi = {
   list: () => apiClient.get<Competitor[]>("/competitors"),
   listMarketplaces: () =>
@@ -55,5 +61,7 @@ export const competitorsApi = {
   }) => apiClient.post<CompetitorProduct>("/competitors/products", data),
   deleteProduct: (id: string) =>
     apiClient.delete(`/competitors/products/${id}`),
+  triggerProductScrape: (id: string) =>
+    apiClient.post<ScrapeTriggerResponse>(`/competitors/products/${id}/scrape`),
   delete: (id: string) => apiClient.delete(`/competitors/${id}`),
 };
