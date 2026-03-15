@@ -2,7 +2,7 @@
 
 ## Обзор
 
-Imperecta — SaaS-платформа конкурентной разведки и рыночной аналитики для e-commerce. Отслеживает цены конкурентов на маркетплейсах (Ozon, Wildberries, Kaspi), показывает рыночные данные (forex, крипто, сырьё, топливо), генерирует ИИ-дайджесты и отправляет алерты при изменениях цен.
+Imperecta — SaaS-платформа конкурентной разведки и рыночной аналитики для e-commerce. Отслеживает цены конкурентов на любых маркетплейсах (UniversalScraper), показывает рыночные данные (forex, крипто, сырьё, топливо), генерирует ИИ-дайджесты и отправляет алерты при изменениях цен.
 
 Целевая аудитория: малый и средний e-commerce бизнес в СНГ (Россия, Казахстан, Украина, Молдова).
 
@@ -39,6 +39,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **products** | PUT | /api/products/{id} | Обновление товара |
 | **products** | DELETE | /api/products/{id} | Удаление товара |
 | **competitors** | GET | /api/competitors | Список конкурентов |
+| **competitors** | GET | /api/competitors/marketplaces | Список маркетплейсов (для селекта) |
 | **competitors** | POST | /api/competitors | Создание конкурента |
 | **competitors** | PUT | /api/competitors/{id} | Обновление конкурента |
 | **competitors** | DELETE | /api/competitors/{id} | Удаление конкурента |
@@ -134,8 +135,9 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **SQLAlchemy (sync)** + **psycopg2** — sync_session_factory для Celery workers; ingest_market_data создаёт локальный async engine/session (не использует глобальный), чтобы избежать ошибки «different event loop» при повторном запуске
 - **Alembic** — миграции БД
 - **Celery** + **Redis** — фоновые задачи (парсинг, алерты, дайджесты)
-- **Playwright** — headless-браузер для парсинга JS-rendered страниц (Ozon)
-- **BeautifulSoup + httpx** — парсинг статических сайтов (httpx 0.27+: `proxy=` вместо `proxies=`)
+- **Decodo Web Scraping API** — основной метод парсинга (managed, anti-bot; DECODO_USERNAME, DECODO_PASSWORD, DECODO_ENABLED)
+- **Playwright** — fallback для JS-rendered страниц при отключённом или недоступном Decodo
+- **BeautifulSoup + httpx** — извлечение цен из HTML (JSON-LD, meta, DOM)
 - **Anthropic Claude API** — генерация ИИ-дайджестов, AI-чат, авто-категоризация товаров
 - **Resend** — отправка email-уведомлений
 - **python-telegram-bot** — Telegram-бот для алертов
@@ -240,7 +242,7 @@ imperecta/
 │   │   │   ├── markets.py            # Forex, crypto, commodities, ticker, overview, ingest
 │   │   │   ├── products.py           # Products CRUD, categories, at-risk
 │   │   │   └── telegram.py           # Webhook, generate-link-code, unlink, status
-│   │   ├── config.py                 # Pydantic Settings (env vars)
+│   │   ├── config.py                 # Pydantic Settings (env vars; Decodo: decodo_api_url, decodo_username, decodo_password, decodo_enabled)
 │   │   ├── database.py               # SQLAlchemy async engine, session, sync_session_factory (Celery)
 │   │   ├── entitlements/
 │   │   │   ├── __init__.py
@@ -280,7 +282,7 @@ imperecta/
 │   │   │   ├── product.py
 │   │   │   └── user.py
 │   │   ├── scrapers/
-│   │   │   ├── engine.py             # ScrapeResult, Ozon, WB, GenericWebScraper; httpx proxy=proxy_url
+│   │   │   ├── engine.py             # ScrapeResult, UniversalScraper; Decodo API primary, Playwright fallback
 │   │   │   ├── __init__.py
 │   │   │   └── proxy_manager.py      # Decodo (SmartProxy) rotating residential proxies
 │   │   ├── services/
@@ -595,7 +597,7 @@ imperecta/
 
 ## Текущий статус
 
-- [x] Backend: FastAPI, все API-роуты, Celery, scrapers (Ozon, WB, Kaspi, Generic); ingest_market_data — fresh engine/session per task; httpx proxy= (не proxies=)
+- [x] Backend: FastAPI, все API-роуты, Celery, scrapers (UniversalScraper: Decodo primary, Playwright fallback); ingest_market_data — fresh engine/session per task
 - [x] Frontend: Landing, 15+ страниц, entitlements, AIAnalystRoute (locked), PlanLimitBanner
 - [x] Auth: JWT, «Запомнить меня», telegram-link/disconnect в auth
 - [x] Entitlements: Trial/Free/Paid Full, AI Analyst только для Paid

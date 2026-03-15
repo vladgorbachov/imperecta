@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     proxy_list: str = ""
     proxy_sticky_duration: int = 10  # minutes for sticky session
     proxy_country_routing: bool = True  # use geo-targeted proxies
+
+    decodo_api_url: str = "https://scraper-api.decodo.com/v2/"
+    decodo_username: str = ""  # Railway: set from Decodo dashboard
+    decodo_password: str = ""  # Railway: set from Decodo dashboard
+    decodo_enabled: bool = True  # Railway: true = primary scraping via Decodo
     sentry_dsn: str = ""
     allowed_origins: str = "http://localhost:5173,https://imperecta.pages.dev"
     app_env: str = "development"
