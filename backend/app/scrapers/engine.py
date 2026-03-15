@@ -1,13 +1,13 @@
 """
 Imperecta scraping engine.
 
-Universal 3-level scraper for any e-commerce site:
-1. JSON-LD structured data (schema.org Product)
-2. OpenGraph / meta tags
-3. DOM analysis with Playwright
+Universal scraper for any e-commerce site.
+Primary: Decodo Web Scraping API (managed, handles anti-bot).
+Fallback: Playwright + extraction strategies (JSON-LD, meta, DOM).
 """
 
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -16,10 +16,14 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
+from app.config import Settings
 from app.scrapers.proxy_manager import proxy_manager
+
+settings = Settings()
 
 logger = logging.getLogger(__name__)
 
@@ -160,10 +164,8 @@ class BaseScraper(ABC):
 class UniversalScraper(BaseScraper):
     """
     Universal e-commerce scraper. Works with ANY online store.
-    Extraction strategy (in order of reliability):
-    1. JSON-LD structured data (schema.org Product)
-    2. OpenGraph / meta tags
-    3. DOM text analysis (Playwright)
+    Strategy 0: Decodo Web Scraping API (primary, managed anti-bot).
+    Strategy 1-3: Playwright fallback (JSON-LD, meta, DOM).
     """
 
     def __init__(self, config: object | None = None, css_selector_price: str | None = None) -> None:
@@ -171,27 +173,32 @@ class UniversalScraper(BaseScraper):
         self._css_selector_price = css_selector_price
 
     async def _scrape_impl(self, url: str) -> ScrapeResult:
-        """Main entry point. Tries all strategies in order."""
-        html = await self._fetch_page(url)
+        """Main entry point. Decodo first, then Playwright fallback."""
+        # Strategy 0: Decodo Web Scraping API (managed, handles anti-bot)
+        if settings.decodo_enabled and settings.decodo_username:
+            result = await self._scrape_decodo(url)
+            if result and result.price:
+                result.extraction_method = "decodo_api"
+                result.product_url = url
+                return result
 
+        # Strategy 1-3: Playwright fallback (JSON-LD, meta, DOM)
+        html = await self._fetch_page(url)
         if not html:
             raise ValueError("Failed to fetch page")
 
-        # Strategy 1: JSON-LD (most reliable)
         result = self._extract_jsonld(html)
         if result and result.price:
             result.extraction_method = "jsonld"
             result.product_url = url
             return result
 
-        # Strategy 2: Meta tags
         result = self._extract_meta(html)
         if result and result.price:
             result.extraction_method = "meta"
             result.product_url = url
             return result
 
-        # Strategy 3: DOM analysis with Playwright
         result = await self._extract_dom_playwright(url)
         if result and result.price:
             result.extraction_method = "dom"
@@ -199,6 +206,76 @@ class UniversalScraper(BaseScraper):
             return result
 
         raise ValueError("Could not extract price from page")
+
+    async def _scrape_decodo(self, url: str) -> ScrapeResult | None:
+        """
+        Use Decodo Web Scraping API for managed scraping.
+        Handles proxies, anti-bot, CAPTCHA automatically.
+        """
+        auth = base64.b64encode(
+            f"{settings.decodo_username}:{settings.decodo_password}".encode()
+        ).decode()
+
+        api_url = f"{settings.decodo_api_url.rstrip('/')}/scrape"
+        payload = {
+            "url": url,
+            "headless": "html",
+            "geo": self._get_geo_for_url(url),
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    api_url,
+                    json=payload,
+                    headers={"Authorization": f"Basic {auth}"},
+                )
+
+            if resp.status_code != 200:
+                logger.warning("Decodo API returned %d for %s", resp.status_code, url[:80])
+                return None
+
+            data = resp.json()
+            results = data.get("results") or []
+            first = results[0] if results else {}
+            html = first.get("content") or data.get("html") or data.get("content") or ""
+
+            if not isinstance(html, str):
+                return None
+
+            result = self._extract_jsonld(html)
+            if result and result.price:
+                return result
+
+            result = self._extract_meta(html)
+            if result and result.price:
+                return result
+
+            return None
+
+        except Exception as e:
+            logger.error("Decodo API error for %s: %s", url[:80], e)
+            return None
+
+    @staticmethod
+    def _get_geo_for_url(url: str) -> str:
+        """Detect geo location from URL domain."""
+        domain = url.lower()
+        if ".ru" in domain:
+            return "ru"
+        if ".ua" in domain:
+            return "ua"
+        if ".kz" in domain:
+            return "kz"
+        if ".de" in domain:
+            return "de"
+        if ".pl" in domain:
+            return "pl"
+        if ".fr" in domain:
+            return "fr"
+        if ".ro" in domain:
+            return "ro"
+        return "eu"
 
     async def _fetch_page(self, url: str) -> str | None:
         """Fetch page HTML. Uses Playwright for JS-rendered sites."""
