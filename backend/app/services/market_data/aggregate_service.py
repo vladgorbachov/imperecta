@@ -320,12 +320,7 @@ class MarketDataAggregateService:
             )
             admin_marketplaces = {r.marketplace_id: r.name for r in admin_result.all()}
 
-            builtin: dict[str, str] = {
-                "ozon": "Ozon",
-                "wildberries": "Wildberries",
-                "kaspi": "Kaspi",
-            }
-            all_marketplaces = {**builtin, **admin_marketplaces}
+            all_marketplaces = dict(admin_marketplaces)
 
             by_mp: dict[str, list] = {}
             for mp_id in all_marketplaces:

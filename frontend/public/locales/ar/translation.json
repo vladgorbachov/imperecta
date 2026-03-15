@@ -369,6 +369,7 @@
   "competitors.scraperCss": "CSS selector",
   "competitors.scraperJsonApi": "JSON API",
   "competitors.scraperGeneric": "Generic",
+  "competitors.scraperUniversal": "عالمي",
   "competitors.noCompetitors": "لا منافسين بعد. أضف الأول.",
   "competitors.noProductsLinked": "لا منتجات مربوطة. انقر «ربط منتج».",
   "competitors.addSuccess": "تمت إضافة المنافس",

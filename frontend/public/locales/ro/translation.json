@@ -373,6 +373,7 @@
   "competitors.scraperCss": "Selector CSS",
   "competitors.scraperJsonApi": "JSON API",
   "competitors.scraperGeneric": "Generic",
+  "competitors.scraperUniversal": "Universal",
   "competitors.noCompetitors": "Niciun concurent încă. Adaugă unul pentru a începe.",
   "competitors.noProductsLinked": "Niciun produs asociat. Apasă \"Asociază produs\" pentru a adăuga.",
   "competitors.addSuccess": "Concurent adăugat",

@@ -71,6 +71,7 @@ class CompetitorProductBrief(BaseModel):
     id: UUID
     competitor_id: UUID
     competitor_name: str
+    marketplace: str
     url: str
     name: str | None
     last_price: Decimal | None

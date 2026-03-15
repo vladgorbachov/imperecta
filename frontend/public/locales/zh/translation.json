@@ -369,6 +369,7 @@
   "competitors.scraperCss": "CSS selector",
   "competitors.scraperJsonApi": "JSON API",
   "competitors.scraperGeneric": "Generic",
+  "competitors.scraperUniversal": "通用",
   "competitors.noCompetitors": "暂无竞品。添加第一个。",
   "competitors.noProductsLinked": "未关联商品。点击「关联商品」。",
   "competitors.addSuccess": "竞品已添加",

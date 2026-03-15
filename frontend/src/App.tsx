@@ -30,8 +30,7 @@
  *   myPriceLegend, runParsing, parseSuccess, parsePending
  *
  * competitors: addCompetitor, linkProduct, name, websiteUrl, marketplace, product, productUrl,
- *   scraper, selectProduct, marketplaceOzon, marketplaceWb, marketplaceKaspi, marketplaceCustom,
- *   added, myProduct, autoDetect, scraperAuto, scraperOzonApi, scraperWbApi, scraperCss,
+ *   scraper, selectProduct, added, myProduct, autoDetect, scraperAuto, scraperUniversal,
  *   scraperJsonApi, scraperGeneric, noCompetitors, noProductsLinked, addSuccess, addError,
  *   linkSuccess, linkError, linkTo, productsCount, productsCountHeader, tableProduct, tableUrl,
  *   tablePrice, tableLastChecked

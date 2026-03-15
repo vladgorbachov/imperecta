@@ -32,7 +32,7 @@ class Competitor(Base):
     marketplace: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-    )  # ozon, wildberries, kaspi, custom
+    )  # marketplace identifier, any string
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

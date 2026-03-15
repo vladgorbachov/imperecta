@@ -56,7 +56,6 @@ import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-type Marketplace = "ozon" | "wildberries" | "kaspi" | "custom";
 type Period = "7d" | "30d" | "90d";
 type AlertType = "price_drop" | "price_increase" | "out_of_stock" | "new_promo";
 type AlertChannel = "email" | "telegram";
@@ -66,14 +65,6 @@ interface ChartDataPoint {
   dateLabel: string;
   myPrice: number;
   [key: string]: string | number | null;
-}
-
-function competitorNameToMarketplace(name: string): Marketplace {
-  const lower = name.toLowerCase();
-  if (lower.includes("ozon")) return "ozon";
-  if (lower.includes("wildberries") || lower.includes("wb")) return "wildberries";
-  if (lower.includes("kaspi")) return "kaspi";
-  return "custom";
 }
 
 const ALERT_TYPE_KEYS: Record<AlertType, string> = {
@@ -198,6 +189,7 @@ export function ProductDetailPage() {
         return {
           id: c.id,
           competitor_name: c.competitor_name,
+          marketplace: c.marketplace ?? c.competitor_name,
           url: c.url,
           last_price: c.last_price,
           last_promo_label: c.last_promo_label,
@@ -209,6 +201,7 @@ export function ProductDetailPage() {
     : comparisonCompetitors.map((c, i) => ({
         id: `comp-${i}`,
         competitor_name: c.name,
+        marketplace: c.name,
         url: "#",
         last_price: c.price,
         last_promo_label: c.promo_label,
@@ -511,7 +504,7 @@ export function ProductDetailPage() {
                         price != null && myPrice > 0
                           ? ((Number(price) - myPrice) / myPrice) * 100
                           : null;
-                      const marketplace = competitorNameToMarketplace(c.competitor_name);
+                      const marketplace = c.marketplace ?? c.competitor_name;
 
                       return (
                         <TableRow key={c.id}>

@@ -29,8 +29,15 @@ export interface CompetitorProduct {
   price_diff: number | null;
 }
 
+export interface MarketplaceOption {
+  marketplace_id: string;
+  name: string;
+}
+
 export const competitorsApi = {
   list: () => apiClient.get<Competitor[]>("/competitors"),
+  listMarketplaces: () =>
+    apiClient.get<MarketplaceOption[]>("/competitors/marketplaces"),
   create: (data: {
     name: string;
     website_url?: string;

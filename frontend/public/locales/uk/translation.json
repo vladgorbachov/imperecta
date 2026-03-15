@@ -388,6 +388,7 @@
   "competitors.scraperCss": "CSS селектор",
   "competitors.scraperJsonApi": "JSON API",
   "competitors.scraperGeneric": "Generic",
+  "competitors.scraperUniversal": "Універсальний",
   "competitors.noCompetitors": "Ще немає конкурентів. Додай одного, щоб почати.",
   "competitors.noProductsLinked": "Немає прив'язаних товарів. Натисни «Прив'язати товар».",
   "competitors.addSuccess": "Конкурента додано",

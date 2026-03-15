@@ -54,7 +54,6 @@ import {
 } from "@/components/ui/table";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { SearchableMarketplaceSelect } from "@/components/ui-custom/SearchableMarketplaceSelect";
-import type { MarketplaceId } from "@/components/ui-custom/SearchableMarketplaceSelect";
 import { TrendBadge } from "@/components/ui-custom/TrendBadge";
 import { CircularScore } from "@/components/ui-custom/CircularScore";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
@@ -64,35 +63,18 @@ import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
 
-type Marketplace = "ozon" | "wildberries" | "kaspi";
-type ScraperType = "auto" | "ozon_api" | "wb_api" | "css_selector" | "json_api";
+type ScraperType = "auto" | "universal";
 type ViewMode = "grid" | "table";
 
-function mapScraperToApi(type: ScraperType): string {
-  switch (type) {
-    case "auto": return "auto";
-    case "ozon_api": return "ozon";
-    case "wb_api": return "wildberries";
-    case "css_selector": return "generic";
-    case "json_api": return "generic";
-    default: return "auto";
-  }
+function mapScraperToApi(_type: ScraperType): string {
+  return "universal";
 }
 
 function getScraperLabel(type: ScraperType): string {
-  switch (type) {
-    case "auto": return "competitors.scraperAuto";
-    case "ozon_api": return "competitors.scraperOzonApi";
-    case "wb_api": return "competitors.scraperWbApi";
-    case "css_selector": return "competitors.scraperCss";
-    case "json_api": return "competitors.scraperJsonApi";
-  }
+  return type === "auto" ? "competitors.scraperAuto" : "competitors.scraperUniversal";
 }
 
-function detectScraperFromUrl(url: string): ScraperType {
-  const lower = url.toLowerCase();
-  if (lower.includes("ozon.ru") || lower.includes("ozon.")) return "ozon_api";
-  if (lower.includes("wildberries") || lower.includes("wb.ru")) return "wb_api";
+function detectScraperFromUrl(_url: string): ScraperType {
   return "auto";
 }
 
@@ -202,7 +184,7 @@ export function CompetitorsPage() {
   const [competitorForm, setCompetitorForm] = useState({
     name: "",
     website_url: "",
-    marketplace: "" as MarketplaceId | "",
+    marketplace: "",
   });
   const [productForm, setProductForm] = useState({
     product_id: "",
@@ -493,7 +475,7 @@ function CompetitorCard({
 }) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
-  const marketplace = competitor.marketplace as Marketplace;
+  const marketplace = competitor.marketplace;
   const score = benchmark?.score ?? 0;
   const strength = strengthFromScore(score);
   const sparklineData = benchmark?.trend_30d ?? [];
@@ -681,7 +663,7 @@ function ExpandableCompetitorRow({
     enabled: expanded,
   });
 
-  const marketplace = competitor.marketplace as Marketplace;
+  const marketplace = competitor.marketplace;
   const score = benchmark?.score ?? 0;
   const aggressiveness = score;
 
@@ -830,7 +812,7 @@ function AddCompetitorDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  form: { name: string; website_url: string; marketplace: Marketplace };
+  form: { name: string; website_url: string; marketplace: string };
   setForm: (f: (prev: typeof form) => typeof form) => void;
   onSubmit: (e: React.FormEvent) => void;
   isLoading: boolean;
@@ -948,7 +930,7 @@ function AddCompetitorProductDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(["auto", "ozon_api", "wb_api", "css_selector", "json_api"] as const).map((k) => (
+                    {(["auto", "universal"] as const).map((k) => (
                       <SelectItem key={k} value={k}>
                         {t(getScraperLabel(k))}
                       </SelectItem>

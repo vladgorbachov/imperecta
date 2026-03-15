@@ -397,6 +397,7 @@
   "competitors.scraperCss": "CSS selector",
   "competitors.scraperJsonApi": "JSON API",
   "competitors.scraperGeneric": "Generic",
+  "competitors.scraperUniversal": "Universal",
   "competitors.noCompetitors": "No competitors yet. Add one to get started.",
   "competitors.noProductsLinked": "No products linked. Click \"Link product\" to add.",
   "competitors.addSuccess": "Competitor added",

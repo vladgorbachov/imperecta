@@ -7,7 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-MarketplaceType = Literal["ozon", "wildberries", "kaspi", "custom"]
+# Marketplace ID: any string. No special treatment for specific marketplaces.
+MarketplaceType = str
 
 
 class CompetitorCreate(BaseModel):
