@@ -183,7 +183,7 @@
   "dashboard.market.noData": "Nicio dată de preț încă. Adaugă produse și concurenți.",
   "dashboard.market.sparkline": "Trend",
   "dashboard.market.momentum": "Semnal 1m",
-  "widgets.forex.title": "FOREX",
+  "widgets.forex.title": "Valute",
   "widgets.forex.unavailable": "Date Forex indisponibile",
   "widgets.forex.retry": "Reîncearcă",
   "widgets.crypto.title": "CRIPTO",

@@ -179,7 +179,7 @@
   "dashboard.market.noData": "Pas encore de données de prix. Ajoutez des produits et des concurrents.",
   "dashboard.market.sparkline": "Tendance",
   "dashboard.market.momentum": "Signal 1m",
-  "widgets.forex.title": "FOREX",
+  "widgets.forex.title": "Devises",
   "widgets.forex.unavailable": "Données Forex indisponibles",
   "widgets.forex.retry": "Réessayer",
   "widgets.crypto.title": "CRYPTO",

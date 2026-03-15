@@ -179,7 +179,7 @@
   "dashboard.market.noData": "لا توجد بيانات أسعار. أضف المنتجات والمنافسين.",
   "dashboard.market.sparkline": "الاتجاه",
   "dashboard.market.momentum": "إشارة 1م",
-  "widgets.forex.title": "فوركس",
+  "widgets.forex.title": "العملات",
   "widgets.forex.unavailable": "بيانات الفوركس غير متوفرة",
   "widgets.forex.retry": "إعادة المحاولة",
   "widgets.crypto.title": "كريبتو",

@@ -183,7 +183,7 @@
   "dashboard.market.noData": "Ще немає даних про ціни. Додай товари та конкурентів.",
   "dashboard.market.sparkline": "Тренд",
   "dashboard.market.momentum": "Сигнал 1м",
-  "widgets.forex.title": "ФОРЕКС",
+  "widgets.forex.title": "Валюты",
   "widgets.forex.unavailable": "Дані Forex недоступні",
   "widgets.forex.retry": "Повторити",
   "widgets.crypto.title": "КРИПТО",

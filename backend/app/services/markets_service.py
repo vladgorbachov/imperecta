@@ -1,6 +1,7 @@
 """Markets domain service. Reads from markets tables. Supports 2-hour scheduled refresh."""
 
 import logging
+import random
 from datetime import datetime
 from uuid import UUID
 
@@ -238,6 +239,11 @@ class MarketsService:
                 "last_updated": r.refreshed_at,
             })
 
+        # Random sample of marketplace products so overview shows varied items; sort/filter still apply
+        total = len(items)
+        if len(items) > limit:
+            items = random.sample(items, limit)
+
         def _tie_key(x: dict) -> str:
             return f"{x['marketplace']}_{x['product_name']}"
 
@@ -270,9 +276,6 @@ class MarketsService:
                     _tie_key(x),
                 ),
             )
-
-        total = len(items)
-        items = items[:limit]
         last_at = items[0]["last_updated"] if items else None
         return {
             "items": items,
@@ -281,8 +284,10 @@ class MarketsService:
             "last_refreshed_at": last_at,
         }
 
+    _NON_MARKETPLACE_IDS = frozenset({"crypto", "commodities", "forex"})
+
     async def get_category_analytics(self) -> dict:
-        """Category/segment analytics data."""
+        """Category/segment analytics data. Excludes crypto, commodities, forex (product-only)."""
         result = await self.db.execute(
             select(MarketsCategoryAnalytics).order_by(
                 MarketsCategoryAnalytics.refreshed_at.desc()
@@ -290,22 +295,24 @@ class MarketsService:
         )
         rows = result.scalars().unique().all()
         last_at = rows[0].refreshed_at if rows else None
+        items = [
+            {
+                "id": str(r.id),
+                "category_id": r.category_id,
+                "segment": r.segment,
+                "metrics": r.metrics or {},
+                "refreshed_at": r.refreshed_at,
+            }
+            for r in rows
+            if (r.category_id or "").lower() not in self._NON_MARKETPLACE_IDS
+        ]
         return {
-            "items": [
-                {
-                    "id": str(r.id),
-                    "category_id": r.category_id,
-                    "segment": r.segment,
-                    "metrics": r.metrics or {},
-                    "refreshed_at": r.refreshed_at,
-                }
-                for r in rows
-            ],
+            "items": items,
             "last_refreshed_at": last_at,
         }
 
     async def get_marketplace_analytics(self) -> dict:
-        """Marketplace table analytics. Separate from competitor-benchmark."""
+        """Marketplace table analytics. Excludes crypto, commodities, forex (marketplaces only)."""
         result = await self.db.execute(
             select(MarketsMarketplaceAnalytics).order_by(
                 MarketsMarketplaceAnalytics.refreshed_at.desc()
@@ -322,6 +329,7 @@ class MarketsService:
                 "refreshed_at": r.refreshed_at,
             }
             for r in rows
+            if (r.marketplace_id or "").lower() not in self._NON_MARKETPLACE_IDS
         ]
         # Sort by product count DESC, then name ASC
         items.sort(
