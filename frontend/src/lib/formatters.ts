@@ -9,12 +9,21 @@
  * @example formatPrice(12450, "RUB", "en") → "RUB 12,450.00"
  */
 export function formatPrice(amount: number, currency: string, locale: string): string {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
+  const normalizedCurrency = currency?.trim().toUpperCase() || "USD";
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    const formattedAmount = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+    return normalizedCurrency ? `${formattedAmount} ${normalizedCurrency}` : formattedAmount;
+  }
 }
 
 /**
