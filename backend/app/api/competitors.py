@@ -333,6 +333,39 @@ async def list_competitor_products_by_competitor(
     return result
 
 
+@router.post("/products/{id}/scrape")
+async def trigger_manual_competitor_product_scrape(
+    id: UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """
+    Trigger manual scrape for one competitor product owned by current user.
+    Enqueues Celery task and returns task metadata.
+    """
+    result = await db.execute(
+        select(CompetitorProduct)
+        .join(Product, CompetitorProduct.product_id == Product.id)
+        .where(
+            CompetitorProduct.id == id,
+            Product.user_id == current_user.id,
+        )
+    )
+    cp = result.scalar_one_or_none()
+    if cp is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Competitor product not found",
+        )
+
+    from app.workers.scrape_tasks import scrape_single
+
+    task = scrape_single.delay(str(cp.id))
+    return {
+        "status": "enqueued",
+        "task_id": task.id,
+        "competitor_product_id": str(cp.id),
+    }
 
 
 @router.delete("/products/{id}", status_code=status.HTTP_204_NO_CONTENT)
