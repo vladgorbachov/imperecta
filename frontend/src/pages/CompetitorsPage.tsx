@@ -459,6 +459,7 @@ export function CompetitorsPage() {
 
 function CompetitorCard({
   competitor,
+  benchmark,
   onWhatIsDoingNow,
   onDetails,
   expanded,
