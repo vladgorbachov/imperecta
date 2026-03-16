@@ -1,6 +1,4 @@
 """Markets domain service. Reads from markets tables. Supports 2-hour scheduled refresh."""
-
-import random
 from datetime import datetime
 from uuid import UUID
 
@@ -11,7 +9,6 @@ from app.models import (
     MarketsCategoryAnalytics,
     MarketsMarketplaceAnalytics,
     MarketsOpportunityBlock,
-    MarketsOverviewItem,
     MarketsPreferences,
     MarketsRefreshLog,
     MarketsRefreshStatus,
@@ -102,87 +99,6 @@ class MarketsService:
             }
             for t in sorted(types_seen)
         ]
-
-    async def get_overview(self, sort: str = "volatile", limit: int = 50) -> dict:
-        """
-        Market Overview: global materialized rows from markets_overview.
-        Data is produced by scheduled ingestion/materialization pipeline and is
-        independent from user products/competitors.
-        """
-        result = await self.db.execute(
-            select(MarketsOverviewItem).order_by(MarketsOverviewItem.refreshed_at.desc())
-        )
-        rows = result.scalars().all()
-
-        if not rows:
-            return {"items": [], "total": 0, "sort": sort, "last_refreshed_at": None}
-
-        items: list[dict] = []
-        for r in rows:
-            marketplace_id = r.marketplace
-            marketplace_label = marketplace_id.replace("_", " ").title()
-            items.append({
-                "id": str(r.id),
-                "marketplace": marketplace_label,
-                "marketplace_domain": r.marketplace_domain or "",
-                "marketplace_id": marketplace_id,
-                "product_name": (r.product_name or "Unknown")[:500],
-                "product_url": None,
-                "price": float(r.price),
-                "currency": (r.currency or "USD"),
-                "category": marketplace_id,
-                "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                "change_3d": float(r.change_3d) if r.change_3d is not None else None,
-                "change_1w": float(r.change_1w) if r.change_1w is not None else None,
-                "change_1m": float(r.change_1m) if r.change_1m is not None else None,
-                "sparkline_data": r.sparkline_data if len(r.sparkline_data or []) >= 2 else [],
-                "last_updated": r.refreshed_at,
-            })
-
-        # Random sample of marketplace products so overview shows varied items; sort/filter still apply
-        total = len(items)
-        if len(items) > limit:
-            items = random.sample(items, limit)
-
-        def _tie_key(x: dict) -> str:
-            return f"{x['marketplace']}_{x['product_name']}"
-
-        if sort == "volatile":
-            items.sort(
-                key=lambda x: (
-                    -max(abs(x["change_24h"] or 0), abs(x["change_3d"] or 0)),
-                    _tie_key(x),
-                ),
-            )
-        elif sort == "trending":
-            items.sort(key=lambda x: (-abs(x["change_24h"] or 0), _tie_key(x)))
-        elif sort == "gainers":
-            items = [x for x in items if (x["change_24h"] or 0) > 0]
-            items.sort(key=lambda x: (-(x["change_24h"] or 0), _tie_key(x)))
-        elif sort == "losers":
-            items = [x for x in items if (x["change_24h"] or 0) < 0]
-            items.sort(key=lambda x: ((x["change_24h"] or 0), _tie_key(x)))
-        elif sort == "recent":
-            items.sort(
-                key=lambda x: (
-                    -(x["last_updated"].timestamp() if x["last_updated"] else 0),
-                    _tie_key(x),
-                ),
-            )
-        else:
-            items.sort(
-                key=lambda x: (
-                    -max(abs(x["change_24h"] or 0), abs(x["change_3d"] or 0)),
-                    _tie_key(x),
-                ),
-            )
-        last_at = items[0]["last_updated"] if items else None
-        return {
-            "items": items,
-            "total": total,
-            "sort": sort,
-            "last_refreshed_at": last_at,
-        }
 
     _NON_MARKETPLACE_IDS = frozenset({"crypto", "commodities", "forex"})
 

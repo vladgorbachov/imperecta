@@ -1,15 +1,6 @@
 """Markets API contract tests. Ingestion, read endpoints, superuser-only ingest."""
 
-from datetime import datetime, timezone
-from decimal import Decimal
-from uuid import uuid4
-
 import pytest
-from sqlalchemy import delete
-
-from app.database import async_session_maker
-from app.models import MarketsOverviewItem
-
 
 @pytest.mark.asyncio
 async def test_markets_ingest_forbidden_for_regular_user(client, auth_headers):
@@ -48,7 +39,7 @@ async def test_markets_forex_returns_stored_data(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_markets_overview_returns_stored_data(client, auth_headers):
-    """Overview endpoint returns items when data exists; empty list when none."""
+    """Overview endpoint returns paginated payload from pool data source."""
     resp = await client.get(
         "/api/markets/overview",
         params={"sort": "volatile", "limit": 50},
@@ -58,50 +49,9 @@ async def test_markets_overview_returns_stored_data(client, auth_headers):
     data = resp.json()
     assert "items" in data
     assert "total" in data
-    assert "sort" in data
+    assert "limit" in data
+    assert "offset" in data
     assert isinstance(data["items"], list)
-
-
-@pytest.mark.asyncio
-async def test_markets_overview_reads_materialized_table(client, auth_headers):
-    """Overview uses global materialized rows from markets_overview."""
-    marker = f"integration-{uuid4()}"
-    async with async_session_maker() as session:
-        session.add(
-            MarketsOverviewItem(
-                marketplace="integration_market",
-                marketplace_domain="integration.example",
-                product_name=marker,
-                price=Decimal("123.45"),
-                currency="USD",
-                change_24h=Decimal("1.25"),
-                sparkline_data=[120.0, 123.45],
-                refreshed_at=datetime.now(timezone.utc),
-            )
-        )
-        await session.commit()
-
-    resp = await client.get(
-        "/api/markets/overview",
-        params={"sort": "recent", "limit": 100},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert any(
-        item.get("marketplace_id") == "integration_market"
-        and item.get("product_name") == marker
-        for item in data["items"]
-    )
-
-    async with async_session_maker() as session:
-        await session.execute(
-            delete(MarketsOverviewItem).where(
-                MarketsOverviewItem.marketplace == "integration_market",
-                MarketsOverviewItem.product_name == marker,
-            )
-        )
-        await session.commit()
 
 
 @pytest.mark.asyncio
