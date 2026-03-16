@@ -1,6 +1,5 @@
 """Markets domain service. Reads from markets tables. Supports 2-hour scheduled refresh."""
 
-import logging
 import random
 from datetime import datetime
 from uuid import UUID
@@ -10,21 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     MarketsCategoryAnalytics,
-    MarketsCommodity,
-    MarketsCrypto,
-    MarketsForex,
     MarketsMarketplaceAnalytics,
     MarketsOpportunityBlock,
     MarketsOverviewItem,
     MarketsPreferences,
     MarketsRefreshLog,
     MarketsRefreshStatus,
-    MarketsRefreshType,
-    MarketsTickerItem,
 )
-
-logger = logging.getLogger(__name__)
-
 
 class MarketsService:
     """Service for markets data. Uses typed schemas."""
@@ -111,97 +102,6 @@ class MarketsService:
             }
             for t in sorted(types_seen)
         ]
-
-    async def get_forex(self) -> dict:
-        """Forex widget data."""
-        result = await self.db.execute(
-            select(MarketsForex).order_by(MarketsForex.refreshed_at.desc())
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        if not rows:
-            logger.debug("get_forex: no rows in markets_forex")
-        return {
-            "items": [
-                {
-                    "symbol": r.symbol,
-                    "bid": float(r.bid),
-                    "ask": float(r.ask),
-                    "spread": float(r.spread),
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "refreshed_at": r.refreshed_at,
-                }
-                for r in rows
-            ],
-            "last_refreshed_at": last_at,
-        }
-
-    async def get_crypto(self) -> dict:
-        """Crypto widget data."""
-        result = await self.db.execute(
-            select(MarketsCrypto).order_by(MarketsCrypto.refreshed_at.desc())
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        if not rows:
-            logger.debug("get_crypto: no rows in markets_crypto")
-        return {
-            "items": [
-                {
-                    "symbol": r.symbol,
-                    "price": float(r.price),
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "market_cap": float(r.market_cap) if r.market_cap is not None else None,
-                    "refreshed_at": r.refreshed_at,
-                }
-                for r in rows
-            ],
-            "last_refreshed_at": last_at,
-        }
-
-    async def get_commodities(self) -> dict:
-        """Resources/commodities widget data."""
-        result = await self.db.execute(
-            select(MarketsCommodity).order_by(MarketsCommodity.refreshed_at.desc())
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        return {
-            "items": [
-                {
-                    "symbol": r.symbol,
-                    "name": r.name,
-                    "price": float(r.price),
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "unit": r.unit,
-                    "refreshed_at": r.refreshed_at,
-                }
-                for r in rows
-            ],
-            "last_refreshed_at": last_at,
-        }
-
-    async def get_ticker(self) -> dict:
-        """Ticker bar data."""
-        result = await self.db.execute(
-            select(MarketsTickerItem).order_by(MarketsTickerItem.refreshed_at.desc())
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        return {
-            "items": [
-                {
-                    "symbol": r.symbol,
-                    "name": r.name,
-                    "price": float(r.price),
-                    "change_24h": float(r.change_24h) if r.change_24h is not None else None,
-                    "currency": r.currency,
-                    "refreshed_at": r.refreshed_at,
-                }
-                for r in rows
-            ],
-            "last_refreshed_at": last_at,
-        }
 
     async def get_overview(self, sort: str = "volatile", limit: int = 50) -> dict:
         """
