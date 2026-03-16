@@ -11,7 +11,7 @@ from sqlalchemy.orm import joinedload
 
 from app.database import sync_session_factory
 from app.models import AdminMarketplace, CompetitorProduct, PriceSnapshot, ScrapeLog
-from app.scrapers.engine import ScraperFactory, ScrapeResult
+from app.scrapers.engine import ScrapeResult
 from app.services.price_service import _detect_scraper_type, _get_scraper
 from app.workers.alert_tasks import check_alerts
 from app.workers.celery_app import celery_app

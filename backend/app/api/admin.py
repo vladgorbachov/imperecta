@@ -272,6 +272,37 @@ async def admin_trigger_scrape() -> dict:
     return {"message": "Scrape task queued", "task_id": str(task.id)}
 
 
+@router.post("/discovery/trigger/{marketplace_id}")
+async def trigger_discovery(
+    marketplace_id: int,
+    _current_user: CurrentSuperuser,
+    _db: DbSession,
+):
+    """Manually trigger discovery for one marketplace."""
+    from app.workers.discovery_tasks import discover_single_marketplace
+
+    discover_single_marketplace.delay(marketplace_id)
+    return {"status": "queued", "marketplace_id": marketplace_id}
+
+
+@router.post("/discovery/trigger-all")
+async def trigger_discovery_all(_current_user: CurrentSuperuser):
+    """Manually trigger discovery for all active marketplaces."""
+    from app.workers.discovery_tasks import discover_all_marketplaces
+
+    discover_all_marketplaces.delay()
+    return {"status": "queued"}
+
+
+@router.post("/pool/trigger-scrape")
+async def trigger_pool_scrape(_current_user: CurrentSuperuser):
+    """Manually trigger scraping of stale pool products."""
+    from app.workers.discovery_tasks import scrape_all_pool_products
+
+    scrape_all_pool_products.delay()
+    return {"status": "queued"}
+
+
 # Real product URLs for seed-competitors (scrapers need product pages, not search results)
 REAL_PRODUCT_URLS: dict[str, list[tuple[str, str]]] = {
     "wildberries": [

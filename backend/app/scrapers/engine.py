@@ -8,10 +8,8 @@ Fallback: Playwright + extraction strategies (JSON-LD, meta, DOM).
 
 import asyncio
 import base64
-import json
 import logging
 import random
-import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -21,6 +19,12 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 from app.config import Settings
+from app.scrapers.extractors import (
+    extract_auto_detect,
+    extract_from_jsonld,
+    extract_from_meta_tags,
+    parse_price_text,
+)
 from app.scrapers.proxy_manager import proxy_manager
 
 settings = Settings()
@@ -73,12 +77,6 @@ class BaseScraper(ABC):
             return self.config.country
         return None
 
-    def _get_sticky_key(self, url: str) -> str | None:
-        """Generate sticky session key for multi-page scraping."""
-        if self.config and hasattr(self.config, "id"):
-            return f"{self.config.id}:{url[:100]}"
-        return None
-
     async def _rate_limit(self) -> None:
         """Enforce rate limit from marketplace config."""
         if not self.config or not hasattr(self.config, "id"):
@@ -122,39 +120,6 @@ class BaseScraper(ABC):
                     backoff = self._backoff_delay(attempt)
                     await asyncio.sleep(backoff)
         raise last_error or RuntimeError("Scrape failed")
-
-    async def _log_scrape(
-        self,
-        db,
-        marketplace_id: str,
-        marketplace_name: str,
-        url: str,
-        status: str,
-        error_message: str | None = None,
-        price_found: float | None = None,
-        duration_ms: int | None = None,
-        proxy_used: bool = False,
-        competitor_product_id=None,
-    ) -> None:
-        """Log scrape result to scrape_logs table."""
-        from app.models.scrape_log import ScrapeLog
-
-        from decimal import Decimal
-
-        price_val = Decimal(str(price_found)) if price_found is not None else None
-        log = ScrapeLog(
-            marketplace_id=marketplace_id,
-            marketplace_name=marketplace_name,
-            competitor_product_id=competitor_product_id,
-            url=url,
-            status=status,
-            error_message=error_message,
-            price_found=price_val,
-            duration_ms=duration_ms,
-            proxy_used=proxy_used,
-        )
-        db.add(log)
-
 
 # -----------------------------------------------------------------------------
 # UniversalScraper
@@ -328,136 +293,35 @@ class UniversalScraper(BaseScraper):
         Most e-commerce sites include: <script type="application/ld+json">
         with @type: "Product" containing name, price, image, availability.
         """
-        soup = BeautifulSoup(html, "html.parser")
-        scripts = soup.find_all("script", type="application/ld+json")
-
-        for script in scripts:
-            try:
-                data = json.loads(script.string or "{}")
-            except (json.JSONDecodeError, TypeError):
-                continue
-
-            items = data if isinstance(data, list) else [data]
-
-            for item in items:
-                product = None
-
-                if item.get("@type") == "Product":
-                    product = item
-                elif "@graph" in item:
-                    for node in item["@graph"]:
-                        if node.get("@type") == "Product":
-                            product = node
-                            break
-
-                if not product:
-                    continue
-
-                price = None
-                currency = None
-                old_price = None
-
-                offers = product.get("offers", {})
-                if isinstance(offers, list):
-                    offers = offers[0] if offers else {}
-                elif isinstance(offers, str):
-                    continue
-
-                if "price" in offers:
-                    price = self._parse_price(offers["price"])
-                    currency = offers.get("priceCurrency")
-                elif "lowPrice" in offers:
-                    price = self._parse_price(offers["lowPrice"])
-                    currency = offers.get("priceCurrency")
-                    if "highPrice" in offers:
-                        old_price = self._parse_price(offers["highPrice"])
-                elif "highPrice" in offers:
-                    price = self._parse_price(offers["highPrice"])
-                    currency = offers.get("priceCurrency")
-
-                if not price:
-                    continue
-
-                name = product.get("name")
-                image = product.get("image")
-                if isinstance(image, list):
-                    image = image[0] if image else None
-                elif isinstance(image, dict):
-                    image = image.get("url")
-
-                description = product.get("description", "")
-                if isinstance(description, str) and len(description) > 500:
-                    description = description[:500]
-
-                availability = offers.get("availability", "")
-                in_stock = "InStock" in str(availability) or "instock" in str(availability).lower()
-
-                return ScrapeResult(
-                    price=price,
-                    old_price=old_price,
-                    currency=currency,
-                    product_name=name,
-                    image_url=image,
-                    description=description,
-                    in_stock=in_stock,
-                )
-
-        return None
+        extracted = extract_from_jsonld(BeautifulSoup(html, "html.parser"))
+        if extracted.price is None:
+            return None
+        return ScrapeResult(
+            price=extracted.price,
+            old_price=extracted.original_price,
+            currency=extracted.currency,
+            product_name=extracted.title,
+            image_url=extracted.image_url,
+            description=extracted.description,
+            in_stock=None,
+        )
 
     def _extract_meta(self, html: str) -> ScrapeResult | None:
         """
         Extract product data from meta tags.
         Common patterns: og:price:amount, product:price:amount, og:title, og:image.
         """
-        soup = BeautifulSoup(html, "html.parser")
-
-        price = None
-        currency = None
-
-        price_metas = [
-            ("og:price:amount", "og:price:currency"),
-            ("product:price:amount", "product:price:currency"),
-            ("twitter:data1", None),
-        ]
-
-        for price_prop, currency_prop in price_metas:
-            meta = soup.find("meta", property=price_prop) or soup.find(
-                "meta", attrs={"name": price_prop}
-            )
-            if meta and meta.get("content"):
-                price = self._parse_price(meta["content"])
-                if price:
-                    if currency_prop:
-                        cur_meta = soup.find("meta", property=currency_prop) or soup.find(
-                            "meta", attrs={"name": currency_prop}
-                        )
-                        if cur_meta:
-                            currency = cur_meta.get("content")
-                    break
-
-        if not price:
+        extracted = extract_from_meta_tags(BeautifulSoup(html, "html.parser"))
+        if extracted.price is None:
             return None
-
-        name = None
-        image = None
-
-        for prop in ["og:title", "twitter:title"]:
-            meta = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
-            if meta and meta.get("content"):
-                name = meta["content"]
-                break
-
-        for prop in ["og:image", "twitter:image"]:
-            meta = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
-            if meta and meta.get("content"):
-                image = meta["content"]
-                break
-
         return ScrapeResult(
-            price=price,
-            currency=currency,
-            product_name=name,
-            image_url=image,
+            price=extracted.price,
+            old_price=extracted.original_price,
+            currency=extracted.currency,
+            product_name=extracted.title,
+            image_url=extracted.image_url,
+            description=extracted.description,
+            in_stock=None,
         )
 
     async def _extract_dom_playwright(self, url: str) -> ScrapeResult | None:
@@ -485,6 +349,7 @@ class UniversalScraper(BaseScraper):
                 page = await context.new_page()
                 await page.goto(url, wait_until="networkidle", timeout=30000)
                 await page.wait_for_timeout(3000)
+                html = await page.content()
 
                 price_selectors = [
                     '[data-price]',
@@ -516,19 +381,19 @@ class UniversalScraper(BaseScraper):
                         if el:
                             data_price = await el.get_attribute("data-price")
                             if data_price:
-                                price = self._parse_price(data_price)
+                                price = parse_price_text(data_price)
                                 if price:
                                     break
 
                             content = await el.get_attribute("content")
                             if content:
-                                price = self._parse_price(content)
+                                price = parse_price_text(content)
                                 if price:
                                     break
 
                             text = await el.inner_text()
                             if text:
-                                price = self._parse_price(text)
+                                price = parse_price_text(text)
                                 if price:
                                     break
                     except Exception:
@@ -548,10 +413,12 @@ class UniversalScraper(BaseScraper):
 
                 if price:
                     self.proxy_manager.report_success()
+                    auto = extract_auto_detect(BeautifulSoup(html, "html.parser"), url)
                     return ScrapeResult(
                         price=price,
-                        product_name=title,
-                        image_url=image,
+                        product_name=auto.title or title,
+                        image_url=auto.image_url or image,
+                        description=auto.description,
                     )
 
         except Exception as e:
@@ -559,57 +426,6 @@ class UniversalScraper(BaseScraper):
             self.proxy_manager.report_failure()
 
         return None
-
-    @staticmethod
-    def _parse_price(value) -> float | None:
-        """
-        Parse price from various formats:
-        "1 234.56", "1,234.56", "1234", "₽ 1 234", "$99.99", "11 265 ₽"
-        """
-        if value is None:
-            return None
-
-        s = str(value).strip()
-        s = re.sub(r"[₽$€£¥₴₸₺₼₾₿\s]", " ", s)
-        s = re.sub(
-            r"(руб|сум|тг|грн|лей|zł|Kč|Ft|лв|kr|CHF|RUB|USD|EUR|UAH|KZT|PLN|RON|HUF|BGN|TRY|GBP)\.?",
-            "",
-            s,
-            flags=re.IGNORECASE,
-        )
-        s = s.strip()
-
-        if not s:
-            return None
-
-        match = re.search(r"(\d[\d\s.,]*\d|\d+)", s)
-        if not match:
-            return None
-
-        num_str = match.group(1).replace(" ", "")
-
-        if "," in num_str and "." in num_str:
-            if num_str.rfind(",") > num_str.rfind("."):
-                num_str = num_str.replace(".", "").replace(",", ".")
-            else:
-                num_str = num_str.replace(",", "")
-        elif "," in num_str:
-            parts = num_str.split(",")
-            if len(parts[-1]) <= 2:
-                num_str = num_str.replace(",", ".")
-            else:
-                num_str = num_str.replace(",", "")
-        elif "." in num_str:
-            parts = num_str.split(".")
-            if len(parts[-1]) == 3 and len(parts) > 2:
-                num_str = num_str.replace(".", "")
-
-        try:
-            result = float(num_str)
-            return result if result > 0 else None
-        except ValueError:
-            return None
-
 
 # -----------------------------------------------------------------------------
 # ScraperFactory
@@ -628,8 +444,3 @@ class ScraperFactory:
     def register(cls, scraper_type: str, scraper_class: type) -> None:
         """No-op. Kept for API compatibility. All types use UniversalScraper."""
         pass
-
-    @classmethod
-    def get_available_types(cls) -> list[str]:
-        """List supported types (for stats). All map to UniversalScraper."""
-        return ["universal"]
