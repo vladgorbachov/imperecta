@@ -7,7 +7,9 @@ from app.models.alert_event import AlertEvent
 from app.models.api_log import ApiLog
 from app.models.competitor import Competitor
 from app.models.competitor_product import CompetitorProduct
+from app.models.discovery_log import DiscoveryLog
 from app.models.digest import Digest
+from app.models.global_product import GlobalPriceSnapshot, GlobalProduct
 from app.models.markets_analytics import MarketsCategoryAnalytics, MarketsMarketplaceAnalytics
 from app.models.markets_opportunity import MarketsOpportunityBlock
 from app.models.markets_overview import MarketsOverviewItem
@@ -39,7 +41,10 @@ __all__ = [
     "Product",
     "Competitor",
     "CompetitorProduct",
+    "DiscoveryLog",
     "PriceSnapshot",
+    "GlobalProduct",
+    "GlobalPriceSnapshot",
     "Alert",
     "AlertEvent",
     "Digest",
