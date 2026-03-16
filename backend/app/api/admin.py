@@ -3,10 +3,9 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlparse
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, HttpUrl
 
 from app.services.seed_service import seed_products_for_user
@@ -19,6 +18,7 @@ from app.api.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.models import AdminMarketplace, Competitor, CompetitorProduct, ScrapeLog, User
 from app.models.product import Product
 from app.services.claude_monitor import check_claude_api_health, get_claude_api_stats
+from app.services.marketplace_pool_service import MarketplacePoolService
 
 logger = logging.getLogger(__name__)
 
@@ -458,45 +458,11 @@ class AddMarketplaceRequest(BaseModel):
 @router.post("/marketplaces")
 async def admin_add_marketplace(data: AddMarketplaceRequest, db: DbSession) -> dict:
     """Add new marketplace by URL."""
-    parsed = urlparse(str(data.url))
-    domain = parsed.netloc or parsed.path
-    if not domain:
-        raise HTTPException(status_code=422, detail="Invalid URL: could not extract domain")
-    domain = domain.lower().replace("www.", "").strip("/")
-    if not domain:
-        raise HTTPException(status_code=422, detail="Invalid URL: could not extract domain")
-
-    marketplace_id = _domain_to_marketplace_id(domain)
-
-    for reg in MARKETPLACE_REGISTRY:
-        if reg["marketplace_id"] == marketplace_id:
-            raise HTTPException(status_code=409, detail="Marketplace already exists in registry")
-
-    existing = await db.execute(
-        select(AdminMarketplace).where(AdminMarketplace.marketplace_id == marketplace_id)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Marketplace already exists")
-
-    tld = domain.split(".")[-1] if "." in domain else "com"
-    country = TLD_TO_COUNTRY.get(tld, "XX")
-    region = "cis" if country in ("RU", "KZ", "BY", "UA") else "other"
-    base_url = f"https://{domain}"
-
-    am = AdminMarketplace(
-        marketplace_id=marketplace_id,
-        name=domain,
-        domain=domain,
-        base_url=base_url,
-        country=country,
-        region=region,
-        currency="USD",
-        scraper_type="universal",
-        is_active=True,
-    )
-    db.add(am)
-    await db.flush()
-    await db.refresh(am)
+    service = MarketplacePoolService(db)
+    try:
+        am = await service.add_by_url(str(data.url))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return {
         "marketplace_id": am.marketplace_id,
@@ -508,6 +474,43 @@ async def admin_add_marketplace(data: AddMarketplaceRequest, db: DbSession) -> d
         "currency": am.currency,
         "scraper_type": am.scraper_type,
     }
+
+
+@router.post("/marketplaces/add-by-url")
+async def add_marketplace_by_url(
+    url: str = Body(..., embed=True),
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+):
+    """Add marketplace by URL. Auto-extracts domain, name, country."""
+    service = MarketplacePoolService(db)
+    try:
+        mp = await service.add_by_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": mp.id, "domain": mp.domain, "name": mp.name}
+
+
+@router.post("/marketplaces/import-file")
+async def import_marketplaces_from_file(
+    file: UploadFile = File(...),
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+):
+    """
+    Import marketplaces from .txt or .csv file.
+    .txt: one URL per line
+    .csv: column 'url' or first column
+    """
+    content = (await file.read()).decode("utf-8")
+    service = MarketplacePoolService(db)
+
+    if file.filename and file.filename.endswith(".csv"):
+        result = await service.import_from_csv(content)
+    else:
+        result = await service.import_from_txt(content)
+
+    return result
 
 
 @router.delete("/marketplaces/{marketplace_id}")
@@ -523,6 +526,8 @@ async def admin_delete_marketplace(marketplace_id: str, db: DbSession) -> dict:
     await db.flush()
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Marketplace not found")
+    service = MarketplacePoolService(db)
+    await service.recalculate_all_quotas()
     return {"ok": True}
 
 
