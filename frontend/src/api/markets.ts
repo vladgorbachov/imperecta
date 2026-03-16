@@ -121,27 +121,44 @@ export interface MarketsTickerResponse {
 // --- Market Overview ---
 
 export interface MarketsOverviewItem {
-  id: string;
-  marketplace: string;
-  marketplace_domain: string;
-  product_name: string;
-  price: number;
+  id: number;
+  marketplace_id: number;
+  marketplace_name?: string | null;
+  marketplace_domain?: string | null;
+  url: string;
+  title?: string | null;
+  image_url?: string | null;
+  description?: string | null;
+  current_price?: number | null;
+  original_price?: number | null;
   currency: string;
-  change_24h: number | null;
-  change_3d: number | null;
-  change_1w: number | null;
-  change_1m: number | null;
-  sparkline_data: number[];
-  last_updated: string;
-  /** Optional product thumbnail. When absent, show placeholder. */
-  thumbnail_url?: string | null;
+  price_change_pct_24h?: number | null;
+  price_change_pct_7d?: number | null;
+  price_change_pct_30d?: number | null;
+  volatility_30d?: number | null;
+  status: string;
+  last_scraped_at?: string | null;
 }
 
 export interface MarketsOverviewResponse {
   items: MarketsOverviewItem[];
   total: number;
-  sort: string;
-  last_refreshed_at: string | null;
+  limit: number;
+  offset: number;
+}
+
+export interface PoolMarketplaceStatsItem {
+  marketplace_domain: string;
+  marketplace_name?: string | null;
+  product_count: number;
+  avg_price?: number | null;
+}
+
+export interface PoolStatsResponse {
+  total_products: number;
+  total_marketplaces: number;
+  products_with_price: number;
+  last_discovery_at?: string | null;
 }
 
 // --- Category analytics ---
@@ -231,10 +248,28 @@ export const marketsApi = {
   getFuel: (country: string) =>
     apiClient.get<FuelResponse>(`/markets/fuel?country=${encodeURIComponent(country)}`),
 
-  getOverview: (sort?: string, limit?: number) =>
+  getOverview: (params?: {
+    sort?: string;
+    search?: string;
+    marketplace_id?: number;
+    limit?: number;
+    offset?: number;
+  }) =>
     apiClient.get<MarketsOverviewResponse>("/markets/overview", {
-      params: { sort: sort ?? "volatile", limit: limit ?? 50 },
+      params: {
+        sort: params?.sort ?? "volatile",
+        search: params?.search,
+        marketplace_id: params?.marketplace_id,
+        limit: params?.limit ?? 50,
+        offset: params?.offset ?? 0,
+      },
     }),
+
+  getPoolMarketplaceStats: () =>
+    apiClient.get<PoolMarketplaceStatsItem[]>("/pool/marketplace-stats"),
+
+  getPoolStats: () =>
+    apiClient.get<PoolStatsResponse>("/pool/stats"),
 
   getCategoryAnalytics: () =>
     apiClient.get<MarketsCategoryAnalyticsResponse>("/markets/category-analytics"),
@@ -264,8 +299,24 @@ export const marketsQueryKeys = {
     [...marketsQueryKeys.all, "ticker", country ?? ""] as const,
   fuel: (country: string) =>
     [...marketsQueryKeys.all, "fuel", country] as const,
-  overview: (sort?: string, limit?: number) =>
-    [...marketsQueryKeys.all, "overview", sort ?? "volatile", limit ?? 50] as const,
+  overview: (params?: {
+    sort?: string;
+    search?: string;
+    marketplace_id?: number;
+    limit?: number;
+    offset?: number;
+  }) =>
+    [
+      ...marketsQueryKeys.all,
+      "overview",
+      params?.sort ?? "volatile",
+      params?.search ?? "",
+      params?.marketplace_id ?? null,
+      params?.limit ?? 50,
+      params?.offset ?? 0,
+    ] as const,
+  poolMarketplaceStats: () => [...marketsQueryKeys.all, "pool-marketplace-stats"] as const,
+  poolStats: () => [...marketsQueryKeys.all, "pool-stats"] as const,
   categoryAnalytics: () => [...marketsQueryKeys.all, "category-analytics"] as const,
   marketplaceAnalytics: () => [...marketsQueryKeys.all, "marketplace-analytics"] as const,
   opportunities: () => [...marketsQueryKeys.all, "opportunities"] as const,
