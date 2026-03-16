@@ -13,6 +13,7 @@ from app.api.admin import router as admin_router
 from app.api.ai import router as ai_router
 from app.api.dashboard import router as dashboard_router
 from app.api.markets import router as markets_router
+from app.api.product_pool import router as pool_router
 from app.config import Settings
 from app.database import Base, engine
 
@@ -108,6 +109,7 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(markets_router, prefix="/api")
+app.include_router(pool_router, prefix="/api")
 
 
 @app.get("/health")

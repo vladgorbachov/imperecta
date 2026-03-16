@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.api.deps import CurrentUser, CurrentSuperuser, DbSession
 from app.services.market_data_service import (
@@ -75,7 +75,6 @@ from app.schemas.markets import (
     MarketsForexResponse,
     MarketsMarketplaceAnalyticsResponse,
     MarketsOpportunitiesResponse,
-    MarketsOverviewResponse,
     MarketsPreferencesResponse,
     MarketsPreferencesUpdate,
     MarketsRefreshMetadataResponse,
@@ -83,6 +82,7 @@ from app.schemas.markets import (
     MarketsTickerResponse,
 )
 from app.services.markets_service import MarketsService
+from app.services.product_pool_service import ProductPoolService
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 
@@ -272,7 +272,7 @@ async def get_ticker(
     return MarketsTickerResponse(items=items, last_refreshed_at=now)
 
 
-@router.get("/overview", response_model=MarketsOverviewResponse)
+@router.get("/overview")
 async def get_overview(
     current_user: CurrentUser,
     db: DbSession,
@@ -280,13 +280,24 @@ async def get_overview(
         "volatile",
         description="Sort: volatile, trending, gainers, losers, recent",
     ),
+    search: str | None = Query(None, min_length=2),
+    marketplace_id: int | None = Query(None),
     limit: int = Query(50, ge=1, le=100, description="Max items"),
-) -> MarketsOverviewResponse:
-    """Market Overview tabbed table data."""
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Market Overview — now reads from global product pool."""
     if sort not in OVERVIEW_SORT:
         sort = "volatile"
-    service = MarketsService(db, current_user.id)
-    return MarketsOverviewResponse(**await service.get_overview(sort=sort, limit=limit))
+    _ = current_user
+    service = ProductPoolService(db)
+    items, total = await service.list_products(
+        sort=sort,
+        search=search,
+        marketplace_id=marketplace_id,
+        limit=limit,
+        offset=offset,
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/category-analytics", response_model=MarketsCategoryAnalyticsResponse)
