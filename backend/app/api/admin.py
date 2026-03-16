@@ -8,7 +8,6 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, HttpUrl
 
-from app.services.seed_service import seed_products_for_user
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -244,23 +243,6 @@ async def admin_marketplace_logs(marketplace_id: str, db: DbSession) -> list[dic
         }
         for log in logs
     ]
-
-
-class SeedProductsRequest(BaseModel):
-    """Request body for seed-products endpoint."""
-
-    limit: int = 20
-
-
-@router.post("/seed-products")
-async def admin_seed_products(
-    db: DbSession,
-    current_user: CurrentSuperuser,
-    data: SeedProductsRequest | None = Body(default=None),
-) -> dict:
-    """Seed current superuser account with real products for scraping test."""
-    limit = data.limit if data else 20
-    return await seed_products_for_user(db, current_user.id, limit=limit)
 
 
 @router.post("/trigger-scrape")

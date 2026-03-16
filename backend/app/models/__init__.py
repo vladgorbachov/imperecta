@@ -12,7 +12,6 @@ from app.models.digest import Digest
 from app.models.global_product import GlobalPriceSnapshot, GlobalProduct
 from app.models.markets_analytics import MarketsCategoryAnalytics, MarketsMarketplaceAnalytics
 from app.models.markets_opportunity import MarketsOpportunityBlock
-from app.models.markets_overview import MarketsOverviewItem
 from app.models.markets_preferences import MarketsPreferences
 from app.models.markets_refresh_log import (
     MarketsRefreshLog,
@@ -56,7 +55,6 @@ __all__ = [
     "MarketsCrypto",
     "MarketsCommodity",
     "MarketsTickerItem",
-    "MarketsOverviewItem",
     "MarketsCategoryAnalytics",
     "MarketsMarketplaceAnalytics",
     "MarketsOpportunityBlock",

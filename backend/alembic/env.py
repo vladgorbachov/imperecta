@@ -26,7 +26,6 @@ from app.models import (
     MarketsForex,
     MarketsMarketplaceAnalytics,
     MarketsOpportunityBlock,
-    MarketsOverviewItem,
     MarketsPreferences,
     MarketsRefreshLog,
     MarketsTickerItem,
