@@ -27,4 +27,16 @@ celery_app.conf.beat_schedule = {
         "task": "ingest_market_data",
         "schedule": crontab(minute=0, hour="*/2"),
     },
+    "discover-all-marketplaces-daily": {
+        "task": "discover_all_marketplaces",
+        "schedule": crontab(minute=0, hour=3),  # 03:00 UTC daily
+    },
+    "scrape-pool-products-6h": {
+        "task": "scrape_all_pool_products",
+        "schedule": crontab(minute=0, hour="*/6"),  # Every 6 hours
+    },
+    "check-pool-completeness-3h": {
+        "task": "check_pool_completeness",
+        "schedule": crontab(minute=30, hour="*/3"),  # Every 3 hours at :30
+    },
 }
