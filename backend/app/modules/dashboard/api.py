@@ -52,7 +52,7 @@ async def get_overview(
     sort: str = Query("volatile", description="Sort: volatile, trending, gainers, losers, recent"),
     search: str | None = Query(None, min_length=2),
     marketplace_id: int | None = Query(None),
-    limit: int = Query(50, ge=1, le=100, description="Max items"),
+    limit: int = Query(50, ge=1, le=500, description="Max items per page"),
     offset: int = Query(0, ge=0),
 ) -> dict:
     if sort not in OVERVIEW_SORT:
