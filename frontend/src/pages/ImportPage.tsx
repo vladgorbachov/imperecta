@@ -17,7 +17,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Upload, Download, CheckCircle, ChevronDown, ChevronUp, FileSpreadsheet } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { importApi } from "@/api/import";
+import { importApi, IMPORT_ACCEPT } from "@/api/import";
 import { apiBaseUrl } from "@/api/client";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
 import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
@@ -58,7 +58,8 @@ function getColumnLabel(col: (typeof KNOWN_COLUMNS)[number]): string {
 }
 
 function parseCsv(
-  text: string
+  text: string,
+  sep: string = ","
 ): { headers: string[]; rows: string[][]; allRows: string[][]; totalRows: number } {
   const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length === 0) return { headers: [], rows: [], allRows: [], totalRows: 0 };
@@ -70,7 +71,7 @@ function parseCsv(
       const c = line.charAt(i);
       if (c === '"') {
         inQuotes = !inQuotes;
-      } else if ((c === "," && !inQuotes) || (c === ";" && !inQuotes)) {
+      } else if ((c === sep && !inQuotes) || (c === ";" && sep === "," && !inQuotes)) {
         result.push(current.trim());
         current = "";
       } else {
@@ -130,16 +131,58 @@ export function ImportPage() {
   const [productsWithoutCategory, setProductsWithoutCategory] = useState(0);
   const [autoCategorizeDismissed, setAutoCategorizeDismissed] = useState(false);
 
+  const isExcel = (name: string) =>
+    /\.(xls|xlsx|xlsm)$/i.test(name);
+
   const handleFileSelect = useCallback(
     async (selectedFile: File) => {
-      if (!selectedFile.name.toLowerCase().endsWith(".csv")) {
+      const name = selectedFile.name.toLowerCase();
+      const valid =
+        name.endsWith(".csv") ||
+        name.endsWith(".tsv") ||
+        name.endsWith(".xls") ||
+        name.endsWith(".xlsx") ||
+        name.endsWith(".xlsm");
+      if (!valid) {
         toast.error(t("import.fileFormatError"));
         return;
       }
       setFile(selectedFile);
       setResult(null);
+
+      if (isExcel(selectedFile.name)) {
+        try {
+          const { data } = await importApi.previewProductsCsv(selectedFile);
+          if (data.errors?.length && !data.preview?.length) {
+            toast.error(data.errors[0]?.message ?? t("import.fileFormatError"));
+            setFile(null);
+            return;
+          }
+          const prev = data.preview ?? [];
+          const h = prev.length ? Object.keys(prev[0]) : [];
+          const ar = prev.map((row) => h.map((key) => String(row[key] ?? "")));
+          const r = ar.slice(0, 5);
+          setHeaders(h);
+          setRows(r);
+          setAllRows(ar);
+          setTotalRows(ar.length);
+          const map = new Map<string, string>();
+          h.forEach((header) => {
+            const mapped = autoMapColumn(header);
+            map.set(header, mapped ?? "");
+          });
+          setColumnMap(map);
+          setAutoCategorizeDismissed(false);
+        } catch (err) {
+          toast.error(t("import.error"));
+          setFile(null);
+        }
+        return;
+      }
+
       const text = await selectedFile.text();
-      const { headers: h, rows: r, allRows: ar, totalRows: tr } = parseCsv(text);
+      const sep = name.endsWith(".tsv") ? "\t" : ",";
+      const { headers: h, rows: r, allRows: ar, totalRows: tr } = parseCsv(text, sep);
       setHeaders(h);
       setRows(r);
       setAllRows(ar);
@@ -209,6 +252,27 @@ export function ImportPage() {
   const requiredMapped = REQUIRED_COLUMNS.every((r) => mappedColumns.includes(r));
   const productCount = totalRows;
 
+  const buildTransformedCsv = useCallback(() => {
+    const revMap = new Map<string, string>();
+    headers.forEach((header) => {
+      const target = columnMap.get(header);
+      if (target) revMap.set(target, header);
+    });
+    const csvLines: string[] = [KNOWN_COLUMNS.join(",")];
+    for (const row of allRows) {
+      const obj = new Map<string, string>();
+      headers.forEach((header, i) => {
+        obj.set(header, row.at(i) ?? "");
+      });
+      const mappedRow = KNOWN_COLUMNS.map((col) => {
+        const src = revMap.get(col);
+        return src ? (obj.get(src) ?? "") : "";
+      });
+      csvLines.push(mappedRow.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
+    }
+    return new Blob([csvLines.join("\n")], { type: "text/csv" });
+  }, [headers, columnMap, allRows]);
+
   const handleImport = async () => {
     if (!file || !requiredMapped) return;
     setImporting(true);
@@ -216,29 +280,40 @@ export function ImportPage() {
     setResult(null);
     try {
       setImportProgress(30);
-      const text = await file.text();
-      const { headers: h, allRows } = parseCsv(text);
-      const revMap = new Map<string, string>();
-      h.forEach((header) => {
-        const target = columnMap.get(header);
-        if (target) revMap.set(target, header);
-      });
-      const csvLines: string[] = [KNOWN_COLUMNS.join(",")];
-      for (const row of allRows) {
-        const obj = new Map<string, string>();
-        h.forEach((header, i) => {
-          obj.set(header, row.at(i) ?? "");
+      let fileToUpload: File;
+      if (isExcel(file.name)) {
+        const blob = buildTransformedCsv();
+        fileToUpload = new File([blob], file.name.replace(/\.[^.]+$/, ".csv"), {
+          type: "text/csv",
         });
-        const mappedRow = KNOWN_COLUMNS.map((col) => {
-          const src = revMap.get(col);
-          return src ? (obj.get(src) ?? "") : "";
+      } else {
+        const text = await file.text();
+        const sep = file.name.toLowerCase().endsWith(".tsv") ? "\t" : ",";
+        const { headers: h, allRows: ar } = parseCsv(text, sep);
+        const revMap = new Map<string, string>();
+        h.forEach((header) => {
+          const target = columnMap.get(header);
+          if (target) revMap.set(target, header);
         });
-        csvLines.push(mappedRow.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
+        const csvLines: string[] = [KNOWN_COLUMNS.join(",")];
+        for (const row of ar) {
+          const obj = new Map<string, string>();
+          h.forEach((header, i) => {
+            obj.set(header, row.at(i) ?? "");
+          });
+          const mappedRow = KNOWN_COLUMNS.map((col) => {
+            const src = revMap.get(col);
+            return src ? (obj.get(src) ?? "") : "";
+          });
+          csvLines.push(mappedRow.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
+        }
+        const blob = new Blob([csvLines.join("\n")], { type: "text/csv" });
+        fileToUpload = new File([blob], file.name.replace(/\.[^.]+$/, ".csv"), {
+          type: "text/csv",
+        });
       }
       setImportProgress(60);
-      const blob = new Blob([csvLines.join("\n")], { type: "text/csv" });
-      const transformedFile = new File([blob], file.name, { type: "text/csv" });
-      const { data } = await importApi.uploadProductsCsv(transformedFile);
+      const { data } = await importApi.uploadProductsCsv(fileToUpload);
       setImportProgress(100);
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setResult({ imported: data.imported, errors: data.errors ?? [] });
@@ -293,7 +368,7 @@ export function ImportPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv"
+        accept={IMPORT_ACCEPT}
         className="hidden"
         onChange={handleInputChange}
       />
@@ -319,6 +394,11 @@ export function ImportPage() {
               {canAddProducts && (
                 <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                   {t("import.or")}
+                </p>
+              )}
+              {canAddProducts && (
+                <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                  Поддерживаемые форматы: .csv, .tsv, .xls, .xlsx, .xlsm
                 </p>
               )}
               <Button

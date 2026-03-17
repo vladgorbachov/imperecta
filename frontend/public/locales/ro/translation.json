@@ -281,6 +281,8 @@
   "products.paginationShown": "Se afișează {{from}}–{{to}} din {{total}}",
   "products.noProducts": "Nicio produs",
   "products.noProductsHint": "Adaugă primul produs pentru monitorizare prețuri",
+  "products.poolEmpty": "Niciun produs în pool",
+  "products.poolEmptyHint": "Adăugați marketplaces prin panoul admin și rulați discovery.",
   "products.noResults": "Niciun rezultat",
   "products.clearFilters": "Resetează filtre",
   "products.position": "Poziție",

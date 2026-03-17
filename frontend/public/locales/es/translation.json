@@ -277,6 +277,8 @@
   "products.paginationShown": "Mostrando {{from}}–{{to}} de {{total}}",
   "products.noProducts": "No hay productos",
   "products.noProductsHint": "Añada su primer producto para rastrear precios",
+  "products.poolEmpty": "No hay productos en el pool",
+  "products.poolEmptyHint": "Añada marketplaces en el panel admin y ejecute discovery.",
   "products.noResults": "No se encontraron resultados",
   "products.clearFilters": "Borrar filtros",
   "products.position": "Posición",

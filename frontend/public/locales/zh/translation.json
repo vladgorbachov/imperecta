@@ -277,6 +277,8 @@
   "products.paginationShown": "显示 {{from}}–{{to}} / {{total}}",
   "products.noProducts": "暂无商品",
   "products.noProductsHint": "添加首个商品以追踪价格",
+  "products.poolEmpty": "池中无商品",
+  "products.poolEmptyHint": "通过管理面板添加市场并运行发现。",
   "products.noResults": "未找到",
   "products.clearFilters": "清除筛选",
   "products.position": "位置",

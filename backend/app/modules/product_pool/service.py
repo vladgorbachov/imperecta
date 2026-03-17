@@ -14,11 +14,25 @@ class ProductPoolService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    def _get_sort_order(self, sort: str):
+        return {
+            "recent": GlobalProduct.discovered_at.desc().nullslast(),
+            "name_asc": GlobalProduct.title.asc().nullslast(),
+            "name_desc": GlobalProduct.title.desc().nullslast(),
+            "price_asc": GlobalProduct.current_price.asc().nullslast(),
+            "price_desc": GlobalProduct.current_price.desc().nullslast(),
+            "trending": func.abs(GlobalProduct.price_change_pct_24h).desc().nullslast(),
+            "gainers": GlobalProduct.price_change_pct_24h.desc().nullslast(),
+            "losers": GlobalProduct.price_change_pct_24h.asc().nullslast(),
+            "volatile": GlobalProduct.volatility_30d.desc().nullslast(),
+        }.get(sort, GlobalProduct.discovered_at.desc().nullslast())
+
     async def list_products(
         self,
         sort: str = "recent",
         search: str | None = None,
         marketplace_id: int | None = None,
+        category: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict], int]:
@@ -32,6 +46,12 @@ class ProductPoolService:
             stmt = stmt.where(GlobalProduct.marketplace_id == marketplace_id)
         if search:
             stmt = stmt.where(GlobalProduct.title.ilike(f"%{search}%"))
+        if category:
+            cat_pattern = f"%{category}%"
+            stmt = stmt.where(
+                (AdminMarketplace.domain.ilike(cat_pattern))
+                | (AdminMarketplace.name.ilike(cat_pattern))
+            )
 
         if sort in {"trending", "gainers", "losers", "volatile"}:
             stmt = stmt.where(GlobalProduct.current_price.is_not(None))
@@ -46,23 +66,18 @@ class ProductPoolService:
             count_stmt = count_stmt.where(GlobalProduct.marketplace_id == marketplace_id)
         if search:
             count_stmt = count_stmt.where(GlobalProduct.title.ilike(f"%{search}%"))
+        if category:
+            cat_pattern = f"%{category}%"
+            count_stmt = count_stmt.where(
+                (AdminMarketplace.domain.ilike(cat_pattern))
+                | (AdminMarketplace.name.ilike(cat_pattern))
+            )
         if sort in {"trending", "gainers", "losers", "volatile"}:
             count_stmt = count_stmt.where(GlobalProduct.current_price.is_not(None))
 
         total = int(await self.db.scalar(count_stmt) or 0)
 
-        if sort == "recent":
-            stmt = stmt.order_by(GlobalProduct.discovered_at.desc().nullslast())
-        elif sort == "trending":
-            stmt = stmt.order_by(func.abs(GlobalProduct.price_change_pct_24h).desc().nullslast())
-        elif sort == "gainers":
-            stmt = stmt.order_by(GlobalProduct.price_change_pct_24h.desc().nullslast())
-        elif sort == "losers":
-            stmt = stmt.order_by(GlobalProduct.price_change_pct_24h.asc().nullslast())
-        elif sort == "volatile":
-            stmt = stmt.order_by(GlobalProduct.volatility_30d.desc().nullslast())
-        else:
-            stmt = stmt.order_by(GlobalProduct.discovered_at.desc().nullslast())
+        stmt = stmt.order_by(self._get_sort_order(sort))
 
         stmt = stmt.limit(limit).offset(offset)
         rows = (await self.db.execute(stmt)).all()
@@ -103,6 +118,31 @@ class ProductPoolService:
                 }
             )
         return items, total
+
+    async def get_categories(self) -> list[dict]:
+        """Unique marketplaces for filter dropdown."""
+        stmt = (
+            select(
+                AdminMarketplace.id,
+                AdminMarketplace.domain,
+                AdminMarketplace.name,
+                func.count(GlobalProduct.id).label("product_count"),
+            )
+            .join(GlobalProduct, GlobalProduct.marketplace_id == AdminMarketplace.id)
+            .where(GlobalProduct.status.in_(("active", "pending")))
+            .group_by(AdminMarketplace.id, AdminMarketplace.domain, AdminMarketplace.name)
+            .order_by(AdminMarketplace.name.asc())
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return [
+            {
+                "id": row.id,
+                "domain": row.domain,
+                "name": row.name,
+                "product_count": int(row.product_count or 0),
+            }
+            for row in rows
+        ]
 
     async def get_marketplace_stats(self) -> list[dict]:
         stmt = (

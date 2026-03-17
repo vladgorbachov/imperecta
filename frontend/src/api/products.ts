@@ -1,5 +1,61 @@
 import { apiClient } from "./client";
 
+// --- Pool products (global marketplace pool) ---
+
+export type PoolProductsSort =
+  | "recent"
+  | "name_asc"
+  | "name_desc"
+  | "price_asc"
+  | "price_desc"
+  | "trending"
+  | "gainers"
+  | "losers"
+  | "volatile";
+
+export interface PoolProductsParams {
+  search?: string;
+  marketplace_id?: number;
+  category?: string;
+  sort?: PoolProductsSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface PoolProductItem {
+  id: number;
+  marketplace_id: number;
+  marketplace_name?: string | null;
+  marketplace_domain?: string | null;
+  url: string;
+  title?: string | null;
+  image_url?: string | null;
+  description?: string | null;
+  current_price?: number | null;
+  original_price?: number | null;
+  currency: string;
+  price_change_pct_24h?: number | null;
+  price_change_pct_7d?: number | null;
+  price_change_pct_30d?: number | null;
+  volatility_30d?: number | null;
+  status: string;
+  last_scraped_at?: string | null;
+}
+
+export interface PoolProductsResponse {
+  items: PoolProductItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PoolCategoryItem {
+  id: number;
+  domain: string;
+  name: string;
+  product_count: number;
+}
+
 export interface Product {
   id: string;
   user_id: string;
@@ -51,9 +107,16 @@ export const productsApi = {
   list: (params?: {
     search?: string;
     category?: string;
+    sort?: string;
     page?: number;
     limit?: number;
   }) => apiClient.get<ProductListResponse>("/products", { params }),
+
+  fetchPoolProducts: (params: PoolProductsParams) =>
+    apiClient.get<PoolProductsResponse>("/pool/products", { params }),
+
+  getPoolCategories: () =>
+    apiClient.get<PoolCategoryItem[]>("/pool/categories"),
   get: (id: string) => apiClient.get<ProductDetail>(`/products/${id}`),
   getCategories: () =>
     apiClient.get<string[]>("/products/categories"),

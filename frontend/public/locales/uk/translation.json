@@ -296,6 +296,8 @@
   "products.paginationShown": "Показано {{from}}–{{to}} з {{total}}",
   "products.noProducts": "Немає товарів",
   "products.noProductsHint": "Додай перший товар для відстеження цін",
+  "products.poolEmpty": "Немає товарів у пулі",
+  "products.poolEmptyHint": "Додайте маркетплейси через адмін-панель і запустіть discovery.",
   "products.noResults": "Нічого не знайдено",
   "products.clearFilters": "Скинути фільтри",
   "products.position": "Позиція",

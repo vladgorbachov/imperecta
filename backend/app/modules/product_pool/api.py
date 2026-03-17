@@ -17,23 +17,36 @@ router = APIRouter(prefix="/pool", tags=["product-pool"])
 async def list_pool_products(
     current_user: CurrentUser,
     db: DbSession,
-    sort: str = Query("recent", description="recent|trending|gainers|losers|volatile"),
-    search: str | None = Query(None, min_length=2),
-    marketplace_id: int | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None, min_length=2, description="Search by title"),
+    marketplace_id: int | None = Query(None, description="Filter by marketplace"),
+    category: str | None = Query(None, description="Filter by marketplace domain/name"),
+    sort: str = Query(
+        "recent",
+        description="recent|name_asc|name_desc|price_asc|price_desc|trending|gainers|losers|volatile",
+    ),
+    limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List products from global pool. Used by Market Overview widget."""
+    """List products from global pool. Used by All Products tab and Market Overview."""
     _ = current_user
     service = ProductPoolService(db)
     items, total = await service.list_products(
         sort=sort,
         search=search,
         marketplace_id=marketplace_id,
+        category=category,
         limit=limit,
         offset=offset,
     )
     return GlobalProductListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/categories")
+async def pool_categories(current_user: CurrentUser, db: DbSession) -> list[dict]:
+    """Unique marketplaces for filter dropdown (domain, name, id)."""
+    _ = current_user
+    service = ProductPoolService(db)
+    return await service.get_categories()
 
 
 @router.get("/marketplace-stats", response_model=list[PoolCategorySummary])

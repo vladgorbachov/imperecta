@@ -13,6 +13,7 @@ from app.database import Base, engine
 from app.modules.ai_analyst.api import router as ai_router
 from app.modules.alerts.api import router as alerts_router
 from app.modules.analytics.api import router as analytics_router
+from app.modules.core.api_admin import router as admin_router
 from app.modules.core.api_auth import router as auth_router
 from app.modules.core.api_telegram import router as telegram_router
 from app.modules.dashboard.api import router as dashboard_router
@@ -113,6 +114,7 @@ app.add_middleware(
 )
 
 for router in [
+    admin_router,
     auth_router,
     telegram_router,
     marketplaces_router,

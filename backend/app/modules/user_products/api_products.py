@@ -36,6 +36,10 @@ async def list_products(
     db: DbSession,
     search: str | None = Query(None, description="Search by name or SKU"),
     category: str | None = Query(None, description="Filter by category"),
+    sort: str = Query(
+        "recent",
+        description="recent|name_asc|name_desc|price_asc|price_desc",
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ) -> ProductListResponse:
@@ -49,9 +53,17 @@ async def list_products(
         query = query.where(Product.category == category)
         count_query = count_query.where(Product.category == category)
 
+    sort_order = {
+        "recent": Product.created_at.desc(),
+        "name_asc": Product.name.asc(),
+        "name_desc": Product.name.desc(),
+        "price_asc": Product.current_price.asc(),
+        "price_desc": Product.current_price.desc(),
+    }.get(sort, Product.created_at.desc())
+
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
-    query = query.offset((page - 1) * limit).limit(limit).order_by(Product.created_at.desc())
+    query = query.offset((page - 1) * limit).limit(limit).order_by(sort_order)
     result = await db.execute(query)
     products = result.scalars().all()
 

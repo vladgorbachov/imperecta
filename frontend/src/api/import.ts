@@ -1,5 +1,8 @@
 import { apiBaseUrl, apiClient } from "./client";
 
+/** Accepted file extensions for product import. */
+export const IMPORT_ACCEPT = ".csv,.tsv,.xls,.xlsx,.xlsm";
+
 export interface ImportResult {
   imported: number;
   errors: { row: number; message: string }[];

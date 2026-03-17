@@ -21,6 +21,10 @@ import {
   ChevronDown,
   ChevronRight,
   RefreshCw,
+  Stethoscope,
+  Calculator,
+  Play,
+  Scissors,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -67,6 +71,14 @@ import {
   useDeleteMarketplace,
   useMarketsIngest,
 } from "@/hooks/useAdmin";
+import {
+  runPoolDiagnostics,
+  recalculateQuotas,
+  triggerDiscoveryAll,
+  triggerPoolScrape,
+  clearUserProducts,
+  type PoolDiagnostics,
+} from "@/api/admin";
 import { formatRelativeTime } from "@/lib/formatters";
 import type { AdminMarketplace as AdminMarketplaceType } from "@/api/admin";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
@@ -199,6 +211,177 @@ function ClaudeStatusCard() {
             </Button>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Pool management workflow:
+ * 1. Click "Диагностика пула" to see current state
+ * 2. If quotas are 0 → click "Пересчитать квоты"
+ * 3. Click "Запустить Discovery" → wait 5-10 min
+ * 4. Click "Диагностика пула" again to check progress
+ * 5. When products appear → click "Запустить Scraping"
+ * 6. Check Dashboard → Market Overview should show products
+ */
+function PoolManagementCard() {
+  const { t } = useTranslation();
+  const [diagnostics, setDiagnostics] = useState<PoolDiagnostics | null>(null);
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  const fetchDiagnostics = async () => {
+    setLoadingDiagnostics(true);
+    try {
+      const { data } = await runPoolDiagnostics();
+      setDiagnostics(data);
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingDiagnostics(false);
+    }
+  };
+
+  const handleRecalculateQuotas = async () => {
+    setLoadingAction("quotas");
+    try {
+      await recalculateQuotas();
+      toast.success("Квоты пересчитаны");
+      await fetchDiagnostics();
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleTriggerDiscovery = async () => {
+    setLoadingAction("discovery");
+    try {
+      await triggerDiscoveryAll();
+      toast.success("Discovery поставлен в очередь");
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleTriggerScrape = async () => {
+    setLoadingAction("scrape");
+    try {
+      await triggerPoolScrape();
+      toast.success("Scraping поставлен в очередь");
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleClearUserProducts = async () => {
+    if (!confirm("Удалить все тестовые товары пользователей? Это действие нельзя отменить.")) {
+      return;
+    }
+    setLoadingAction("clear");
+    try {
+      const { data } = await clearUserProducts();
+      toast.success(`Удалено товаров: ${data.deleted_products}`);
+      await fetchDiagnostics();
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Управление пулом товаров</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchDiagnostics}
+              disabled={loadingDiagnostics}
+            >
+              {loadingDiagnostics ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Stethoscope className="mr-2 size-4" />
+              )}
+              Диагностика пула
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRecalculateQuotas}
+              disabled={loadingAction === "quotas"}
+            >
+              {loadingAction === "quotas" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Calculator className="mr-2 size-4" />
+              )}
+              Пересчитать квоты
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTriggerDiscovery}
+              disabled={loadingAction === "discovery"}
+            >
+              {loadingAction === "discovery" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 size-4" />
+              )}
+              Запустить Discovery
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTriggerScrape}
+              disabled={loadingAction === "scrape"}
+            >
+              {loadingAction === "scrape" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 size-4" />
+              )}
+              Запустить Scraping
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearUserProducts}
+              disabled={loadingAction === "clear"}
+              className="text-destructive hover:text-destructive"
+            >
+              {loadingAction === "clear" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Scissors className="mr-2 size-4" />
+              )}
+              Удалить тестовые товары
+            </Button>
+          </div>
+          {diagnostics && (
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <p className="mb-2 text-sm font-medium text-muted-foreground">
+                Результат диагностики:
+              </p>
+              <pre className="max-h-64 overflow-auto text-xs">
+                {JSON.stringify(diagnostics, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -447,6 +630,9 @@ export function AdminPage() {
       </Card>
 
       <MarketsRefreshCard />
+
+      {/* Pool management */}
+      <PoolManagementCard />
 
       {/* Scrape activity chart */}
       <Card>
