@@ -110,3 +110,59 @@ export interface ClaudeStatus {
 
 export const getClaudeStatus = () =>
   apiClient.get<ClaudeStatus>("/admin/claude-status");
+
+export const runPoolDiagnostics = () =>
+  apiClient.get<PoolDiagnostics>("/admin/diagnostics/pool");
+export const recalculateQuotas = () =>
+  apiClient.post<RecalculateQuotasResponse>("/admin/marketplaces/recalculate-quotas");
+export const triggerDiscoveryAll = () =>
+  apiClient.post<{ status: string }>("/admin/discovery/trigger-all");
+export const triggerPoolScrape = () =>
+  apiClient.post<{ status: string }>("/admin/pool/trigger-scrape");
+export const clearUserProducts = () =>
+  apiClient.post<ClearUserProductsResponse>("/admin/products/clear-user-data");
+export const triggerDiscoveryOne = (id: number) =>
+  apiClient.post<{ status: string; marketplace_id: number }>(
+    `/admin/discovery/trigger/${id}`
+  );
+
+export interface PoolDiagnostics {
+  marketplaces: { total: number; active: number; zero_quota: number };
+  global_products: { total: number; by_status: Record<string, number> };
+  price_snapshots: number;
+  discovery_logs: {
+    total: number;
+    recent: Array<{
+      domain: string;
+      status: string;
+      found: number;
+      new: number;
+      errors: number;
+      error: string | null;
+      started_at: string | null;
+      duration_s: number | null;
+    }>;
+  };
+  user_products: number;
+  marketplace_details: Array<{
+    domain: string;
+    quota: number;
+    products: number;
+    active: boolean;
+    requires_js: boolean;
+    last_discovery: string | null;
+  }>;
+  diagnosis: string[];
+}
+
+export interface RecalculateQuotasResponse {
+  status: string;
+  active_marketplaces: number;
+  quota_per_marketplace: number;
+  total_pool_capacity: number;
+}
+
+export interface ClearUserProductsResponse {
+  status: string;
+  deleted_products: number;
+}

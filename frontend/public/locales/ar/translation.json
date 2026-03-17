@@ -277,6 +277,8 @@
   "products.paginationShown": "عرض {{from}}–{{to}} من {{total}}",
   "products.noProducts": "لا توجد منتجات",
   "products.noProductsHint": "أضف أول منتج لتتبع الأسعار",
+  "products.poolEmpty": "No products in pool",
+  "products.poolEmptyHint": "Add marketplaces via admin panel and run discovery.",
   "products.noResults": "لم يتم العثور على نتائج",
   "products.clearFilters": "مسح الفلاتر",
   "products.position": "الموقع",

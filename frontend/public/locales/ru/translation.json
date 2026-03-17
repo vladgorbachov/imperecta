@@ -296,6 +296,8 @@
   "products.paginationShown": "Показано {{from}}–{{to}} из {{total}}",
   "products.noProducts": "Нет товаров",
   "products.noProductsHint": "Добавьте первый товар для отслеживания цен",
+  "products.poolEmpty": "Нет товаров в пуле",
+  "products.poolEmptyHint": "Добавьте маркетплейсы через админ-панель и запустите discovery.",
   "products.noResults": "Ничего не найдено",
   "products.clearFilters": "Сбросить фильтры",
   "products.position": "Позиция",

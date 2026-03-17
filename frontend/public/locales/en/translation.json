@@ -305,6 +305,8 @@
   "products.paginationShown": "Showing {{from}}–{{to}} of {{total}}",
   "products.noProducts": "No products",
   "products.noProductsHint": "Add your first product to track prices",
+  "products.poolEmpty": "No products in pool",
+  "products.poolEmptyHint": "Add marketplaces via admin panel and run discovery.",
   "products.noResults": "No results found",
   "products.clearFilters": "Clear filters",
   "products.position": "Position",

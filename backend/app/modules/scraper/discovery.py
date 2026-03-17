@@ -69,15 +69,23 @@ class DiscoveryCrawler:
 
         base_url = marketplace.base_url
         urls: list[str] = []
+        requires_js = bool(marketplace.requires_js)
         try:
-            sitemap_urls = await self._try_sitemap(base_url, limit=remaining_quota)
+            sitemap_urls = await self._try_sitemap(
+                base_url, limit=remaining_quota, requires_js=requires_js
+            )
             urls.extend(sitemap_urls)
         except Exception as exc:
             errors.append(f"sitemap_error: {exc}")
 
         if len(urls) < max(10, remaining_quota // 10):
             try:
-                category_urls = await self._find_category_urls(base_url)
+                category_urls = await self._find_category_urls(base_url, requires_js=requires_js)
+                if not category_urls and not requires_js:
+                    category_urls = await self._find_category_urls(base_url, requires_js=True)
+                    if category_urls:
+                        marketplace.requires_js = True
+                        logger.info("Auto-detected requires_js=True for %s", marketplace.domain)
                 for category_url in category_urls:
                     if len(urls) >= remaining_quota:
                         break
@@ -142,17 +150,21 @@ class DiscoveryCrawler:
             duration_seconds=duration_seconds,
         )
 
-    async def _try_sitemap(self, base_url: str, limit: int) -> list[str]:
+    async def _try_sitemap(
+        self, base_url: str, limit: int, requires_js: bool = False
+    ) -> list[str]:
+        """Fetch sitemap via ScraperPool (Decodo primary) for anti-bot bypass."""
         candidate_paths = ("/sitemap.xml", "/sitemap_index.xml")
         output: list[str] = []
         for path in candidate_paths:
             sitemap_url = urljoin(base_url, path)
             try:
-                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-                    response = await client.get(sitemap_url)
-                if response.status_code >= 400:
+                raw = await self.pool.fetch_html(sitemap_url, requires_js=requires_js)
+                if not raw:
+                    raw = await self._fetch_sitemap_httpx_fallback(sitemap_url)
+                if not raw:
                     continue
-                soup = BeautifulSoup(response.text, "xml")
+                soup = BeautifulSoup(raw, "xml")
                 for loc in soup.find_all("loc"):
                     url = (loc.text or "").strip()
                     if self._looks_like_product_url(url):
@@ -163,11 +175,23 @@ class DiscoveryCrawler:
                 continue
         return list(dict.fromkeys(output))
 
-    async def _find_category_urls(self, base_url: str) -> list[str]:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            response = await client.get(base_url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+    async def _fetch_sitemap_httpx_fallback(self, sitemap_url: str) -> str | None:
+        """Fallback for sitemap when ScraperPool returns empty (sitemap is often static XML)."""
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                response = await client.get(sitemap_url)
+            return response.text if response.status_code < 400 else None
+        except Exception:
+            return None
+
+    async def _find_category_urls(
+        self, base_url: str, requires_js: bool = False
+    ) -> list[str]:
+        """Fetch homepage via ScraperPool (Decodo primary) to find category links."""
+        raw = await self.pool.fetch_html(base_url, requires_js=requires_js)
+        if not raw:
+            return []
+        soup = BeautifulSoup(raw, "html.parser")
 
         selectors = ["nav a[href]", "header a[href]", "a[href]"]
         collected: list[str] = []
@@ -200,6 +224,7 @@ class DiscoveryCrawler:
         current_url: str | None = listing_url
         max_pages = 50
         page_count = 0
+        requires_js = bool(marketplace.requires_js)
         while current_url and current_url not in visited and page_count < max_pages:
             visited.add(current_url)
             page_count += 1
@@ -207,8 +232,19 @@ class DiscoveryCrawler:
                 url=current_url,
                 custom_link_selector=marketplace.custom_product_link_selector,
                 custom_next_page_selector=marketplace.custom_next_page_selector,
-                requires_js=bool(marketplace.requires_js),
+                requires_js=requires_js,
             )
+            if not result.success and not requires_js and page_count == 1:
+                result = await self.pool.scrape_listing(
+                    url=current_url,
+                    custom_link_selector=marketplace.custom_product_link_selector,
+                    custom_next_page_selector=marketplace.custom_next_page_selector,
+                    requires_js=True,
+                )
+                if result.success:
+                    marketplace.requires_js = True
+                    requires_js = True
+                    logger.info("Auto-detected requires_js=True for listing %s", marketplace.domain)
             if not result.success:
                 break
             discovered.extend(result.product_urls)

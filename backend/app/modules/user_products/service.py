@@ -8,17 +8,21 @@ import pandas as pd
 
 
 def parse_products_file(content: bytes, filename: str, user_id: UUID) -> tuple[list[dict], list[dict]]:
-    """Parse CSV or Excel file. Returns (products_to_create, errors)."""
+    """Parse CSV, TSV, or Excel file (.xls, .xlsx, .xlsm). Returns (products_to_create, errors)."""
     errors: list[dict] = []
     products: list[dict] = []
 
     try:
         if filename.lower().endswith(".csv"):
             df = pd.read_csv(BytesIO(content))
-        elif filename.lower().endswith((".xlsx", ".xls")):
-            df = pd.read_excel(BytesIO(content))
+        elif filename.lower().endswith(".tsv"):
+            df = pd.read_csv(BytesIO(content), sep="\t")
+        elif filename.lower().endswith((".xlsx", ".xlsm")):
+            df = pd.read_excel(BytesIO(content), engine="openpyxl")
+        elif filename.lower().endswith(".xls"):
+            df = pd.read_excel(BytesIO(content), engine="xlrd")
         else:
-            return [], [{"row": 0, "message": "Unsupported file format. Use CSV or Excel."}]
+            return [], [{"row": 0, "message": "Unsupported format. Use CSV, TSV, .xls, .xlsx, or .xlsm."}]
     except Exception as error:
         return [], [{"row": 0, "message": str(error)}]
 
@@ -89,10 +93,14 @@ def preview_products_file(content: bytes, filename: str, limit: int = 5) -> tupl
     try:
         if filename.lower().endswith(".csv"):
             df = pd.read_csv(BytesIO(content))
-        elif filename.lower().endswith((".xlsx", ".xls")):
-            df = pd.read_excel(BytesIO(content))
+        elif filename.lower().endswith(".tsv"):
+            df = pd.read_csv(BytesIO(content), sep="\t")
+        elif filename.lower().endswith((".xlsx", ".xlsm")):
+            df = pd.read_excel(BytesIO(content), engine="openpyxl")
+        elif filename.lower().endswith(".xls"):
+            df = pd.read_excel(BytesIO(content), engine="xlrd")
         else:
-            return [], [{"row": 0, "message": "Unsupported file format. Use CSV or Excel."}]
+            return [], [{"row": 0, "message": "Unsupported format. Use CSV, TSV, .xls, .xlsx, or .xlsm."}]
     except Exception as error:
         return [], [{"row": 0, "message": str(error)}]
 

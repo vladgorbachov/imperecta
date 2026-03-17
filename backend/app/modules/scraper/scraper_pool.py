@@ -95,6 +95,15 @@ class ScraperPool:
             error=None,
         )
 
+    async def fetch_html(self, url: str, requires_js: bool = False) -> str | None:
+        """Fetch raw HTML via Decodo (primary) -> httpx -> Playwright. Used by Discovery."""
+        layers = self._layer_order(requires_js=requires_js)
+        for layer_name in layers:
+            html = await self._fetch_by_layer(layer_name, url)
+            if html:
+                return html
+        return None
+
     async def scrape_listing(
         self,
         url: str,

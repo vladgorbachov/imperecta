@@ -4,20 +4,22 @@ import { productsApi } from "@/api/products";
 interface UseProductsParams {
   search?: string;
   category?: string;
+  sort?: string;
   page?: number;
   limit?: number;
 }
 
 export function useProducts(params: UseProductsParams = {}) {
-  const { search, category, page = 1, limit = 20 } = params;
+  const { search, category, sort, page = 1, limit = 20 } = params;
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["products", search, category, page, limit],
+    queryKey: ["products", search, category, sort, page, limit],
     queryFn: async () => {
       const { data: res } = await productsApi.list({
         search: search || undefined,
         category: category || undefined,
+        sort: sort || undefined,
         page,
         limit,
       });

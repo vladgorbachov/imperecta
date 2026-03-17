@@ -36,8 +36,12 @@ async def post_auto_categorize(body: AutoCategorizeRequest, current_user: Curren
     return await auto_categorize(items)
 
 
+SUPPORTED_IMPORT_EXTENSIONS = (".csv", ".tsv", ".xls", ".xlsx", ".xlsm")
+
+
 @router.post("/products/preview")
 async def preview_products_csv(file: UploadFile, current_user: CurrentUser) -> dict:
+    """Preview import from CSV, TSV, XLS, XLSX, or XLSM file."""
     _ = current_user
     content = await file.read(MAX_IMPORT_FILE_SIZE_BYTES + 1)
     if len(content) > MAX_IMPORT_FILE_SIZE_BYTES:
@@ -48,10 +52,17 @@ async def preview_products_csv(file: UploadFile, current_user: CurrentUser) -> d
 
 @router.post("/products/csv")
 async def upload_products_csv(file: UploadFile, current_user: CurrentUser, db: DbSession) -> dict:
+    """Import products from CSV, TSV, XLS, XLSX, or XLSM file."""
     content = await file.read(MAX_IMPORT_FILE_SIZE_BYTES + 1)
     if len(content) > MAX_IMPORT_FILE_SIZE_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large.")
-    products_data, errors = parse_products_file(content, file.filename or "upload.csv", current_user.id)
+    filename = file.filename or "upload.csv"
+    if not filename.lower().endswith(SUPPORTED_IMPORT_EXTENSIONS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Supported formats: {', '.join(SUPPORTED_IMPORT_EXTENSIONS)}",
+        )
+    products_data, errors = parse_products_file(content, filename, current_user.id)
     if errors and not products_data:
         return {"imported": 0, "errors": errors}
 
