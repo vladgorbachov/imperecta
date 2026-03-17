@@ -562,106 +562,46 @@ imperecta/
 
 ## Backend: краткое описание файлов кода
 
-### backend/app (ядро)
+### backend/app (модульная архитектура)
 
-- `main.py` — инициализация FastAPI-приложения, middleware, CORS, health-check и подключение роутеров.
+- `main.py` — инициализация FastAPI-приложения, middleware, CORS, health-check и подключение роутеров ТОЛЬКО из `modules/*`.
 - `config.py` — централизованные настройки приложения через переменные окружения.
 - `database.py` — async/sync подключения к PostgreSQL, фабрики сессий для API и workers.
-- `__init__.py` — пакетный инициализатор backend-приложения.
+- `common/deps.py` — общие зависимости FastAPI (DB session, текущий пользователь, superuser-проверки).
+- `modules/` — доменные bounded-context модули.
 
-### backend/app/api (REST-слой)
+### backend/app/modules (актуальные домены)
 
-- `__init__.py` — сборка общего `api_router` и регистрация endpoint-модулей.
-- `deps.py` — общие зависимости FastAPI (DB session, текущий пользователь, superuser-проверки).
-- `auth.py` — регистрация, логин, refresh, профиль пользователя, привязка Telegram.
-- `telegram.py` — webhook и служебные операции Telegram-интеграции.
-- `products.py` — CRUD товаров, категории, список risk-позиций и AI-рекомендации.
-- `competitors.py` — CRUD конкурентов и привязка карточек конкурентов к товарам.
-- `analytics.py` — история цен, сравнения, прогнозы, симуляции и benchmark-метрики.
-- `dashboard.py` — агрегированные KPI, аномалии и тренды для дашборда.
-- `alerts.py` — CRUD алертов, события алертов, AI-объяснения и автоответы.
-- `digests.py` — получение списка и деталей дайджестов.
-- `import_export.py` — preview/импорт CSV и авто-категоризация.
-- `ai.py` — AI-чат: сессии, сообщения и управление историей.
-- `markets.py` — рыночные виджеты, обзор рынков, аналитика и ручной ingest.
-- `admin.py` — админ-метрики, пользователи, маркетплейсы, сервисные ручки superuser.
+- `core/` — auth, users, plans, admin bootstrap (`api_auth.py`, `api_telegram.py`, `auth/service.py`, `models.py`, `schemas.py`).
+- `marketplaces/` — управление пулом маркетплейсов и admin endpoints (`models.py`, `service.py`, `api.py`).
+- `scraper/` — движок парсинга, discovery, pool scraping, tasks (`engine.py`, `discovery.py`, `service.py`, `tasks.py`, `api.py`).
+- `product_pool/` — глобальный пул товаров (`models.py`, `schemas.py`, `service.py`, `api.py`).
+- `market_data/` — forex/crypto/commodities/fuel/ticker + ingest/aggregate/providers (`models.py`, `schemas.py`, `service.py`, `ingestion.py`, `aggregation.py`, `providers/*`, `tasks.py`, `api.py`).
+- `dashboard/` — KPI, overview, category/marketplace analytics, opportunities (`service.py`, `schemas.py`, `api.py`).
+- `user_products/` — пользовательские товары/конкуренты/импорт (`models.py`, `schemas.py`, `service.py`, `api_products.py`, `api_competitors.py`, `api_import.py`).
+- `analytics/` — прогнозы, benchmark, comparison APIs (`service.py`, `schemas.py`, `api.py`).
+- `alerts/` — правила алертов, события, уведомления, background tasks (`models.py`, `schemas.py`, `service.py`, `notifications.py`, `tasks.py`, `api.py`).
+- `digests/` — генерация и выдача дайджестов (`models.py`, `schemas.py`, `service.py`, `tasks.py`, `api.py`).
+- `ai_analyst/` — AI чат, рекомендации, Claude client/monitoring (`models.py`, `schemas.py`, `service.py`, `claude_client.py`, `monitor.py`, `api.py`).
 
-### backend/app/services (бизнес-логика)
+### API routes (backend/app/modules/*)
 
-- `__init__.py` — пакетный инициализатор сервисного слоя.
-- `auth_service.py` — JWT-аутентификация, управление пользователем и login-flow.
-- `admin_service.py` — бизнес-логика админки и операции с marketplace-конфигурацией.
-- `dashboard_service.py` — расчет KPI, аномалий и сводной аналитики dashboard.
-- `price_service.py` — работа с ценовыми срезами и историей цен.
-- `benchmark_service.py` — расчеты конкурентного бенчмарка.
-- `forecast_service.py` — прогнозирование цен и рыночных трендов.
-- `import_service.py` — обработка импорта, валидация и категоризация данных товаров.
-- `ai_service.py` — низкоуровневая интеграция с Claude API.
-- `ai_chat_service.py` — orchestration AI-чата, контекста и истории диалогов.
-- `alert_ai_service.py` — генерация AI-объяснений событий и автоответов для алертов.
-- `product_ai_service.py` — AI-подсказки и рекомендации по карточкам товаров.
-- `claude_monitor.py` — проверки доступности и статус/метрики Claude-интеграции.
-- `plan_limits.py` — ограничения тарифов и проверка entitlements.
-- `markets_service.py` — high-level операции рынков для API-слоя.
-- `market_data_service.py` — получение и кэширование market data для виджетов.
-- `seed_service.py` — подготовка seed-данных для админских сценариев/тестового парсинга.
+- `/api/auth/*` — `modules/core/api_auth.py`
+- `/api/telegram/*` — `modules/core/api_telegram.py`
+- `/api/admin/marketplaces/*` — `modules/marketplaces/api.py`
+- `/api/admin/discovery/*`, `/api/admin/pool/*`, `/api/admin/scrape-*` — `modules/scraper/api.py`
+- `/api/pool/*` — `modules/product_pool/api.py`
+- `/api/markets/*` (data + dashboard views) — `modules/market_data/api.py` + `modules/dashboard/api.py`
+- `/api/products/*`, `/api/competitors/*`, `/api/import/*` — `modules/user_products/*`
+- `/api/analytics/*` — `modules/analytics/api.py`
+- `/api/alerts/*` — `modules/alerts/api.py`
+- `/api/digests/*` — `modules/digests/api.py`
+- `/api/ai/*` — `modules/ai_analyst/api.py`
 
-### backend/app/services/market_data (рыночные данные)
+### Удалённые legacy-каталоги
 
-- `__init__.py` — экспорт ключевых сущностей модуля market_data.
-- `dto.py` — DTO/контракты для обмена данными между ingestion/adapter-слоями.
-- `ingestion_service.py` — процесс инжеста forex/crypto/commodities в БД.
-- `aggregate_service.py` — построение агрегатов по категориям и маркетплейсам.
-- `providers/__init__.py` — реестр и экспорт провайдеров market data.
-- `providers/base.py` — базовый интерфейс/абстракции для всех адаптеров данных.
-- `providers/forex_adapter.py` — адаптер валютных котировок.
-- `providers/crypto_adapter.py` — адаптер криптовалютных котировок.
-- `providers/commodities_adapter.py` — адаптер сырьевых рынков.
-- `providers/commodities_goldapi_alphavantage.py` — источник сырья через GoldAPI/AlphaVantage.
-- `providers/fuel_adapter.py` — адаптер цен на топливо по странам.
-
-### backend/app/models (ORM-модели)
-
-- `__init__.py` — реэкспорт SQLAlchemy-моделей.
-- `user.py` — пользователь, роли, план и профильные поля.
-- `product.py` — сущность товара и его бизнес-атрибуты.
-- `competitor.py` — карточка конкурента/источника цены.
-- `competitor_product.py` — связь товар ↔ конкурент и текущие ценовые атрибуты.
-- `price_snapshot.py` — исторические snapshots цен для аналитики.
-- `alert.py` — правило алерта (условия/пороги/каналы).
-- `alert_event.py` — событие срабатывания алерта и его метаданные.
-- `digest.py` — пользовательские дайджесты и их параметры.
-- `ai_chat.py` — AI-сессии и сообщения чата.
-- `admin_marketplace.py` — управляемые через админку маркетплейсы.
-- `scrape_log.py` — журналы попыток парсинга и результат выполнения.
-- `api_log.py` — логирование внешних API-вызовов.
-- `markets_preferences.py` — пользовательские настройки рыночного блока.
-- `markets_snapshots.py` — snapshots forex/crypto/commodities/ticker.
-- `markets_overview.py` — сущности для табличного обзора рынков.
-- `markets_analytics.py` — агрегаты аналитики категорий и маркетплейсов.
-- `markets_opportunity.py` — блоки рыночных возможностей.
-- `markets_refresh_log.py` — журнал обновлений market-data ingestion.
-
-### backend/app/schemas (Pydantic-контракты)
-
-- `__init__.py` — общий экспорт схем запросов/ответов.
-- `user.py` — DTO пользователя, auth-профиль и связанные payload.
-- `product.py` — контракты CRUD товаров и списков.
-- `competitor.py` — контракты конкурентов и связей competitor-product.
-- `analytics.py` — форматы аналитических ответов, трендов и прогнозов.
-- `alert.py` — payload для правил/событий алертов и AI-блоков.
-- `digest.py` — DTO дайджестов и фильтров выборки.
-- `ai_chat.py` — контракты AI-сессий/сообщений.
-- `markets.py` — структуры ответов по forex/crypto/commodities/fuel/overview.
-
-### backend/app/scrapers и backend/app/notifications
-
-- `scrapers/__init__.py` — экспорт scraper-модуля.
-- `scrapers/engine.py` — UniversalScraper: получение HTML/данных и извлечение цены.
-- `scrapers/proxy_manager.py` — управление proxy/Decodo-конфигурацией и ротацией.
-- `notifications/__init__.py` — экспорт notification-слоя.
-- `notifications/email_sender.py` — отправка email-уведомлений через Resend.
-- `notifications/telegram_bot.py` — отправка Telegram-уведомлений и bot-helper методы.
+- Старые плоские каталоги `backend/app/api/*`, `backend/app/services/*`, `backend/app/schemas/*`, `backend/app/scrapers/*`, `backend/app/notifications/*` удалены как источник runtime-кода.
+- `backend/app/models/__init__.py` оставлен как единая точка реэкспорта ORM-моделей для Alembic metadata discovery.
 
 ### backend/app/workers (Celery tasks)
 

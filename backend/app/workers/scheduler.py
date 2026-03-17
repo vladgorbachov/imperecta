@@ -12,11 +12,11 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour="*/2"),
     },
     "weekly-digests": {
-        "task": "app.workers.digest_tasks.schedule_weekly_digests",
+        "task": "app.modules.digests.tasks.schedule_weekly_digests",
         "schedule": crontab(minute=0, hour=18, day_of_week=5),
     },
     "daily-digests": {
-        "task": "app.workers.digest_tasks.schedule_daily_digests",
+        "task": "app.modules.digests.tasks.schedule_daily_digests",
         "schedule": crontab(minute=0, hour=8),
     },
     "cleanup-old-data-weekly": {

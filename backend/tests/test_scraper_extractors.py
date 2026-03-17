@@ -4,7 +4,7 @@ import pytest
 import httpx
 from bs4 import BeautifulSoup
 
-from app.scrapers.extractors import (
+from app.modules.scraper.extractors import (
     ExtractedProduct,
     extract_auto_detect,
     extract_from_jsonld,
@@ -13,8 +13,8 @@ from app.scrapers.extractors import (
     merge_results,
     parse_price_text,
 )
-from app.scrapers.scraper_pool import ScraperPool
-import app.scrapers.scraper_pool as scraper_pool_module
+from app.modules.scraper.scraper_pool import ScraperPool
+import app.modules.scraper.scraper_pool as scraper_pool_module
 
 
 async def _fetch_html(urls: list[str]) -> tuple[str, str] | tuple[None, None]:

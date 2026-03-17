@@ -4,8 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.database import sync_session_factory
-from app.models import AIChatMessage, ApiLog, PriceSnapshot, ScrapeLog
-from app.models.alert_event import AlertEvent
+from app.models import AIChatMessage, AlertEvent, ApiLog, PriceSnapshot, ScrapeLog
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)

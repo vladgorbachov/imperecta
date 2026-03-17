@@ -11,7 +11,7 @@ import pytest
 async def test_webhook_rejects_missing_secret_header(client, monkeypatch):
     """Webhook returns 403 when X-Telegram-Bot-Api-Secret-Token header is missing."""
     monkeypatch.setattr(
-        "app.api.telegram.settings",
+        "app.modules.core.api_telegram.settings",
         type("S", (), {"telegram_webhook_secret": "test-secret-123", "telegram_bot_token": "x"})(),
     )
     resp = await client.post(
@@ -25,7 +25,7 @@ async def test_webhook_rejects_missing_secret_header(client, monkeypatch):
 async def test_webhook_rejects_wrong_secret_header(client, monkeypatch):
     """Webhook returns 403 when header value does not match TELEGRAM_WEBHOOK_SECRET."""
     monkeypatch.setattr(
-        "app.api.telegram.settings",
+        "app.modules.core.api_telegram.settings",
         type("S", (), {"telegram_webhook_secret": "test-secret-123", "telegram_bot_token": "x"})(),
     )
     resp = await client.post(
@@ -40,7 +40,7 @@ async def test_webhook_rejects_wrong_secret_header(client, monkeypatch):
 async def test_webhook_accepts_valid_secret_header(client, monkeypatch):
     """Webhook accepts request when header matches TELEGRAM_WEBHOOK_SECRET."""
     monkeypatch.setattr(
-        "app.api.telegram.settings",
+        "app.modules.core.api_telegram.settings",
         type("S", (), {"telegram_webhook_secret": "test-secret-123", "telegram_bot_token": "x"})(),
     )
     resp = await client.post(
@@ -55,7 +55,7 @@ async def test_webhook_accepts_valid_secret_header(client, monkeypatch):
 async def test_webhook_rejects_when_no_secret_configured(client, monkeypatch):
     """Webhook returns 403 when TELEGRAM_WEBHOOK_SECRET is not configured."""
     monkeypatch.setattr(
-        "app.api.telegram.settings",
+        "app.modules.core.api_telegram.settings",
         type("S", (), {"telegram_webhook_secret": None, "telegram_bot_token": None})(),
     )
     resp = await client.post(
