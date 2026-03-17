@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision: str = "015_add_global_products_and_extend_marketplaces"
+revision: str = "015_global_products"
 down_revision: Union[str, None] = "014_avatar_url_text"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

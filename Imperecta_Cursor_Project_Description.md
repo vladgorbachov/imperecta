@@ -1,5 +1,21 @@
 # Imperecta — Описание проекта для Cursor IDE
 
+## Актуализация (после PR-7)
+
+- Backend работает в модульной архитектуре `backend/app/modules/*`; legacy proxy-слой удалён.
+- `backend/app/api/*`, `backend/app/services/*`, `backend/app/schemas/*`, `backend/app/scrapers/*`, `backend/app/notifications/*` больше не являются runtime-слоем (удалены/заменены).
+- Все backend-роутеры монтируются в `backend/app/main.py` напрямую из `modules/*` под префиксом `/api`.
+- Добавлена миграция `backend/alembic/versions/016_drop_digest_summary_json.py`.
+- Актуальные фоновые задачи подключаются из:
+  - `app.modules.scraper.tasks`
+  - `app.modules.alerts.tasks`
+  - `app.modules.digests.tasks`
+  - `app.modules.market_data.tasks`
+- В `backend/app/workers/` остаются инфраструктурные файлы: `celery_app.py`, `scheduler.py`, `cleanup_tasks.py`.
+- Актуальные пути модулей:
+  - `modules/core`, `modules/marketplaces`, `modules/scraper`, `modules/product_pool`, `modules/market_data`, `modules/dashboard`, `modules/user_products`, `modules/analytics`, `modules/alerts`, `modules/digests`, `modules/ai_analyst`.
+- Часть нижних разделов этого документа содержит исторический снимок структуры до финальной чистки; ориентироваться на разделы "backend/app (модульная архитектура)" и "backend/app/modules (актуальные домены)".
+
 ## Обзор
 
 Imperecta — SaaS-платформа конкурентной разведки и рыночной аналитики для e-commerce. Отслеживает цены конкурентов на любых маркетплейсах (UniversalScraper), показывает рыночные данные (forex, крипто, сырьё, топливо, товары маркетплэйсов), генерирует ИИ-дайджесты и отправляет алерты при изменениях цен. Имеет встроенный ИИ для аналитики и обработки данных цен товаров на маркетплэйсах.  
@@ -606,12 +622,8 @@ imperecta/
 ### backend/app/workers (Celery tasks)
 
 - `__init__.py` — пакетный инициализатор worker-модуля.
-- `celery_app.py` — создание и конфигурация Celery-приложения.
-- `scheduler.py` — расписание периодических задач (beat).
-- `scrape_tasks.py` — задачи парсинга карточек конкурентов и фиксации snapshots.
-- `alert_tasks.py` — проверка условий алертов и генерация событий.
-- `digest_tasks.py` — периодическая генерация и рассылка дайджестов.
-- `market_data_tasks.py` — фоновые задачи инжеста market-data.
+- `celery_app.py` — создание и конфигурация Celery-приложения с includes на `modules/*/tasks.py`.
+- `scheduler.py` — расписание периодических задач (beat) для task names из модулей.
 - `cleanup_tasks.py` — очистка устаревших технических и ценовых данных.
 
 ### backend/alembic и backend/alembic/versions
@@ -632,6 +644,8 @@ imperecta/
 - `012_add_markets_tables.py` — таблицы подсистемы рыночных данных.
 - `013_markets_refresh_log_metadata.py` — метаданные и доработки refresh log.
 - `014_avatar_url_text_preferred_country.py` — avatar URL как TEXT + preferred country.
+- `015_add_global_products_and_extend_marketplaces.py` — global pool + расширение admin marketplaces.
+- `016_drop_digest_summary_json.py` — удаление неиспользуемой колонки `digests.summary_json`.
 
 ### backend/tests (контрактные и security тесты)
 
@@ -745,7 +759,7 @@ imperecta/
 - [x] Frontend: Landing, 15+ страниц, entitlements, AIAnalystRoute (locked), PlanLimitBanner
 - [x] Auth: JWT, «Запомнить меня», telegram-link/disconnect в auth
 - [x] Entitlements: Trial/Free/Paid Full, AI Analyst только для Paid
-- [x] Миграции 001–015 (включая global_products/global_price_snapshots/discovery_logs и расширение admin_marketplaces)
+- [x] Миграции 001–016 (включая global_products/global_price_snapshots/discovery_logs и удаление `digests.summary_json`)
 - [x] Локальная разработка: docker-compose
 - [x] CI: ruff, pytest, eslint, vitest, build, security
 - [x] Markets: overview переключён на global pool (`/api/markets/overview`), API `/api/pool/*`, discovery/scraping celery tasks, обновлённый beat schedule
