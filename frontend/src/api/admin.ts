@@ -1,16 +1,19 @@
 import { apiClient } from "./client";
 
 export interface AdminStats {
-  users_count: number;
-  active_users_count: number;
-  marketplaces_count: number;
-  active_marketplaces_count: number;
-  total_scrapes_today: number;
-  successful_scrapes_today: number;
-  failed_scrapes_today: number;
-  error_rate_today: number;
-  total_products_monitored: number;
-  total_competitor_products: number;
+  users_count?: number;
+  users?: number;
+  active_users_count?: number;
+  marketplaces_count?: number;
+  marketplaces?: number;
+  active_marketplaces_count?: number;
+  products_in_pool?: number;
+  total_scrapes_today?: number;
+  successful_scrapes_today?: number;
+  failed_scrapes_today?: number;
+  error_rate_today?: number;
+  total_products_monitored?: number;
+  total_competitor_products?: number;
 }
 
 export interface AdminMarketplace {
@@ -55,12 +58,12 @@ export interface ErrorDistribution {
 export interface AdminUser {
   id: string;
   email: string;
-  name: string;
+  name?: string;
   plan: string;
-  products_count: number;
+  products_count?: number;
   created_at: string;
   last_login_at: string | null;
-  is_active: boolean;
+  is_active?: boolean;
 }
 
 export const getAdminStats = () => apiClient.get<AdminStats>("/admin/stats");
@@ -104,8 +107,10 @@ export interface ClaudeStats {
 }
 
 export interface ClaudeStatus {
-  health: ClaudeHealth;
-  stats: ClaudeStats;
+  health?: ClaudeHealth;
+  stats?: ClaudeStats;
+  configured?: boolean;
+  model?: string;
 }
 
 export const getClaudeStatus = () =>

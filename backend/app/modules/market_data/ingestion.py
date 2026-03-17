@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import httpx
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,6 +80,27 @@ class MarketDataIngestionService:
                 log_entry.error_message = None
                 await self.db.flush()
                 return result
+            except httpx.HTTPStatusError as error:
+                last_error = error
+                if error.response.status_code == 429:
+                    wait_sec = attempt * 30
+                    logger.warning(
+                        "Market data %s attempt %d rate limited (429), waiting %ds before retry",
+                        refresh_type.value,
+                        attempt,
+                        wait_sec,
+                    )
+                    if attempt < self.retry_attempts:
+                        await asyncio.sleep(wait_sec)
+                else:
+                    logger.warning(
+                        "Market data %s attempt %d HTTP error: %s",
+                        refresh_type.value,
+                        attempt,
+                        error,
+                        exc_info=True,
+                    )
+                    raise
             except asyncio.TimeoutError as error:
                 last_error = error
                 logger.warning(
@@ -96,7 +118,8 @@ class MarketDataIngestionService:
                     exc_info=True,
                 )
             if attempt < self.retry_attempts:
-                await asyncio.sleep(2**attempt)
+                if not isinstance(last_error, httpx.HTTPStatusError):
+                    await asyncio.sleep(2**attempt)
 
         log_entry.status = MarketsRefreshStatus.error
         log_entry.completed_at = datetime.now(timezone.utc)

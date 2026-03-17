@@ -113,8 +113,9 @@ class BaseScraper(ABC):
 class UniversalScraper(BaseScraper):
     """
     Universal e-commerce scraper. Works with ANY online store.
-    Strategy 0: Decodo Web Scraping API (primary, managed anti-bot).
-    Strategy 1-3: Playwright fallback (JSON-LD, meta, DOM).
+    Strategy: Decodo (primary) -> httpx -> Playwright. Extract from HTML only.
+    Playwright is used ONLY when Decodo/httpx failed to return HTML.
+    Never re-open URL in Playwright when we already have HTML from Decodo.
     """
 
     def __init__(self, config: object | None = None, css_selector_price: str | None = None) -> None:
@@ -122,40 +123,69 @@ class UniversalScraper(BaseScraper):
         self._css_selector_price = css_selector_price
 
     async def _scrape_impl(self, url: str) -> ScrapeResult:
-        """Main entry point. Decodo first, then Playwright fallback."""
-        if settings.decodo_enabled and settings.decodo_username and settings.decodo_password:
-            result = await self._scrape_decodo(url)
+        """
+        Decodo first -> httpx -> Playwright. Extract from HTML at each step.
+        If Decodo returns HTML, extract from it and return. Do NOT open Playwright.
+        """
+        # Step 1: Decodo
+        html = await self._fetch_html_decodo(url)
+        if html:
+            result = self._extract_from_html(html, url)
             if result and result.price:
                 result.extraction_method = "decodo_api"
                 result.product_url = url
                 return result
+            raise ValueError("Could not extract price from Decodo HTML")
 
+        # Step 2: httpx
+        html = await self._fetch_html_httpx(url)
+        if html:
+            result = self._extract_from_html(html, url)
+            if result and result.price:
+                result.extraction_method = "httpx"
+                result.product_url = url
+                return result
+            raise ValueError("Could not extract price from httpx HTML")
+
+        # Step 3: Playwright - only when Decodo and httpx failed
         html = await self._fetch_page(url)
         if not html:
             raise ValueError("Failed to fetch page")
-
-        result = self._extract_jsonld(html)
+        result = self._extract_from_html(html, url)
         if result and result.price:
-            result.extraction_method = "jsonld"
+            result.extraction_method = "playwright"
             result.product_url = url
             return result
-
-        result = self._extract_meta(html)
-        if result and result.price:
-            result.extraction_method = "meta"
-            result.product_url = url
-            return result
-
-        result = await self._extract_dom_playwright(url)
-        if result and result.price:
-            result.extraction_method = "dom"
-            result.product_url = url
-            return result
-
         raise ValueError("Could not extract price from page")
 
-    async def _scrape_decodo(self, url: str) -> ScrapeResult | None:
-        """Use Decodo Web Scraping API for managed scraping. Skip if disabled or credentials missing."""
+    def _extract_from_html(self, html: str, url: str) -> ScrapeResult | None:
+        """Extract product data from HTML using JSON-LD, meta, auto-detect. No Playwright."""
+        result = self._extract_jsonld(html)
+        if result and result.price:
+            return result
+        result = self._extract_meta(html)
+        if result and result.price:
+            return result
+        result = self._extract_auto_detect(html, url)
+        return result
+
+    def _extract_auto_detect(self, html: str, url: str) -> ScrapeResult | None:
+        """Extract using auto-detect heuristics on static HTML."""
+        extracted = extract_auto_detect(BeautifulSoup(html, "html.parser"), url)
+        if extracted.price is None:
+            return None
+        return ScrapeResult(
+            price=extracted.price,
+            old_price=extracted.original_price,
+            currency=extracted.currency,
+            product_name=extracted.title,
+            image_url=extracted.image_url,
+            description=extracted.description,
+            in_stock=None,
+        )
+
+    async def _fetch_html_decodo(self, url: str) -> str | None:
+        """Fetch HTML via Decodo API. Returns raw HTML or None. Skip if disabled or credentials missing."""
         if not settings.decodo_enabled:
             return None
         if not (settings.decodo_username and settings.decodo_password):
@@ -188,20 +218,29 @@ class UniversalScraper(BaseScraper):
             first = results[0] if results else {}
             html = first.get("content") or data.get("html") or data.get("content") or ""
 
-            if not isinstance(html, str):
+            if not isinstance(html, str) or not html.strip():
                 return None
-
-            result = self._extract_jsonld(html)
-            if result and result.price:
-                return result
-
-            result = self._extract_meta(html)
-            if result and result.price:
-                return result
-
-            return None
+            return html
         except Exception as error:
             logger.error("Decodo API error for %s: %s", url[:80], error)
+            return None
+
+    async def _fetch_html_httpx(self, url: str) -> str | None:
+        """Fetch HTML via httpx. Returns raw HTML or None."""
+        try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                )
+            }
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                response = await client.get(url, headers=headers)
+            if response.status_code >= 400:
+                return None
+            return response.text or None
+        except Exception as error:
+            logger.warning("httpx fetch failed for %s: %s", url[:80], error)
             return None
 
     @staticmethod

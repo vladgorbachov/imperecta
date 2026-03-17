@@ -7,8 +7,13 @@
 - **Digests:** `generate_digest` из `app.modules.ai_analyst.claude_client`.
 - **Celery:** `celery_app.conf.include` (scraper, alerts, digests, market_data); `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, digests, cleanup.
 - **Decodo:** в `scraper/engine.py` и `scraper/scraper_pool.py` слой Decodo вызывается только при `decodo_enabled` и непустых `decodo_username` и `decodo_password`; при пустых credentials — skip и fallback на httpx/Playwright.
-- **API:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()`. `/api/markets/overview` limit до 500. Commodities: при ошибках GoldAPI/Alpha Vantage в ответе поле `error` (без mock-данных).
-- Pipeline: marketplaces → discovery → scraping → виджеты; админ: POST `/api/admin/marketplaces/add-by-url`, POST `/api/admin/discovery/trigger-all`, GET `/api/pool/stats`.
+- **API:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()`. `/api/markets/overview` limit до 500. Commodities: при ошибках GoldAPI/Alpha Vantage в ответе поле `error`; `/api/markets/commodities` возвращает `{items, error}` (без 500).
+- **Rate limits:** ingestion `_fetch_with_retry` — exponential backoff при 429 (30s, 60s, 90s). Alpha Vantage TTL 4h (25 req/day free tier). Commodities widget: «Данные недоступны» при error.
+- **Admin Page:** frontend resilient к формату backend (stats: users/marketplaces, users: name/products_count fallback, claude-status: configured/model). Секция «Управление пулом товаров» после «Активность парсинга» — диагностика, пересчёт квот, Discovery, Scraping, удаление пользовательских товаров; human-readable вывод + raw JSON.
+- **Products:** страница с двумя вкладками — «Все товары» (GET `/api/pool/products`) и «Мои товары» (GET `/api/products`). Компоненты: `PoolProductsTab`, `MyProductsTab`, хук `usePoolProducts`.
+- **Import:** поддерживает .csv, .tsv, .xls, .xlsx, .xlsm. Preview и upload через `/api/import/products/preview` и `/api/import/products/csv`.
+- **Admin pool:** GET `/api/admin/diagnostics/pool`, POST `/api/admin/marketplaces/recalculate-quotas`, POST `/api/admin/marketplaces/set-requires-js`, POST `/api/admin/products/clear-user-data`. Discovery/scrape: POST `/api/admin/discovery/trigger-all`, POST `/api/admin/pool/trigger-scrape`.
+- Pipeline: marketplaces → discovery → scraping → виджеты; админ: add-by-url, discovery/trigger-all, pool/trigger-scrape, diagnostics, recalculate-quotas.
 - Модули: core, marketplaces, scraper, product_pool, market_data, dashboard, user_products, analytics, alerts, digests, ai_analyst.
 - Ниже — исторический снимок; ориентир — разделы про модульную архитектуру и актуальные домены.
 
@@ -42,8 +47,13 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **telegram** | POST | /api/telegram/generate-link-code | Генерация кода привязки |
 | **telegram** | POST | /api/telegram/unlink | Отвязка (admin) |
 | **telegram** | GET | /api/telegram/status | Статус привязки |
+| **pool** | GET | /api/pool/products | Товары из глобального пула (search, marketplace_id, sort, limit, offset) |
+| **pool** | GET | /api/pool/categories | Маркетплейсы для фильтра |
+| **pool** | GET | /api/pool/marketplace-stats | Статистика по маркетплейсам |
+| **pool** | GET | /api/pool/stats | Общая статистика пула |
+| **pool** | GET | /api/pool/search | Поиск по названию |
 | **products** | GET | /api/products/categories | Список категорий |
-| **products** | GET | /api/products | Список товаров (пагинация) |
+| **products** | GET | /api/products | Список товаров пользователя (пагинация, search, sort) |
 | **products** | GET | /api/products/at-risk | Товары в зоне риска |
 | **products** | GET | /api/products/{id} | Детали товара |
 | **products** | GET | /api/products/{id}/ai-recommendation | AI-рекомендация |
@@ -82,8 +92,8 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **digests** | GET | /api/digests | Список дайджестов |
 | **digests** | GET | /api/digests/{id} | Детали дайджеста |
 | **import** | POST | /api/import/auto-categorize | Авто-категоризация |
-| **import** | POST | /api/import/products/preview | Превью импорта CSV |
-| **import** | POST | /api/import/products/csv | Импорт CSV |
+| **import** | POST | /api/import/products/preview | Превью импорта (CSV, TSV, Excel) |
+| **import** | POST | /api/import/products/csv | Импорт CSV/TSV/Excel |
 | **import** | GET | /api/import/products/template | Шаблон CSV |
 | **ai** | POST | /api/ai/chat | Отправка сообщения в AI-чат |
 | **ai** | GET | /api/ai/sessions | Список сессий AI-чата |
@@ -103,16 +113,23 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **markets** | GET | /api/markets/opportunities | Блоки возможностей |
 | **markets** | POST | /api/markets/ingest | Запуск инжеста (superuser) |
 | **admin** | GET | /api/admin/stats | Статистика админки |
+| **admin** | GET | /api/admin/users | Список пользователей |
+| **admin** | GET | /api/admin/claude-status | Статус Claude API |
+| **admin** | GET | /api/admin/diagnostics/pool | Диагностика пула (marketplaces, products, discovery_logs) |
+| **admin** | POST | /api/admin/products/clear-user-data | Удаление всех пользовательских товаров |
+| **admin** | DELETE | /api/admin/products/clear-test-data | Удаление тестовых товаров |
 | **admin** | GET | /api/admin/marketplaces | Список маркетплейсов |
 | **admin** | GET | /api/admin/marketplaces/{marketplace_id}/logs | Логи маркетплейса |
 | **admin** | POST | /api/admin/marketplaces | Добавление маркетплейса |
+| **admin** | POST | /api/admin/marketplaces/recalculate-quotas | Пересчёт квот пула |
+| **admin** | POST | /api/admin/marketplaces/set-requires-js | Установка requires_js для маркетплейсов |
 | **admin** | DELETE | /api/admin/marketplaces/{marketplace_id} | Удаление маркетплейса |
+| **admin** | POST | /api/admin/discovery/trigger/{marketplace_id} | Запуск discovery для одного маркетплейса |
+| **admin** | POST | /api/admin/discovery/trigger-all | Запуск discovery для всех |
+| **admin** | POST | /api/admin/pool/trigger-scrape | Запуск scraping пула товаров |
+| **admin** | POST | /api/admin/trigger-scrape | Ручной запуск парсинга competitor_products |
 | **admin** | GET | /api/admin/scrape-activity | Активность парсинга |
 | **admin** | GET | /api/admin/error-distribution | Распределение ошибок |
-| **admin** | GET | /api/admin/users | Список пользователей |
-| **admin** | GET | /api/admin/claude-status | Статус Claude API |
-| **admin** | POST | /api/admin/seed-products | Сид продуктов для теста парсинга (superuser) |
-| **admin** | POST | /api/admin/trigger-scrape | Ручной запуск парсинга всех competitor_products |
 
 ### Frontend (React Router)
 
@@ -125,16 +142,16 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | /change-password | ChangePasswordRoute | Смена пароля (force_password_change) |
 | / | DashboardLayout | Корневой layout (ProtectedRoute) |
 | /dashboard | DashboardPage | Рынки: TickerBar, Widgets, MarketDataTable, Analytics |
-| /products | ProductsPage | CRUD товаров |
+| /products | ProductsPage | Две вкладки: «Все товары» (пул), «Мои товары» (CRUD) |
 | /products/:id | ProductDetailPage | Детали товара, график цен, конкуренты |
 | /competitors | CompetitorsPage | CRUD конкурентов |
 | /alerts | AlertsPage | CRUD алертов, события |
 | /digests | DigestsPage | Список дайджестов |
-| /import | ImportPage | Импорт CSV |
+| /import | ImportPage | Импорт CSV/TSV/Excel (.csv, .tsv, .xls, .xlsx, .xlsm) |
 | /analytics | AnalyticsPage | Аналитика, тренды, прогнозы |
 | /ai | AIAnalystRoute | AI-чат (locked для Trial/Free) |
 | /settings | SettingsPage | Профиль, Telegram, план |
-| /admin | AdminPage | Админ-панель (SuperuserRoute) |
+| /admin | AdminPage | Админ-панель (SuperuserRoute): stats, marketplaces, pool management, scrape activity |
 | * | NotFoundPage | 404 |
 
 ---
@@ -240,7 +257,7 @@ imperecta/
 │   ├── alembic.ini                   # Alembic config
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── admin.py               # Admin API (stats, marketplaces, users, claude-status)
+│   │   │   ├── admin.py               # Admin API (stats, users, claude-status, diagnostics, clear-user-data)
 │   │   │   ├── ai.py                 # AI chat API
 │   │   │   ├── alerts.py             # Alerts CRUD, events, explanation, auto-response
 │   │   │   ├── analytics.py          # Price history, comparison, forecast, benchmark
@@ -450,6 +467,9 @@ imperecta/
 │   │   │   ├── competitors/
 │   │   │   │   ├── ComparisonMatrix.tsx
 │   │   │   │   └── PriceSparkline.tsx
+│   │   │   ├── products/
+│   │   │   │   ├── PoolProductsTab.tsx   # Вкладка «Все товары» (пул)
+│   │   │   │   └── MyProductsTab.tsx     # Вкладка «Мои товары» (CRUD)
 │   │   │   ├── LoadingScreen.tsx
 │   │   │   ├── ProtectedRoute.tsx
 │   │   │   ├── PublicAuthRoute.tsx
@@ -502,6 +522,7 @@ imperecta/
 │   │   │   ├── useDebounce.ts
 │   │   │   ├── useEntitlements.ts
 │   │   │   ├── usePlanLimits.ts
+│   │   │   ├── usePoolProducts.ts   # Пул товаров (GET /api/pool/products)
 │   │   │   ├── useProducts.ts
 │   │   │   └── useSidebar.ts
 │   │   ├── i18n/
@@ -692,16 +713,13 @@ imperecta/
 - `backend/app/models/markets_overview.py` — удалён (overview читает из `global_products`).
 - Удалены мёртвые методы/импорты в `markets_service.py` и legacy overview materialization через `markets_overview`.
 
-### Новые API routes
+### Новые API routes (pool + admin)
 
-- `/api/pool/products`
-- `/api/pool/marketplace-stats`
-- `/api/pool/stats`
-- `/api/pool/search`
-- `/api/admin/marketplaces/add-by-url`
-- `/api/admin/marketplaces/import-file`
-- `/api/admin/discovery/trigger/{marketplace_id}`
-- `/api/admin/discovery/trigger-all`
+- `/api/pool/products`, `/api/pool/categories`, `/api/pool/marketplace-stats`, `/api/pool/stats`, `/api/pool/search`
+- `/api/admin/diagnostics/pool`, `/api/admin/products/clear-user-data`
+- `/api/admin/marketplaces/recalculate-quotas`, `/api/admin/marketplaces/set-requires-js`
+- `/api/admin/marketplaces/add-by-url`, `/api/admin/marketplaces/import-file`
+- `/api/admin/discovery/trigger/{marketplace_id}`, `/api/admin/discovery/trigger-all`
 - `/api/admin/pool/trigger-scrape`
 
 ### Двухуровневый pipeline

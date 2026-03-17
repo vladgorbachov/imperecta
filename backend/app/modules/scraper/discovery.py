@@ -52,6 +52,12 @@ class DiscoveryCrawler:
 
         remaining_quota = max(0, (marketplace.product_quota or 0) - (marketplace.products_in_pool or 0))
         if remaining_quota <= 0:
+            logger.info(
+                "Discovery skip %s: quota=%s, in_pool=%s, remaining=0",
+                marketplace.domain,
+                marketplace.product_quota,
+                marketplace.products_in_pool,
+            )
             log_row.status = "completed"
             log_row.completed_at = datetime.now(timezone.utc)
             log_row.duration_seconds = 0

@@ -2,7 +2,7 @@
 
 ## Актуализация (после PR-7 и PR-1–PR-5)
 
-Дата актуализации: 2026-03-17
+Дата актуализации: 2026-03-15
 
 ### Ключевой факт
 - Backend в модульной структуре `backend/app/modules/*`. Legacy api/services/schemas/scrapers/notifications удалены как runtime.
@@ -13,6 +13,7 @@
 
 ### Роутеры
 - В `main.py` только роутеры из `app.modules.*` под префиксом `/api`.
+- Admin: `modules/core/api_admin.py` (prefix `/admin`), `modules/marketplaces/api.py` (prefix `/admin/marketplaces`), `modules/scraper/api.py` (prefix `/admin` для discovery, pool, scrape).
 
 ### Celery/Beat
 - `celery_app.conf.include`: scraper, alerts, digests, market_data. `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, cleanup, digests (weekly/daily).
@@ -23,9 +24,10 @@
 ### Изменения PR-1–PR-5
 - **PR-1:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()` (метод `get_dashboard_summary` отсутствовал).
 - **PR-2:** GET `/api/markets/overview` limit увеличен с 100 до 500.
-- **PR-3:** Commodities (GoldAPI/Alpha Vantage): при пустом результате или 403 выставляется `error` в ответе; проверка `Error Message`/`Note` в ответе Alpha Vantage; без mock-данных.
-- **PR-4:** Pipeline проверен: MarketplacePoolService.list_all, ScraperPool, DiscoveryCrawler, Celery tasks, Beat schedule. Админ: add-by-url, import-file, discovery/trigger-all, pool/stats.
-- **PR-5:** Decodo: в `_fetch_html_decodo` (scraper_pool) и `_scrape_decodo` (engine) в начале проверка `decodo_enabled` и наличие username/password; при отсутствии — skip и fallback (httpx/Playwright).
+- **PR-3:** Admin Page crash fix (frontend resilient к backend response format). Rate limits: `market_data/ingestion.py` — httpx.HTTPStatusError 429 → exponential backoff (attempt*30s). `market_data/service.py` — ALPHA_VANTAGE_TTL 4h (25 req/day free tier). `market_data/api.py` — GET `/api/markets/commodities` try/except → `{items:[], error}` без 500. Commodities widget: «Данные недоступны» при error.
+- **PR-4:** Products page: две вкладки (пул + мои товары). GET `/api/pool/products` (search, marketplace_id, sort, limit, offset). Import: .csv, .tsv, .xls, .xlsx, .xlsm.
+- **PR-5:** Admin pool: GET `/api/admin/diagnostics/pool`, POST `/api/admin/products/clear-user-data`, POST `/api/admin/marketplaces/recalculate-quotas`, POST `/api/admin/marketplaces/set-requires-js`. Discovery/trigger-all, pool/trigger-scrape в `modules/scraper/api.py`. AdminPage: секция «Управление пулом товаров» после «Активность парсинга»; human-readable diagnostics + raw JSON.
+- **Decodo:** в `_fetch_html_decodo` (scraper_pool) и `_scrape_decodo` (engine) проверка `decodo_enabled` и наличие username/password; при отсутствии — skip и fallback (httpx/Playwright).
 
 ### Кросс-модульные зависимости
 - Digests: `generate_digest` из `app.modules.ai_analyst.claude_client`.
@@ -42,7 +44,7 @@
 ## 1. Ядро приложения
 
 ### `backend/app/main.py`
-- **Подключённые роутеры**: `api_router`, `admin_router`, `ai_router`, `dashboard_router`, `markets_router`, `pool_router` (`L107-L112`).
+- **Подключённые роутеры**: `admin_router` (core.api_admin), `auth_router`, `telegram_router`, `marketplaces_router`, `scraper_admin_router`, `pool_router`, `market_data_router`, `dashboard_router`, `products_router`, `competitors_router`, `import_router`, `analytics_router`, `alerts_router`, `digests_router`, `ai_router` — все под prefix `/api`.
 - **Middleware**: `CORSMiddleware` (`L99-L105`), `allow_origins=settings.origins_list`.
 - **Lifespan/startup**: в `lifespan()` запускаются фоновые задачи `create_all`, webhook Telegram, `ensure_superuser` (`L84-L90`).
 - **Health endpoints**: `/health` и `/api/health` (`L115-L159`).
@@ -104,9 +106,8 @@
   - API: `AsyncSession` через dependency.
   - Celery: sync `sessionmaker` + отдельные async factory в задачах, где нужно.
 
-### `backend/app/api/__init__.py`
-- **Собрано в `api_router`**: `auth`, `telegram`, `products`, `competitors`, `analytics`, `alerts`, `digests`, `import_export` (`L9-L16`).
-- **Роутеры, подключённые напрямую в `main.py` мимо `api_router`**: `admin`, `ai`, `dashboard`, `markets`, `product_pool` (`main.py:L108-L112`).
+### Роутеры (main.py)
+- Модульная архитектура: роутеры из `app.modules.*` под prefix `/api`. Нет единого `api_router` — каждый модуль подключается отдельно.
 
 ---
 
@@ -253,23 +254,13 @@
 - Auth делается через JWT Bearer + `decode_token` (`L18-L80`).
 
 ### Эндпоинты (метод + полный путь + auth)
-- Префиксы из `api/__init__.py` + `main.py`:
-  - `/api/auth/*` (`api_router + prefix /auth`)
-  - `/api/products/*`
-  - `/api/competitors/*`
-  - `/api/analytics/*`
-  - `/api/alerts/*`
-  - `/api/digests/*`
-  - `/api/import/*`
-  - `/api/telegram/*`
-  - `/api/dashboard/*` (direct router)
-  - `/api/markets/*` (direct router)
-  - `/api/admin/*` (direct router, superuser dependency)
-  - `/api/ai/*` (direct router)
-- Полный список маршрутов извлечён из декораторов: см. `api/*.py` (`rg @router...`).
+- Модули: auth, telegram, products, competitors, analytics, alerts, digests, import, ai, dashboard, markets, pool, admin (core + marketplaces + scraper).
+- Admin (superuser): `/api/admin/stats`, `/api/admin/users`, `/api/admin/claude-status`, `/api/admin/diagnostics/pool`, `/api/admin/products/clear-user-data`, `/api/admin/products/clear-test-data`, `/api/admin/marketplaces/*`, `/api/admin/discovery/*`, `/api/admin/pool/trigger-scrape`, `/api/admin/trigger-scrape`, `/api/admin/scrape-activity`, `/api/admin/error-distribution`.
 
 ### Ключевые замечания
-- `api/admin.py` содержит superuser-only роутер через `dependencies=[Depends(get_current_superuser)]` (`L24-L28`).
+- `modules/core/api_admin.py`: prefix `/admin`, superuser-only через `dependencies=[Depends(get_current_superuser)]`. Endpoints: stats, users, claude-status, diagnostics/pool, products/clear-user-data, products/clear-test-data.
+- `modules/marketplaces/api.py`: prefix `/admin/marketplaces`. Endpoints: recalculate-quotas, set-requires-js, GET "", logs, POST "", add-by-url, import-file, DELETE.
+- `modules/scraper/api.py`: prefix `/admin`. Endpoints: discovery/trigger/{id}, discovery/trigger-all, pool/trigger-scrape, trigger-scrape, scrape-activity, error-distribution.
 - В `api/markets.py` endpoint `/overview` уже читает из `ProductPoolService` (`L275-L300`).
 - В `api/telegram.py` есть как webhook без user auth (`/webhook`), так и user endpoints через `get_current_user`.
 
@@ -304,7 +295,7 @@
 
 ### Методы с признаками мёртвого кода
 - `ScraperFactory.register` (см. секция 13).
-- `api/admin.py`: `TLD_TO_COUNTRY`, `_domain_to_marketplace_id` (не вызываются).
+- `modules/core/api_admin.py`: нет legacy TLD_TO_COUNTRY / _domain_to_marketplace_id (удалены при рефакторинге).
 
 ---
 
@@ -505,8 +496,7 @@
 
 | Файл | Элемент | Тип | Доказательство |
 |---|---|---|---|
-| `backend/app/api/admin.py` | `TLD_TO_COUNTRY` | Переменная без использования | найдено только объявление |
-| `backend/app/api/admin.py` | `_domain_to_marketplace_id()` | Функция без вызовов | найдено только определение |
+| `backend/app/modules/core/api_admin.py` | — | Актуален: stats, users, claude-status, diagnostics/pool, products/clear-user-data | — |
 | `backend/app/scrapers/engine.py` | `ScraperFactory.register()` | Метод без вызовов | поиском `ScraperFactory.register(` совпадений нет |
 | `backend/app/schemas/markets.py` | `MarketsOverviewItem` | Схема не используется endpoint-ами | встречается только в `schemas/markets.py` |
 | `backend/app/schemas/markets.py` | `MarketsOverviewResponse` | Схема не используется endpoint-ами | встречается только в `schemas/markets.py` |
@@ -528,7 +518,7 @@
 - `api/import_export` -> `import_service`, `plan_limits`, `product_ai_service`
 - `api/ai` -> `ai_chat_service`
 - `api/markets` -> `market_data_service`, `markets_service`, `product_pool_service`
-- `api/admin` -> `claude_monitor`, `marketplace_pool_service`
+- `api/admin` (core.api_admin, marketplaces.api, scraper.api) -> `claude_monitor`, `MarketplacePoolService`
 - `api/product_pool` -> `product_pool_service`
 - `api/deps` -> `auth_service`
 
@@ -550,7 +540,7 @@
 
 ## 15. Критические риски/замечания
 
-- `api/admin.py` содержит сид-данные (`REAL_PRODUCT_URLS`) — противоречит подходу без хардкода.
+- Admin endpoints в `modules/core/api_admin.py` — без сид-данных. Диагностика pool через raw SQL к admin_marketplaces, global_products, discovery_logs.
 - Архитектура роутеров смешанная: часть через `api_router`, часть напрямую в `main.py`.
 - В `markets` схемах остались legacy `MarketsOverview*`, но `/markets/overview` возвращает plain `dict` из pool-сервиса.
 - `market_data_service.py` содержит large static `FUEL_PRICES` блок (если требование только real data — это риск расхождения).

@@ -152,24 +152,32 @@ async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
 async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesResponse:
     _ = current_user
     now = _now()
-    raw_items, error_msg, cached = await fetch_commodities()
-    items = [
-        {
-            "symbol": commodity["symbol"],
-            "name": commodity.get("name"),
-            "price": commodity["price"],
-            "change_24h": commodity.get("change_24h"),
-            "unit": commodity.get("unit"),
-            "refreshed_at": now,
-        }
-        for commodity in raw_items
-    ]
-    return MarketsCommoditiesResponse(
-        items=items,
-        error=error_msg,
-        cached=cached,
-        last_refreshed_at=now,
-    )
+    try:
+        raw_items, error_msg, cached = await fetch_commodities()
+        items = [
+            {
+                "symbol": commodity["symbol"],
+                "name": commodity.get("name"),
+                "price": commodity["price"],
+                "change_24h": commodity.get("change_24h"),
+                "unit": commodity.get("unit"),
+                "refreshed_at": now,
+            }
+            for commodity in raw_items
+        ]
+        return MarketsCommoditiesResponse(
+            items=items,
+            error=error_msg,
+            cached=cached,
+            last_refreshed_at=now,
+        )
+    except Exception:
+        return MarketsCommoditiesResponse(
+            items=[],
+            error="Commodities data temporarily unavailable",
+            cached=False,
+            last_refreshed_at=now,
+        )
 
 
 @router.get("/fuel")

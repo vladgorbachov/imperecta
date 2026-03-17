@@ -133,7 +133,7 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
 
 
 GOLDAPI_TTL = 129600
-ALPHA_VANTAGE_TTL = 86400
+ALPHA_VANTAGE_TTL = 14400  # 4h — free tier 25 req/day; 1 req per 4h keeps under limit
 GOLDAPI_METALS: list[tuple[str, str]] = [
     ("Gold", "XAU"),
     ("Silver", "XAG"),
