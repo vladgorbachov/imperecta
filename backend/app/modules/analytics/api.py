@@ -128,7 +128,7 @@ async def get_comparison_matrix(current_user: CurrentUser, db: DbSession) -> dic
 
 @router.get("/dashboard/summary")
 async def get_dashboard_summary(current_user: CurrentUser, db: DbSession) -> dict:
-    return await DashboardService(db, current_user.id).get_dashboard_summary()
+    return await DashboardService(db, current_user.id).get_kpi()
 
 
 @router.get("/dashboard/anomalies")

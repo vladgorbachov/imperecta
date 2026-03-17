@@ -165,6 +165,15 @@ async def _fetch_one_metal(
             "unit": "oz",
             "change_24h": change_24h,
         }
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 403:
+            logger.warning(
+                "GoldAPI %s: 403 Forbidden. Set GOLDAPI_KEY in Railway; key may be invalid or quota exceeded.",
+                symbol,
+            )
+        else:
+            logger.warning("GoldAPI %s fetch failed: %s", symbol, error)
+        return None
     except Exception as error:
         logger.warning("GoldAPI %s fetch failed: %s", symbol, error)
         return None
@@ -196,6 +205,10 @@ async def fetch_metals() -> dict:
                 result_items.append(item)
 
         result = {"items": result_items, "error": None}
+        if not result_items:
+            result["error"] = (
+                "Metals unavailable. Set GOLDAPI_KEY in Railway; 403 usually means invalid key or quota exceeded."
+            )
         _set_cached("commodities_metals", result)
         logger.info("Metals fetched: %d items from goldapi.io", len(result_items))
         return result
@@ -231,6 +244,10 @@ async def _fetch_alpha_vantage(
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
+        err_msg = data.get("Error Message") or data.get("Note")
+        if err_msg:
+            logger.warning("Alpha Vantage %s: API message: %s", symbol, err_msg[:200])
+            return None
         data_list = data.get("data")
         if not isinstance(data_list, list) or len(data_list) < 2:
             logger.warning("Alpha Vantage %s: insufficient data", symbol)
@@ -275,6 +292,10 @@ async def fetch_energy() -> dict:
                     result_items.append(item)
 
         result = {"items": result_items, "error": None}
+        if not result_items:
+            result["error"] = (
+                "Energy data unavailable. Check ALPHA_VANTAGE_KEY in Railway; free tier is 5 calls/min."
+            )
         _set_cached("commodities_energy", result)
         logger.info("Energy fetched: %d items from Alpha Vantage", len(result_items))
         return result

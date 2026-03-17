@@ -154,7 +154,11 @@ class ScraperPool:
         return layers
 
     async def _fetch_html_decodo(self, url: str) -> str | None:
+        """Fetch via Decodo API. Skip if disabled or credentials missing."""
+        if not settings.decodo_enabled:
+            return None
         if not (settings.decodo_username and settings.decodo_password):
+            logger.debug("Decodo credentials not configured, skipping")
             return None
         auth = base64.b64encode(
             f"{settings.decodo_username}:{settings.decodo_password}".encode()

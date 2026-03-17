@@ -155,7 +155,12 @@ class UniversalScraper(BaseScraper):
         raise ValueError("Could not extract price from page")
 
     async def _scrape_decodo(self, url: str) -> ScrapeResult | None:
-        """Use Decodo Web Scraping API for managed scraping."""
+        """Use Decodo Web Scraping API for managed scraping. Skip if disabled or credentials missing."""
+        if not settings.decodo_enabled:
+            return None
+        if not (settings.decodo_username and settings.decodo_password):
+            logger.debug("Decodo credentials not configured, skipping")
+            return None
         auth = base64.b64encode(
             f"{settings.decodo_username}:{settings.decodo_password}".encode()
         ).decode()
