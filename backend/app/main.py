@@ -8,14 +8,22 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import api_router
-from app.api.admin import router as admin_router
-from app.api.ai import router as ai_router
-from app.api.dashboard import router as dashboard_router
-from app.api.markets import router as markets_router
-from app.api.product_pool import router as pool_router
 from app.config import Settings
 from app.database import Base, engine
+from app.modules.ai_analyst.api import router as ai_router
+from app.modules.alerts.api import router as alerts_router
+from app.modules.analytics.api import router as analytics_router
+from app.modules.core.api_auth import router as auth_router
+from app.modules.core.api_telegram import router as telegram_router
+from app.modules.dashboard.api import router as dashboard_router
+from app.modules.digests.api import router as digests_router
+from app.modules.market_data.api import router as market_data_router
+from app.modules.marketplaces.api import router as marketplaces_router
+from app.modules.product_pool.api import router as pool_router
+from app.modules.scraper.api import router as scraper_admin_router
+from app.modules.user_products.api_competitors import router as competitors_router
+from app.modules.user_products.api_import import router as import_router
+from app.modules.user_products.api_products import router as products_router
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -46,7 +54,7 @@ async def _ensure_superuser() -> None:
     import asyncio
 
     from app.database import async_session_maker
-    from app.services.admin_service import ensure_superuser
+    from app.modules.core.admin_service import ensure_superuser
 
     for attempt in range(10):
         try:
@@ -104,12 +112,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api")
-app.include_router(admin_router, prefix="/api")
-app.include_router(ai_router, prefix="/api")
-app.include_router(dashboard_router, prefix="/api")
-app.include_router(markets_router, prefix="/api")
-app.include_router(pool_router, prefix="/api")
+for router in [
+    auth_router,
+    telegram_router,
+    marketplaces_router,
+    scraper_admin_router,
+    pool_router,
+    market_data_router,
+    dashboard_router,
+    products_router,
+    competitors_router,
+    import_router,
+    analytics_router,
+    alerts_router,
+    digests_router,
+    ai_router,
+]:
+    app.include_router(router, prefix="/api")
 
 
 @app.get("/health")

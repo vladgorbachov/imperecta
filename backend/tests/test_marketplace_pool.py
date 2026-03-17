@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 
 from app.database import async_session_maker
 from app.models import AdminMarketplace
-from app.services.marketplace_pool_service import MarketplacePoolService
+from app.modules.marketplaces.service import MarketplacePoolService
 
 
 def _unique_domain(suffix: str = "com") -> str:

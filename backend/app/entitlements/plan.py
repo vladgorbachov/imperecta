@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from app.models.user import UserPlan
+from app.modules.core.models import UserPlan
 
 
 class ServiceTier(str, Enum):

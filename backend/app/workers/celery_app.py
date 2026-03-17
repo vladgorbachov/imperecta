@@ -22,12 +22,10 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=None,  # Disabled to reduce Redis requests (task results not needed)
     include=[
-        "app.workers.scrape_tasks",
-        "app.workers.alert_tasks",
-        "app.workers.digest_tasks",
-        "app.workers.cleanup_tasks",
-        "app.workers.market_data_tasks",
-        "app.workers.discovery_tasks",
+        "app.modules.scraper.tasks",
+        "app.modules.alerts.tasks",
+        "app.modules.digests.tasks",
+        "app.modules.market_data.tasks",
     ],
 )
 celery_app.conf.update(

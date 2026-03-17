@@ -1,49 +1,68 @@
-"""SQLAlchemy models."""
+"""
+Re-export all ORM models for Alembic metadata discovery.
+Actual model code lives in app/modules/*/models.py.
+"""
 
-from app.models.admin_marketplace import AdminMarketplace
-from app.models.ai_chat import AIChatMessage, AIChatSession
-from app.models.alert import Alert
-from app.models.alert_event import AlertEvent
-from app.models.api_log import ApiLog
-from app.models.competitor import Competitor
-from app.models.competitor_product import CompetitorProduct
-from app.models.discovery_log import DiscoveryLog
-from app.models.digest import Digest
-from app.models.global_product import GlobalPriceSnapshot, GlobalProduct
-from app.models.markets_analytics import MarketsCategoryAnalytics, MarketsMarketplaceAnalytics
-from app.models.markets_opportunity import MarketsOpportunityBlock
-from app.models.markets_preferences import MarketsPreferences
-from app.models.markets_refresh_log import (
-    MarketsRefreshLog,
-    MarketsRefreshStatus,
-    MarketsRefreshType,
-)
-from app.models.markets_snapshots import (
+# Core
+# AI
+from app.modules.ai_analyst.models import AIChatMessage, AIChatSession
+
+# Alerts
+from app.modules.alerts.models import Alert, AlertEvent
+from app.modules.core.models import ApiLog, User, UserPlan
+
+# Digests
+from app.modules.digests.models import Digest
+
+# Market Data
+from app.modules.market_data.models import (
+    MarketsCategoryAnalytics,
     MarketsCommodity,
     MarketsCrypto,
     MarketsForex,
+    MarketsMarketplaceAnalytics,
+    MarketsOpportunityBlock,
+    MarketsPreferences,
+    MarketsRefreshLog,
+    MarketsRefreshStatus,
+    MarketsRefreshType,
     MarketsTickerItem,
 )
-from app.models.price_snapshot import PriceSnapshot
-from app.models.product import Product
-from app.models.scrape_log import ScrapeLog
-from app.models.user import User, UserPlan
+
+# Marketplaces
+from app.modules.marketplaces.models import AdminMarketplace
+
+# Product Pool
+from app.modules.product_pool.models import GlobalPriceSnapshot, GlobalProduct
+
+# Scraper
+from app.modules.scraper.models import DiscoveryLog, ScrapeLog
+
+# User Products
+from app.modules.user_products.models import (
+    Competitor,
+    CompetitorProduct,
+    PriceSnapshot,
+    Product,
+)
 
 __all__ = [
     "AdminMarketplace",
     "AIChatMessage",
     "AIChatSession",
     "ApiLog",
-    "ScrapeLog",
     "User",
     "UserPlan",
+    "ApiLog",
+    "AdminMarketplace",
+    "GlobalProduct",
+    "GlobalPriceSnapshot",
+    "ScrapeLog",
+    "DiscoveryLog",
     "Product",
     "Competitor",
     "CompetitorProduct",
-    "DiscoveryLog",
     "PriceSnapshot",
-    "GlobalProduct",
-    "GlobalPriceSnapshot",
     "Alert",
     "AlertEvent",
     "Digest",
@@ -58,4 +77,6 @@ __all__ = [
     "MarketsCategoryAnalytics",
     "MarketsMarketplaceAnalytics",
     "MarketsOpportunityBlock",
+    "AIChatSession",
+    "AIChatMessage",
 ]
