@@ -73,22 +73,53 @@ def discover_all_marketplaces():
     """Beat: discover products for all active marketplaces. Every 24h."""
 
     async def _do() -> dict:
+        from app.modules.marketplaces.service import MarketplacePoolService
+
+        logger.info("=== Starting discover_all_marketplaces ===")
         engine, session_factory = _make_session_factory()
         try:
             async with session_factory() as db:
+                # Recalculate quotas before discovery (fixes zero-quota when marketplaces added)
+                svc = MarketplacePoolService(db)
+                await svc.recalculate_all_quotas()
+                logger.info("Quotas recalculated")
+
                 result = await db.execute(
                     select(AdminMarketplace).where(AdminMarketplace.is_active.is_(True))
                 )
                 marketplaces = result.scalars().all()
+                logger.info("Found %d active marketplaces", len(marketplaces))
+
+                for mp in marketplaces:
+                    logger.info(
+                        "Marketplace %s: quota=%s, products_in_pool=%s, active=%s",
+                        mp.domain,
+                        mp.product_quota,
+                        mp.products_in_pool,
+                        mp.is_active,
+                    )
+
+                if not marketplaces:
+                    logger.info("No active marketplaces, skipping discovery")
+                    return {"marketplaces": 0, "completed": 0, "failed": 0}
+
                 pool = ScraperPool()
                 crawler = DiscoveryCrawler(db=db, scraper_pool=pool)
                 summary = {"marketplaces": len(marketplaces), "completed": 0, "failed": 0}
                 for marketplace in marketplaces:
                     discovery_result = await crawler.discover(marketplace)
+                    logger.info(
+                        "Discovery %s: status=%s, found=%d, new=%d",
+                        marketplace.domain,
+                        discovery_result.status,
+                        discovery_result.products_found,
+                        discovery_result.products_new,
+                    )
                     if discovery_result.status in {"completed", "partial"}:
                         summary["completed"] += 1
                     else:
                         summary["failed"] += 1
+                logger.info("=== Discovery completed: %s ===", summary)
                 return summary
         finally:
             await engine.dispose()
@@ -198,8 +229,8 @@ def check_pool_completeness():
     bind=True,
     max_retries=2,
     default_retry_delay=30,
-    soft_time_limit=60,
-    time_limit=90,
+    soft_time_limit=120,
+    time_limit=150,
 )
 def scrape_single(self, competitor_product_id: str):
     """Scrape a single competitor product URL."""

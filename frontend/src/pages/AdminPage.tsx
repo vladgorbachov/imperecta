@@ -122,8 +122,47 @@ function ClaudeStatusCard() {
     );
   }
 
-  const { health, stats } = data;
-  const status = health.status;
+  const health = data.health;
+  const stats = data.stats;
+
+  if (!health && !stats) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+          <p className="text-sm font-medium text-muted-foreground">
+            {t("admin.claude.title")}
+          </p>
+          <Brain className="size-4 shrink-0 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">
+            {data.configured
+              ? t("admin.claude.configured", { model: data.model ?? "—" })
+              : t("admin.claude.notConfigured")}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.stopPropagation();
+              refetch();
+            }}
+            disabled={isFetching}
+            className="mt-2"
+          >
+            {isFetching ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4" />
+            )}{" "}
+            {t("admin.claude.checkNow")}
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const status = health?.status ?? "not_configured";
 
   const statusLabel =
     status === "online"
@@ -168,9 +207,9 @@ function ClaudeStatusCard() {
       <CardContent>
         <div className="text-2xl font-bold">{statusLabel}</div>
         <p className="text-xs text-muted-foreground">
-          {t("admin.claude.latency", { ms: health.latency_ms })}
+          {t("admin.claude.latency", { ms: health?.latency_ms ?? 0 })}
         </p>
-        {expanded && (
+        {expanded && stats && (
           <div className="mt-4 space-y-2 border-t pt-4 text-xs">
             <p>
               {t("admin.claude.calls24h")}: {stats.calls_24h} (
@@ -247,7 +286,7 @@ function PoolManagementCard() {
     setLoadingAction("quotas");
     try {
       await recalculateQuotas();
-      toast.success("Квоты пересчитаны");
+      toast.success(t("admin.pool.quotasRecalculated"));
       await fetchDiagnostics();
     } catch {
       toast.error(t("common.error"));
@@ -260,7 +299,7 @@ function PoolManagementCard() {
     setLoadingAction("discovery");
     try {
       await triggerDiscoveryAll();
-      toast.success("Discovery поставлен в очередь");
+      toast.success(t("admin.pool.discoveryLaunched"));
     } catch {
       toast.error(t("common.error"));
     } finally {
@@ -272,7 +311,7 @@ function PoolManagementCard() {
     setLoadingAction("scrape");
     try {
       await triggerPoolScrape();
-      toast.success("Scraping поставлен в очередь");
+      toast.success(t("admin.pool.scrapingLaunched"));
     } catch {
       toast.error(t("common.error"));
     } finally {
@@ -281,13 +320,13 @@ function PoolManagementCard() {
   };
 
   const handleClearUserProducts = async () => {
-    if (!confirm("Удалить все тестовые товары пользователей? Это действие нельзя отменить.")) {
+    if (!confirm(t("admin.pool.clearConfirm"))) {
       return;
     }
     setLoadingAction("clear");
     try {
       const { data } = await clearUserProducts();
-      toast.success(`Удалено товаров: ${data.deleted_products}`);
+      toast.success(t("admin.pool.clearedCount", { count: data.deleted_products }));
       await fetchDiagnostics();
     } catch {
       toast.error(t("common.error"));
@@ -299,13 +338,13 @@ function PoolManagementCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Управление пулом товаров</CardTitle>
+        <CardTitle>{t("admin.pool.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
+              variant="default"
               size="sm"
               onClick={fetchDiagnostics}
               disabled={loadingDiagnostics}
@@ -315,70 +354,110 @@ function PoolManagementCard() {
               ) : (
                 <Stethoscope className="mr-2 size-4" />
               )}
-              Диагностика пула
+              {t("admin.pool.diagnostics")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={handleRecalculateQuotas}
               disabled={loadingAction === "quotas"}
+              className="border-amber-500 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400 dark:hover:bg-amber-500/20"
             >
               {loadingAction === "quotas" ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
                 <Calculator className="mr-2 size-4" />
               )}
-              Пересчитать квоты
+              {t("admin.pool.recalculateQuotas")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={handleTriggerDiscovery}
               disabled={loadingAction === "discovery"}
+              className="border-green-600 bg-green-600/10 text-green-700 hover:bg-green-600/20 dark:text-green-400 dark:hover:bg-green-600/20"
             >
               {loadingAction === "discovery" ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
                 <Play className="mr-2 size-4" />
               )}
-              Запустить Discovery
+              {t("admin.pool.triggerDiscovery")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onClick={handleTriggerScrape}
               disabled={loadingAction === "scrape"}
+              className="border-green-600 bg-green-600/10 text-green-700 hover:bg-green-600/20 dark:text-green-400 dark:hover:bg-green-600/20"
             >
               {loadingAction === "scrape" ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
                 <RefreshCw className="mr-2 size-4" />
               )}
-              Запустить Scraping
+              {t("admin.pool.triggerScraping")}
             </Button>
             <Button
-              variant="outline"
+              variant="destructive"
               size="sm"
               onClick={handleClearUserProducts}
               disabled={loadingAction === "clear"}
-              className="text-destructive hover:text-destructive"
             >
               {loadingAction === "clear" ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
                 <Scissors className="mr-2 size-4" />
               )}
-              Удалить тестовые товары
+              {t("admin.pool.clearUserProducts")}
             </Button>
           </div>
           {diagnostics && (
-            <div className="rounded-lg border bg-muted/30 p-4">
-              <p className="mb-2 text-sm font-medium text-muted-foreground">
-                Результат диагностики:
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("admin.pool.diagnosticsResult")}
               </p>
-              <pre className="max-h-64 overflow-auto text-xs">
-                {JSON.stringify(diagnostics, null, 2)}
-              </pre>
+              <div className="space-y-1 text-sm">
+                <p>
+                  {t("admin.pool.marketplaces")}:{" "}
+                  {diagnostics.marketplaces?.total ?? 0}{" "}
+                  ({t("admin.pool.active")}:{" "}
+                  {diagnostics.markplaces?.active ?? 0}, quota=0:{" "}
+                  {diagnostics.markplaces?.zero_quota ?? 0})
+                </p>
+                <p>
+                  {t("admin.pool.productsInPool")}:{" "}
+                  {diagnostics.global_products?.total ?? 0}
+                </p>
+                <p>
+                  {t("admin.pool.priceSnapshots")}:{" "}
+                  {diagnostics.price_snapshots ?? 0}
+                </p>
+                <p>
+                  {t("admin.pool.discoveryLogs")}:{" "}
+                  {diagnostics.discovery_logs?.total ?? 0}
+                </p>
+                {(diagnostics.diagnosis ?? []).length > 0 && (
+                  <>
+                    <p className="mt-2 font-medium text-amber-600 dark:text-amber-400">
+                      ⚠️ {t("admin.pool.problems")}:
+                    </p>
+                    <ul className="list-inside list-disc space-y-1 text-muted-foreground">
+                      {(diagnostics.diagnosis ?? []).map((msg, i) => (
+                        <li key={i}>{msg}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-muted-foreground hover:underline">
+                  {t("admin.pool.showRawJson")}
+                </summary>
+                <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted/50 p-2 text-xs">
+                  {JSON.stringify(diagnostics, null, 2)}
+                </pre>
+              </details>
             </div>
           )}
         </div>
@@ -498,10 +577,11 @@ export function AdminPage() {
     return statusOrder(a) - statusOrder(b);
   });
 
+  const errorRate = stats?.error_rate_today ?? 0;
   const errorRateColor =
-    stats && stats.error_rate_today < 5
+    errorRate < 5
       ? "text-[var(--color-price-down)]"
-      : stats && stats.error_rate_today <= 15
+      : errorRate <= 15
         ? "text-[var(--color-promo)]"
         : "text-[var(--color-price-up)]";
 
@@ -524,7 +604,9 @@ export function AdminPage() {
             {statsLoading ? (
               <Skeleton className="h-8 w-12" />
             ) : (
-              <div className="text-2xl font-bold">{stats?.users_count ?? 0}</div>
+              <div className="text-2xl font-bold">
+                {stats?.users_count ?? stats?.users ?? 0}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -542,11 +624,12 @@ export function AdminPage() {
             ) : (
               <>
                 <div className="text-2xl font-bold">
-                  {stats?.marketplaces_count ?? 0}
+                  {stats?.marketplaces_count ?? stats?.marketplaces ?? 0}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t("admin.stats.activeMarketplaces", {
-                    count: stats?.active_marketplaces_count ?? 0,
+                    count:
+                      stats?.active_marketplaces_count ?? stats?.marketplaces ?? 0,
                   })}
                 </p>
               </>
@@ -591,7 +674,7 @@ export function AdminPage() {
             ) : (
               <div className={`text-2xl font-bold ${errorRateColor}`}>
                 {t("admin.stats.errorRate", {
-                  rate: stats?.error_rate_today ?? 0,
+                  rate: errorRate,
                 })}
               </div>
             )}
@@ -631,9 +714,6 @@ export function AdminPage() {
 
       <MarketsRefreshCard />
 
-      {/* Pool management */}
-      <PoolManagementCard />
-
       {/* Scrape activity chart */}
       <Card>
         <CardHeader>
@@ -665,6 +745,9 @@ export function AdminPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pool management — after Scrape activity */}
+      <PoolManagementCard />
 
       {/* Error distribution */}
       <Card>
@@ -784,11 +867,11 @@ export function AdminPage() {
               {(users ?? []).map((u) => (
                 <TableRow key={u.id}>
                   <TableCell>{u.email}</TableCell>
-                  <TableCell>{u.name}</TableCell>
+                  <TableCell>{u.name ?? u.email?.split("@")[0] ?? "—"}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{u.plan}</Badge>
+                    <Badge variant="secondary">{u.plan ?? "—"}</Badge>
                   </TableCell>
-                  <TableCell>{u.products_count}</TableCell>
+                  <TableCell>{u.products_count ?? 0}</TableCell>
                   <TableCell>{formatDate(u.created_at, locale)}</TableCell>
                   <TableCell>
                     {u.last_login_at

@@ -248,11 +248,9 @@ function CommoditiesWidget() {
   if (items.length === 0) {
     return (
       <WidgetCard title={t("widgets.commodities.title")}>
-        {data?.error ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{data.error}</p>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
-        )}
+        <p className="text-sm text-muted-foreground">
+          {data?.error ? t("widgets.commodities.unavailable") : t("common.noData")}
+        </p>
       </WidgetCard>
     );
   }
