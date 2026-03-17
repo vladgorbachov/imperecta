@@ -1,20 +1,16 @@
 # Imperecta — Описание проекта для Cursor IDE
 
-## Актуализация (после PR-7)
+## Актуализация (после PR-7 и PR-1–PR-5)
 
-- Backend работает в модульной архитектуре `backend/app/modules/*`; legacy proxy-слой удалён.
-- `backend/app/api/*`, `backend/app/services/*`, `backend/app/schemas/*`, `backend/app/scrapers/*`, `backend/app/notifications/*` больше не являются runtime-слоем (удалены/заменены).
-- Все backend-роутеры монтируются в `backend/app/main.py` напрямую из `modules/*` под префиксом `/api`.
-- Добавлена миграция `backend/alembic/versions/016_drop_digest_summary_json.py`.
-- Актуальные фоновые задачи подключаются из:
-  - `app.modules.scraper.tasks`
-  - `app.modules.alerts.tasks`
-  - `app.modules.digests.tasks`
-  - `app.modules.market_data.tasks`
-- В `backend/app/workers/` остаются инфраструктурные файлы: `celery_app.py`, `scheduler.py`, `cleanup_tasks.py`.
-- Актуальные пути модулей:
-  - `modules/core`, `modules/marketplaces`, `modules/scraper`, `modules/product_pool`, `modules/market_data`, `modules/dashboard`, `modules/user_products`, `modules/analytics`, `modules/alerts`, `modules/digests`, `modules/ai_analyst`.
-- Часть нижних разделов этого документа содержит исторический снимок структуры до финальной чистки; ориентироваться на разделы "backend/app (модульная архитектура)" и "backend/app/modules (актуальные домены)".
+- Backend в модульной архитектуре `backend/app/modules/*`. Роутеры из `modules/*` под префиксом `/api` в `main.py`.
+- **Alembic:** 015 = `015_global_products`, 016 = `016_drop_digest_summary_json`.
+- **Digests:** `generate_digest` из `app.modules.ai_analyst.claude_client`.
+- **Celery:** `celery_app.conf.include` (scraper, alerts, digests, market_data); `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, digests, cleanup.
+- **Decodo:** в `scraper/engine.py` и `scraper/scraper_pool.py` слой Decodo вызывается только при `decodo_enabled` и непустых `decodo_username` и `decodo_password`; при пустых credentials — skip и fallback на httpx/Playwright.
+- **API:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()`. `/api/markets/overview` limit до 500. Commodities: при ошибках GoldAPI/Alpha Vantage в ответе поле `error` (без mock-данных).
+- Pipeline: marketplaces → discovery → scraping → виджеты; админ: POST `/api/admin/marketplaces/add-by-url`, POST `/api/admin/discovery/trigger-all`, GET `/api/pool/stats`.
+- Модули: core, marketplaces, scraper, product_pool, market_data, dashboard, user_products, analytics, alerts, digests, ai_analyst.
+- Ниже — исторический снимок; ориентир — разделы про модульную архитектуру и актуальные домены.
 
 ## Обзор
 

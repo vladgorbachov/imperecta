@@ -1,62 +1,38 @@
 # Полный аудит backend (read-only)
 
-## Актуализация (после PR-7, модульная архитектура)
+## Актуализация (после PR-7 и PR-1–PR-5)
 
 Дата актуализации: 2026-03-17
 
 ### Ключевой факт
-- Backend полностью переведён на модульную структуру `backend/app/modules/*`.
-- Legacy proxy-слой удалён: `backend/app/api/*`, `backend/app/services/*`, `backend/app/schemas/*`, `backend/app/scrapers/*`, `backend/app/notifications/*` (кроме служебных `__init__.py` в оставшихся каталогах).
+- Backend в модульной структуре `backend/app/modules/*`. Legacy api/services/schemas/scrapers/notifications удалены как runtime.
 
 ### Фактическая структура backend/app
-- `common/`: `deps.py`, `exceptions.py`.
-- `modules/core`: auth/users/plans/admin bootstrap.
-- `modules/marketplaces`: marketplace pool.
-- `modules/scraper`: discovery, scraping engine, tasks, admin scraper API.
-- `modules/product_pool`: global products pool API/service/models.
-- `modules/market_data`: providers, ingestion, aggregation, tasks, markets API.
-- `modules/dashboard`: dashboard and markets analytics endpoints.
-- `modules/user_products`: products/competitors/import.
-- `modules/analytics`: forecast/benchmark APIs.
-- `modules/alerts`: alerts API/service/models/tasks/notifications.
-- `modules/digests`: digests API/service/models/tasks.
-- `modules/ai_analyst`: chat API/service/models/claude client/monitor.
+- `common/`: deps.py, exceptions.py.
+- `modules/core`, `modules/marketplaces`, `modules/scraper`, `modules/product_pool`, `modules/market_data`, `modules/dashboard`, `modules/user_products`, `modules/analytics`, `modules/alerts`, `modules/digests`, `modules/ai_analyst`.
 
-### Подключение роутеров
-- В `backend/app/main.py` подключаются только роутеры из `modules/*` под префиксом `/api`.
-- Legacy `api_router` не используется (`backend/app/api/__init__.py` оставлен как legacy marker).
+### Роутеры
+- В `main.py` только роутеры из `app.modules.*` под префиксом `/api`.
 
-### Celery/Beat (актуально)
-- `backend/app/workers/celery_app.py` включает:
-  - `app.modules.scraper.tasks`
-  - `app.modules.alerts.tasks`
-  - `app.modules.digests.tasks`
-  - `app.modules.market_data.tasks`
-- `backend/app/workers/scheduler.py` использует актуальные task names:
-  - `scrape_all`
-  - `discover_all_marketplaces`
-  - `scrape_all_pool_products`
-  - `check_pool_completeness`
-  - `ingest_market_data`
-  - `cleanup_old_data`
-  - `app.modules.digests.tasks.schedule_weekly_digests`
-  - `app.modules.digests.tasks.schedule_daily_digests`
+### Celery/Beat
+- `celery_app.conf.include`: scraper, alerts, digests, market_data. `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, cleanup, digests (weekly/daily).
 
 ### Миграции
-- Добавлена `016_drop_digest_summary_json.py`:
-  - удаляет неиспользуемую колонку `digests.summary_json`.
+- 015 = `015_global_products`, 016 = `016_drop_digest_summary_json`.
 
-### Тесты и проверки (последний прогон)
-- `python -c "from app.main import app; print('App OK')"`: OK.
-- `python -c "from app.models import *; print('Models OK')"`: OK.
-- `python -m ruff check app/ --select F401,F811,F821`: OK.
-- `python -m ruff check app/`: остаются legacy style issues (исторические по проекту, не только по PR-7).
-- `pytest tests/`: не проходит в локальном окружении без поднятой PostgreSQL (`Connection refused 127.0.0.1:5432`).
-- `python -m alembic check`: не проходит по той же причине (нет доступной DB).
+### Изменения PR-1–PR-5
+- **PR-1:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()` (метод `get_dashboard_summary` отсутствовал).
+- **PR-2:** GET `/api/markets/overview` limit увеличен с 100 до 500.
+- **PR-3:** Commodities (GoldAPI/Alpha Vantage): при пустом результате или 403 выставляется `error` в ответе; проверка `Error Message`/`Note` в ответе Alpha Vantage; без mock-данных.
+- **PR-4:** Pipeline проверен: MarketplacePoolService.list_all, ScraperPool, DiscoveryCrawler, Celery tasks, Beat schedule. Админ: add-by-url, import-file, discovery/trigger-all, pool/stats.
+- **PR-5:** Decodo: в `_fetch_html_decodo` (scraper_pool) и `_scrape_decodo` (engine) в начале проверка `decodo_enabled` и наличие username/password; при отсутствии — skip и fallback (httpx/Playwright).
 
-### Статус этого файла
-- Ниже в документе находится исторический аудит до финальной чистки.
-- Источником истины по текущей архитектуре считать этот блок "Актуализация".
+### Кросс-модульные зависимости
+- Digests: `generate_digest` из `app.modules.ai_analyst.claude_client`.
+- Decodo: только при `decodo_enabled` и заданных credentials.
+
+### Статус файла
+- Ниже — исторический аудит. Источник истины — этот блок «Актуализация».
 
 Дата: 2026-03-15  
 Режим: **только чтение**, без изменений кода.
