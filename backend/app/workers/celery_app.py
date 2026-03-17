@@ -21,12 +21,6 @@ celery_app = Celery(
     "imperecta",
     broker=settings.redis_url,
     backend=None,  # Disabled to reduce Redis requests (task results not needed)
-    include=[
-        "app.modules.scraper.tasks",
-        "app.modules.alerts.tasks",
-        "app.modules.digests.tasks",
-        "app.modules.market_data.tasks",
-    ],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -36,6 +30,12 @@ celery_app.conf.update(
     broker_pool_limit=5,  # Reduce Redis connections for Upstash limits
     **_broker_options,
 )
+celery_app.conf.include = [
+    "app.modules.scraper.tasks",
+    "app.modules.alerts.tasks",
+    "app.modules.digests.tasks",
+    "app.modules.market_data.tasks",
+]
 
 # Load beat schedule from scheduler module
 from app.workers import scheduler  # noqa: F401, E402

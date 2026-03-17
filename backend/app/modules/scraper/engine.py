@@ -123,7 +123,7 @@ class UniversalScraper(BaseScraper):
 
     async def _scrape_impl(self, url: str) -> ScrapeResult:
         """Main entry point. Decodo first, then Playwright fallback."""
-        if settings.decodo_enabled and settings.decodo_username:
+        if settings.decodo_enabled and settings.decodo_username and settings.decodo_password:
             result = await self._scrape_decodo(url)
             if result and result.price:
                 result.extraction_method = "decodo_api"

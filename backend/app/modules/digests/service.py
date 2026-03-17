@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PriceSnapshot, Product, User
-from app.modules.ai_analyst.service import generate_digest as ai_generate_digest
+from app.modules.ai_analyst.claude_client import generate_digest as ai_generate_digest
 from app.modules.alerts.notifications import send_digest, send_digest_email_to_user
 from app.modules.digests.models import Digest
 

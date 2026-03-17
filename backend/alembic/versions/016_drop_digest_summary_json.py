@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "016_drop_digest_summary_json"
-down_revision: Union[str, None] = "015_add_global_products_and_extend_marketplaces"
+down_revision: Union[str, None] = "015_global_products"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
