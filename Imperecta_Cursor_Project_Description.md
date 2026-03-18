@@ -1,18 +1,21 @@
 # Imperecta — Описание проекта для Cursor IDE
 
-## Актуализация (после PR-7 и PR-1–PR-5)
+## Актуализация (после PR-7, PR-1–PR-5, Fix Discovery/MarketData)
 
 - Backend в модульной архитектуре `backend/app/modules/*`. Роутеры из `modules/*` под префиксом `/api` в `main.py`.
 - **Alembic:** 015 = `015_global_products`, 016 = `016_drop_digest_summary_json`.
 - **Digests:** `generate_digest` из `app.modules.ai_analyst.claude_client`.
-- **Celery:** `celery_app.conf.include` (scraper, alerts, digests, market_data); `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, digests, cleanup.
-- **Decodo:** в `scraper/engine.py` и `scraper/scraper_pool.py` слой Decodo вызывается только при `decodo_enabled` и непустых `decodo_username` и `decodo_password`; при пустых credentials — skip и fallback на httpx/Playwright.
-- **API:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()`. `/api/markets/overview` limit до 500. Commodities: при ошибках GoldAPI/Alpha Vantage в ответе поле `error`; `/api/markets/commodities` возвращает `{items, error}` (без 500).
-- **Rate limits:** ingestion `_fetch_with_retry` — exponential backoff при 429 (30s, 60s, 90s). Alpha Vantage TTL 4h (25 req/day free tier). Commodities widget: «Данные недоступны» при error.
-- **Admin Page:** frontend resilient к формату backend (stats: users/marketplaces, users: name/products_count fallback, claude-status: configured/model). Секция «Управление пулом товаров» после «Активность парсинга» — диагностика, пересчёт квот, Discovery, Scraping, удаление пользовательских товаров; human-readable вывод + raw JSON.
+- **Celery:** `celery_app.conf.include` (scraper, alerts, digests, market_data); `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, ingest_commodities (4×/день 0,6,12,18), digests, cleanup.
+- **Decodo:** в `scraper/scraper_pool.py` — Decodo → httpx → Playwright; после успешного Decodo HTML не перезапрашивается через Playwright. `scrape_pool_product` soft_time_limit=120, time_limit=150.
+- **Discovery:** каждый URL товара = отдельная запись GlobalProduct. Валидация URL (http, длина ≤2000). POST `/api/admin/products/cleanup-invalid` — удаление невалидных записей.
+- **Crypto:** Binance API primary (50 монет), CoinGecko backup. `CryptoCompositeAdapter`, `BinanceCryptoAdapter`.
+- **Commodities:** 6 символов (XAU, XAG, XPT, XPD, WTI, BRENT). Отдельная задача `ingest_commodities` 4×/день. GET `/api/markets/commodities` читает из БД (markets_commodities).
+- **API:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()`. `/api/markets/overview` limit до 500. Commodities: данные из БД; при ошибках GoldAPI/Alpha Vantage — кеш/последние сохранённые.
+- **Rate limits:** ingestion `_fetch_with_retry` — exponential backoff при 429. Alpha Vantage TTL 4h. GoldAPI: при 403/429 — использование кеша из БД.
+- **Admin Page:** секция «Состояние API» (GET `/api/admin/api-health`), кнопки «Очистить невалидные товары», «Дедупликация маркетплейсов». Управление пулом: диагностика, пересчёт квот, Discovery, Scraping, clear user products.
 - **Products:** страница с двумя вкладками — «Все товары» (GET `/api/pool/products`) и «Мои товары» (GET `/api/products`). Компоненты: `PoolProductsTab`, `MyProductsTab`, хук `usePoolProducts`.
 - **Import:** поддерживает .csv, .tsv, .xls, .xlsx, .xlsm. Preview и upload через `/api/import/products/preview` и `/api/import/products/csv`.
-- **Admin pool:** GET `/api/admin/diagnostics/pool`, POST `/api/admin/marketplaces/recalculate-quotas`, POST `/api/admin/marketplaces/set-requires-js`, POST `/api/admin/products/clear-user-data`. Discovery/scrape: POST `/api/admin/discovery/trigger-all`, POST `/api/admin/pool/trigger-scrape`.
+- **Admin pool:** GET `/api/admin/diagnostics/pool`, GET `/api/admin/api-health`, POST `/api/admin/marketplaces/recalculate-quotas`, POST `/api/admin/marketplaces/deduplicate`, POST `/api/admin/marketplaces/set-requires-js`, POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/products/clear-user-data`. Discovery/scrape: POST `/api/admin/discovery/trigger-all`, POST `/api/admin/pool/trigger-scrape`.
 - Pipeline: marketplaces → discovery → scraping → виджеты; админ: add-by-url, discovery/trigger-all, pool/trigger-scrape, diagnostics, recalculate-quotas.
 - Модули: core, marketplaces, scraper, product_pool, market_data, dashboard, user_products, analytics, alerts, digests, ai_analyst.
 - Ниже — исторический снимок; ориентир — разделы про модульную архитектуру и актуальные домены.
@@ -115,12 +118,15 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **admin** | GET | /api/admin/stats | Статистика админки |
 | **admin** | GET | /api/admin/users | Список пользователей |
 | **admin** | GET | /api/admin/claude-status | Статус Claude API |
+| **admin** | GET | /api/admin/api-health | Статус внешних API (forex, crypto, commodities, decodo, claude и др.) |
 | **admin** | GET | /api/admin/diagnostics/pool | Диагностика пула (marketplaces, products, discovery_logs) |
+| **admin** | POST | /api/admin/products/cleanup-invalid | Удаление global_products с невалидными URL |
 | **admin** | POST | /api/admin/products/clear-user-data | Удаление всех пользовательских товаров |
 | **admin** | DELETE | /api/admin/products/clear-test-data | Удаление тестовых товаров |
 | **admin** | GET | /api/admin/marketplaces | Список маркетплейсов |
 | **admin** | GET | /api/admin/marketplaces/{marketplace_id}/logs | Логи маркетплейса |
 | **admin** | POST | /api/admin/marketplaces | Добавление маркетплейса |
+| **admin** | POST | /api/admin/marketplaces/deduplicate | Дедупликация маркетплейсов (rozetka.ua ↔ rozetka.com.ua) |
 | **admin** | POST | /api/admin/marketplaces/recalculate-quotas | Пересчёт квот пула |
 | **admin** | POST | /api/admin/marketplaces/set-requires-js | Установка requires_js для маркетплейсов |
 | **admin** | DELETE | /api/admin/marketplaces/{marketplace_id} | Удаление маркетплейса |
@@ -333,8 +339,9 @@ imperecta/
 │   │   │   │   ├── __init__.py
 │   │   │   │   └── providers/
 │   │   │   │       ├── base.py
+│   │   │   │       ├── binance_adapter.py    # Binance API (crypto primary)
 │   │   │   │       ├── commodities_adapter.py
-│   │   │   │       ├── crypto_adapter.py
+│   │   │   │       ├── crypto_adapter.py      # CryptoCompositeAdapter (Binance+CoinGecko)
 │   │   │   │       ├── forex_adapter.py
 │   │   │   │       ├── fuel_adapter.py
 │   │   │   │       └── __init__.py
@@ -756,7 +763,8 @@ imperecta/
 | scrape_single | API / scrape_all | Парсинг одного competitor_product: fetch → extract → price_snapshots → competitor_product.last_price → ScrapeLog |
 | scrape_user_products | API | Парсинг всех товаров пользователя (stagger) |
 | scrape_all | Beat каждые 6 ч | Очередь scrape_single для всех активных competitor_products |
-| ingest_market_data | Beat каждые 2 ч | Загрузка forex, crypto, commodities; fresh engine+session per run (avoids asyncpg event loop error) |
+| ingest_market_data | Beat каждые 2 ч | Загрузка forex, crypto, fuel (без commodities); fresh engine+session per run |
+| ingest_commodities | Beat 0,6,12,18 UTC | Загрузка commodities (6 символов: XAU, XAG, XPT, XPD, WTI, BRENT) |
 | discover_all_marketplaces | Beat ежедневно 03:00 | Discovery URL товаров по активным маркетплейсам |
 | scrape_all_pool_products | Beat каждые 6 ч | Массовый скрейпинг stale товаров из global pool |
 | check_pool_completeness | Beat каждые 3 ч (:30) | Поиск и переочередь incomplete товаров в global pool |
