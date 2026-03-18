@@ -80,6 +80,7 @@ import {
   triggerPoolScrape,
   clearUserProducts,
   cleanupInvalidProducts,
+  clearPool,
   deduplicateMarketplaces,
   type PoolDiagnostics,
 } from "@/api/admin";
@@ -343,9 +344,29 @@ function PoolManagementCard() {
     setLoadingAction("cleanup");
     try {
       const { data } = await cleanupInvalidProducts();
-      toast.success(
-        `Удалено: ${data.deleted_long_urls} длинных URL, ${data.deleted_invalid_urls} невалидных`
-      );
+      const parts = [
+        data.deleted_long_urls > 0 && `${data.deleted_long_urls} длинных URL`,
+        data.deleted_invalid_urls > 0 && `${data.deleted_invalid_urls} невалидных`,
+        (data.deleted_category_pages ?? 0) > 0 &&
+          `${data.deleted_category_pages} страниц категорий`,
+      ].filter(Boolean);
+      toast.success(parts.length ? `Удалено: ${parts.join(", ")}` : "Нечего удалять");
+      await fetchDiagnostics();
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleClearPool = async () => {
+    if (!confirm("Удалить ВСЕ товары из пула? Запустите Discovery заново после этого.")) {
+      return;
+    }
+    setLoadingAction("clearPool");
+    try {
+      const { data } = await clearPool();
+      toast.success(`Пул очищен: удалено ${data.deleted} товаров`);
       await fetchDiagnostics();
     } catch {
       toast.error(t("common.error"));
@@ -468,6 +489,20 @@ function PoolManagementCard() {
                 <Merge className="mr-2 size-4" />
               )}
               Дедупликация маркетплейсов
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearPool}
+              disabled={loadingAction === "clearPool"}
+              className="border-red-500/50 text-red-600 hover:bg-red-500/10 dark:text-red-400"
+            >
+              {loadingAction === "clearPool" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Scissors className="mr-2 size-4" />
+              )}
+              Очистить пул полностью
             </Button>
           </div>
           {diagnostics && (

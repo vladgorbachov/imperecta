@@ -151,10 +151,31 @@ export const clearUserProducts = () =>
 export interface CleanupInvalidResponse {
   deleted_long_urls: number;
   deleted_invalid_urls: number;
+  deleted_category_pages?: number;
 }
 
 export const cleanupInvalidProducts = () =>
   apiClient.post<CleanupInvalidResponse>("/admin/products/cleanup-invalid");
+
+export const clearPool = () =>
+  apiClient.post<{ deleted: number; message: string }>("/admin/products/clear-pool");
+
+export const getSampleProducts = () =>
+  apiClient.get<
+    Array<{
+      id: number;
+      url: string;
+      url_length: number;
+      title: string | null;
+      current_price: number | null;
+      image_url: string | null;
+      status: string;
+      marketplace_id: number;
+      last_scraped_at: string | null;
+      scrape_error_count: number;
+      last_scraper_layer: string | null;
+    }>
+  >("/admin/diagnostics/sample-products");
 
 export interface DeduplicateMarketplacesResponse {
   merged: number;

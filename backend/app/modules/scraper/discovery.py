@@ -220,7 +220,16 @@ class DiscoveryCrawler:
                 path = parsed.path.lower()
                 if any(
                     token in path
-                    for token in ("/category/", "/c/", "/catalog/", "/shop/", "/products/")
+                    for token in (
+                        "/category/",
+                        "/c/",
+                        "/catalog/",
+                        "/shop/",
+                        "/products/",
+                        "/computer/",
+                        "/ru/",
+                        "/ua/",
+                    )
                 ):
                     collected.append(f"{parsed.scheme}://{parsed.netloc}{parsed.path}")
         return list(dict.fromkeys(collected))
@@ -269,6 +278,13 @@ class DiscoveryCrawler:
     def _looks_like_product_url(url: str) -> bool:
         parsed = urlparse(url)
         path = parsed.path.lower()
-        return any(
+        if any(
             token in path for token in ("/product/", "/products/", "/item/", "/p/", "/tovar/", "/dp/")
-        ) or bool(re.search(r"/\d{4,}", path))
+        ):
+            return True
+        if re.search(r"/\d{4,}", path):
+            return True
+        if ".html" in path:
+            return True
+        segments = [s for s in path.split("/") if s]
+        return len(segments) >= 3
