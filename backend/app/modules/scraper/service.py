@@ -1,5 +1,6 @@
 """Scraper services: global pool scraping and competitor product scraping."""
 
+import logging
 import statistics
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -13,6 +14,9 @@ from app.modules.marketplaces.models import AdminMarketplace
 from app.modules.product_pool.models import GlobalPriceSnapshot, GlobalProduct
 from app.modules.scraper.engine import ScrapeResult, ScraperFactory
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
+
+logger = logging.getLogger(__name__)
+MAX_VALID_PRICE = 9_999_999_999.99  # Max for Numeric(12,2)
 
 
 class GlobalScrapeService:
@@ -49,10 +53,19 @@ class GlobalScrapeService:
 
         if result.success and result.data:
             data = result.data
+            price = data.price
+            if price is not None:
+                if price > MAX_VALID_PRICE or price <= 0:
+                    logger.warning(
+                        "Price overflow or invalid %.2f for %s, discarding",
+                        price,
+                        product.url[:80],
+                    )
+                    price = None
             product.title = data.title or product.title
             product.description = data.description or product.description
             product.image_url = data.image_url or product.image_url
-            product.current_price = data.price if data.price is not None else product.current_price
+            product.current_price = price if price is not None else product.current_price
             product.original_price = (
                 data.original_price if data.original_price is not None else product.original_price
             )
@@ -61,10 +74,10 @@ class GlobalScrapeService:
             product.status = "active"
             product.scrape_error_count = 0
 
-            if data.price is not None:
+            if price is not None:
                 snapshot = GlobalPriceSnapshot(
                     global_product_id=product.id,
-                    price=data.price,
+                    price=price,
                     original_price=data.original_price,
                     currency=data.currency or product.currency or "USD",
                     scraper_layer=result.scraper_layer,
@@ -79,7 +92,11 @@ class GlobalScrapeService:
 
         await self.db.flush()
         await self.recalculate_analytics(product.id)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception as e:
+            logger.error("Failed to save scrape result for %s: %s", product.url[:80], e)
+            await self.db.rollback()
         return result
 
     async def get_stale_products(self, limit: int = 500) -> list[GlobalProduct]:

@@ -32,6 +32,10 @@ def _run_async(coro):
     try:
         return loop.run_until_complete(coro)
     finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
         loop.close()
 
 
