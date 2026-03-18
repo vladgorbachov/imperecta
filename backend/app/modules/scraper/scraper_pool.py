@@ -28,6 +28,7 @@ from app.modules.scraper.extractors import (
 
 logger = logging.getLogger(__name__)
 settings = Settings()
+MAX_VALID_PRICE = 9_999_999_999.99  # Max for Numeric(12,2)
 
 
 @dataclass
@@ -86,6 +87,15 @@ class ScraperPool:
             )
 
         merged = self._extract_all_levels(html, url, custom_selectors)
+        if merged.price is not None and (
+            merged.price > MAX_VALID_PRICE or merged.price <= 0
+        ):
+            logger.warning(
+                "Price overflow %.2f for %s, discarding",
+                merged.price,
+                url[:80],
+            )
+            merged.price = None
         if merged.price is None:
             return PoolScrapeResult(
                 success=False,

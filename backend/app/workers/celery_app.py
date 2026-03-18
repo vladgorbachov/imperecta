@@ -26,8 +26,19 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
+    broker_connection_retry=True,
     broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=10,
     broker_pool_limit=5,  # Reduce Redis connections for Upstash limits
+    broker_transport_options={
+        "retry_policy": {
+            "timeout": 30.0,
+            "max_retries": 10,
+            "interval_start": 1,
+            "interval_step": 2,
+            "interval_max": 30,
+        }
+    },
     **_broker_options,
 )
 celery_app.conf.include = [

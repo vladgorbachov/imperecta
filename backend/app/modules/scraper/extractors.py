@@ -439,7 +439,7 @@ def extract_product_links(
     base_url: str,
     custom_selector: str | None = None,
 ) -> list[str]:
-    """Extract product URLs from category/listing page."""
+    """Extract product URLs from category/listing page. Strict filtering excludes category URLs."""
     links = []
     if custom_selector:
         links = soup.select(custom_selector)
@@ -447,7 +447,7 @@ def extract_product_links(
         links = soup.find_all("a", href=True)
 
     parsed_base = urlparse(base_url)
-    output: list[str] = []
+    collected: list[str] = []
     seen: set[str] = set()
     for link in links:
         href = link.get("href")
@@ -471,8 +471,37 @@ def extract_product_links(
         if normalized in seen:
             continue
         seen.add(normalized)
-        output.append(normalized)
-    return output
+        collected.append(normalized)
+
+    filtered: list[str] = []
+    for url in collected:
+        path = urlparse(url).path.lower()
+        if "/list/" in path:
+            continue
+        if "/category/" in path and not re.search(r"/\d{4,}", path):
+            continue
+        if "/catalog/" in path and not re.search(r"/\d{4,}", path):
+            continue
+        if "/search" in path:
+            continue
+        if path.endswith("/") and path.count("/") <= 3:
+            continue
+        if re.search(r"/\d{5,}", path):
+            filtered.append(url)
+            continue
+        if ".html" in path:
+            filtered.append(url)
+            continue
+        if re.search(r"[-_]\d{4,}", path):
+            filtered.append(url)
+            continue
+        if "/p/" in path or "/product/" in path or "/tovar/" in path:
+            filtered.append(url)
+            continue
+        segments = [s for s in path.split("/") if s]
+        if len(segments) >= 4:
+            filtered.append(url)
+    return filtered
 
 
 def detect_next_page(
