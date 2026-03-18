@@ -70,7 +70,7 @@ def _update_admin_marketplace(db, marketplace_id: str, status: str, error_messag
 
 @celery_app.task(name="discover_all_marketplaces")
 def discover_all_marketplaces():
-    """Beat: discover products for all active marketplaces. Every 24h."""
+    """Dispatch individual discovery tasks. Each gets fresh DB session (avoids connection timeout)."""
 
     async def _do() -> dict:
         from app.modules.marketplaces.service import MarketplacePoolService
@@ -79,70 +79,39 @@ def discover_all_marketplaces():
         engine, session_factory = _make_session_factory()
         try:
             async with session_factory() as db:
-                # Recalculate quotas before discovery (fixes zero-quota when marketplaces added)
                 svc = MarketplacePoolService(db)
                 await svc.recalculate_all_quotas()
                 logger.info("Quotas recalculated")
 
                 result = await db.execute(
-                    select(AdminMarketplace).where(AdminMarketplace.is_active.is_(True))
+                    select(AdminMarketplace.id, AdminMarketplace.domain).where(
+                        AdminMarketplace.is_active.is_(True)
+                    )
                 )
-                marketplaces = result.scalars().all()
-                logger.info("Found %d active marketplaces", len(marketplaces))
-
-                for mp in marketplaces:
-                    logger.info(
-                        "Marketplace %s: quota=%s, products_in_pool=%s, active=%s",
-                        mp.domain,
-                        mp.product_quota,
-                        mp.products_in_pool,
-                        mp.is_active,
-                    )
-
-                if not marketplaces:
-                    logger.info("No active marketplaces, skipping discovery")
-                    return {"marketplaces": 0, "completed": 0, "failed": 0}
-
-                pool = ScraperPool()
-                crawler = DiscoveryCrawler(db=db, scraper_pool=pool)
-                summary = {"marketplaces": len(marketplaces), "completed": 0, "failed": 0}
-                for i, marketplace in enumerate(marketplaces):
-                    logger.info(
-                        "Starting discovery for %s (%d/%d)",
-                        marketplace.domain,
-                        i + 1,
-                        len(marketplaces),
-                    )
-                    try:
-                        discovery_result = await crawler.discover(marketplace)
-                        logger.info(
-                            "Completed %s: status=%s, found=%d, new=%d",
-                            marketplace.domain,
-                            discovery_result.status,
-                            discovery_result.products_found,
-                            discovery_result.products_new,
-                        )
-                        if discovery_result.status in {"completed", "partial"}:
-                            summary["completed"] += 1
-                        else:
-                            summary["failed"] += 1
-                    except Exception as e:
-                        logger.error(
-                            "Failed %s: %s",
-                            marketplace.domain,
-                            e,
-                            exc_info=True,
-                        )
-                        summary["failed"] += 1
-                logger.info("=== Discovery completed: %s ===", summary)
-                return summary
+                rows = result.fetchall()
+                logger.info("Found %d active marketplaces", len(rows))
+            # Session closed here — quick, <5 seconds total
         finally:
             await engine.dispose()
 
-    return _run_async(_do())
+        if not rows:
+            logger.info("No active marketplaces, skipping discovery")
+            return {"dispatched": 0}
+
+        for mp_id, domain in rows:
+            logger.info("Dispatching discovery for %s (id=%d)", domain, mp_id)
+            discover_single_marketplace.delay(mp_id)
+
+        return {"dispatched": len(rows)}
 
 
-@celery_app.task(name="discover_single_marketplace", bind=True, max_retries=2)
+@celery_app.task(
+    name="discover_single_marketplace",
+    bind=True,
+    max_retries=2,
+    soft_time_limit=300,
+    time_limit=360,
+)
 def discover_single_marketplace(self, marketplace_id: int):
     """Discover for one marketplace."""
 

@@ -191,11 +191,14 @@ async def cleanup_invalid_products(_current_user: CurrentSuperuser, db: DbSessio
 @router.post("/products/clear-pool")
 async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
     """Delete ALL global products and snapshots to start fresh. Superuser only."""
+    from sqlalchemy import update
+
     from app.models import GlobalPriceSnapshot
 
     count = await db.scalar(select(func.count()).select_from(GlobalProduct))
     await db.execute(delete(GlobalPriceSnapshot))
     await db.execute(delete(GlobalProduct))
+    await db.execute(update(AdminMarketplace).values(products_in_pool=0))
     await db.commit()
     return {"deleted": count or 0, "message": "Pool cleared. Run discovery again."}
 

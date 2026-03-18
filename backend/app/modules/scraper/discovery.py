@@ -113,23 +113,49 @@ class DiscoveryCrawler:
             if not url or not url.startswith(("http://", "https://")):
                 continue
             if len(url) > 2000:
-                logger.warning("Discovery skip: URL too long (%d chars) for %s", len(url), marketplace.domain)
+                logger.warning(
+                    "Discovery skip: URL too long (%d chars) for %s",
+                    len(url),
+                    marketplace.domain,
+                )
                 continue
             url_hash = GlobalProduct.compute_url_hash(url)
-            exists = await self.db.execute(
-                select(GlobalProduct.id).where(GlobalProduct.url_hash == url_hash)
-            )
-            if exists.scalar_one_or_none() is not None:
-                continue
-            self.db.add(
-                GlobalProduct(
-                    marketplace_id=marketplace.id,
-                    url=url,
-                    url_hash=url_hash,
-                    status="pending",
+
+            try:
+                exists = await self.db.execute(
+                    select(GlobalProduct.id).where(GlobalProduct.url_hash == url_hash)
                 )
-            )
-            products_new += 1
+                if exists.scalar_one_or_none() is not None:
+                    continue
+                self.db.add(
+                    GlobalProduct(
+                        marketplace_id=marketplace.id,
+                        url=url,
+                        url_hash=url_hash,
+                        status="pending",
+                    )
+                )
+                products_new += 1
+
+                if products_new % 50 == 0:
+                    await self.db.commit()
+
+            except Exception as e:
+                logger.warning("Error saving URL %s: %s", url[:80], e)
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+                continue
+
+        try:
+            await self.db.commit()
+        except Exception as e:
+            logger.error("Final commit failed: %s", e)
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
 
         await self.db.flush()
         count_result = await self.db.execute(
@@ -227,8 +253,6 @@ class DiscoveryCrawler:
                         "/shop/",
                         "/products/",
                         "/computer/",
-                        "/ru/",
-                        "/ua/",
                     )
                 ):
                     collected.append(f"{parsed.scheme}://{parsed.netloc}{parsed.path}")
