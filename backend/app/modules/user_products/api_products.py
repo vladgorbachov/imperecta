@@ -2,8 +2,9 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Body, HTTPException, Query, status
+from pydantic import BaseModel
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from app.common.deps import CurrentUser, DbSession
@@ -225,6 +226,44 @@ async def update_product(id: UUID, data: ProductUpdate, current_user: CurrentUse
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
+
+
+class BulkDeleteBody(BaseModel):
+    product_ids: list[UUID]
+
+
+@router.delete("/bulk")
+async def bulk_delete_products(
+    body: BulkDeleteBody,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """
+    Delete multiple user products by IDs.
+    Only deletes products owned by current_user.
+    CASCADE deletes related: competitor_products, price_snapshots, alerts.
+    """
+    if not body.product_ids:
+        return {"deleted": 0}
+    result = await db.execute(
+        delete(Product).where(
+            Product.id.in_(body.product_ids),
+            Product.user_id == current_user.id,
+        )
+    )
+    await db.commit()
+    return {"deleted": result.rowcount or 0}
+
+
+@router.delete("/all")
+async def delete_all_user_products(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Delete ALL products of current user."""
+    result = await db.execute(delete(Product).where(Product.user_id == current_user.id))
+    await db.commit()
+    return {"deleted": result.rowcount or 0}
 
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -52,6 +52,20 @@ class MarketplacePoolService:
         return domain
 
     @staticmethod
+    def normalize_domain(domain: str) -> str:
+        """Normalize domain for deduplication: lowercase, no www."""
+        d = (domain or "").lower().strip()
+        if d.startswith("www."):
+            d = d[4:]
+        return d
+
+    @staticmethod
+    def _domain_core(domain: str) -> str:
+        """Extract core (first label) for duplicate detection. rozetka.ua and rozetka.com.ua -> rozetka."""
+        parts = domain.split(".")
+        return parts[0] if parts else ""
+
+    @staticmethod
     def _marketplace_id_from_domain(domain: str) -> str:
         return domain.replace(".", "_").replace("-", "_")
 
@@ -108,11 +122,18 @@ class MarketplacePoolService:
         if not domain:
             raise ValueError("Invalid URL: could not extract domain")
 
-        existing = await self.db.execute(
-            select(AdminMarketplace).where(AdminMarketplace.domain == domain)
-        )
-        if existing.scalar_one_or_none():
-            raise ValueError(f"Marketplace domain already exists: {domain}")
+        domain_norm = self.normalize_domain(domain)
+        core = self._domain_core(domain_norm)
+
+        all_admin = await self.db.execute(select(AdminMarketplace))
+        for existing_mp in all_admin.scalars().all():
+            existing_norm = self.normalize_domain(existing_mp.domain)
+            if existing_norm == domain_norm:
+                raise ValueError(f"Marketplace domain already exists: {domain}")
+            if core and self._domain_core(existing_norm) == core:
+                raise ValueError(
+                    f"Duplicate marketplace: {domain} matches existing {existing_mp.domain}"
+                )
 
         country = self._detect_country_from_domain(domain)
         region = self._region_for_country(country)

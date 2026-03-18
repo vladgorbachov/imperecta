@@ -2,7 +2,11 @@
 
 from fastapi import APIRouter, Query
 
-from app.common.deps import CurrentUser, DbSession
+from app.common.deps import CurrentUser, CurrentSuperuser, DbSession
+from pydantic import BaseModel
+from sqlalchemy import delete
+
+from app.modules.product_pool.models import GlobalProduct
 from app.modules.product_pool.schemas import (
     GlobalProductListResponse,
     PoolCategorySummary,
@@ -11,6 +15,26 @@ from app.modules.product_pool.schemas import (
 from app.modules.product_pool.service import ProductPoolService
 
 router = APIRouter(prefix="/pool", tags=["product-pool"])
+
+
+class PoolBulkDeleteBody(BaseModel):
+    product_ids: list[int]
+
+
+@router.delete("/products/bulk")
+async def bulk_delete_pool_products(
+    body: PoolBulkDeleteBody,
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Delete multiple products from global pool. Superuser only."""
+    if not body.product_ids:
+        return {"deleted": 0}
+    result = await db.execute(
+        delete(GlobalProduct).where(GlobalProduct.id.in_(body.product_ids))
+    )
+    await db.commit()
+    return {"deleted": result.rowcount or 0}
 
 
 @router.get("/products", response_model=GlobalProductListResponse)

@@ -59,23 +59,33 @@ class ScraperPool:
         custom_selectors: dict | None = None,
         requires_js: bool = False,
     ) -> PoolScrapeResult:
+        """
+        Fetch HTML once (Decodo -> httpx -> Playwright), extract once.
+        Do NOT re-fetch via Playwright after Decodo returns HTML.
+        """
         started = time.perf_counter()
         layers = self._layer_order(requires_js=requires_js)
 
-        merged = ExtractedProduct()
+        html = None
         used_layer = None
-
         for layer_name in layers:
             html = await self._fetch_by_layer(layer_name, url)
-            if not html:
-                continue
-            used_layer = layer_name
-            extracted = self._extract_all_levels(html, url, custom_selectors)
-            merged = merge_results(merged, extracted)
-            if merged.completeness >= 1.0:
+            if html:
+                used_layer = layer_name
                 break
 
         duration_ms = int((time.perf_counter() - started) * 1000)
+        if not html:
+            return PoolScrapeResult(
+                success=False,
+                url=url,
+                data=None,
+                scraper_layer=None,
+                duration_ms=duration_ms,
+                error="fetch_failed",
+            )
+
+        merged = self._extract_all_levels(html, url, custom_selectors)
         if merged.price is None:
             return PoolScrapeResult(
                 success=False,
@@ -86,6 +96,13 @@ class ScraperPool:
                 error="price_not_found",
             )
 
+        logger.info(
+            "Scraping %s: layer=%s, title=%s, price=%s",
+            url[:80],
+            used_layer,
+            merged.title[:50] if merged.title else None,
+            merged.price,
+        )
         return PoolScrapeResult(
             success=True,
             url=url,

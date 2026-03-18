@@ -116,6 +116,27 @@ export interface ClaudeStatus {
 export const getClaudeStatus = () =>
   apiClient.get<ClaudeStatus>("/admin/claude-status");
 
+export interface ApiHealthProvider {
+  type: string;
+  status: string;
+  last_refresh: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+  provider?: string | null;
+  items_count?: number;
+}
+
+export interface ApiHealthResponse {
+  providers: Record<string, ApiHealthProvider>;
+  api_keys: Record<
+    string,
+    { configured: boolean; name: string }
+  >;
+}
+
+export const getApiHealth = () =>
+  apiClient.get<ApiHealthResponse>("/admin/api-health");
+
 export const runPoolDiagnostics = () =>
   apiClient.get<PoolDiagnostics>("/admin/diagnostics/pool");
 export const recalculateQuotas = () =>
@@ -126,6 +147,22 @@ export const triggerPoolScrape = () =>
   apiClient.post<{ status: string }>("/admin/pool/trigger-scrape");
 export const clearUserProducts = () =>
   apiClient.post<ClearUserProductsResponse>("/admin/products/clear-user-data");
+
+export interface CleanupInvalidResponse {
+  deleted_long_urls: number;
+  deleted_invalid_urls: number;
+}
+
+export const cleanupInvalidProducts = () =>
+  apiClient.post<CleanupInvalidResponse>("/admin/products/cleanup-invalid");
+
+export interface DeduplicateMarketplacesResponse {
+  merged: number;
+  deleted: number;
+}
+
+export const deduplicateMarketplaces = () =>
+  apiClient.post<DeduplicateMarketplacesResponse>("/admin/marketplaces/deduplicate");
 export const triggerDiscoveryOne = (id: number) =>
   apiClient.post<{ status: string; marketplace_id: number }>(
     `/admin/discovery/trigger/${id}`

@@ -13,8 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+
 from app.models import (
     MarketsCategoryAnalytics,
+    MarketsCommodity,
     MarketsMarketplaceAnalytics,
     MarketsOpportunityBlock,
 )
@@ -100,32 +102,23 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
     if cached is not None:
         return (cached, True)
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            "https://api.coingecko.com/api/v3/coins/markets",
-            params={
-                "vs_currency": "usd",
-                "order": "market_cap_desc",
-                "per_page": 20,
-                "page": 1,
-                "sparkline": "false",
-                "price_change_percentage": "24h",
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    from app.modules.market_data.providers.crypto_adapter import CryptoCompositeAdapter
 
-    result = []
-    for coin in data:
-        result.append({
-            "symbol": (coin.get("symbol") or "").upper(),
-            "name": coin.get("name", ""),
-            "price": coin.get("current_price") or 0,
-            "change_24h": round(coin.get("price_change_percentage_24h") or 0, 2),
-            "market_cap": coin.get("market_cap") or 0,
-            "volume_24h": coin.get("total_volume") or 0,
-            "image": coin.get("image", ""),
-        })
+    adapter = CryptoCompositeAdapter(timeout=15.0)
+    items = await adapter.fetch()
+
+    result = [
+        {
+            "symbol": dto.symbol,
+            "name": dto.symbol,
+            "price": float(dto.price),
+            "change_24h": round(dto.change_24h, 2) if dto.change_24h is not None else None,
+            "market_cap": float(dto.market_cap) if dto.market_cap is not None else None,
+            "volume_24h": None,
+            "image": "",
+        }
+        for dto in items
+    ]
 
     _set_cached("crypto", result)
     logger.info("Crypto prices fetched: %d coins", len(result))
@@ -166,10 +159,11 @@ async def _fetch_one_metal(
             "change_24h": change_24h,
         }
     except httpx.HTTPStatusError as error:
-        if error.response.status_code == 403:
+        if error.response.status_code in (403, 429):
             logger.warning(
-                "GoldAPI %s: 403 Forbidden. Set GOLDAPI_KEY in Railway; key may be invalid or quota exceeded.",
+                "GoldAPI %s: %s. Using cached data from DB.",
                 symbol,
+                "403 Forbidden" if error.response.status_code == 403 else "429 Rate limited",
             )
         else:
             logger.warning("GoldAPI %s fetch failed: %s", symbol, error)
@@ -219,15 +213,14 @@ async def fetch_metals() -> dict:
         return result
 
 
+# 6 symbols: 4 metals (GoldAPI) + 2 energy (Alpha Vantage). 4 req/day × 6 = 24, fits free tier.
 ALPHA_VANTAGE_TICKERS: list[tuple[str, str, str]] = [
     ("Crude Oil (WTI)", "WTI", "bbl"),
     ("Crude Oil (Brent)", "BRENT", "bbl"),
-    ("Natural Gas", "NATGAS", "MMBtu"),
 ]
 ALPHA_VANTAGE_FUNCTIONS: dict[str, str] = {
     "WTI": "WTI",
     "BRENT": "BRENT",
-    "NATGAS": "NATURAL_GAS",
 }
 
 
@@ -380,7 +373,7 @@ async def get_fuel_prices(country_code: str) -> dict | None:
     return FUEL_PRICES.get(code)
 
 
-async def get_ticker_data(country_code: str = "UA") -> list[dict]:
+async def get_ticker_data(country_code: str = "UA", db=None) -> list[dict]:
     """Assemble ticker data for the scrolling bar."""
     items: list[dict] = []
 
@@ -410,15 +403,20 @@ async def get_ticker_data(country_code: str = "UA") -> list[dict]:
         pass
 
     try:
-        commodities, _, _ = await fetch_commodities()
-        for item in commodities[:3]:
+        if db is not None:
+            svc = MarketsService(db, 0)
+            commodities, _ = await svc.get_commodities_from_db()
+        else:
+            commodities, _, _ = await fetch_commodities()
+        for item in (commodities or [])[:3]:
+            name = item.get("name") or item.get("symbol", "")
             items.append({
                 "type": "commodity",
-                "label": item["name"],
+                "label": name,
                 "value": item["price"],
                 "change": item.get("change_24h"),
                 "prefix": "$",
-                "suffix": f"/{item['unit']}",
+                "suffix": f"/{item.get('unit', '')}",
             })
     except Exception:
         pass
@@ -453,6 +451,31 @@ class MarketsService:
     def __init__(self, db: AsyncSession, user_id):
         self.db = db
         self.user_id = user_id
+
+    async def get_commodities_from_db(self) -> tuple[list[dict], datetime | None]:
+        """Read commodities from markets_commodities table. Always returns last persisted data."""
+        result = await self.db.execute(
+            select(MarketsCommodity).order_by(MarketsCommodity.refreshed_at.desc())
+        )
+        rows = result.scalars().all()
+        seen: set[str] = set()
+        items: list[dict] = []
+        last_at: datetime | None = None
+        for row in rows:
+            if row.symbol in seen:
+                continue
+            seen.add(row.symbol)
+            items.append({
+                "symbol": row.symbol,
+                "name": row.name,
+                "price": float(row.price),
+                "change_24h": float(row.change_24h) if row.change_24h is not None else None,
+                "unit": row.unit,
+                "refreshed_at": row.refreshed_at,
+            })
+            if last_at is None:
+                last_at = row.refreshed_at
+        return (items, last_at)
 
     async def get_preferences(self) -> dict:
         result = await self.db.execute(

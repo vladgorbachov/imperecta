@@ -178,7 +178,13 @@ def scrape_all_pool_products():
     return _run_async(_do())
 
 
-@celery_app.task(name="scrape_pool_product", bind=True, max_retries=1)
+@celery_app.task(
+    name="scrape_pool_product",
+    bind=True,
+    max_retries=1,
+    soft_time_limit=120,
+    time_limit=150,
+)
 def scrape_pool_product(self, product_id: int):
     """Scrape single product from pool."""
 

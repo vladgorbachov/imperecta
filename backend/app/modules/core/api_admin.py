@@ -6,6 +6,12 @@ from sqlalchemy import delete, func, select, text
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.config import Settings
 from app.models import AdminMarketplace, GlobalProduct, User
+from app.modules.market_data.models import (
+    MarketsCommodity,
+    MarketsCrypto,
+    MarketsForex,
+    MarketsRefreshLog,
+)
 from app.modules.user_products.models import CompetitorProduct, PriceSnapshot, Product
 
 router = APIRouter(
@@ -50,6 +56,58 @@ async def admin_users(_current_user: CurrentSuperuser, db: DbSession) -> list[di
     ]
 
 
+@router.get("/api-health")
+async def api_health_status(_current_user: CurrentSuperuser, db: DbSession) -> dict:
+    """Real-time health status of all external API integrations."""
+    result = await db.execute(
+        select(MarketsRefreshLog)
+        .order_by(MarketsRefreshLog.started_at.desc())
+        .limit(50)
+    )
+    logs = result.scalars().all()
+
+    providers: dict[str, dict] = {}
+    for log in logs:
+        key = log.refresh_type.value if hasattr(log.refresh_type, "value") else str(log.refresh_type)
+        if key not in providers:
+            providers[key] = {
+                "type": key,
+                "status": log.status.value if hasattr(log.status, "value") else str(log.status),
+                "last_refresh": log.started_at.isoformat() if log.started_at else None,
+                "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+                "error": log.error_message,
+                "provider": log.provider_source,
+            }
+
+    forex_count = await db.scalar(select(func.count()).select_from(MarketsForex))
+    crypto_count = await db.scalar(select(func.count()).select_from(MarketsCrypto))
+    commodities_count = await db.scalar(select(func.count()).select_from(MarketsCommodity))
+    if "forex" in providers:
+        providers["forex"]["items_count"] = forex_count or 0
+    if "crypto" in providers:
+        providers["crypto"]["items_count"] = crypto_count or 0
+    if "commodities" in providers:
+        providers["commodities"]["items_count"] = commodities_count or 0
+
+    settings = Settings()
+    api_keys = {
+        "goldapi": {"configured": bool(settings.goldapi_key), "name": "GoldAPI (Metals)"},
+        "alpha_vantage": {"configured": bool(settings.alpha_vantage_key), "name": "Alpha Vantage (Energy)"},
+        "coingecko": {"configured": True, "name": "CoinGecko (Crypto backup)"},
+        "binance": {"configured": True, "name": "Binance (Crypto primary)"},
+        "frankfurter": {"configured": True, "name": "Frankfurter (Forex)"},
+        "decodo": {
+            "configured": bool(settings.decodo_username and settings.decodo_password),
+            "name": "Decodo (Web Scraping)",
+        },
+        "claude": {"configured": bool(settings.claude_api_key), "name": "Claude AI"},
+        "resend": {"configured": bool(settings.resend_api_key), "name": "Resend (Email)"},
+        "telegram": {"configured": bool(settings.telegram_bot_token), "name": "Telegram Bot"},
+    }
+
+    return {"providers": providers, "api_keys": api_keys}
+
+
 @router.get("/claude-status")
 async def admin_claude_status(_current_user: CurrentSuperuser) -> dict:
     """Claude API status."""
@@ -67,6 +125,29 @@ async def clear_test_products(_current_user: CurrentSuperuser, db: DbSession) ->
     await db.execute(delete(Product))
     await db.commit()
     return {"deleted": count or 0}
+
+
+@router.post("/products/cleanup-invalid")
+async def cleanup_invalid_products(_current_user: CurrentSuperuser, db: DbSession) -> dict:
+    """
+    Delete global_products with invalid URLs (multiple URLs in one field, too long, etc.).
+    Call before re-running discovery after fixing discovery bugs.
+    """
+    long_result = await db.execute(
+        delete(GlobalProduct).where(func.length(GlobalProduct.url) > 2000)
+    )
+    long_deleted = long_result.rowcount or 0
+
+    invalid_result = await db.execute(
+        delete(GlobalProduct).where(~GlobalProduct.url.startswith("http"))
+    )
+    invalid_deleted = invalid_result.rowcount or 0
+
+    await db.commit()
+    return {
+        "deleted_long_urls": long_deleted,
+        "deleted_invalid_urls": invalid_deleted,
+    }
 
 
 @router.post("/products/clear-user-data")

@@ -109,7 +109,13 @@ class DiscoveryCrawler:
         products_found = len(deduped_urls)
 
         for product_url in deduped_urls:
-            url_hash = GlobalProduct.compute_url_hash(product_url)
+            url = (product_url or "").strip()
+            if not url or not url.startswith(("http://", "https://")):
+                continue
+            if len(url) > 2000:
+                logger.warning("Discovery skip: URL too long (%d chars) for %s", len(url), marketplace.domain)
+                continue
+            url_hash = GlobalProduct.compute_url_hash(url)
             exists = await self.db.execute(
                 select(GlobalProduct.id).where(GlobalProduct.url_hash == url_hash)
             )
@@ -118,7 +124,7 @@ class DiscoveryCrawler:
             self.db.add(
                 GlobalProduct(
                     marketplace_id=marketplace.id,
-                    url=product_url,
+                    url=url,
                     url_hash=url_hash,
                     status="pending",
                 )
