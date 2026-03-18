@@ -25,6 +25,7 @@ import {
   Calculator,
   Play,
   Scissors,
+  Merge,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -70,6 +71,7 @@ import {
   useAddMarketplace,
   useDeleteMarketplace,
   useMarketsIngest,
+  useApiHealth,
 } from "@/hooks/useAdmin";
 import {
   runPoolDiagnostics,
@@ -77,6 +79,8 @@ import {
   triggerDiscoveryAll,
   triggerPoolScrape,
   clearUserProducts,
+  cleanupInvalidProducts,
+  deduplicateMarketplaces,
   type PoolDiagnostics,
 } from "@/api/admin";
 import { formatRelativeTime } from "@/lib/formatters";
@@ -335,6 +339,34 @@ function PoolManagementCard() {
     }
   };
 
+  const handleCleanupInvalid = async () => {
+    setLoadingAction("cleanup");
+    try {
+      const { data } = await cleanupInvalidProducts();
+      toast.success(
+        `Удалено: ${data.deleted_long_urls} длинных URL, ${data.deleted_invalid_urls} невалидных`
+      );
+      await fetchDiagnostics();
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleDeduplicate = async () => {
+    setLoadingAction("deduplicate");
+    try {
+      const { data } = await deduplicateMarketplaces();
+      toast.success(`Объединено: ${data.merged} дубликатов`);
+      await fetchDiagnostics();
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -411,6 +443,32 @@ function PoolManagementCard() {
               )}
               {t("admin.pool.clearUserProducts")}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCleanupInvalid}
+              disabled={loadingAction === "cleanup"}
+            >
+              {loadingAction === "cleanup" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 size-4" />
+              )}
+              Очистить невалидные товары
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDeduplicate}
+              disabled={loadingAction === "deduplicate"}
+            >
+              {loadingAction === "deduplicate" ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Merge className="mr-2 size-4" />
+              )}
+              Дедупликация маркетплейсов
+            </Button>
           </div>
           {diagnostics && (
             <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
@@ -422,7 +480,7 @@ function PoolManagementCard() {
                   {t("admin.pool.marketplaces")}:{" "}
                   {diagnostics.marketplaces?.total ?? 0}{" "}
                   ({t("admin.pool.active")}:{" "}
-                  {diagnostics.markplaces?.active ?? 0}, quota=0:{" "}
+                  {diagnostics.marketplaces?.active ?? 0}, quota=0:{" "}
                   {diagnostics.markplaces?.zero_quota ?? 0})
                 </p>
                 <p>
@@ -461,6 +519,117 @@ function PoolManagementCard() {
             </div>
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const API_STATUS_LABELS: Record<string, string> = {
+  forex: "Frankfurter (Forex)",
+  crypto: "Binance (Crypto)",
+  commodities: "GoldAPI + Alpha Vantage",
+  fuel: "Fuel",
+  decodo: "Decodo (Scraping)",
+  claude: "Claude AI",
+  resend: "Resend (Email)",
+  telegram: "Telegram Bot",
+};
+
+function ApiHealthSection() {
+  const { data, isLoading } = useApiHealth();
+
+  if (isLoading || !data) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Состояние API</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-32 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const providers = data.providers ?? {};
+  const apiKeys = data.api_keys ?? {};
+
+  const getStatusDot = (key: string, prov: { status?: string } | undefined, cfg: { configured?: boolean } | undefined) => {
+    if (["decodo", "claude", "resend", "telegram"].includes(key)) {
+      return cfg?.configured ? "🟢" : "⚪";
+    }
+    if (prov?.status === "success") return "🟢";
+    if (prov?.status === "error") return "🔴";
+    if (prov?.status === "running") return "🟡";
+    return "🟡";
+  };
+
+  const getStatusLabel = (key: string, prov: { status?: string; error?: string } | undefined, cfg: { configured?: boolean } | undefined) => {
+    if (["decodo", "claude", "resend", "telegram"].includes(key)) {
+      return cfg?.configured ? "Настроен" : "Не настроен";
+    }
+    if (prov?.status === "success") return "Работает";
+    if (prov?.status === "error") return prov?.error ?? "Ошибка";
+    if (prov?.status === "running") return "Выполняется";
+    return "—";
+  };
+
+  const rows = [
+    "forex",
+    "crypto",
+    "commodities",
+    "fuel",
+    "decodo",
+    "claude",
+    "resend",
+    "telegram",
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Состояние API</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>API</TableHead>
+              <TableHead>Статус</TableHead>
+              <TableHead>Обновлено</TableHead>
+              <TableHead>Данные</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((key) => {
+              const prov = providers[key];
+              const cfgKey =
+                key === "forex"
+                  ? "frankfurter"
+                  : key === "crypto"
+                    ? "binance"
+                    : key === "commodities"
+                      ? "goldapi"
+                      : key;
+              const cfg = apiKeys[cfgKey];
+              const name = cfg?.name ?? API_STATUS_LABELS[key] ?? key;
+              return (
+                <TableRow key={key}>
+                  <TableCell>
+                    {getStatusDot(key, prov, cfg)} {name}
+                  </TableCell>
+                  <TableCell>{getStatusLabel(key, prov, cfg)}</TableCell>
+                  <TableCell>
+                    {prov?.last_refresh
+                      ? formatRelativeTime(prov.last_refresh, "ru")
+                      : "—"}
+                  </TableCell>
+                  <TableCell>{prov?.items_count ?? "—"}</TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   );
@@ -713,6 +882,9 @@ export function AdminPage() {
       </Card>
 
       <MarketsRefreshCard />
+
+      {/* API status */}
+      <ApiHealthSection />
 
       {/* Scrape activity chart */}
       <Card>

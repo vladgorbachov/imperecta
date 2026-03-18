@@ -25,7 +25,7 @@ from app.modules.market_data.providers.commodities_adapter import CommoditiesHtt
 from app.modules.market_data.providers.commodities_goldapi_alphavantage import (
     CommoditiesGoldAPIAlphaVantageAdapter,
 )
-from app.modules.market_data.providers.crypto_adapter import CryptoCoingeckoAdapter
+from app.modules.market_data.providers.crypto_adapter import CryptoCompositeAdapter
 from app.modules.market_data.providers.forex_adapter import ForexFrankfurterAdapter
 from app.modules.market_data.providers.fuel_adapter import FuelHttpAdapter
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 settings = Settings()
 
 PROVIDER_FOREX = "frankfurter"
-PROVIDER_CRYPTO = "coingecko"
+PROVIDER_CRYPTO = "binance"
 PROVIDER_COMMODITIES = "http"
 PROVIDER_FUEL = "fuel"
 
@@ -158,7 +158,7 @@ class MarketDataIngestionService:
         return len(items)
 
     async def ingest_crypto(self) -> int:
-        adapter = CryptoCoingeckoAdapter(timeout=float(self.timeout))
+        adapter = CryptoCompositeAdapter(timeout=float(self.timeout))
         items = await self._fetch_with_retry(adapter.fetch, MarketsRefreshType.crypto)
         if not items:
             return 0
@@ -256,14 +256,16 @@ class MarketDataIngestionService:
         logger.info("Persisted %d fuel items", len(items))
         return len(items)
 
-    async def ingest_all(self) -> dict[str, int]:
+    async def ingest_all(self, include_commodities: bool = True) -> dict[str, int]:
         results: dict[str, int] = {}
-        for name, fn in [
+        tasks = [
             ("forex", self.ingest_forex),
             ("crypto", self.ingest_crypto),
-            ("commodities", self.ingest_commodities),
             ("fuel", self.ingest_fuel),
-        ]:
+        ]
+        if include_commodities:
+            tasks.append(("commodities", self.ingest_commodities))
+        for name, fn in tasks:
             try:
                 count = await fn()
                 results[name] = count
@@ -271,3 +273,11 @@ class MarketDataIngestionService:
                 logger.error("Ingestion %s failed: %s", name, error, exc_info=True)
                 results[name] = 0
         return results
+
+    async def ingest_commodities_only(self) -> int:
+        """Run only commodities ingestion. Used by 4x/day schedule."""
+        try:
+            return await self.ingest_commodities()
+        except Exception as error:
+            logger.error("Commodities ingestion failed: %s", error, exc_info=True)
+            raise

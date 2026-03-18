@@ -436,6 +436,8 @@ def extract_product_links(
         if not _looks_like_product_url(parsed.path):
             continue
         normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        if len(normalized) > 2000:
+            continue
         if normalized in seen:
             continue
         seen.add(normalized)

@@ -138,4 +138,20 @@ export const productsApi = {
     }>
   ) => apiClient.put<Product>(`/products/${id}`, data),
   delete: (id: string) => apiClient.delete(`/products/${id}`),
+
+  /** Bulk delete user products by IDs */
+  bulkDelete: (productIds: string[]) =>
+    apiClient.delete<{ deleted: number }>("/products/bulk", {
+      data: { product_ids: productIds },
+    }),
+
+  /** Delete ALL user products */
+  deleteAll: () =>
+    apiClient.delete<{ deleted: number }>("/products/all"),
+
+  /** Bulk delete pool products (superuser only) */
+  bulkDeletePool: (productIds: number[]) =>
+    apiClient.delete<{ deleted: number }>("/pool/products/bulk", {
+      data: { product_ids: productIds },
+    }),
 };

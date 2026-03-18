@@ -7,9 +7,10 @@
  * - Sort: По дате, По алфавиту, По цене, По тренду
  * - Pagination with configurable page size (20/50/100)
  * - Each product row: image, title (clickable), marketplace badge, price, price change
+ * - Bulk delete (superuser only): checkboxes, Ctrl+A, Delete key, SelectionActionBar
  */
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Search } from "lucide-react";
 import { formatPrice } from "@/lib/formatters";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -24,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -36,6 +38,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/authStore";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { productsApi } from "@/api/products";
+import { useRowSelection } from "@/hooks/useRowSelection";
+import { SelectionActionBar } from "./SelectionActionBar";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { PoolProductItem } from "@/api/products";
 
 const PAGE_SIZES = [20, 50, 100] as const;
@@ -77,11 +86,16 @@ function ProductThumbnail({ item }: { item: PoolProductItem }) {
 }
 
 export function PoolProductsTab({ locale }: { locale: string }) {
+  const isSuperuser = useAuthStore((s) => s.user?.is_superuser);
+  const queryClient = useQueryClient();
+
   const [searchRaw, setSearchRaw] = useState("");
   const [marketplaceId, setMarketplaceId] = useState<string>("all");
   const [sort, setSort] = useState<string>("recent");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const search = useDebounce(searchRaw, 500);
   const offset = (page - 1) * pageSize;
@@ -102,6 +116,53 @@ export function PoolProductsTab({ locale }: { locale: string }) {
   const start = (clampedPage - 1) * pageSize;
   const hasFilters = search.length >= 2 || marketplaceId !== "all";
   const isEmpty = items.length === 0 && !isLoading;
+
+  const pageItemIds = items.map((i) => i.id);
+  const {
+    selectedIds,
+    selectedCount,
+    toggleItem,
+    toggleAll,
+    clearSelection,
+    isAllSelected,
+    isSelected,
+  } = useRowSelection({ pageItemIds });
+
+  useEffect(() => {
+    clearSelection();
+  }, [page, clearSelection]);
+
+  useEffect(() => {
+    if (!isSuperuser) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Delete" && selectedCount > 0) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA") {
+          e.preventDefault();
+          setShowDeleteDialog(true);
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selectedCount, isSuperuser]);
+
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsDeleting(true);
+    try {
+      const { data: res } = await productsApi.bulkDeletePool(ids);
+      toast.success(`Удалено ${res.deleted} товаров`);
+      clearSelection();
+      setShowDeleteDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["pool-products"] });
+    } catch {
+      toast.error("Ошибка при удалении");
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [selectedIds, clearSelection, queryClient]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -193,6 +254,15 @@ export function PoolProductsTab({ locale }: { locale: string }) {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
+                  {isSuperuser && (
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={isAllSelected}
+                        onCheckedChange={toggleAll}
+                        aria-label="Выбрать все"
+                      />
+                    </TableHead>
+                  )}
                   <TableHead className="w-12" />
                   <TableHead>Название</TableHead>
                   <TableHead>Маркетплейс</TableHead>
@@ -205,9 +275,33 @@ export function PoolProductsTab({ locale }: { locale: string }) {
                 {items.map((item) => (
                   <TableRow
                     key={item.id}
-                    className="cursor-pointer transition-colors hover:bg-muted/50"
-                    onClick={() => item.url && window.open(item.url, "_blank")}
+                    className={cn(
+                      "cursor-pointer transition-colors",
+                      isSelected(item.id)
+                        ? "border-l-2 border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15"
+                        : "hover:bg-muted/50"
+                    )}
+                    onClick={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && isSuperuser) {
+                        e.preventDefault();
+                        toggleItem(item.id);
+                      } else if (item.url) {
+                        window.open(item.url, "_blank");
+                      }
+                    }}
                   >
+                    {isSuperuser && (
+                      <TableCell
+                        className="w-12"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={isSelected(item.id)}
+                          onCheckedChange={() => toggleItem(item.id)}
+                          aria-label={`Выбрать ${item.title || item.id}`}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell className="w-12">
                       <ProductThumbnail item={item} />
                     </TableCell>
@@ -264,8 +358,26 @@ export function PoolProductsTab({ locale }: { locale: string }) {
               </TableBody>
             </Table>
           </div>
+          {isSuperuser && selectedCount > 0 && (
+            <SelectionActionBar
+              selectedCount={selectedCount}
+              onDelete={() => setShowDeleteDialog(true)}
+              onClear={clearSelection}
+              isDeleting={isDeleting}
+            />
+          )}
         )}
       </div>
+
+      {isSuperuser && (
+        <DeleteConfirmDialog
+          open={showDeleteDialog}
+          onCancel={() => setShowDeleteDialog(false)}
+          onConfirm={handleBulkDelete}
+          count={selectedCount}
+          isLoading={isDeleting}
+        />
+      )}
 
       {/* Pagination */}
       {!isEmpty && !isLoading && total > 0 && (

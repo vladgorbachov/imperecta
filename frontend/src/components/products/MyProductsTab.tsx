@@ -7,10 +7,11 @@
  * - "Импорт CSV" button (navigates to import)
  * - "Импорт Excel" button (navigates to import, accepts .xls, .xlsx, .xlsm)
  *
- * Table: SKU, name, "Моя цена", "Мин. цена конкурентов", actions (edit, delete)
+ * Table: checkboxes, SKU, name, "Моя цена", "Мин. цена конкурентов", actions (edit, delete)
+ * Bulk delete: select rows, Ctrl+A, Delete key, SelectionActionBar.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -36,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -54,7 +56,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Package } from "lucide-react";
 import { toast } from "sonner";
-import { IMPORT_ACCEPT } from "@/api/import";
+import { useQueryClient } from "@tanstack/react-query";
+import { productsApi } from "@/api/products";
+import { useRowSelection } from "@/hooks/useRowSelection";
+import { SelectionActionBar } from "./SelectionActionBar";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { cn } from "@/lib/utils";
 
 const PAGE_SIZES = [20, 50, 100] as const;
 const SORT_OPTIONS = [
@@ -68,6 +75,7 @@ const SORT_OPTIONS = [
 export function MyProductsTab({ locale }: { locale: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { canAddProducts } = usePlanLimits();
 
   const [searchRaw, setSearchRaw] = useState("");
@@ -75,6 +83,8 @@ export function MyProductsTab({ locale }: { locale: string }) {
   const [sort, setSort] = useState<string>("recent");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const search = useDebounce(searchRaw, 500);
   const categoryParam = category && category !== "all" ? category : undefined;
@@ -88,11 +98,57 @@ export function MyProductsTab({ locale }: { locale: string }) {
   });
   const { data: categories = [] } = useProductCategories();
 
+  const pageItemIds = products.map((p) => p.id);
+  const {
+    selectedIds,
+    selectedCount,
+    toggleItem,
+    toggleAll,
+    clearSelection,
+    isAllSelected,
+    isSelected,
+  } = useRowSelection({ pageItemIds });
+
+  useEffect(() => {
+    clearSelection();
+  }, [page, clearSelection]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Delete" && selectedCount > 0) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA") {
+          e.preventDefault();
+          setShowDeleteDialog(true);
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selectedCount]);
+
   const totalPages = Math.ceil(total / pageSize) || 1;
   const clampedPage = Math.min(page, totalPages) || 1;
   const start = (clampedPage - 1) * pageSize;
   const hasFilters = !!search || (!!category && category !== "all");
   const isEmpty = products.length === 0 && !isLoading;
+
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setIsDeleting(true);
+    try {
+      const { data } = await productsApi.bulkDelete(ids);
+      toast.success(`Удалено ${data.deleted} товаров`);
+      clearSelection();
+      setShowDeleteDialog(false);
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    } catch {
+      toast.error("Ошибка при удалении");
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [selectedIds, clearSelection, queryClient]);
 
   const handleAddProduct = useCallback(() => {
     navigate("/import");
@@ -247,6 +303,13 @@ export function MyProductsTab({ locale }: { locale: string }) {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={isAllSelected}
+                      onCheckedChange={toggleAll}
+                      aria-label="Выбрать все"
+                    />
+                  </TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Название</TableHead>
                   <TableHead>Моя цена</TableHead>
@@ -258,9 +321,31 @@ export function MyProductsTab({ locale }: { locale: string }) {
                 {products.map((p) => (
                   <TableRow
                     key={p.id}
-                    className="cursor-pointer transition-colors hover:bg-muted/50"
-                    onClick={() => navigate(`/products/${p.id}`)}
+                    className={cn(
+                      "cursor-pointer transition-colors",
+                      isSelected(p.id)
+                        ? "border-l-2 border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15"
+                        : "hover:bg-muted/50"
+                    )}
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        toggleItem(p.id);
+                      } else {
+                        navigate(`/products/${p.id}`);
+                      }
+                    }}
                   >
+                    <TableCell
+                      className="w-12"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={isSelected(p.id)}
+                        onCheckedChange={() => toggleItem(p.id)}
+                        aria-label={`Выбрать ${p.name}`}
+                      />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {p.sku ?? "—"}
                     </TableCell>
@@ -302,8 +387,24 @@ export function MyProductsTab({ locale }: { locale: string }) {
               </TableBody>
             </Table>
           </div>
+          {selectedCount > 0 && (
+            <SelectionActionBar
+              selectedCount={selectedCount}
+              onDelete={() => setShowDeleteDialog(true)}
+              onClear={clearSelection}
+              isDeleting={isDeleting}
+            />
+          )}
         )}
       </div>
+
+      <DeleteConfirmDialog
+        open={showDeleteDialog}
+        onCancel={() => setShowDeleteDialog(false)}
+        onConfirm={handleBulkDelete}
+        count={selectedCount}
+        isLoading={isDeleting}
+      />
 
       {/* Pagination */}
       {!isEmpty && !isLoading && total > 0 && (

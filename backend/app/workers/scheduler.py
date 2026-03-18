@@ -27,6 +27,10 @@ celery_app.conf.beat_schedule = {
         "task": "ingest_market_data",
         "schedule": crontab(minute=0, hour="*/2"),
     },
+    "ingest-commodities-6h": {
+        "task": "ingest_commodities",
+        "schedule": crontab(minute=0, hour="0,6,12,18"),
+    },
     "discover-all-marketplaces-daily": {
         "task": "discover_all_marketplaces",
         "schedule": crontab(minute=0, hour=3),  # 03:00 UTC daily

@@ -8,9 +8,10 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
-from app.models import Competitor, CompetitorProduct, ScrapeLog
+from app.models import Competitor, CompetitorProduct, GlobalProduct, ScrapeLog
 from app.modules.marketplaces.models import AdminMarketplace
 from app.modules.marketplaces.service import MarketplacePoolService
+from app.modules.scraper.models import DiscoveryLog
 
 router = APIRouter(
     prefix="/admin/marketplaces",
@@ -65,6 +66,51 @@ async def _get_marketplace_scrape_stats(db: AsyncSession, marketplace_id: str) -
         "last_scrape_status": last_status,
         "last_error": last_err.error_message if last_err else None,
     }
+
+
+@router.post("/deduplicate")
+async def deduplicate_marketplaces(
+    db: DbSession,
+    _current_user: CurrentSuperuser,
+) -> dict:
+    """
+    Find and merge duplicate marketplaces (same site, different domains).
+    e.g. rozetka.ua and rozetka.com.ua -> keep one, transfer products, delete other.
+    """
+    service = MarketplacePoolService(db)
+    all_mp = await db.execute(select(AdminMarketplace))
+    rows = all_mp.scalars().all()
+
+    by_core: dict[str, list[AdminMarketplace]] = {}
+    for mp in rows:
+        core = service._domain_core(service.normalize_domain(mp.domain))
+        if not core:
+            continue
+        by_core.setdefault(core, []).append(mp)
+
+    merged = 0
+    deleted = 0
+    for core, group in by_core.items():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda m: (len(m.domain), m.id))
+        keep = group[0]
+        duplicates = group[1:]
+        for dup in duplicates:
+            await db.execute(
+                update(GlobalProduct).where(GlobalProduct.marketplace_id == dup.id).values(marketplace_id=keep.id)
+            )
+            await db.execute(
+                update(DiscoveryLog).where(DiscoveryLog.marketplace_id == dup.id).values(marketplace_id=keep.id)
+            )
+            await db.execute(delete(AdminMarketplace).where(AdminMarketplace.id == dup.id))
+            merged += 1
+            deleted += 1
+
+    if merged:
+        await service.recalculate_all_quotas()
+    await db.commit()
+    return {"merged": merged, "deleted": deleted}
 
 
 @router.post("/recalculate-quotas")

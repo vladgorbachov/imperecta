@@ -1,4 +1,4 @@
-"""Crypto provider: CoinGecko API. Free, no key required."""
+"""Crypto provider: Binance primary, CoinGecko backup. 50 top coins."""
 
 import logging
 from datetime import datetime, timezone
@@ -9,16 +9,18 @@ import httpx
 from app.config import Settings
 from app.modules.market_data.dto import NormalizedCrypto
 from app.modules.market_data.providers.base import CryptoProviderAdapter
+from app.modules.market_data.providers.binance_adapter import BinanceCryptoAdapter
 
 logger = logging.getLogger(__name__)
 
 
 class CryptoCoingeckoAdapter(CryptoProviderAdapter):
-    """CoinGecko markets adapter. Normalizes to NormalizedCrypto."""
+    """CoinGecko markets adapter (backup). Normalizes to NormalizedCrypto."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str | None = None, timeout: float = 15.0, per_page: int = 50):
         self.base_url = base_url or Settings().market_data_crypto_url
         self.timeout = timeout
+        self.per_page = per_page
 
     async def fetch(self) -> list[NormalizedCrypto]:
         """Fetch top coins from CoinGecko. Returns normalized list."""
@@ -29,7 +31,7 @@ class CryptoCoingeckoAdapter(CryptoProviderAdapter):
                 params={
                     "vs_currency": "usd",
                     "order": "market_cap_desc",
-                    "per_page": 20,
+                    "per_page": self.per_page,
                     "page": 1,
                     "sparkline": "false",
                     "price_change_percentage": "24h",
@@ -64,5 +66,32 @@ class CryptoCoingeckoAdapter(CryptoProviderAdapter):
                 logger.warning("Parse crypto row %s: %s", row.get("id"), error)
                 continue
 
-        logger.info("Crypto adapter fetched %d assets", len(items))
+        logger.info("Crypto CoinGecko adapter fetched %d assets", len(items))
         return items
+
+
+class CryptoCompositeAdapter(CryptoProviderAdapter):
+    """Binance primary, CoinGecko fallback. Returns up to 50 crypto assets."""
+
+    def __init__(self, timeout: float = 15.0):
+        self.timeout = timeout
+        self._binance = BinanceCryptoAdapter(timeout=timeout)
+        self._coingecko = CryptoCoingeckoAdapter(timeout=timeout, per_page=50)
+
+    async def fetch(self) -> list[NormalizedCrypto]:
+        """Fetch crypto: Binance primary, CoinGecko backup."""
+        try:
+            items = await self._binance.fetch()
+            if items and len(items) >= 10:
+                logger.info("Crypto from Binance: %d assets", len(items))
+                return items
+        except Exception as error:
+            logger.warning("Binance crypto failed: %s, falling back to CoinGecko", error)
+
+        try:
+            items = await self._coingecko.fetch()
+            logger.info("Crypto from CoinGecko (backup): %d assets", len(items))
+            return items
+        except Exception as error:
+            logger.error("Both crypto sources failed: %s", error)
+            return []

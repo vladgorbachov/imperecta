@@ -46,6 +46,13 @@ export const useClaudeStatus = () =>
     refetchInterval: 60_000,
   });
 
+export const useApiHealth = () =>
+  useQuery({
+    queryKey: ["admin", "api-health"],
+    queryFn: () => adminApi.getApiHealth().then((r) => r.data),
+    refetchInterval: 60_000,
+  });
+
 export const useAddMarketplace = () => {
   const qc = useQueryClient();
   return useMutation({

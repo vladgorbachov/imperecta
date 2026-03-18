@@ -17,7 +17,6 @@ from app.modules.market_data.schemas import (
 )
 from app.modules.market_data.service import (
     MarketsService,
-    fetch_commodities,
     fetch_crypto_prices,
     fetch_forex_rates,
     get_fuel_prices,
@@ -142,42 +141,35 @@ async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
     except Exception:
         return MarketsCryptoResponse(
             items=[],
-            error="CoinGecko API rate limited (429). Retry in 2 hours.",
+            error="Crypto API unavailable. Retry later.",
             cached=False,
             last_refreshed_at=now,
         )
 
 
 @router.get("/commodities", response_model=MarketsCommoditiesResponse)
-async def get_commodities(current_user: CurrentUser) -> MarketsCommoditiesResponse:
+async def get_commodities(current_user: CurrentUser, db: DbSession) -> MarketsCommoditiesResponse:
+    """Return commodities from DB. Data refreshed 4x/day by ingest_commodities task."""
     _ = current_user
-    now = _now()
-    try:
-        raw_items, error_msg, cached = await fetch_commodities()
-        items = [
-            {
-                "symbol": commodity["symbol"],
-                "name": commodity.get("name"),
-                "price": commodity["price"],
-                "change_24h": commodity.get("change_24h"),
-                "unit": commodity.get("unit"),
-                "refreshed_at": now,
-            }
-            for commodity in raw_items
-        ]
-        return MarketsCommoditiesResponse(
-            items=items,
-            error=error_msg,
-            cached=cached,
-            last_refreshed_at=now,
-        )
-    except Exception:
-        return MarketsCommoditiesResponse(
-            items=[],
-            error="Commodities data temporarily unavailable",
-            cached=False,
-            last_refreshed_at=now,
-        )
+    service = MarketsService(db, current_user.id)
+    raw_items, last_at = await service.get_commodities_from_db()
+    items = [
+        {
+            "symbol": c["symbol"],
+            "name": c.get("name"),
+            "price": c["price"],
+            "change_24h": c.get("change_24h"),
+            "unit": c.get("unit"),
+            "refreshed_at": c["refreshed_at"],
+        }
+        for c in raw_items
+    ]
+    return MarketsCommoditiesResponse(
+        items=items,
+        error=None,
+        cached=False,
+        last_refreshed_at=last_at or _now(),
+    )
 
 
 @router.get("/fuel")
@@ -195,10 +187,11 @@ async def get_fuel(
 @router.get("/ticker", response_model=MarketsTickerResponse)
 async def get_ticker(
     current_user: CurrentUser,
+    db: DbSession,
     country: str = Query("UA", description="Country code for fuel data"),
 ) -> MarketsTickerResponse:
     _ = current_user
-    raw = await get_ticker_data(country)
+    raw = await get_ticker_data(country, db=db)
     now = _now()
     items = []
     for row in raw:
