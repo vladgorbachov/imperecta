@@ -16,10 +16,17 @@
 - Admin: `modules/core/api_admin.py` (prefix `/admin`), `modules/marketplaces/api.py` (prefix `/admin/marketplaces`), `modules/scraper/api.py` (prefix `/admin` для discovery, pool, scrape).
 
 ### Celery/Beat
-- `celery_app.conf.include`: scraper, alerts, digests, market_data. `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, cleanup, digests (weekly/daily).
+- `celery_app.conf.include`: scraper, alerts, digests, market_data. `cleanup_old_data` в `app.workers.cleanup_tasks`. Beat: scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data (forex/crypto/fuel), ingest_commodities (4×/день 0,6,12,18 UTC), cleanup, digests (weekly/daily).
 
 ### Миграции
 - 015 = `015_global_products`, 016 = `016_drop_digest_summary_json`.
+
+### Изменения Fix Discovery/MarketData (2026-03-15)
+- **Discovery:** каждый URL = отдельная запись GlobalProduct; валидация URL (http, длина ≤2000). POST `/api/admin/products/cleanup-invalid`.
+- **Scraping:** Decodo → httpx → Playwright; после Decodo HTML не перезапрашивается. `scrape_pool_product` soft_time_limit=120, time_limit=150.
+- **Crypto:** Binance API primary (50 монет), CoinGecko backup. `BinanceCryptoAdapter`, `CryptoCompositeAdapter`.
+- **Commodities:** 6 символов (XAU, XAG, XPT, XPD, WTI, BRENT). Отдельная задача `ingest_commodities` 4×/день. GET `/api/markets/commodities` из БД.
+- **Admin:** GET `/api/admin/api-health`, POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/marketplaces/deduplicate`. Нормализация домена при add_by_url (rozetka.ua ↔ rozetka.com.ua = дубликат).
 
 ### Изменения PR-1–PR-5
 - **PR-1:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()` (метод `get_dashboard_summary` отсутствовал).
@@ -255,11 +262,11 @@
 
 ### Эндпоинты (метод + полный путь + auth)
 - Модули: auth, telegram, products, competitors, analytics, alerts, digests, import, ai, dashboard, markets, pool, admin (core + marketplaces + scraper).
-- Admin (superuser): `/api/admin/stats`, `/api/admin/users`, `/api/admin/claude-status`, `/api/admin/diagnostics/pool`, `/api/admin/products/clear-user-data`, `/api/admin/products/clear-test-data`, `/api/admin/marketplaces/*`, `/api/admin/discovery/*`, `/api/admin/pool/trigger-scrape`, `/api/admin/trigger-scrape`, `/api/admin/scrape-activity`, `/api/admin/error-distribution`.
+- Admin (superuser): `/api/admin/stats`, `/api/admin/users`, `/api/admin/claude-status`, `/api/admin/api-health`, `/api/admin/diagnostics/pool`, `/api/admin/products/cleanup-invalid`, `/api/admin/products/clear-user-data`, `/api/admin/products/clear-test-data`, `/api/admin/marketplaces/*` (включая deduplicate), `/api/admin/discovery/*`, `/api/admin/pool/trigger-scrape`, `/api/admin/trigger-scrape`, `/api/admin/scrape-activity`, `/api/admin/error-distribution`.
 
 ### Ключевые замечания
-- `modules/core/api_admin.py`: prefix `/admin`, superuser-only через `dependencies=[Depends(get_current_superuser)]`. Endpoints: stats, users, claude-status, diagnostics/pool, products/clear-user-data, products/clear-test-data.
-- `modules/marketplaces/api.py`: prefix `/admin/marketplaces`. Endpoints: recalculate-quotas, set-requires-js, GET "", logs, POST "", add-by-url, import-file, DELETE.
+- `modules/core/api_admin.py`: prefix `/admin`, superuser-only. Endpoints: stats, users, claude-status, api-health, diagnostics/pool, products/cleanup-invalid, products/clear-user-data, products/clear-test-data.
+- `modules/marketplaces/api.py`: prefix `/admin/marketplaces`. Endpoints: deduplicate, recalculate-quotas, set-requires-js, GET "", logs, POST "", add-by-url, import-file, DELETE. Domain normalization и проверка дубликатов при add_by_url.
 - `modules/scraper/api.py`: prefix `/admin`. Endpoints: discovery/trigger/{id}, discovery/trigger-all, pool/trigger-scrape, trigger-scrape, scrape-activity, error-distribution.
 - В `api/markets.py` endpoint `/overview` уже читает из `ProductPoolService` (`L275-L300`).
 - В `api/telegram.py` есть как webhook без user auth (`/webhook`), так и user endpoints через `get_current_user`.
@@ -291,7 +298,7 @@
 - `dto.py`: normalized DTO-классы.
 - `ingestion_service.py`: ingestion + persist (upsert в `MarketsForex/Crypto/Commodity`, лог в `MarketsRefreshLog`).
 - `aggregate_service.py`: materialization ticker/category/marketplace/opportunities.
-- `providers/*`: адаптеры forex/crypto/commodities/fuel (+ GoldAPI/AlphaVantage adapter).
+- `providers/*`: BinanceCryptoAdapter (crypto primary), CryptoCompositeAdapter (Binance+CoinGecko), forex/crypto/commodities/fuel (+ GoldAPI/AlphaVantage).
 
 ### Методы с признаками мёртвого кода
 - `ScraperFactory.register` (см. секция 13).
@@ -356,13 +363,14 @@
   - `generate_weekly_digest`, `generate_daily_digest`, `schedule_weekly_digests`, `schedule_daily_digests`.
   - schedules вызываются Beat.
 - `market_data_tasks.py`
-  - `ingest_market_data` (`name="ingest_market_data", bind=True`) -> ingestion + aggregate pipeline.
+  - `ingest_market_data` (`name="ingest_market_data", bind=True`) -> forex, crypto, fuel (без commodities).
+  - `ingest_commodities` (`name="ingest_commodities", bind=True`) -> commodities 6 символов, 4×/день.
 - `cleanup_tasks.py`
   - `cleanup_old_data` (`name="cleanup_old_data"`), запускается Beat.
-- `discovery_tasks.py`
+- `discovery_tasks.py` (modules/scraper/tasks.py)
   - `discover_all_marketplaces`, `discover_single_marketplace(bind=True,max_retries=2)`,
   - `scrape_all_pool_products`,
-  - `scrape_pool_product(bind=True,max_retries=1)`,
+  - `scrape_pool_product(bind=True,max_retries=1,soft_time_limit=120,time_limit=150)`,
   - `check_pool_completeness`.
 
 ---
