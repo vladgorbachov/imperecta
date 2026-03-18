@@ -98,11 +98,16 @@ def discover_all_marketplaces():
             logger.info("No active marketplaces, skipping discovery")
             return {"dispatched": 0}
 
+        dispatched = 0
         for mp_id, domain in rows:
             logger.info("Dispatching discovery for %s (id=%d)", domain, mp_id)
             discover_single_marketplace.delay(mp_id)
+            dispatched += 1
 
-        return {"dispatched": len(rows)}
+        logger.info("=== Dispatched %d discovery tasks ===", dispatched)
+        return {"dispatched": dispatched}
+
+    return _run_async(_do())
 
 
 @celery_app.task(
