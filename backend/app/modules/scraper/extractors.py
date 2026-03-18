@@ -416,10 +416,14 @@ def _is_category_url(path: str) -> bool:
     """Exclude category/listing URLs. Product pages have more specific paths."""
     lowered = path.lower()
     segments = [s for s in lowered.split("/") if s]
-    if len(segments) <= 2:
+    if len(segments) <= 1:
         return True
     if any(seg in _CATEGORY_PATH_SEGMENTS for seg in segments):
         return True
+    if ".html" in lowered:
+        return False
+    if re.search(r"\d{4,}", lowered):
+        return False
     if len(segments) == 3 and segments[-1] and len(segments[-1]) < 15:
         return True
     return False
