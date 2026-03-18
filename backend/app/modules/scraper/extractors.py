@@ -48,6 +48,9 @@ _EXCLUDED_LINK_HINTS = (
 
 _PRODUCT_LINK_HINTS = ("/product/", "/products/", "/item/", "/p/", "/tovar/", "/dp/")
 
+# Path segments that indicate category/listing page, not product
+_CATEGORY_PATH_SEGMENTS = ("catalog", "c", "category", "shop", "categories", "katalog")
+
 
 @dataclass
 class ExtractedProduct:
@@ -395,10 +398,31 @@ def merge_results(*results: ExtractedProduct) -> ExtractedProduct:
 
 
 def _looks_like_product_url(path: str) -> bool:
+    """Product URLs: .html (allo), product hints, 4+ digits, or 3+ path segments (hotline)."""
     lowered = path.lower()
     if any(hint in lowered for hint in _PRODUCT_LINK_HINTS):
         return True
-    return bool(re.search(r"/\d{4,}", lowered))
+    if re.search(r"/\d{4,}", lowered):
+        return True
+    if ".html" in lowered:
+        return True
+    segments = [s for s in lowered.split("/") if s]
+    if len(segments) >= 3:
+        return True
+    return False
+
+
+def _is_category_url(path: str) -> bool:
+    """Exclude category/listing URLs. Product pages have more specific paths."""
+    lowered = path.lower()
+    segments = [s for s in lowered.split("/") if s]
+    if len(segments) <= 2:
+        return True
+    if any(seg in _CATEGORY_PATH_SEGMENTS for seg in segments):
+        return True
+    if len(segments) == 3 and segments[-1] and len(segments[-1]) < 15:
+        return True
+    return False
 
 
 def _is_excluded_link(url: str) -> bool:
@@ -432,6 +456,8 @@ def extract_product_links(
         if parsed.netloc != parsed_base.netloc:
             continue
         if _is_excluded_link(full_url):
+            continue
+        if _is_category_url(parsed.path):
             continue
         if not _looks_like_product_url(parsed.path):
             continue

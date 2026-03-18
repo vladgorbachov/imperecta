@@ -106,18 +106,33 @@ def discover_all_marketplaces():
                 pool = ScraperPool()
                 crawler = DiscoveryCrawler(db=db, scraper_pool=pool)
                 summary = {"marketplaces": len(marketplaces), "completed": 0, "failed": 0}
-                for marketplace in marketplaces:
-                    discovery_result = await crawler.discover(marketplace)
+                for i, marketplace in enumerate(marketplaces):
                     logger.info(
-                        "Discovery %s: status=%s, found=%d, new=%d",
+                        "Starting discovery for %s (%d/%d)",
                         marketplace.domain,
-                        discovery_result.status,
-                        discovery_result.products_found,
-                        discovery_result.products_new,
+                        i + 1,
+                        len(marketplaces),
                     )
-                    if discovery_result.status in {"completed", "partial"}:
-                        summary["completed"] += 1
-                    else:
+                    try:
+                        discovery_result = await crawler.discover(marketplace)
+                        logger.info(
+                            "Completed %s: status=%s, found=%d, new=%d",
+                            marketplace.domain,
+                            discovery_result.status,
+                            discovery_result.products_found,
+                            discovery_result.products_new,
+                        )
+                        if discovery_result.status in {"completed", "partial"}:
+                            summary["completed"] += 1
+                        else:
+                            summary["failed"] += 1
+                    except Exception as e:
+                        logger.error(
+                            "Failed %s: %s",
+                            marketplace.domain,
+                            e,
+                            exc_info=True,
+                        )
                         summary["failed"] += 1
                 logger.info("=== Discovery completed: %s ===", summary)
                 return summary

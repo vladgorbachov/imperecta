@@ -1,7 +1,7 @@
 """Admin dashboard endpoints: stats, users, claude-status, clear-test-data, diagnostics."""
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.config import Settings
@@ -53,6 +53,31 @@ async def admin_users(_current_user: CurrentSuperuser, db: DbSession) -> list[di
             "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
         }
         for u in users
+    ]
+
+
+@router.get("/diagnostics/sample-products")
+async def sample_products(_current_user: CurrentSuperuser, db: DbSession) -> list[dict]:
+    """Show 10 sample global products with full data for debugging."""
+    result = await db.execute(
+        select(GlobalProduct).order_by(GlobalProduct.id).limit(10)
+    )
+    products = result.scalars().all()
+    return [
+        {
+            "id": p.id,
+            "url": (p.url or "")[:200],
+            "url_length": len(p.url or ""),
+            "title": p.title,
+            "current_price": float(p.current_price) if p.current_price is not None else None,
+            "image_url": (p.image_url or "")[:100] if p.image_url else None,
+            "status": p.status,
+            "marketplace_id": p.marketplace_id,
+            "last_scraped_at": p.last_scraped_at.isoformat() if p.last_scraped_at else None,
+            "scrape_error_count": p.scrape_error_count,
+            "last_scraper_layer": p.last_scraper_layer,
+        }
+        for p in products
     ]
 
 
@@ -130,7 +155,7 @@ async def clear_test_products(_current_user: CurrentSuperuser, db: DbSession) ->
 @router.post("/products/cleanup-invalid")
 async def cleanup_invalid_products(_current_user: CurrentSuperuser, db: DbSession) -> dict:
     """
-    Delete global_products with invalid URLs (multiple URLs in one field, too long, etc.).
+    Delete global_products with invalid URLs or category page titles.
     Call before re-running discovery after fixing discovery bugs.
     """
     long_result = await db.execute(
@@ -143,11 +168,36 @@ async def cleanup_invalid_products(_current_user: CurrentSuperuser, db: DbSessio
     )
     invalid_deleted = invalid_result.rowcount or 0
 
+    category_result = await db.execute(
+        delete(GlobalProduct).where(
+            or_(
+                GlobalProduct.title.ilike("%каталог%огляди%відгуки%"),
+                GlobalProduct.title.ilike("%| купити в інтернет-магазині%"),
+                GlobalProduct.title.ilike("% - вигідні ціни | купити%"),
+                GlobalProduct.title.ilike("%ціни, відгуки - купити%"),
+            )
+        )
+    )
+    category_deleted = category_result.rowcount or 0
+
     await db.commit()
     return {
         "deleted_long_urls": long_deleted,
         "deleted_invalid_urls": invalid_deleted,
+        "deleted_category_pages": category_deleted,
     }
+
+
+@router.post("/products/clear-pool")
+async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
+    """Delete ALL global products and snapshots to start fresh. Superuser only."""
+    from app.models import GlobalPriceSnapshot
+
+    count = await db.scalar(select(func.count()).select_from(GlobalProduct))
+    await db.execute(delete(GlobalPriceSnapshot))
+    await db.execute(delete(GlobalProduct))
+    await db.commit()
+    return {"deleted": count or 0, "message": "Pool cleared. Run discovery again."}
 
 
 @router.post("/products/clear-user-data")
