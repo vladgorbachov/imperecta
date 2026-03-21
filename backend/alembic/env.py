@@ -10,30 +10,7 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from app.database import Base
-from app.models import (
-    AdminMarketplace,
-    AIChatMessage,
-    AIChatSession,
-    ApiLog,
-    Alert,
-    AlertEvent,
-    Competitor,
-    CompetitorProduct,
-    Digest,
-    MarketsCategoryAnalytics,
-    MarketsCommodity,
-    MarketsCrypto,
-    MarketsForex,
-    MarketsMarketplaceAnalytics,
-    MarketsOpportunityBlock,
-    MarketsPreferences,
-    MarketsRefreshLog,
-    MarketsTickerItem,
-    PriceSnapshot,
-    Product,
-    ScrapeLog,
-    User,
-)
+from app.models import *  # noqa: F401,F403 — loads all models into Base.metadata
 
 config = context.config
 
@@ -56,6 +33,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table_schema="alembic_meta",
     )
 
     with context.begin_transaction():
@@ -64,7 +42,11 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations with given connection."""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        version_table_schema="alembic_meta",
+    )
     with context.begin_transaction():
         context.run_migrations()
 

@@ -1,234 +1,285 @@
-"""
-Read-only service for the global product pool.
-Used by Dashboard/Market Overview and public-facing API.
-"""
+"""Global product pool: listings joined to dim_product and dim_marketplace."""
 
-from sqlalchemy import and_, func, select
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import asc, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.marketplaces.models import AdminMarketplace
-from app.modules.product_pool.models import GlobalProduct
+from app.models.dimensions import DimMarketplace, DimProduct
+from app.models.facts import FactListing, FactPrice
+
+_SORT_RECENT = "recent"
+_SORT_NAME_ASC = "name_asc"
+_SORT_NAME_DESC = "name_desc"
+_SORT_PRICE_ASC = "price_asc"
+_SORT_PRICE_DESC = "price_desc"
+_SORT_TRENDING = "trending"
+_SORT_GAINERS = "gainers"
+_SORT_LOSERS = "losers"
+_SORT_VOLATILE = "volatile"
+
+
+def _latest_price_change_subquery():
+    """Latest fact_price row per listing (for price_change_pct and sorting)."""
+    rn = func.row_number().over(
+        partition_by=FactPrice.listing_id,
+        order_by=desc(FactPrice.date_id),
+    ).label("rn")
+    inner = (
+        select(
+            FactPrice.listing_id,
+            FactPrice.price_change_pct,
+            rn,
+        )
+    ).subquery()
+    return (
+        select(inner.c.listing_id, inner.c.price_change_pct).where(inner.c.rn == 1)
+    ).subquery()
 
 
 class ProductPoolService:
+    """List and aggregate global pool rows from v2 star schema."""
+
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def _get_sort_order(self, sort: str):
-        return {
-            "recent": GlobalProduct.discovered_at.desc().nullslast(),
-            "name_asc": GlobalProduct.title.asc().nullslast(),
-            "name_desc": GlobalProduct.title.desc().nullslast(),
-            "price_asc": GlobalProduct.current_price.asc().nullslast(),
-            "price_desc": GlobalProduct.current_price.desc().nullslast(),
-            "trending": func.abs(GlobalProduct.price_change_pct_24h).desc().nullslast(),
-            "gainers": GlobalProduct.price_change_pct_24h.desc().nullslast(),
-            "losers": GlobalProduct.price_change_pct_24h.asc().nullslast(),
-            "volatile": GlobalProduct.volatility_30d.desc().nullslast(),
-        }.get(sort, GlobalProduct.discovered_at.desc().nullslast())
+    def _base_listing_stmt(self, latest_pc):
+        """Shared SELECT for pool listings with optional price-change join."""
+        return (
+            select(
+                FactListing.id,
+                DimProduct.id.label("product_id"),
+                DimProduct.name.label("title"),
+                DimProduct.image_url,
+                FactListing.external_url.label("url"),
+                DimMarketplace.name.label("marketplace_name"),
+                DimMarketplace.domain.label("marketplace_domain"),
+                DimMarketplace.marketplace_code,
+                DimMarketplace.country_code,
+                FactListing.last_price.label("price"),
+                FactListing.last_currency_code.label("currency"),
+                FactListing.last_price_eur.label("price_eur"),
+                FactListing.last_in_stock.label("in_stock"),
+                FactListing.last_checked_at,
+                FactListing.is_active,
+                latest_pc.c.price_change_pct.label("price_change_pct"),
+            )
+            .select_from(FactListing)
+            .join(DimProduct, FactListing.product_id == DimProduct.id)
+            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+            .outerjoin(latest_pc, latest_pc.c.listing_id == FactListing.id)
+            .where(FactListing.is_active.is_(True))
+        )
+
+    def _apply_filters(
+        self,
+        stmt,
+        *,
+        search: str | None,
+        marketplace_id: UUID | None,
+        category: str | None,
+    ):
+        if search:
+            like = f"%{search}%"
+            stmt = stmt.where(DimProduct.name.ilike(like))
+        if marketplace_id is not None:
+            stmt = stmt.where(FactListing.marketplace_id == marketplace_id)
+        if category:
+            cat = f"%{category}%"
+            stmt = stmt.where(
+                or_(
+                    DimMarketplace.domain.ilike(cat),
+                    DimMarketplace.name.ilike(cat),
+                    DimMarketplace.marketplace_code.ilike(cat),
+                )
+            )
+        return stmt
+
+    def _apply_sort(self, stmt, sort: str, latest_pc):
+        """Apply ordering for pool list (uses latest price-change when relevant)."""
+        pct = latest_pc.c.price_change_pct
+        abs_pct = func.abs(pct)
+        if sort == _SORT_NAME_ASC:
+            return stmt.order_by(asc(DimProduct.name))
+        if sort == _SORT_NAME_DESC:
+            return stmt.order_by(desc(DimProduct.name))
+        if sort == _SORT_PRICE_ASC:
+            return stmt.order_by(nullslast(asc(FactListing.last_price)))
+        if sort == _SORT_PRICE_DESC:
+            return stmt.order_by(nullslast(desc(FactListing.last_price)))
+        if sort == _SORT_GAINERS:
+            return stmt.order_by(nullslast(desc(pct)))
+        if sort == _SORT_LOSERS:
+            return stmt.order_by(nullslast(asc(pct)))
+        if sort in (_SORT_VOLATILE, "volatile"):
+            return stmt.order_by(nullslast(desc(abs_pct)))
+        if sort in (_SORT_TRENDING, "trending"):
+            return stmt.order_by(nullslast(desc(FactListing.last_checked_at)))
+        # recent and unknown
+        return stmt.order_by(nullslast(desc(FactListing.last_checked_at)))
 
     async def list_products(
         self,
+        *,
         sort: str = "recent",
         search: str | None = None,
-        marketplace_id: int | None = None,
+        marketplace_id: UUID | None = None,
         category: str | None = None,
-        limit: int = 50,
+        limit: int = 20,
         offset: int = 0,
-    ) -> tuple[list[dict], int]:
-        stmt = (
-            select(GlobalProduct, AdminMarketplace.name, AdminMarketplace.domain)
-            .join(AdminMarketplace, AdminMarketplace.id == GlobalProduct.marketplace_id)
-            .where(GlobalProduct.status.in_(("active", "pending")))
-        )
-
-        if marketplace_id is not None:
-            stmt = stmt.where(GlobalProduct.marketplace_id == marketplace_id)
-        if search:
-            stmt = stmt.where(GlobalProduct.title.ilike(f"%{search}%"))
-        if category:
-            cat_pattern = f"%{category}%"
-            stmt = stmt.where(
-                (AdminMarketplace.domain.ilike(cat_pattern))
-                | (AdminMarketplace.name.ilike(cat_pattern))
-            )
-
-        if sort in {"trending", "gainers", "losers", "volatile"}:
-            stmt = stmt.where(GlobalProduct.current_price.is_not(None))
-
-        count_stmt = (
-            select(func.count())
-            .select_from(GlobalProduct)
-            .join(AdminMarketplace, AdminMarketplace.id == GlobalProduct.marketplace_id)
-            .where(GlobalProduct.status.in_(("active", "pending")))
-        )
-        if marketplace_id is not None:
-            count_stmt = count_stmt.where(GlobalProduct.marketplace_id == marketplace_id)
-        if search:
-            count_stmt = count_stmt.where(GlobalProduct.title.ilike(f"%{search}%"))
-        if category:
-            cat_pattern = f"%{category}%"
-            count_stmt = count_stmt.where(
-                (AdminMarketplace.domain.ilike(cat_pattern))
-                | (AdminMarketplace.name.ilike(cat_pattern))
-            )
-        if sort in {"trending", "gainers", "losers", "volatile"}:
-            count_stmt = count_stmt.where(GlobalProduct.current_price.is_not(None))
-
-        total = int(await self.db.scalar(count_stmt) or 0)
-
-        stmt = stmt.order_by(self._get_sort_order(sort))
-
+    ) -> tuple[list[dict[str, Any]], int]:
+        latest_pc = _latest_price_change_subquery()
+        stmt = self._base_listing_stmt(latest_pc)
+        stmt = self._apply_filters(stmt, search=search, marketplace_id=marketplace_id, category=category)
+        stmt = self._apply_sort(stmt, sort, latest_pc)
         stmt = stmt.limit(limit).offset(offset)
-        rows = (await self.db.execute(stmt)).all()
 
-        items: list[dict] = []
-        for product, marketplace_name, marketplace_domain in rows:
-            items.append(
-                {
-                    "id": product.id,
-                    "marketplace_id": product.marketplace_id,
-                    "marketplace_name": marketplace_name,
-                    "marketplace_domain": marketplace_domain,
-                    "url": product.url,
-                    "title": product.title,
-                    "image_url": product.image_url,
-                    "description": product.description,
-                    "current_price": float(product.current_price)
-                    if product.current_price is not None
-                    else None,
-                    "original_price": float(product.original_price)
-                    if product.original_price is not None
-                    else None,
-                    "currency": product.currency or "USD",
-                    "price_change_pct_24h": float(product.price_change_pct_24h)
-                    if product.price_change_pct_24h is not None
-                    else None,
-                    "price_change_pct_7d": float(product.price_change_pct_7d)
-                    if product.price_change_pct_7d is not None
-                    else None,
-                    "price_change_pct_30d": float(product.price_change_pct_30d)
-                    if product.price_change_pct_30d is not None
-                    else None,
-                    "volatility_30d": float(product.volatility_30d)
-                    if product.volatility_30d is not None
-                    else None,
-                    "status": product.status,
-                    "last_scraped_at": product.last_scraped_at,
-                }
-            )
-        return items, total
+        count_base = (
+            select(func.count())
+            .select_from(FactListing)
+            .join(DimProduct, FactListing.product_id == DimProduct.id)
+            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+            .where(FactListing.is_active.is_(True))
+        )
+        count_base = self._apply_filters(
+            count_base,
+            search=search,
+            marketplace_id=marketplace_id,
+            category=category,
+        )
+
+        total = await self.db.scalar(count_base) or 0
+        result = await self.db.execute(stmt)
+        rows = result.mappings().all()
+        items = [_row_to_pool_item(dict(r)) for r in rows]
+        return items, int(total)
 
     async def get_categories(self) -> list[dict]:
-        """Unique marketplaces for filter dropdown."""
+        """Distinct marketplaces that have active listings (lightweight category browse)."""
         stmt = (
             select(
-                AdminMarketplace.id,
-                AdminMarketplace.domain,
-                AdminMarketplace.name,
-                func.count(GlobalProduct.id).label("product_count"),
+                DimMarketplace.id,
+                DimMarketplace.marketplace_code,
+                DimMarketplace.name,
+                DimMarketplace.domain,
+                func.count(FactListing.id).label("listing_count"),
             )
-            .join(GlobalProduct, GlobalProduct.marketplace_id == AdminMarketplace.id)
-            .where(GlobalProduct.status.in_(("active", "pending")))
-            .group_by(AdminMarketplace.id, AdminMarketplace.domain, AdminMarketplace.name)
-            .order_by(AdminMarketplace.name.asc())
+            .select_from(FactListing)
+            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+            .where(FactListing.is_active.is_(True))
+            .group_by(
+                DimMarketplace.id,
+                DimMarketplace.marketplace_code,
+                DimMarketplace.name,
+                DimMarketplace.domain,
+            )
+            .order_by(desc("listing_count"))
         )
-        rows = (await self.db.execute(stmt)).all()
+        result = await self.db.execute(stmt)
         return [
             {
-                "id": row.id,
-                "domain": row.domain,
-                "name": row.name,
-                "product_count": int(row.product_count or 0),
+                "marketplace_id": str(r.id),
+                "marketplace_code": r.marketplace_code,
+                "name": r.name,
+                "domain": r.domain,
+                "listing_count": int(r.listing_count),
             }
-            for row in rows
+            for r in result.all()
         ]
 
     async def get_marketplace_stats(self) -> list[dict]:
+        """Per-marketplace listing counts and average price (EUR) when available."""
         stmt = (
             select(
-                AdminMarketplace.domain.label("marketplace_domain"),
-                AdminMarketplace.name.label("marketplace_name"),
-                func.count(GlobalProduct.id).label("product_count"),
-                func.avg(GlobalProduct.current_price).label("avg_price"),
+                DimMarketplace.id.label("marketplace_id"),
+                DimMarketplace.name.label("marketplace_name"),
+                DimMarketplace.domain.label("marketplace_domain"),
+                DimMarketplace.country_code,
+                func.count(FactListing.id).label("listing_count"),
+                func.avg(FactListing.last_price_eur).label("avg_price_eur"),
             )
-            .join(GlobalProduct, GlobalProduct.marketplace_id == AdminMarketplace.id)
-            .where(GlobalProduct.status.in_(("active", "pending")))
-            .group_by(AdminMarketplace.id, AdminMarketplace.domain, AdminMarketplace.name)
-            .order_by(func.count(GlobalProduct.id).desc())
+            .select_from(FactListing)
+            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+            .where(FactListing.is_active.is_(True))
+            .group_by(
+                DimMarketplace.id,
+                DimMarketplace.name,
+                DimMarketplace.domain,
+                DimMarketplace.country_code,
+            )
+            .order_by(desc("listing_count"))
         )
-        rows = (await self.db.execute(stmt)).all()
-        return [
-            {
-                "marketplace_domain": row.marketplace_domain,
-                "marketplace_name": row.marketplace_name,
-                "product_count": int(row.product_count or 0),
-                "avg_price": float(row.avg_price) if row.avg_price is not None else None,
-            }
-            for row in rows
-        ]
+        result = await self.db.execute(stmt)
+        out: list[dict] = []
+        for r in result.all():
+            avg = r.avg_price_eur
+            out.append({
+                "marketplace_domain": r.marketplace_domain,
+                "marketplace_name": r.marketplace_name,
+                "product_count": int(r.listing_count),
+                "avg_price": float(avg) if avg is not None else None,
+            })
+        return out
 
     async def get_pool_stats(self) -> dict:
-        total_products = int(
-            await self.db.scalar(
-                select(func.count()).select_from(GlobalProduct).where(
-                    GlobalProduct.status.in_(("active", "pending"))
-                )
-            )
-            or 0
+        """Aggregate counts for the global pool dashboard card."""
+        total_listings = await self.db.scalar(
+            select(func.count()).select_from(FactListing).where(FactListing.is_active.is_(True)),
         )
-        total_marketplaces = int(
-            await self.db.scalar(
-                select(func.count(func.distinct(GlobalProduct.marketplace_id))).where(
-                    GlobalProduct.status.in_(("active", "pending"))
-                )
-            )
-            or 0
+        total_products = await self.db.scalar(select(func.count()).select_from(DimProduct))
+        marketplaces_count = await self.db.scalar(
+            select(func.count()).select_from(DimMarketplace).where(DimMarketplace.is_active.is_(True)),
         )
-        products_with_price = int(
-            await self.db.scalar(
-                select(func.count()).select_from(GlobalProduct).where(
-                    and_(
-                        GlobalProduct.status.in_(("active", "pending")),
-                        GlobalProduct.current_price.is_not(None),
-                    )
-                )
-            )
-            or 0
+        listings_with_price = await self.db.scalar(
+            select(func.count())
+            .select_from(FactListing)
+            .where(FactListing.is_active.is_(True), FactListing.last_price.isnot(None)),
         )
-        last_discovery_at = await self.db.scalar(select(func.max(AdminMarketplace.last_discovery_at)))
+        last_discovery = await self.db.scalar(select(func.max(DimMarketplace.last_discovery_at)))
+
         return {
-            "total_products": total_products,
-            "total_marketplaces": total_marketplaces,
-            "products_with_price": products_with_price,
-            "last_discovery_at": last_discovery_at,
+            "total_products": int(total_products or 0),
+            "total_listings": int(total_listings or 0),
+            "marketplaces_count": int(marketplaces_count or 0),
+            "listings_with_price": int(listings_with_price or 0),
+            "last_updated": last_discovery,
+            "total_marketplaces": int(marketplaces_count or 0),
+            "products_with_price": int(listings_with_price or 0),
+            "last_discovery_at": last_discovery,
+            "message": None,
         }
 
     async def search_products(self, query: str, limit: int = 50) -> list[dict]:
-        stmt = (
-            select(GlobalProduct, AdminMarketplace.name, AdminMarketplace.domain)
-            .join(AdminMarketplace, AdminMarketplace.id == GlobalProduct.marketplace_id)
-            .where(GlobalProduct.status.in_(("active", "pending")))
-            .where(GlobalProduct.title.ilike(f"%{query}%"))
-            .order_by(GlobalProduct.discovered_at.desc().nullslast())
-            .limit(limit)
+        """Search pool by product title."""
+        items, _total = await self.list_products(
+            sort=_SORT_RECENT,
+            search=query,
+            limit=limit,
+            offset=0,
         )
-        rows = (await self.db.execute(stmt)).all()
-        return [
-            {
-                "id": product.id,
-                "marketplace_id": product.marketplace_id,
-                "marketplace_name": marketplace_name,
-                "marketplace_domain": marketplace_domain,
-                "url": product.url,
-                "title": product.title,
-                "image_url": product.image_url,
-                "current_price": float(product.current_price)
-                if product.current_price is not None
-                else None,
-                "currency": product.currency or "USD",
-                "status": product.status,
-                "last_scraped_at": product.last_scraped_at,
-            }
-            for product, marketplace_name, marketplace_domain in rows
-        ]
+        return items
+
+
+def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalize ORM row mapping to API dict (UUIDs as str for JSON)."""
+    pct = row.get("price_change_pct")
+    return {
+        "id": row["id"],
+        "product_id": row["product_id"],
+        "title": row.get("title"),
+        "image_url": row.get("image_url"),
+        "url": row.get("url"),
+        "marketplace_name": row.get("marketplace_name"),
+        "marketplace_domain": row.get("marketplace_domain"),
+        "marketplace_code": row.get("marketplace_code"),
+        "country_code": row.get("country_code"),
+        "price": float(row["price"]) if row.get("price") is not None else None,
+        "currency": row.get("currency"),
+        "price_eur": float(row["price_eur"]) if row.get("price_eur") is not None else None,
+        "price_change_pct": float(pct) if pct is not None else None,
+        "in_stock": row.get("in_stock"),
+        "last_checked_at": row.get("last_checked_at"),
+        "status": "active" if row.get("is_active") else "inactive",
+        "is_active": row.get("is_active"),
+    }

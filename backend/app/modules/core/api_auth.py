@@ -19,7 +19,8 @@ from app.modules.core.auth.service import (
     hash_password,
     verify_password,
 )
-from app.modules.core.models import User, UserPlan
+from app.entitlements.plan import UserPlan
+from app.models.core import User
 from app.modules.core.schemas import (
     ChangeInitialPasswordRequest,
     RefreshTokenRequest,
@@ -47,18 +48,26 @@ def _create_tokens(user_id: UUID, force_password_change: bool | None = None, per
     return response
 
 
+def _plan_str(plan: object) -> str:
+    return plan.value if hasattr(plan, "value") else str(plan)
+
+
 def _build_user_response(current_user: User) -> UserResponse:
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
         name=current_user.name,
         company_name=current_user.company_name,
-        plan=current_user.plan.value,
+        plan=_plan_str(current_user.plan),
         trial_ends_at=current_user.trial_ends_at,
         language=current_user.language,
+        timezone=getattr(current_user, "timezone", "UTC") or "UTC",
         ai_tone=getattr(current_user, "ai_tone", "balanced"),
+        default_currency=getattr(current_user, "default_currency", "EUR") or "EUR",
         is_superuser=getattr(current_user, "is_superuser", False),
+        is_active=getattr(current_user, "is_active", True),
         created_at=current_user.created_at,
+        last_login_at=getattr(current_user, "last_login_at", None),
         telegram_chat_id=current_user.telegram_chat_id,
         avatar_url=getattr(current_user, "avatar_url", None),
         entitlements=get_entitlements_for_frontend(current_user.plan, trial_ends_at=current_user.trial_ends_at),
@@ -75,7 +84,7 @@ async def register(data: UserRegister, db: DbSession) -> TokenResponse:
         password_hash=hash_password(data.password),
         name=data.name,
         company_name=data.company_name,
-        plan=UserPlan.trial,
+        plan=UserPlan.trial.value,
         trial_ends_at=datetime.now(timezone.utc) + timedelta(days=14),
         language=data.language,
     )
@@ -159,7 +168,16 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
     return _build_user_response(current_user)
 
 
-ALLOWED_USER_UPDATE_FIELDS = frozenset({"name", "company_name", "language", "ai_tone", "avatar_url"})
+ALLOWED_USER_UPDATE_FIELDS = frozenset({
+    "name",
+    "company_name",
+    "language",
+    "timezone",
+    "ai_tone",
+    "default_currency",
+    "avatar_url",
+    "preferences",
+})
 
 
 @router.put("/me", response_model=UserResponse)

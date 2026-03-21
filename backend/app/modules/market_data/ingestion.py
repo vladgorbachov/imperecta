@@ -1,283 +1,347 @@
-"""
-Market data ingestion orchestration. Fetches from providers, validates, persists.
-Isolated from legacy dashboard/anomalies. No routing through benchmark or anomalies.
-"""
+"""Persist market quotes into v2 fact tables + api_logs audit."""
 
-import asyncio
 import logging
-from datetime import datetime, timezone
-from decimal import Decimal
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from typing import Any
 
-import httpx
-from sqlalchemy.dialects.postgresql import insert
+import calendar
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
-from app.modules.market_data.models import (
-    MarketsCommodity,
-    MarketsCrypto,
-    MarketsForex,
-    MarketsRefreshLog,
-    MarketsRefreshStatus,
-    MarketsRefreshType,
-)
-from app.modules.market_data.providers.commodities_adapter import CommoditiesHttpAdapter
-from app.modules.market_data.providers.commodities_goldapi_alphavantage import (
-    CommoditiesGoldAPIAlphaVantageAdapter,
-)
-from app.modules.market_data.providers.crypto_adapter import CryptoCompositeAdapter
-from app.modules.market_data.providers.forex_adapter import ForexFrankfurterAdapter
-from app.modules.market_data.providers.fuel_adapter import FuelHttpAdapter
+from app.models.app_tables import ApiLog
+from app.models.dimensions import DimDate
+from app.models.facts import FactCommodityPrice, FactCryptoPrice, FactCurrencyRate
 
 logger = logging.getLogger(__name__)
-settings = Settings()
-
-PROVIDER_FOREX = "frankfurter"
-PROVIDER_CRYPTO = "binance"
-PROVIDER_COMMODITIES = "http"
-PROVIDER_FUEL = "fuel"
 
 
-def _provider_for_type(refresh_type: MarketsRefreshType) -> str:
-    if refresh_type == MarketsRefreshType.forex:
-        return PROVIDER_FOREX
-    if refresh_type == MarketsRefreshType.crypto:
-        return PROVIDER_CRYPTO
-    if refresh_type == MarketsRefreshType.commodities:
-        return PROVIDER_COMMODITIES
-    if refresh_type == MarketsRefreshType.fuel:
-        return PROVIDER_FUEL
-    return "unknown"
+async def _ensure_dim_date(db: AsyncSession, d: date) -> int:
+    """Return dim_date.date_id for calendar day, inserting a row if missing."""
+    date_id = int(d.strftime("%Y%m%d"))
+    exists = await db.scalar(select(DimDate.date_id).where(DimDate.date_id == date_id))
+    if exists is not None:
+        return date_id
+    iso_year, iso_week, iso_weekday = d.isocalendar()
+    row = DimDate(
+        date_id=date_id,
+        full_date=d,
+        year=d.year,
+        quarter=(d.month - 1) // 3 + 1,
+        month=d.month,
+        month_name=d.strftime("%B"),
+        week_iso=iso_week,
+        day_of_month=d.day,
+        day_of_week=iso_weekday,
+        day_name=d.strftime("%A"),
+        is_weekend=iso_weekday >= 6,
+        is_last_day_of_month=d.day == calendar.monthrange(d.year, d.month)[1],
+    )
+    db.add(row)
+    await db.flush()
+    return date_id
 
 
-class MarketDataIngestionService:
-    """
-    Orchestrates market data fetch, validation, and persistence.
-    Uses retry/timeout. Provider-specific shapes never leave adapters.
-    """
+def _log_ingestion(
+    db: AsyncSession,
+    *,
+    endpoint: str,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    db.add(
+        ApiLog(
+            service="market_data",
+            endpoint=endpoint,
+            method="POST",
+            status=status,
+            error_message=error_message,
+        )
+    )
+
+
+@dataclass
+class ForexIngestItem:
+    """Row to persist into fact_currency_rate."""
+
+    currency_code: str
+    rate_to_eur: float
+    rate_to_usd: float
+    source: str
+
+
+@dataclass
+class CryptoIngestItem:
+    """Row to persist into fact_crypto_price."""
+
+    symbol: str
+    name: str | None
+    price_usd: float
+    market_cap_usd: float | None
+    volume_24h_usd: float | None
+    change_24h_pct: float | None
+    source: str
+    rank: int | None
+
+
+@dataclass
+class CommodityIngestItem:
+    """Row to persist into fact_commodity_price."""
+
+    symbol: str
+    name: str
+    commodity_type: str
+    price_usd: float
+    unit: str
+    source: str
+    change_24h_pct: float | None = None
+    price_eur: float | None = None
+
+
+class IngestionService:
+    """Write forex / crypto / commodity snapshots to star schema facts."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.timeout = settings.market_data_timeout_seconds
-        self.retry_attempts = settings.market_data_retry_attempts
 
-    async def _fetch_with_retry(self, fetch_fn, refresh_type: MarketsRefreshType):
-        """Execute fetch with retries and log to refresh_log."""
-        log_entry = MarketsRefreshLog(
-            refresh_type=refresh_type,
-            status=MarketsRefreshStatus.running,
-            provider_source=_provider_for_type(refresh_type),
+    async def persist_forex(self, items: list[ForexIngestItem]) -> int:
+        """Insert forex rates for today (replaces same key rows)."""
+        if not items:
+            return 0
+        today = datetime.now(timezone.utc).date()
+        today_id = await _ensure_dim_date(self.db, today)
+        now = datetime.now(timezone.utc)
+        n = 0
+        for item in items:
+            await self.db.execute(
+                delete(FactCurrencyRate).where(
+                    FactCurrencyRate.date_id == today_id,
+                    FactCurrencyRate.currency_code == item.currency_code[:3],
+                    FactCurrencyRate.source == item.source,
+                ),
+            )
+            self.db.add(
+                FactCurrencyRate(
+                    date_id=today_id,
+                    currency_code=item.currency_code[:3],
+                    rate_to_eur=item.rate_to_eur,
+                    rate_to_usd=item.rate_to_usd,
+                    source=item.source,
+                    fetched_at=now,
+                ),
+            )
+            n += 1
+        await _log_ingestion(self.db, endpoint="forex", status="success")
+        await self.db.commit()
+        return n
+
+    async def persist_crypto(self, items: list[CryptoIngestItem]) -> int:
+        """Insert crypto rows for today."""
+        if not items:
+            return 0
+        today = datetime.now(timezone.utc).date()
+        today_id = await _ensure_dim_date(self.db, today)
+        now = datetime.now(timezone.utc)
+        n = 0
+        for item in items:
+            sym = item.symbol[:20]
+            await self.db.execute(
+                delete(FactCryptoPrice).where(
+                    FactCryptoPrice.date_id == today_id,
+                    FactCryptoPrice.symbol == sym,
+                    FactCryptoPrice.source == item.source,
+                ),
+            )
+            self.db.add(
+                FactCryptoPrice(
+                    date_id=today_id,
+                    symbol=sym,
+                    name=(item.name or sym)[:100],
+                    price_usd=item.price_usd,
+                    market_cap_usd=item.market_cap_usd,
+                    volume_24h_usd=item.volume_24h_usd,
+                    change_24h_pct=item.change_24h_pct,
+                    source=item.source,
+                    rank=item.rank,
+                    fetched_at=now,
+                ),
+            )
+            n += 1
+        await self.db.commit()
+        await _log_ingestion(self.db, endpoint="crypto", status="success")
+        await self.db.commit()
+        return n
+
+    async def persist_commodities(self, items: list[CommodityIngestItem]) -> int:
+        """Insert commodity rows for today."""
+        if not items:
+            return 0
+        today = datetime.now(timezone.utc).date()
+        today_id = await _ensure_dim_date(self.db, today)
+        now = datetime.now(timezone.utc)
+        n = 0
+        for item in items:
+            await self.db.execute(
+                delete(FactCommodityPrice).where(
+                    FactCommodityPrice.date_id == today_id,
+                    FactCommodityPrice.symbol == item.symbol[:20],
+                    FactCommodityPrice.source == item.source,
+                ),
+            )
+            self.db.add(
+                FactCommodityPrice(
+                    date_id=today_id,
+                    symbol=item.symbol[:20],
+                    name=item.name[:100],
+                    commodity_type=item.commodity_type,
+                    price_usd=item.price_usd,
+                    price_eur=item.price_eur,
+                    change_24h_pct=item.change_24h_pct,
+                    unit=item.unit[:20],
+                    source=item.source,
+                    fetched_at=now,
+                ),
+            )
+            n += 1
+        await _log_ingestion(self.db, endpoint="commodities", status="success")
+        await self.db.commit()
+        return n
+
+    async def ingest_all(self, include_commodities: bool = False) -> dict[str, Any]:
+        """Fetch from existing adapters and persist (orchestration entrypoint)."""
+        from app.modules.market_data.service import (
+            fetch_crypto_prices,
+            fetch_forex_rates,
+            fetch_commodities,
         )
-        self.db.add(log_entry)
-        await self.db.flush()
 
-        last_error: Exception | None = None
-        for attempt in range(1, self.retry_attempts + 1):
-            try:
-                result = await asyncio.wait_for(fetch_fn(), timeout=float(self.timeout))
-                log_entry.status = MarketsRefreshStatus.success
-                log_entry.completed_at = datetime.now(timezone.utc)
-                log_entry.error_message = None
-                await self.db.flush()
-                return result
-            except httpx.HTTPStatusError as error:
-                last_error = error
-                if error.response.status_code == 429:
-                    wait_sec = attempt * 30
-                    logger.warning(
-                        "Market data %s attempt %d rate limited (429), waiting %ds before retry",
-                        refresh_type.value,
-                        attempt,
-                        wait_sec,
+        out: dict[str, Any] = {"forex": 0, "crypto": 0, "commodities": 0}
+        try:
+            raw_fx = await fetch_forex_rates("EUR")
+            if raw_fx:
+                pairs: dict[str, float] = {}
+                for row in raw_fx:
+                    cur = row.get("pair", "").split("/")[-1].strip()
+                    if len(cur) != 3:
+                        continue
+                    r = float(row.get("rate", 0))
+                    if r > 0:
+                        pairs[cur] = r
+                usd_per_eur = pairs.get("USD")
+                items: list[ForexIngestItem] = []
+                for cur, rate in pairs.items():
+                    if cur == "EUR":
+                        continue
+                    rate_to_eur = 1.0 / rate
+                    if usd_per_eur:
+                        rate_to_usd = usd_per_eur / rate
+                    else:
+                        rate_to_usd = rate_to_eur
+                    items.append(
+                        ForexIngestItem(
+                            currency_code=cur,
+                            rate_to_eur=rate_to_eur,
+                            rate_to_usd=rate_to_usd,
+                            source="openexchangerates",
+                        ),
                     )
-                    if attempt < self.retry_attempts:
-                        await asyncio.sleep(wait_sec)
-                else:
-                    logger.warning(
-                        "Market data %s attempt %d HTTP error: %s",
-                        refresh_type.value,
-                        attempt,
-                        error,
-                        exc_info=True,
+                out["forex"] = await self.persist_forex(items)
+        except Exception as exc:
+            logger.exception("ingest forex: %s", exc)
+            await _log_ingestion(self.db, endpoint="forex", status="error", error_message=str(exc)[:2000])
+            await self.db.commit()
+
+        try:
+            raw_c, _ = await fetch_crypto_prices()
+            if raw_c:
+                crypto_items = [
+                    CryptoIngestItem(
+                        symbol=c["symbol"],
+                        name=c.get("name"),
+                        price_usd=float(c["price"]),
+                        market_cap_usd=float(c["market_cap"]) if c.get("market_cap") else None,
+                        volume_24h_usd=None,
+                        change_24h_pct=float(c["change_24h"]) if c.get("change_24h") is not None else None,
+                        source="coingecko",
+                        rank=None,
                     )
-                    raise
-            except asyncio.TimeoutError as error:
-                last_error = error
-                logger.warning(
-                    "Market data %s attempt %d timeout",
-                    refresh_type.value,
-                    attempt,
-                )
-            except Exception as error:
-                last_error = error
-                logger.warning(
-                    "Market data %s attempt %d error: %s",
-                    refresh_type.value,
-                    attempt,
-                    error,
-                    exc_info=True,
-                )
-            if attempt < self.retry_attempts:
-                if not isinstance(last_error, httpx.HTTPStatusError):
-                    await asyncio.sleep(2**attempt)
+                    for c in raw_c
+                ]
+                out["crypto"] = await self.persist_crypto(crypto_items)
+        except Exception as exc:
+            logger.exception("ingest crypto: %s", exc)
+            await _log_ingestion(self.db, endpoint="crypto", status="error", error_message=str(exc)[:2000])
+            await self.db.commit()
 
-        log_entry.status = MarketsRefreshStatus.error
-        log_entry.completed_at = datetime.now(timezone.utc)
-        log_entry.error_message = str(last_error) if last_error else "Unknown error"
-        await self.db.flush()
-        raise last_error or RuntimeError("Ingestion failed")
-
-    async def ingest_forex(self) -> int:
-        adapter = ForexFrankfurterAdapter(timeout=float(self.timeout))
-        items = await self._fetch_with_retry(adapter.fetch, MarketsRefreshType.forex)
-        if not items:
-            return 0
-
-        for dto in items:
-            stmt = insert(MarketsForex).values(
-                symbol=dto.symbol,
-                bid=dto.bid,
-                ask=dto.ask,
-                spread=dto.spread,
-                change_24h=Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                refreshed_at=dto.refreshed_at,
-            ).on_conflict_do_update(
-                index_elements=["symbol"],
-                set_={
-                    "bid": dto.bid,
-                    "ask": dto.ask,
-                    "spread": dto.spread,
-                    "change_24h": Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                    "refreshed_at": dto.refreshed_at,
-                },
-            )
-            await self.db.execute(stmt)
-
-        await self.db.flush()
-        logger.info("Persisted %d forex pairs", len(items))
-        return len(items)
-
-    async def ingest_crypto(self) -> int:
-        adapter = CryptoCompositeAdapter(timeout=float(self.timeout))
-        items = await self._fetch_with_retry(adapter.fetch, MarketsRefreshType.crypto)
-        if not items:
-            return 0
-
-        for dto in items:
-            stmt = insert(MarketsCrypto).values(
-                symbol=dto.symbol,
-                price=dto.price,
-                change_24h=Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                market_cap=Decimal(str(dto.market_cap)) if dto.market_cap is not None else None,
-                refreshed_at=dto.refreshed_at,
-            ).on_conflict_do_update(
-                index_elements=["symbol"],
-                set_={
-                    "price": dto.price,
-                    "change_24h": Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                    "market_cap": Decimal(str(dto.market_cap)) if dto.market_cap is not None else None,
-                    "refreshed_at": dto.refreshed_at,
-                },
-            )
-            await self.db.execute(stmt)
-
-        await self.db.flush()
-        logger.info("Persisted %d crypto assets", len(items))
-        return len(items)
-
-    async def ingest_commodities(self) -> int:
-        if settings.goldapi_key or settings.alpha_vantage_key:
-            adapter = CommoditiesGoldAPIAlphaVantageAdapter()
-        elif settings.market_data_commodities_url.strip():
-            adapter = CommoditiesHttpAdapter(timeout=float(self.timeout))
-        else:
-            logger.debug("Commodities: no GOLDAPI_KEY, ALPHA_VANTAGE_KEY, or MARKET_DATA_COMMODITIES_URL")
-            return 0
-
-        items = await self._fetch_with_retry(adapter.fetch, MarketsRefreshType.commodities)
-        if not items:
-            return 0
-
-        for dto in items:
-            stmt = insert(MarketsCommodity).values(
-                symbol=dto.symbol,
-                name=dto.name,
-                price=dto.price,
-                change_24h=Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                unit=dto.unit,
-                refreshed_at=dto.refreshed_at,
-            ).on_conflict_do_update(
-                index_elements=["symbol"],
-                set_={
-                    "name": dto.name,
-                    "price": dto.price,
-                    "change_24h": Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                    "unit": dto.unit,
-                    "refreshed_at": dto.refreshed_at,
-                },
-            )
-            await self.db.execute(stmt)
-
-        await self.db.flush()
-        logger.info("Persisted %d commodities", len(items))
-        return len(items)
-
-    async def ingest_fuel(self) -> int:
-        if not settings.market_data_fuel_url.strip():
-            logger.debug("Fuel URL not configured, skipping")
-            return 0
-
-        adapter = FuelHttpAdapter(timeout=float(self.timeout))
-        items = await self._fetch_with_retry(adapter.fetch, MarketsRefreshType.fuel)
-        if not items:
-            return 0
-
-        for dto in items:
-            stmt = insert(MarketsCommodity).values(
-                symbol=dto.symbol,
-                name=dto.name,
-                price=dto.price,
-                change_24h=Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                unit=dto.unit,
-                refreshed_at=dto.refreshed_at,
-            ).on_conflict_do_update(
-                index_elements=["symbol"],
-                set_={
-                    "name": dto.name,
-                    "price": dto.price,
-                    "change_24h": Decimal(str(dto.change_24h)) if dto.change_24h is not None else None,
-                    "unit": dto.unit,
-                    "refreshed_at": dto.refreshed_at,
-                },
-            )
-            await self.db.execute(stmt)
-
-        await self.db.flush()
-        logger.info("Persisted %d fuel items", len(items))
-        return len(items)
-
-    async def ingest_all(self, include_commodities: bool = True) -> dict[str, int]:
-        results: dict[str, int] = {}
-        tasks = [
-            ("forex", self.ingest_forex),
-            ("crypto", self.ingest_crypto),
-            ("fuel", self.ingest_fuel),
-        ]
         if include_commodities:
-            tasks.append(("commodities", self.ingest_commodities))
-        for name, fn in tasks:
             try:
-                count = await fn()
-                results[name] = count
-            except Exception as error:
-                logger.error("Ingestion %s failed: %s", name, error, exc_info=True)
-                results[name] = 0
-        return results
+                comm_raw, _, _ = await fetch_commodities()
+                comm_items: list[CommodityIngestItem] = []
+                for c in comm_raw or []:
+                    sym = str(c.get("symbol", "UNK"))[:20]
+                    name = str(c.get("name", sym))[:100]
+                    unit = str(c.get("unit", "unit"))[:20]
+                    price = float(c.get("price", 0))
+                    ch = c.get("change_24h")
+                    comm_items.append(
+                        CommodityIngestItem(
+                            symbol=sym,
+                            name=name,
+                            commodity_type="metal" if sym in ("XAU", "XAG", "XPT", "XPD") else "energy",
+                            price_usd=price,
+                            unit=unit,
+                            source="goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage",
+                            change_24h_pct=float(ch) if ch is not None else None,
+                        ),
+                    )
+                out["commodities"] = await self.persist_commodities(comm_items)
+            except Exception as exc:
+                logger.exception("ingest commodities: %s", exc)
+                await _log_ingestion(
+                    self.db,
+                    endpoint="commodities",
+                    status="error",
+                    error_message=str(exc)[:2000],
+                )
+                await self.db.commit()
+
+        return out
 
     async def ingest_commodities_only(self) -> int:
-        """Run only commodities ingestion. Used by 4x/day schedule."""
+        """Commodity-only run for scheduled tasks (no forex/crypto)."""
+        from app.modules.market_data.service import fetch_commodities
+
         try:
-            return await self.ingest_commodities()
-        except Exception as error:
-            logger.error("Commodities ingestion failed: %s", error, exc_info=True)
-            raise
+            comm_raw, _, _ = await fetch_commodities()
+            comm_items: list[CommodityIngestItem] = []
+            for c in comm_raw or []:
+                sym = str(c.get("symbol", "UNK"))[:20]
+                name = str(c.get("name", sym) or sym)[:100]
+                unit = str(c.get("unit", "unit"))[:20]
+                price = float(c.get("price", 0))
+                ch = c.get("change_24h")
+                src = "goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"
+                ctype = "metal" if sym in ("XAU", "XAG", "XPT", "XPD") else "energy"
+                comm_items.append(
+                    CommodityIngestItem(
+                        symbol=sym,
+                        name=name,
+                        commodity_type=ctype,
+                        price_usd=price,
+                        unit=unit,
+                        source=src,
+                        change_24h_pct=float(ch) if ch is not None else None,
+                    ),
+                )
+            return await self.persist_commodities(comm_items)
+        except Exception as exc:
+            logger.exception("ingest_commodities_only: %s", exc)
+            await _log_ingestion(self.db, endpoint="commodities", status="error", error_message=str(exc)[:2000])
+            await self.db.commit()
+            return 0
+
+
+class MarketDataIngestionService(IngestionService):
+    """Backward-compatible name for Celery/tasks."""
+
+    pass

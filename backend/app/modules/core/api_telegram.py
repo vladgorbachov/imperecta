@@ -13,7 +13,7 @@ from app.common.deps import get_current_user
 from app.config import Settings
 from app.database import get_db
 from app.modules.alerts.notifications import send_message
-from app.modules.core.models import User
+from app.models.core import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/telegram", tags=["telegram"])

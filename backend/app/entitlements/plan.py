@@ -9,7 +9,15 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from app.modules.core.models import UserPlan
+
+class UserPlan(str, Enum):
+    """Subscription plan values (matches ck_users_plan in DB)."""
+
+    trial = "trial"
+    starter = "starter"
+    business = "business"
+    pro = "pro"
+    enterprise = "enterprise"
 
 
 class ServiceTier(str, Enum):
@@ -38,6 +46,7 @@ PLAN_TO_TIER: dict[UserPlan, ServiceTier] = {
     UserPlan.starter: ServiceTier.FREE,
     UserPlan.business: ServiceTier.PAID_FULL,
     UserPlan.pro: ServiceTier.PAID_FULL,
+    UserPlan.enterprise: ServiceTier.PAID_FULL,
 }
 
 # ServiceTier -> feature access. True = enabled, False = disabled.
@@ -65,22 +74,32 @@ USAGE_LIMITS: dict[ServiceTier, dict[str, int]] = {
 }
 
 
-def get_service_tier(plan: UserPlan) -> ServiceTier:
+def _coerce_plan(plan: UserPlan | str) -> UserPlan:
+    """Normalize DB string or enum to UserPlan."""
+    if isinstance(plan, UserPlan):
+        return plan
+    try:
+        return UserPlan(plan)
+    except ValueError:
+        return UserPlan.starter
+
+
+def get_service_tier(plan: UserPlan | str) -> ServiceTier:
     """Map UserPlan to canonical ServiceTier."""
-    return PLAN_TO_TIER.get(plan, ServiceTier.FREE)
+    return PLAN_TO_TIER.get(_coerce_plan(plan), ServiceTier.FREE)
 
 
-def is_trial(plan: UserPlan) -> bool:
+def is_trial(plan: UserPlan | str) -> bool:
     """True if plan is Trial tier."""
     return get_service_tier(plan) == ServiceTier.TRIAL
 
 
-def is_free(plan: UserPlan) -> bool:
+def is_free(plan: UserPlan | str) -> bool:
     """True if plan is Free tier (restricted)."""
     return get_service_tier(plan) == ServiceTier.FREE
 
 
-def is_paid(plan: UserPlan) -> bool:
+def is_paid(plan: UserPlan | str) -> bool:
     """True if plan is Paid Full tier."""
     return get_service_tier(plan) == ServiceTier.PAID_FULL
 
@@ -93,14 +112,14 @@ def is_trial_expired(trial_ends_at: datetime | None) -> bool:
     return trial_ends_at <= now
 
 
-def has_feature(plan: UserPlan, feature: Feature) -> bool:
+def has_feature(plan: UserPlan | str, feature: Feature) -> bool:
     """Check if plan has access to feature."""
     tier = get_service_tier(plan)
     entitlements = FEATURE_ENTITLEMENTS.get(tier, {})
     return entitlements.get(feature, False)
 
 
-def get_limit(plan: UserPlan, limit_key: str) -> int:
+def get_limit(plan: UserPlan | str, limit_key: str) -> int:
     """Get usage limit for plan. Keys: products, competitors, etc."""
     tier = get_service_tier(plan)
     limits = USAGE_LIMITS.get(tier, USAGE_LIMITS[ServiceTier.FREE])
@@ -108,7 +127,7 @@ def get_limit(plan: UserPlan, limit_key: str) -> int:
 
 
 def get_entitlements_for_frontend(
-    plan: UserPlan,
+    plan: UserPlan | str,
     trial_ends_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Return plan metadata for frontend: tier, features, limits, trial state."""

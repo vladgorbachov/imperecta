@@ -16,6 +16,7 @@ from app.modules.market_data.schemas import (
     MarketsTickerResponse,
 )
 from app.modules.market_data.service import (
+    MarketDataService,
     MarketsService,
     fetch_crypto_prices,
     fetch_forex_rates,
@@ -70,10 +71,7 @@ async def update_preferences(
     db: DbSession,
 ) -> MarketsPreferencesResponse:
     service = MarketsService(db, current_user.id)
-    data = await service.update_preferences(
-        preferred_country_code=body.preferred_country_code,
-        favorite_instrument_ids=body.favorite_instrument_ids,
-    )
+    data = await service.update_preferences(**body.model_dump(exclude_unset=True))
     return MarketsPreferencesResponse(**data)
 
 
@@ -96,8 +94,12 @@ async def get_refresh_metadata(current_user: CurrentUser, db: DbSession) -> Mark
 
 
 @router.get("/forex", response_model=MarketsForexResponse)
-async def get_forex(current_user: CurrentUser) -> MarketsForexResponse:
+async def get_forex(current_user: CurrentUser, db: DbSession) -> MarketsForexResponse:
     _ = current_user
+    mds = MarketDataService(db)
+    db_items, last_at = await mds.build_forex_api_response_async()
+    if db_items:
+        return MarketsForexResponse(items=db_items, last_refreshed_at=last_at)
     raw = await fetch_forex_rates("EUR")
     if not raw:
         raise HTTPException(503, "Forex data temporarily unavailable")
@@ -117,9 +119,18 @@ async def get_forex(current_user: CurrentUser) -> MarketsForexResponse:
 
 
 @router.get("/crypto", response_model=MarketsCryptoResponse)
-async def get_crypto(current_user: CurrentUser) -> MarketsCryptoResponse:
+async def get_crypto(current_user: CurrentUser, db: DbSession) -> MarketsCryptoResponse:
     _ = current_user
     now = _now()
+    mds = MarketDataService(db)
+    db_items, last_at, _cached = await mds.build_crypto_api_response_async()
+    if db_items:
+        return MarketsCryptoResponse(
+            items=db_items,
+            error=None,
+            cached=False,
+            last_refreshed_at=last_at,
+        )
     try:
         raw, from_cache = await fetch_crypto_prices()
         items = [
@@ -175,10 +186,11 @@ async def get_commodities(current_user: CurrentUser, db: DbSession) -> MarketsCo
 @router.get("/fuel")
 async def get_fuel(
     current_user: CurrentUser,
+    db: DbSession,
     country: str = Query("UA", description="Country code or EUROPE/CIS"),
 ) -> dict:
     _ = current_user
-    data = await get_fuel_prices(country)
+    data = await get_fuel_prices(country, db=db)
     if not data:
         raise HTTPException(404, f"No fuel data for country: {country}")
     return data

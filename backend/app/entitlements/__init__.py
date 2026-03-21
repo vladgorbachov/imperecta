@@ -8,6 +8,7 @@ Single source of truth for limits, feature access, and trial behavior.
 from app.entitlements.plan import (
     Feature,
     ServiceTier,
+    UserPlan,
     get_entitlements_for_frontend,
     get_limit,
     get_service_tier,
@@ -21,6 +22,7 @@ from app.entitlements.plan import (
 __all__ = [
     "Feature",
     "ServiceTier",
+    "UserPlan",
     "get_entitlements_for_frontend",
     "get_limit",
     "get_service_tier",

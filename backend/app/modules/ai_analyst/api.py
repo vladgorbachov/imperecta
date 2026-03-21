@@ -1,12 +1,14 @@
 """AI chat API endpoints."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.common.deps import CurrentUser, DbSession
 from app.entitlements import Feature, has_feature
-from app.modules.ai_analyst.models import AIChatMessage, AIChatSession
+from app.models.app_tables import AIChatMessage, AIChatSession
 from app.modules.ai_analyst.schemas import (
     ChatRequest,
     ChatResponse,
@@ -24,7 +26,14 @@ async def post_chat(body: ChatRequest, current_user: CurrentUser, db: DbSession)
     if not has_feature(current_user.plan, Feature.AI_ANALYST):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.")
     try:
-        result = await ai_chat(db=db, user=current_user, session_id=body.session_id, message=body.message, context_type=body.context_type, context_id=body.context_id)
+        result = await ai_chat(
+            db=db,
+            user=current_user,
+            session_id=body.session_id,
+            message=body.message,
+            context_type=body.context_type,
+            context_id=body.context_id,
+        )
         return ChatResponse(**result)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
@@ -65,7 +74,7 @@ async def list_sessions(current_user: CurrentUser, db: DbSession) -> list[Sessio
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
-async def get_session(session_id: int, current_user: CurrentUser, db: DbSession) -> SessionDetailResponse:
+async def get_session(session_id: UUID, current_user: CurrentUser, db: DbSession) -> SessionDetailResponse:
     if not has_feature(current_user.plan, Feature.AI_ANALYST):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.")
     session = (
@@ -81,12 +90,12 @@ async def get_session(session_id: int, current_user: CurrentUser, db: DbSession)
         id=session.id,
         title=session.title,
         context_type=session.context_type,
-        messages=[MessageItem(role=m.role, content=m.content, created_at=m.created_at.isoformat()) for m in session.messages],
+        messages=[MessageItem(role=m.role, content=m.content or "", created_at=m.created_at.isoformat()) for m in session.messages],
     )
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_session(session_id: int, current_user: CurrentUser, db: DbSession) -> None:
+async def delete_session(session_id: UUID, current_user: CurrentUser, db: DbSession) -> None:
     if not has_feature(current_user.plan, Feature.AI_ANALYST):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="AI Analyst is available on Paid Full plan. Upgrade to unlock.")
     session = (

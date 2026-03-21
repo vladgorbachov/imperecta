@@ -6,27 +6,332 @@ Fetches forex, crypto, commodities, and fuel prices from APIs.
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import asc, func, nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-
-from app.models import (
-    MarketsCategoryAnalytics,
-    MarketsCommodity,
-    MarketsMarketplaceAnalytics,
-    MarketsOpportunityBlock,
-)
-from app.modules.market_data.models import (
-    MarketsPreferences,
-    MarketsRefreshLog,
-    MarketsRefreshStatus,
+from app.models.app_tables import ApiLog
+from app.models.core import User
+from app.models.facts import (
+    FactCommodityPrice,
+    FactCryptoPrice,
+    FactCurrencyRate,
+    FactFuelPrice,
 )
 
 logger = logging.getLogger(__name__)
+
+_V2_MSG = "Pending migration to v2 schema"
+
+
+class MarketDataService:
+    """Read forex, crypto, commodities, and fuel from v2 fact tables."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    @staticmethod
+    def _dedupe_currency_rows(rows: list[FactCurrencyRate]) -> list[FactCurrencyRate]:
+        """Keep one row per currency (first after ordering by currency_code, source)."""
+        seen: set[str] = set()
+        out: list[FactCurrencyRate] = []
+        for r in rows:
+            if r.currency_code in seen:
+                continue
+            seen.add(r.currency_code)
+            out.append(r)
+        return out
+
+    @staticmethod
+    def _dedupe_crypto_rows(rows: list[FactCryptoPrice]) -> list[FactCryptoPrice]:
+        """Keep one row per symbol (prefer lower rank)."""
+        best: dict[str, FactCryptoPrice] = {}
+        for r in rows:
+            cur = best.get(r.symbol)
+            if cur is None:
+                best[r.symbol] = r
+                continue
+            cr = cur.rank if cur.rank is not None else 9999
+            rr = r.rank if r.rank is not None else 9999
+            if rr < cr:
+                best[r.symbol] = r
+        return list(best.values())
+
+    @staticmethod
+    def _dedupe_commodity_rows(rows: list[FactCommodityPrice]) -> list[FactCommodityPrice]:
+        """Keep one row per symbol (first wins)."""
+        seen: set[str] = set()
+        out: list[FactCommodityPrice] = []
+        for r in rows:
+            if r.symbol in seen:
+                continue
+            seen.add(r.symbol)
+            out.append(r)
+        return out
+
+    async def get_forex(self) -> list[dict[str, Any]]:
+        """Latest forex rates from fact_currency_rate."""
+        latest_date = await self.db.scalar(select(func.max(FactCurrencyRate.date_id)))
+        if not latest_date:
+            return []
+        result = await self.db.execute(
+            select(FactCurrencyRate)
+            .where(FactCurrencyRate.date_id == latest_date)
+            .order_by(FactCurrencyRate.currency_code, FactCurrencyRate.source),
+        )
+        rows = self._dedupe_currency_rows(list(result.scalars().all()))
+        return [
+            {
+                "currency_code": r.currency_code,
+                "rate_to_eur": float(r.rate_to_eur),
+                "rate_to_usd": float(r.rate_to_usd),
+                "source": r.source,
+                "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
+            }
+            for r in rows
+        ]
+
+    async def get_crypto(self) -> list[dict[str, Any]]:
+        """Latest crypto prices from fact_crypto_price."""
+        latest_date = await self.db.scalar(select(func.max(FactCryptoPrice.date_id)))
+        if not latest_date:
+            return []
+        result = await self.db.execute(
+            select(FactCryptoPrice)
+            .where(FactCryptoPrice.date_id == latest_date)
+            .order_by(nullslast(asc(FactCryptoPrice.rank)), FactCryptoPrice.symbol),
+        )
+        rows = self._dedupe_crypto_rows(list(result.scalars().all()))
+        return [self._crypto_to_dict(r) for r in rows]
+
+    async def get_commodities(self) -> list[dict[str, Any]]:
+        """Latest commodity prices from fact_commodity_price."""
+        latest_date = await self.db.scalar(select(func.max(FactCommodityPrice.date_id)))
+        if not latest_date:
+            return []
+        result = await self.db.execute(
+            select(FactCommodityPrice)
+            .where(FactCommodityPrice.date_id == latest_date)
+            .order_by(FactCommodityPrice.symbol, FactCommodityPrice.source),
+        )
+        rows = self._dedupe_commodity_rows(list(result.scalars().all()))
+        return [self._commodity_to_dict(r) for r in rows]
+
+    async def get_fuel(self, country_code: str) -> list[dict[str, Any]]:
+        """Latest fuel prices for country from fact_fuel_price."""
+        code = country_code.upper()
+        latest_date = await self.db.scalar(
+            select(func.max(FactFuelPrice.date_id)).where(FactFuelPrice.country_code == code),
+        )
+        if not latest_date:
+            return []
+        result = await self.db.execute(
+            select(FactFuelPrice)
+            .where(FactFuelPrice.date_id == latest_date)
+            .where(FactFuelPrice.country_code == code)
+            .order_by(FactFuelPrice.fuel_type),
+        )
+        return [self._fuel_to_dict(r) for r in result.scalars().all()]
+
+    async def get_preferences(self, user: User) -> dict[str, Any]:
+        """User preferences from users.preferences JSONB."""
+        prefs = user.preferences or {}
+        return {
+            "preferred_country_code": prefs.get("preferred_country_code", "DE"),
+            "dashboard_widgets": prefs.get(
+                "dashboard_widgets",
+                ["forex", "crypto", "commodities", "fuel"],
+            ),
+            "forex_favorites": prefs.get("forex_favorites", []),
+            "crypto_favorites": prefs.get("crypto_favorites", []),
+            "commodity_favorites": prefs.get("commodity_favorites", []),
+            "favorite_instrument_ids": prefs.get("favorite_instrument_ids", []),
+        }
+
+    async def update_preferences(self, user: User, updates: dict[str, Any]) -> dict[str, Any]:
+        """Merge updates into users.preferences JSONB."""
+        prefs = dict(user.preferences or {})
+        for k, v in updates.items():
+            if v is not None:
+                prefs[k] = v
+        user.preferences = prefs
+        await self.db.commit()
+        await self.db.refresh(user)
+        return await self.get_preferences(user)
+
+    async def get_ticker(self, country_code: str) -> list[dict[str, Any]]:
+        """Build ticker from latest forex + crypto + commodities (+ fuel from DB when available)."""
+        items: list[dict[str, Any]] = []
+        for fx in await self.get_forex():
+            cc = fx["currency_code"]
+            if cc == "EUR":
+                continue
+            rte = fx["rate_to_eur"]
+            if rte and rte > 0:
+                display = 1.0 / rte
+            else:
+                display = rte
+            items.append({
+                "symbol": f"EUR/{cc}",
+                "name": cc,
+                "price": display,
+                "change_pct": None,
+                "type": "forex",
+            })
+        for c in (await self.get_crypto())[:5]:
+            items.append({
+                "symbol": c["symbol"],
+                "name": c.get("name", c["symbol"]),
+                "price": c["price_usd"],
+                "change_pct": c.get("change_24h_pct"),
+                "type": "crypto",
+            })
+        for cm in await self.get_commodities():
+            items.append({
+                "symbol": cm["symbol"],
+                "name": cm["name"],
+                "price": cm["price_usd"],
+                "change_pct": cm.get("change_24h_pct"),
+                "type": "commodity",
+                "unit": cm.get("unit", ""),
+            })
+        fuel_rows = await self.get_fuel(country_code.upper())
+        for row in fuel_rows:
+            items.append({
+                "symbol": f"{row['fuel_type']}@{country_code.upper()}",
+                "name": row["fuel_type"],
+                "price": row["price_local"],
+                "change_pct": row.get("change_week_pct"),
+                "type": "fuel",
+                "currency_code": row["currency_code"],
+            })
+        return items
+
+    async def get_refresh_metadata(self) -> list[dict[str, Any]]:
+        """Latest api_logs rows for market_data service (refresh audit)."""
+        result = await self.db.execute(
+            select(ApiLog)
+            .where(ApiLog.service == "market_data")
+            .order_by(ApiLog.created_at.desc())
+            .limit(50),
+        )
+        rows = list(result.scalars().all())
+        out: list[dict[str, Any]] = []
+        for log in rows:
+            ep = (log.endpoint or "").strip() or "unknown"
+            refresh_type = ep.split("/")[0] if ep else "market_data"
+            out.append({
+                "refresh_type": refresh_type,
+                "last_successful_refresh": log.created_at if log.status == "success" else None,
+                "last_failed_refresh": log.created_at if log.status != "success" else None,
+                "provider_source": ep,
+                "country_scope": None,
+                "error_message": log.error_message if log.status != "success" else None,
+            })
+        return out
+
+    def _crypto_to_dict(self, r: FactCryptoPrice) -> dict[str, Any]:
+        return {
+            "symbol": r.symbol,
+            "name": r.name,
+            "price_usd": float(r.price_usd),
+            "price_eur": float(r.price_eur) if r.price_eur is not None else None,
+            "market_cap_usd": float(r.market_cap_usd) if r.market_cap_usd is not None else None,
+            "volume_24h_usd": float(r.volume_24h_usd) if r.volume_24h_usd is not None else None,
+            "change_24h_pct": float(r.change_24h_pct) if r.change_24h_pct is not None else None,
+            "change_7d_pct": float(r.change_7d_pct) if r.change_7d_pct is not None else None,
+            "rank": r.rank,
+            "source": r.source,
+            "fetched_at": r.fetched_at,
+        }
+
+    def _commodity_to_dict(self, r: FactCommodityPrice) -> dict[str, Any]:
+        return {
+            "symbol": r.symbol,
+            "name": r.name,
+            "commodity_type": r.commodity_type,
+            "price_usd": float(r.price_usd),
+            "price_eur": float(r.price_eur) if r.price_eur is not None else None,
+            "change_24h_pct": float(r.change_24h_pct) if r.change_24h_pct is not None else None,
+            "unit": r.unit,
+            "source": r.source,
+            "fetched_at": r.fetched_at,
+        }
+
+    def _fuel_to_dict(self, r: FactFuelPrice) -> dict[str, Any]:
+        return {
+            "fuel_type": r.fuel_type,
+            "price_local": float(r.price_local),
+            "currency_code": r.currency_code,
+            "price_eur": float(r.price_eur) if r.price_eur is not None else None,
+            "change_week_pct": float(r.change_week_pct) if r.change_week_pct is not None else None,
+            "source": r.source,
+            "fetched_at": r.fetched_at,
+        }
+
+    async def build_forex_api_response_async(self) -> tuple[list[dict[str, Any]], datetime | None]:
+        """Build MarketsForexResponse-compatible item dicts from DB facts."""
+        latest_date = await self.db.scalar(select(func.max(FactCurrencyRate.date_id)))
+        if not latest_date:
+            return [], None
+        result = await self.db.execute(
+            select(FactCurrencyRate)
+            .where(FactCurrencyRate.date_id == latest_date)
+            .order_by(FactCurrencyRate.currency_code, FactCurrencyRate.source),
+        )
+        rows = self._dedupe_currency_rows(list(result.scalars().all()))
+        last_at: datetime | None = None
+        items: list[dict[str, Any]] = []
+        for r in rows:
+            if r.currency_code == "EUR":
+                continue
+            rte = float(r.rate_to_eur)
+            if rte and rte > 0:
+                display = 1.0 / rte
+            else:
+                display = rte
+            if r.fetched_at and (last_at is None or r.fetched_at > last_at):
+                last_at = r.fetched_at
+            items.append({
+                "symbol": f"EUR/{r.currency_code}",
+                "bid": Decimal(str(round(display, 6))),
+                "ask": Decimal(str(round(display, 6))),
+                "spread": Decimal("0"),
+                "change_24h": None,
+                "refreshed_at": r.fetched_at or datetime.now(timezone.utc),
+            })
+        return items, last_at
+
+    async def build_crypto_api_response_async(self) -> tuple[list[dict[str, Any]], datetime | None, bool]:
+        """Build MarketsCryptoResponse-compatible items."""
+        latest_date = await self.db.scalar(select(func.max(FactCryptoPrice.date_id)))
+        if not latest_date:
+            return [], None, False
+        result = await self.db.execute(
+            select(FactCryptoPrice)
+            .where(FactCryptoPrice.date_id == latest_date)
+            .order_by(nullslast(asc(FactCryptoPrice.rank)), FactCryptoPrice.symbol),
+        )
+        rows = self._dedupe_crypto_rows(list(result.scalars().all()))
+        last_at: datetime | None = None
+        items: list[dict[str, Any]] = []
+        for r in rows:
+            if r.fetched_at and (last_at is None or r.fetched_at > last_at):
+                last_at = r.fetched_at
+            items.append({
+                "symbol": r.symbol,
+                "price": Decimal(str(float(r.price_usd))),
+                "change_24h": float(r.change_24h_pct) if r.change_24h_pct is not None else None,
+                "market_cap": Decimal(str(float(r.market_cap_usd))) if r.market_cap_usd is not None else None,
+                "refreshed_at": r.fetched_at or datetime.now(timezone.utc),
+            })
+        return items, last_at, False
+
 
 _cache: dict[str, tuple[object, float]] = {}
 DEFAULT_TTL = 7200
@@ -309,72 +614,92 @@ async def fetch_commodities() -> tuple[list[dict], str | None, bool]:
     return (all_items, error_msg, False)
 
 
-# TODO: Replace hardcoded fuel prices with external API source.
-FUEL_PRICES: dict[str, dict] = {
-    "RU": {"country": "Russia", "gasoline_95": 54.0, "diesel": 60.5, "lpg": 28.0, "currency": "RUB", "unit": "L", "updated": "2026-03-01"},
-    "UA": {"country": "Ukraine", "gasoline_95": 54.5, "diesel": 52.0, "lpg": 22.5, "currency": "UAH", "unit": "L", "updated": "2026-03-01"},
-    "KZ": {"country": "Kazakhstan", "gasoline_95": 205.0, "diesel": 295.0, "lpg": 85.0, "currency": "KZT", "unit": "L", "updated": "2026-03-01"},
-    "BY": {"country": "Belarus", "gasoline_95": 2.34, "diesel": 2.42, "lpg": 1.15, "currency": "BYN", "unit": "L", "updated": "2026-03-01"},
-    "GE": {"country": "Georgia", "gasoline_95": 3.10, "diesel": 3.30, "lpg": 1.40, "currency": "GEL", "unit": "L", "updated": "2026-03-01"},
-    "AM": {"country": "Armenia", "gasoline_95": 490.0, "diesel": 580.0, "lpg": 220.0, "currency": "AMD", "unit": "L", "updated": "2026-03-01"},
-    "AZ": {"country": "Azerbaijan", "gasoline_95": 1.0, "diesel": 0.85, "lpg": 0.60, "currency": "AZN", "unit": "L", "updated": "2026-03-01"},
-    "MD": {"country": "Moldova", "gasoline_95": 25.5, "diesel": 23.0, "lpg": 13.5, "currency": "MDL", "unit": "L", "updated": "2026-03-01"},
-    "UZ": {"country": "Uzbekistan", "gasoline_95": 10500.0, "diesel": 11000.0, "lpg": 5500.0, "currency": "UZS", "unit": "L", "updated": "2026-03-01"},
-    "KG": {"country": "Kyrgyzstan", "gasoline_95": 58.0, "diesel": 62.0, "lpg": 30.0, "currency": "KGS", "unit": "L", "updated": "2026-03-01"},
-    "TJ": {"country": "Tajikistan", "gasoline_95": 12.5, "diesel": 13.0, "lpg": 7.0, "currency": "TJS", "unit": "L", "updated": "2026-03-01"},
-    "TM": {"country": "Turkmenistan", "gasoline_95": 1.5, "diesel": 1.7, "lpg": 0.9, "currency": "TMT", "unit": "L", "updated": "2026-03-01"},
-    "DE": {"country": "Germany", "gasoline_95": 1.72, "diesel": 1.58, "lpg": 0.72, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "FR": {"country": "France", "gasoline_95": 1.82, "diesel": 1.68, "lpg": 0.85, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "PL": {"country": "Poland", "gasoline_95": 6.35, "diesel": 6.10, "lpg": 2.85, "currency": "PLN", "unit": "L", "updated": "2026-03-01"},
-    "RO": {"country": "Romania", "gasoline_95": 7.20, "diesel": 7.50, "lpg": 3.30, "currency": "RON", "unit": "L", "updated": "2026-03-01"},
-    "HU": {"country": "Hungary", "gasoline_95": 615.0, "diesel": 620.0, "lpg": 290.0, "currency": "HUF", "unit": "L", "updated": "2026-03-01"},
-    "BG": {"country": "Bulgaria", "gasoline_95": 2.55, "diesel": 2.65, "lpg": 1.20, "currency": "BGN", "unit": "L", "updated": "2026-03-01"},
-    "CZ": {"country": "Czech Republic", "gasoline_95": 37.5, "diesel": 36.0, "lpg": 16.5, "currency": "CZK", "unit": "L", "updated": "2026-03-01"},
-    "SK": {"country": "Slovakia", "gasoline_95": 1.62, "diesel": 1.52, "lpg": 0.75, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "HR": {"country": "Croatia", "gasoline_95": 1.55, "diesel": 1.60, "lpg": 0.78, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "SI": {"country": "Slovenia", "gasoline_95": 1.58, "diesel": 1.55, "lpg": 0.82, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "RS": {"country": "Serbia", "gasoline_95": 198.0, "diesel": 205.0, "lpg": 90.0, "currency": "RSD", "unit": "L", "updated": "2026-03-01"},
-    "TR": {"country": "Turkey", "gasoline_95": 42.5, "diesel": 38.0, "lpg": 15.5, "currency": "TRY", "unit": "L", "updated": "2026-03-01"},
-    "GR": {"country": "Greece", "gasoline_95": 1.85, "diesel": 1.62, "lpg": 0.88, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "NL": {"country": "Netherlands", "gasoline_95": 2.05, "diesel": 1.75, "lpg": 0.90, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "BE": {"country": "Belgium", "gasoline_95": 1.75, "diesel": 1.70, "lpg": 0.65, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "AT": {"country": "Austria", "gasoline_95": 1.55, "diesel": 1.58, "lpg": 0.72, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "IT": {"country": "Italy", "gasoline_95": 1.82, "diesel": 1.72, "lpg": 0.75, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "ES": {"country": "Spain", "gasoline_95": 1.58, "diesel": 1.48, "lpg": 0.72, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "PT": {"country": "Portugal", "gasoline_95": 1.72, "diesel": 1.55, "lpg": 0.80, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "SE": {"country": "Sweden", "gasoline_95": 17.5, "diesel": 18.2, "lpg": 8.5, "currency": "SEK", "unit": "L", "updated": "2026-03-01"},
-    "NO": {"country": "Norway", "gasoline_95": 19.8, "diesel": 18.5, "lpg": 9.0, "currency": "NOK", "unit": "L", "updated": "2026-03-01"},
-    "DK": {"country": "Denmark", "gasoline_95": 13.5, "diesel": 12.8, "lpg": 6.5, "currency": "DKK", "unit": "L", "updated": "2026-03-01"},
-    "FI": {"country": "Finland", "gasoline_95": 1.88, "diesel": 1.72, "lpg": 0.95, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "LV": {"country": "Latvia", "gasoline_95": 1.65, "diesel": 1.55, "lpg": 0.68, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "LT": {"country": "Lithuania", "gasoline_95": 1.55, "diesel": 1.48, "lpg": 0.70, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "EE": {"country": "Estonia", "gasoline_95": 1.62, "diesel": 1.52, "lpg": 0.75, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "GB": {"country": "United Kingdom", "gasoline_95": 1.42, "diesel": 1.48, "lpg": 0.68, "currency": "GBP", "unit": "L", "updated": "2026-03-01"},
-    "IE": {"country": "Ireland", "gasoline_95": 1.72, "diesel": 1.65, "lpg": 0.85, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "IS": {"country": "Iceland", "gasoline_95": 310.0, "diesel": 315.0, "lpg": 160.0, "currency": "ISK", "unit": "L", "updated": "2026-03-01"},
-    "CH": {"country": "Switzerland", "gasoline_95": 1.82, "diesel": 1.88, "lpg": 0.95, "currency": "CHF", "unit": "L", "updated": "2026-03-01"},
-    "BA": {"country": "Bosnia", "gasoline_95": 2.65, "diesel": 2.55, "lpg": 1.10, "currency": "BAM", "unit": "L", "updated": "2026-03-01"},
-    "ME": {"country": "Montenegro", "gasoline_95": 1.52, "diesel": 1.45, "lpg": 0.72, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "AL": {"country": "Albania", "gasoline_95": 245.0, "diesel": 240.0, "lpg": 90.0, "currency": "ALL", "unit": "L", "updated": "2026-03-01"},
-    "MK": {"country": "North Macedonia", "gasoline_95": 82.0, "diesel": 78.0, "lpg": 38.0, "currency": "MKD", "unit": "L", "updated": "2026-03-01"},
-}
-
-FUEL_REGION_AVERAGES: dict[str, dict] = {
-    "EUROPE": {"country": "Europe (avg)", "gasoline_95": 1.72, "diesel": 1.62, "lpg": 0.78, "currency": "EUR", "unit": "L", "updated": "2026-03-01"},
-    "CIS": {"country": "CIS (avg)", "gasoline_95": 52.0, "diesel": 55.0, "lpg": 24.0, "currency": "RUB", "unit": "L", "updated": "2026-03-01"},
-}
+def _fuel_facts_to_legacy_dict(rows: list[dict[str, Any]], country_code: str) -> dict[str, Any]:
+    """Map fact_fuel_price rows to legacy flat dict used by dashboard clients."""
+    currency = rows[0]["currency_code"]
+    label = country_code
+    fetched = rows[0].get("fetched_at")
+    if isinstance(fetched, datetime):
+        updated_str = fetched.isoformat()
+    else:
+        updated_str = str(fetched) if fetched else ""
+    out: dict[str, Any] = {
+        "country": label,
+        "currency": currency,
+        "unit": "L",
+        "updated": updated_str,
+    }
+    for r in rows:
+        out[r["fuel_type"]] = r["price_local"]
+    return out
 
 
-async def get_fuel_prices(country_code: str) -> dict | None:
-    """Get fuel prices for a country or region. Returns None if not found."""
+def _legacy_ticker_rows_from_db(rows: list[dict[str, Any]]) -> list[dict]:
+    """Convert MarketDataService.get_ticker rows to legacy ticker bar shape."""
+    items: list[dict] = []
+    for row in rows:
+        t = row["type"]
+        if t == "forex":
+            items.append({
+                "type": "forex",
+                "label": row["symbol"],
+                "value": row["price"],
+                "change": row.get("change_pct"),
+                "prefix": "",
+                "suffix": "",
+            })
+        elif t == "crypto":
+            items.append({
+                "type": "crypto",
+                "label": row["symbol"],
+                "value": row["price"],
+                "change": row.get("change_pct"),
+                "prefix": "$",
+                "suffix": "",
+            })
+        elif t == "commodity":
+            unit = row.get("unit") or ""
+            items.append({
+                "type": "commodity",
+                "label": row["name"],
+                "value": row["price"],
+                "change": row.get("change_pct"),
+                "prefix": "$",
+                "suffix": f"/{unit}" if unit else "",
+            })
+        elif t == "fuel":
+            cc = row.get("currency_code", "")
+            items.append({
+                "type": "fuel",
+                "label": row["symbol"],
+                "value": row["price"],
+                "change": row.get("change_pct"),
+                "prefix": "",
+                "suffix": f" {cc}/L" if cc else "",
+            })
+    return items
+
+
+async def get_fuel_prices(country_code: str, db: AsyncSession | None = None) -> dict | None:
+    """Get fuel prices from fact_fuel_price only (requires db session)."""
     code = country_code.upper()
-    if code in FUEL_REGION_AVERAGES:
-        return FUEL_REGION_AVERAGES[code]
-    return FUEL_PRICES.get(code)
+    if db is None:
+        return None
+    mds = MarketDataService(db)
+    raw = await mds.get_fuel(code)
+    if raw:
+        return _fuel_facts_to_legacy_dict(raw, code)
+    return None
 
 
-async def get_ticker_data(country_code: str = "UA", db=None) -> list[dict]:
-    """Assemble ticker data for the scrolling bar."""
+async def get_ticker_data(country_code: str = "UA", db: AsyncSession | None = None) -> list[dict]:
+    """Assemble ticker data for the scrolling bar. Uses v2 facts when available."""
+    if db is not None:
+        mds = MarketDataService(db)
+        db_rows = await mds.get_ticker(country_code)
+        if db_rows:
+            return _legacy_ticker_rows_from_db(db_rows)
+
     items: list[dict] = []
 
     forex = await fetch_forex_rates("EUR")
@@ -403,11 +728,7 @@ async def get_ticker_data(country_code: str = "UA", db=None) -> list[dict]:
         pass
 
     try:
-        if db is not None:
-            svc = MarketsService(db, 0)
-            commodities, _ = await svc.get_commodities_from_db()
-        else:
-            commodities, _, _ = await fetch_commodities()
+        commodities, _, _ = await fetch_commodities()
         for item in (commodities or [])[:3]:
             name = item.get("name") or item.get("symbol", "")
             items.append({
@@ -421,7 +742,7 @@ async def get_ticker_data(country_code: str = "UA", db=None) -> list[dict]:
     except Exception:
         pass
 
-    fuel = await get_fuel_prices(country_code)
+    fuel = await get_fuel_prices(country_code, db=None)
     if fuel:
         items.append({
             "type": "fuel",
@@ -444,183 +765,71 @@ async def get_ticker_data(country_code: str = "UA", db=None) -> list[dict]:
 
 
 class MarketsService:
-    """Service for markets data. Uses typed schemas."""
+    """Markets domain: user preferences (JSONB), commodities from v2 facts, refresh metadata."""
 
-    _NON_MARKETPLACE_IDS = frozenset({"crypto", "commodities", "forex"})
+    _PREF_KEYS = frozenset({
+        "preferred_country_code",
+        "dashboard_widgets",
+        "forex_favorites",
+        "crypto_favorites",
+        "commodity_favorites",
+        "favorite_instrument_ids",
+    })
 
     def __init__(self, db: AsyncSession, user_id):
         self.db = db
         self.user_id = user_id
 
+    async def _get_user(self) -> User:
+        result = await self.db.execute(select(User).where(User.id == self.user_id))
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise ValueError("User not found")
+        return user
+
     async def get_commodities_from_db(self) -> tuple[list[dict], datetime | None]:
-        """Read commodities from markets_commodities table. Always returns last persisted data."""
-        result = await self.db.execute(
-            select(MarketsCommodity).order_by(MarketsCommodity.refreshed_at.desc())
-        )
-        rows = result.scalars().all()
-        seen: set[str] = set()
-        items: list[dict] = []
+        mds = MarketDataService(self.db)
+        rows = await mds.get_commodities()
+        if not rows:
+            return [], None
         last_at: datetime | None = None
-        for row in rows:
-            if row.symbol in seen:
-                continue
-            seen.add(row.symbol)
-            items.append({
-                "symbol": row.symbol,
-                "name": row.name,
-                "price": float(row.price),
-                "change_24h": float(row.change_24h) if row.change_24h is not None else None,
-                "unit": row.unit,
-                "refreshed_at": row.refreshed_at,
+        raw_items: list[dict] = []
+        for c in rows:
+            fa = c.get("fetched_at")
+            if isinstance(fa, datetime):
+                if last_at is None or fa > last_at:
+                    last_at = fa
+            ref = fa if isinstance(fa, datetime) else datetime.now(timezone.utc)
+            raw_items.append({
+                "symbol": c["symbol"],
+                "name": c.get("name"),
+                "price": Decimal(str(c["price_usd"])),
+                "change_24h": c.get("change_24h_pct"),
+                "unit": c.get("unit"),
+                "refreshed_at": ref,
             })
-            if last_at is None:
-                last_at = row.refreshed_at
-        return (items, last_at)
+        return raw_items, last_at
 
     async def get_preferences(self) -> dict:
-        result = await self.db.execute(
-            select(MarketsPreferences).where(MarketsPreferences.user_id == self.user_id)
-        )
-        prefs = result.scalar_one_or_none()
-        if prefs:
-            return {
-                "preferred_country_code": prefs.preferred_country_code,
-                "favorite_instrument_ids": prefs.favorite_instrument_ids or [],
-            }
-        return {
-            "preferred_country_code": None,
-            "favorite_instrument_ids": [],
-        }
+        user = await self._get_user()
+        mds = MarketDataService(self.db)
+        return await mds.get_preferences(user)
 
-    async def update_preferences(
-        self,
-        preferred_country_code: str | None = None,
-        favorite_instrument_ids: list[str] | None = None,
-    ) -> dict:
-        result = await self.db.execute(
-            select(MarketsPreferences).where(MarketsPreferences.user_id == self.user_id)
-        )
-        prefs = result.scalar_one_or_none()
-        if not prefs:
-            prefs = MarketsPreferences(user_id=self.user_id)
-            self.db.add(prefs)
-        if preferred_country_code is not None:
-            prefs.preferred_country_code = preferred_country_code
-        if favorite_instrument_ids is not None:
-            prefs.favorite_instrument_ids = favorite_instrument_ids
-        await self.db.flush()
-        await self.db.refresh(prefs)
-        return {
-            "preferred_country_code": prefs.preferred_country_code,
-            "favorite_instrument_ids": prefs.favorite_instrument_ids or [],
-        }
+    async def update_preferences(self, **updates: Any) -> dict:
+        user = await self._get_user()
+        mds = MarketDataService(self.db)
+        clean = {k: v for k, v in updates.items() if k in self._PREF_KEYS and v is not None}
+        return await mds.update_preferences(user, clean)
 
     async def get_refresh_metadata(self) -> list[dict]:
-        result = await self.db.execute(
-            select(MarketsRefreshLog).order_by(MarketsRefreshLog.started_at.desc())
-        )
-        rows = result.scalars().all()
-
-        last_success: dict[str, datetime | None] = {}
-        last_failed: dict[str, datetime | None] = {}
-        provider: dict[str, str | None] = {}
-        country_scope: dict[str, str | None] = {}
-        error_message: dict[str, str | None] = {}
-
-        for row in rows:
-            refresh_type = row.refresh_type.value
-            if refresh_type not in last_success:
-                last_success[refresh_type] = (
-                    row.completed_at if row.status == MarketsRefreshStatus.success else None
-                )
-            if refresh_type not in last_failed and row.status == MarketsRefreshStatus.error:
-                last_failed[refresh_type] = row.completed_at
-            if refresh_type not in provider:
-                provider[refresh_type] = getattr(row, "provider_source", None)
-            if refresh_type not in country_scope:
-                country_scope[refresh_type] = getattr(row, "country_scope", None)
-            if refresh_type not in error_message and row.error_message:
-                error_message[refresh_type] = row.error_message
-
-        types_seen = set(last_success.keys()) | set(last_failed.keys())
-        return [
-            {
-                "refresh_type": refresh_type,
-                "last_successful_refresh": last_success.get(refresh_type),
-                "last_failed_refresh": last_failed.get(refresh_type),
-                "provider_source": provider.get(refresh_type),
-                "country_scope": country_scope.get(refresh_type),
-                "error_message": error_message.get(refresh_type),
-            }
-            for refresh_type in sorted(types_seen)
-        ]
+        mds = MarketDataService(self.db)
+        return await mds.get_refresh_metadata()
 
     async def get_category_analytics(self) -> dict:
-        result = await self.db.execute(
-            select(MarketsCategoryAnalytics).order_by(
-                MarketsCategoryAnalytics.refreshed_at.desc()
-            )
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        items = [
-            {
-                "id": str(row.id),
-                "category_id": row.category_id,
-                "segment": row.segment,
-                "metrics": row.metrics or {},
-                "refreshed_at": row.refreshed_at,
-            }
-            for row in rows
-            if (row.category_id or "").lower() not in self._NON_MARKETPLACE_IDS
-        ]
-        return {"items": items, "last_refreshed_at": last_at}
+        return {"items": [], "last_refreshed_at": None}
 
     async def get_marketplace_analytics(self) -> dict:
-        result = await self.db.execute(
-            select(MarketsMarketplaceAnalytics).order_by(
-                MarketsMarketplaceAnalytics.refreshed_at.desc()
-            )
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        items = [
-            {
-                "id": str(row.id),
-                "marketplace_id": row.marketplace_id,
-                "marketplace_name": row.marketplace_name,
-                "metrics": row.metrics or {},
-                "refreshed_at": row.refreshed_at,
-            }
-            for row in rows
-            if (row.marketplace_id or "").lower() not in self._NON_MARKETPLACE_IDS
-        ]
-        items.sort(
-            key=lambda x: (
-                -(x["metrics"].get("item_count") or 0),
-                (x["marketplace_name"] or "").lower(),
-            )
-        )
-        return {"items": items, "last_refreshed_at": last_at}
+        return {"items": [], "last_refreshed_at": None}
 
     async def get_opportunities(self) -> dict:
-        result = await self.db.execute(
-            select(MarketsOpportunityBlock).order_by(
-                MarketsOpportunityBlock.refreshed_at.desc()
-            )
-        )
-        rows = result.scalars().unique().all()
-        last_at = rows[0].refreshed_at if rows else None
-        return {
-            "items": [
-                {
-                    "id": str(row.id),
-                    "block_type": row.block_type,
-                    "title": row.title,
-                    "metrics": row.metrics or {},
-                    "refreshed_at": row.refreshed_at,
-                }
-                for row in rows
-            ],
-            "last_refreshed_at": last_at,
-        }
+        return {"items": [], "last_refreshed_at": None}
