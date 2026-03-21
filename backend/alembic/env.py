@@ -7,7 +7,7 @@ from logging.config import fileConfig
 from uuid import uuid4
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from app.database import Base
 from app.models import *  # noqa: F401,F403 — loads all models into Base.metadata
@@ -82,6 +82,9 @@ async def run_async_migrations() -> None:
     )
 
     async with connectable.connect() as connection:
+        # Create schema before sync callback so version_table_schema is valid on first run.
+        await connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
+        await connection.commit()
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
