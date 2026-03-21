@@ -5,8 +5,9 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entitlements.plan import UserPlan
+from app.models.core import User
 from app.modules.core.auth.service import hash_password
-from app.modules.core.models import User, UserPlan
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def ensure_superuser(db: AsyncSession) -> None:
         name="Administrator",
         is_superuser=True,
         force_password_change=True,
-        plan=UserPlan.pro,
+        plan=UserPlan.pro.value,
         language="en",
     )
     db.add(superuser)

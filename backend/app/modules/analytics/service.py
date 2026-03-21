@@ -1,12 +1,13 @@
-"""Forecast and benchmark analytics services."""
+"""Forecast and benchmark analytics (FactPrice + FactListing + UserProduct)."""
 
-from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Competitor, CompetitorProduct, PriceSnapshot, Product
+from app.models.core import UserProduct
+from app.models.dimensions import DimMarketplace, DimProduct
+from app.models.facts import FactListing, FactPrice
 
 
 def linear_regression(x: list[float], y: list[float]) -> tuple[float, float, float]:
@@ -30,90 +31,122 @@ def linear_regression(x: list[float], y: list[float]) -> tuple[float, float, flo
 
 
 class ForecastService:
-    """Price forecasting and scenario simulation service."""
+    """Price history and simple forecast from FactPrice (per listing)."""
 
     def __init__(self, db: AsyncSession, user_id: UUID):
         self.db = db
         self.user_id = user_id
 
-    async def product_forecast(self, product_id: UUID, forecast_days: int = 14) -> dict:
-        product_result = await self.db.execute(
-            select(Product).where(Product.id == product_id, Product.user_id == self.user_id)
+    async def _user_owns_product(self, product_id: UUID) -> bool:
+        row = await self.db.scalar(
+            select(UserProduct.id).where(
+                UserProduct.user_id == self.user_id,
+                UserProduct.product_id == product_id,
+                UserProduct.is_active.is_(True),
+            ),
         )
-        product = product_result.scalar_one_or_none()
-        if not product:
-            raise ValueError("Product not found")
-        my_price = float(product.current_price)
-        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-        cp_result = await self.db.execute(
-            select(CompetitorProduct.id).where(CompetitorProduct.product_id == product_id, CompetitorProduct.is_active.is_(True))
-        )
-        cp_ids = [r[0] for r in cp_result.all()]
-        history: list[dict] = []
-        if cp_ids:
-            date_col = func.date_trunc("day", PriceSnapshot.scraped_at)
-            agg_result = await self.db.execute(
-                select(date_col.label("dt"), func.avg(PriceSnapshot.price).label("avg_price"))
-                .where(PriceSnapshot.competitor_product_id.in_(cp_ids), PriceSnapshot.scraped_at >= cutoff)
-                .group_by(date_col)
-                .order_by(date_col)
-            )
-            for row in agg_result.all():
-                dt_str = row.dt.strftime("%Y-%m-%d") if hasattr(row.dt, "strftime") else str(row.dt)[:10]
-                history.append({"date": dt_str, "avg_competitor_price": round(float(row.avg_price), 2), "my_price": round(my_price, 2)})
+        return row is not None
 
-        if len(history) >= 2:
-            x = list(range(len(history)))
-            y = [h["avg_competitor_price"] for h in history]
-            slope, intercept, r_squared = linear_regression(x, y)
-            residuals = [yi - (slope * xi + intercept) for xi, yi in zip(x, y)]
-            std_dev = (sum(r**2 for r in residuals) / len(residuals)) ** 0.5 if residuals else 0
-            interval_width = 1.5 * std_dev
-            last_x = len(history) - 1
-            forecast: list[dict] = []
-            for i in range(1, forecast_days + 1):
-                pred_x = last_x + i
-                pred_price = slope * pred_x + intercept
-                pred_date = (datetime.now(timezone.utc) + timedelta(days=i)).strftime("%Y-%m-%d")
-                forecast.append(
-                    {
-                        "date": pred_date,
-                        "predicted_price": round(max(0, pred_price), 2),
-                        "lower_bound": round(max(0, pred_price - interval_width), 2),
-                        "upper_bound": round(pred_price + interval_width, 2),
-                    }
-                )
-            avg_price = sum(y) / len(y)
-            slope_pct = (slope / avg_price * 100) if avg_price else 0
-            trend = "rising" if slope_pct > 1 else ("declining" if slope_pct < -1 else "stable")
-            recommendation = "Continue monitoring."
-            confidence = r_squared
-        else:
-            forecast = []
-            trend = "stable"
-            confidence = 0.0
-            recommendation = "Insufficient historical data for forecast."
+    async def product_forecast(self, product_id: UUID, forecast_days: int = 14) -> dict:
+        """Forecast from aggregated FactPrice rows across listings for this product."""
+        if not await self._user_owns_product(product_id):
+            return {
+                "product_id": str(product_id),
+                "product_name": "",
+                "current_price": 0.0,
+                "history": [],
+                "forecast": [],
+                "confidence": 0.0,
+                "trend": "stable",
+                "recommendation": "Track this product first.",
+            }
+
+        pname = await self.db.scalar(select(DimProduct.name).where(DimProduct.id == product_id))
+        stmt = (
+            select(FactPrice.date_id, FactPrice.price, FactPrice.price_eur)
+            .join(FactListing, FactPrice.listing_id == FactListing.id)
+            .where(
+                FactListing.product_id == product_id,
+                FactListing.is_active.is_(True),
+            )
+            .order_by(FactPrice.date_id)
+            .limit(120)
+        )
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        if len(rows) < 2:
+            last = float(rows[0][1]) if rows else 0.0
+            return {
+                "product_id": str(product_id),
+                "product_name": pname or "",
+                "current_price": last,
+                "history": [],
+                "forecast": [],
+                "confidence": 0.0,
+                "trend": "stable",
+                "recommendation": "Collect more price history.",
+            }
+
+        # One point per date_id: average price across listings
+        by_date: dict[int, list[float]] = {}
+        for date_id, price, price_eur in rows:
+            if date_id not in by_date:
+                by_date[date_id] = []
+            val = float(price_eur) if price_eur is not None else float(price)
+            by_date[date_id].append(val)
+        sorted_ids = sorted(by_date.keys())
+        series = [sum(by_date[i]) / len(by_date[i]) for i in sorted_ids]
+
+        x = [float(i) for i in range(len(series))]
+        slope, intercept, r2 = linear_regression(x, series)
+        trend = "up" if slope > 0 else "down" if slope < 0 else "stable"
+
+        history = [{"date_id": sorted_ids[i], "price": round(series[i], 4)} for i in range(len(series))]
+        forecast = []
+        last_x = float(len(series) - 1)
+        for k in range(1, forecast_days + 1):
+            px = last_x + float(k)
+            forecast.append({"day": k, "price": round(slope * px + intercept, 4)})
 
         return {
             "product_id": str(product_id),
-            "product_name": product.name,
-            "current_price": round(my_price, 2),
-            "history": history,
-            "forecast": forecast,
-            "confidence": round(confidence, 2),
+            "product_name": pname or "",
+            "current_price": round(series[-1], 4),
+            "history": history[-30:],
+            "forecast": forecast[:forecast_days],
+            "confidence": round(r2, 1),
             "trend": trend,
-            "recommendation": recommendation,
+            "recommendation": "Monitor competitor listings for the same SKU.",
         }
 
     async def market_forecast(self, forecast_days: int = 7) -> dict:
-        products_result = await self.db.execute(select(Product.id, Product.name).where(Product.user_id == self.user_id, Product.is_active.is_(True)))
-        products = products_result.all()
+        """Aggregate outlook across tracked products."""
+
+        _ = forecast_days
+        pids = (
+            await self.db.execute(
+                select(UserProduct.product_id).where(
+                    UserProduct.user_id == self.user_id,
+                    UserProduct.is_active.is_(True),
+                ),
+            )
+        ).scalars().all()
         products_forecast: list[dict] = []
-        for product_id, product_name in products:
-            pf = await self.product_forecast(product_id, forecast_days=forecast_days)
-            if pf["history"]:
-                products_forecast.append({"product_id": str(product_id), "name": product_name, "trend": pf["trend"], "expected_change_pct": 0})
-        return {"summary": "Forecast generated", "confidence": 0.6, "products_forecast": products_forecast, "risk_factors": []}
+        for pid in pids[:20]:
+            f = await self.product_forecast(pid, forecast_days=forecast_days)
+            products_forecast.append(
+                {
+                    "product_id": f["product_id"],
+                    "trend": f["trend"],
+                    "current_price": f["current_price"],
+                },
+            )
+        return {
+            "summary": "Portfolio trend snapshot from fact_price.",
+            "confidence": 0.0,
+            "products_forecast": products_forecast,
+            "risk_factors": [],
+        }
 
     async def simulate_scenario(self, product_id: UUID | None, price_change_pct: float, volume_change_pct: float = 0) -> dict:
         _ = product_id
@@ -130,8 +163,8 @@ class ForecastService:
             "predicted_margin_change_pct": 0.0,
             "current_margin_estimate": 25.0,
             "new_margin_estimate": 25.0,
-            "confidence": 0.6,
-            "reasoning": "Default elasticity model",
+            "confidence": 0.0,
+            "reasoning": "Elasticity model (no FactPrice dependency).",
         }
 
     async def advanced_simulation(
@@ -160,43 +193,108 @@ class ForecastService:
 
 
 class BenchmarkService:
-    """Competitor benchmark scoring and comparison matrix."""
+    """Compare listings (same dim_product) across marketplaces using FactPrice + FactListing."""
 
     def __init__(self, db: AsyncSession, user_id: UUID):
         self.db = db
         self.user_id = user_id
 
     async def get_competitor_scores(self) -> list[dict]:
-        competitors_result = await self.db.execute(select(Competitor.id, Competitor.name, Competitor.marketplace).where(Competitor.user_id == self.user_id))
-        competitors = competitors_result.all()
-        return [
-            {
-                "competitor_id": str(comp_id),
-                "competitor_name": comp_name,
-                "marketplace": marketplace,
-                "score": 0,
-                "aggressiveness": "passive",
-                "components": {
-                    "price_aggressiveness": 0,
-                    "activity_level": 0,
-                    "promotion_intensity": 0,
-                    "market_coverage": 0,
+        """Score = relative price vs cheapest competitor listing (same product)."""
+        tracked = (
+            await self.db.execute(
+                select(UserProduct.product_id, DimProduct.name)
+                .join(DimProduct, UserProduct.product_id == DimProduct.id)
+                .where(
+                    UserProduct.user_id == self.user_id,
+                    UserProduct.is_active.is_(True),
+                ),
+            )
+        ).all()
+        out: list[dict] = []
+        for product_id, name in tracked:
+            stmt = (
+                select(
+                    FactListing.id,
+                    FactListing.last_price_eur,
+                    FactListing.last_price,
+                    DimMarketplace.name,
+                )
+                .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+                .where(
+                    FactListing.product_id == product_id,
+                    FactListing.is_active.is_(True),
+                )
+            )
+            rows = (await self.db.execute(stmt)).all()
+            prices: list[float] = []
+            for _lid, lp_eur, lp, _mn in rows:
+                if lp_eur is not None:
+                    prices.append(float(lp_eur))
+                elif lp is not None:
+                    prices.append(float(lp))
+            if len(prices) < 2:
+                continue
+            lo = min(prices)
+            hi = max(prices)
+            spread = ((hi - lo) / lo * 100.0) if lo > 0 else 0.0
+            out.append(
+                {
+                    "product_id": str(product_id),
+                    "product_name": name,
+                    "price_spread_pct": round(spread, 2),
+                    "listing_count": len(prices),
                 },
-                "price_index": 100.0,
-                "last_change_pct": 0.0,
-                "trend_30d": [0.0] * 30,
-            }
-            for comp_id, comp_name, marketplace in competitors
-        ]
+            )
+        return out
 
     async def get_comparison_matrix(self) -> dict:
-        products_result = await self.db.execute(select(Product.id, Product.name).where(Product.user_id == self.user_id, Product.is_active.is_(True)).order_by(Product.name))
-        competitors_result = await self.db.execute(select(Competitor.id, Competitor.name, Competitor.marketplace).where(Competitor.user_id == self.user_id).order_by(Competitor.name))
-        products = products_result.all()
-        competitors = competitors_result.all()
-        matrix = [[None for _ in competitors] for _ in products]
+        """Matrix of user tracked products vs marketplace listing prices."""
+        tracked = (
+            await self.db.execute(
+                select(UserProduct.product_id, DimProduct.name)
+                .join(DimProduct, UserProduct.product_id == DimProduct.id)
+                .where(
+                    UserProduct.user_id == self.user_id,
+                    UserProduct.is_active.is_(True),
+                ),
+            )
+        ).all()
+        if not tracked:
+            return {"products": [], "competitors": [], "matrix": [], "message": None}
+
+        tracked_ids = [t[0] for t in tracked]
+        products = [{"id": str(pid), "title": title} for pid, title in tracked]
+
+        stmt = (
+            select(
+                FactListing.product_id,
+                DimMarketplace.marketplace_code,
+                FactListing.last_price_eur,
+                FactListing.last_price,
+            )
+            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+            .where(
+                FactListing.product_id.in_(tracked_ids),
+                FactListing.is_active.is_(True),
+            )
+        )
+        raw = (await self.db.execute(stmt)).all()
+        row_map: dict[tuple[UUID, str], float | None] = {}
+        mset: set[str] = set()
+        for pid, mcode, peur, p in raw:
+            mset.add(mcode)
+            val = float(peur) if peur is not None else (float(p) if p is not None else None)
+            row_map[(pid, mcode)] = val
+
+        competitors = sorted(mset)
+        matrix: list[list[float | None]] = []
+        for pid, _title in tracked:
+            matrix.append([row_map.get((pid, mcode)) for mcode in competitors])
+
         return {
-            "products": [{"id": str(p.id), "name": p.name} for p in products],
-            "competitors": [{"id": str(c.id), "name": c.name, "marketplace": c.marketplace} for c in competitors],
+            "products": products,
+            "competitors": competitors,
             "matrix": matrix,
+            "message": None,
         }

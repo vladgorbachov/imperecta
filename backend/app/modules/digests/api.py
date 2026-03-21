@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.common.deps import CurrentUser, DbSession
-from app.modules.digests.models import Digest
+from app.models.app_tables import Digest
 from app.modules.digests.schemas import DigestResponse
 
 router = APIRouter(prefix="/digests", tags=["digests"])

@@ -1,82 +1,71 @@
-"""
-Re-export all ORM models for Alembic metadata discovery.
-Actual model code lives in app/modules/*/models.py.
-"""
+"""All ORM models for Alembic metadata discovery."""
 
-# Core
-# AI
-from app.modules.ai_analyst.models import AIChatMessage, AIChatSession
-
-# Alerts
-from app.modules.alerts.models import Alert, AlertEvent
-from app.modules.core.models import ApiLog, User, UserPlan
-
-# Digests
-from app.modules.digests.models import Digest
-
-# Market Data
-from app.modules.market_data.models import (
-    MarketsCategoryAnalytics,
-    MarketsCommodity,
-    MarketsCrypto,
-    MarketsForex,
-    MarketsMarketplaceAnalytics,
-    MarketsOpportunityBlock,
-    MarketsPreferences,
-    MarketsRefreshLog,
-    MarketsRefreshStatus,
-    MarketsRefreshType,
-    MarketsTickerItem,
+from app.models.core import User, UserProduct, UserSubscription  # noqa: F401
+from app.models.dimensions import (  # noqa: F401
+    DimBrand,
+    DimCategory,
+    DimCountry,
+    DimCurrency,
+    DimDate,
+    DimMarketplace,
+    DimProduct,
+    DimSeller,
 )
-
-# Marketplaces
-from app.modules.marketplaces.models import AdminMarketplace
-
-# Product Pool
-from app.modules.product_pool.models import GlobalPriceSnapshot, GlobalProduct
-
-# Scraper
-from app.modules.scraper.models import DiscoveryLog, ScrapeLog
-
-# User Products
-from app.modules.user_products.models import (
-    Competitor,
-    CompetitorProduct,
-    PriceSnapshot,
-    Product,
+from app.models.facts import (  # noqa: F401
+    FactCommodityPrice,
+    FactCryptoPrice,
+    FactCurrencyRate,
+    FactFuelPrice,
+    FactListing,
+    FactPrice,
+    FactPromo,
+    FactReview,
+    FactSearchTrend,
+    FactStock,
+    FactTariff,
+)
+from app.models.app_tables import (  # noqa: F401
+    AIChatMessage,
+    AIChatSession,
+    Alert,
+    AlertEvent,
+    ApiLog,
+    DataExport,
+    Digest,
+    ScrapeJob,
+    ScrapeLog,
 )
 
 __all__ = [
-    "AdminMarketplace",
-    "AIChatMessage",
-    "AIChatSession",
-    "ApiLog",
     "User",
-    "UserPlan",
-    "ApiLog",
-    "AdminMarketplace",
-    "GlobalProduct",
-    "GlobalPriceSnapshot",
-    "ScrapeLog",
-    "DiscoveryLog",
-    "Product",
-    "Competitor",
-    "CompetitorProduct",
-    "PriceSnapshot",
+    "UserSubscription",
+    "UserProduct",
+    "DimDate",
+    "DimCountry",
+    "DimCurrency",
+    "DimMarketplace",
+    "DimCategory",
+    "DimBrand",
+    "DimProduct",
+    "DimSeller",
+    "FactListing",
+    "FactPrice",
+    "FactReview",
+    "FactStock",
+    "FactSearchTrend",
+    "FactCurrencyRate",
+    "FactTariff",
+    "FactPromo",
+    "FactCryptoPrice",
+    "FactCommodityPrice",
+    "FactFuelPrice",
     "Alert",
     "AlertEvent",
     "Digest",
-    "MarketsPreferences",
-    "MarketsRefreshLog",
-    "MarketsRefreshStatus",
-    "MarketsRefreshType",
-    "MarketsForex",
-    "MarketsCrypto",
-    "MarketsCommodity",
-    "MarketsTickerItem",
-    "MarketsCategoryAnalytics",
-    "MarketsMarketplaceAnalytics",
-    "MarketsOpportunityBlock",
     "AIChatSession",
     "AIChatMessage",
+    "ScrapeJob",
+    "ScrapeLog",
+    "ApiLog",
+    "DataExport",
 ]

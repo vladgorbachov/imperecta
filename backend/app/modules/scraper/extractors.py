@@ -208,7 +208,7 @@ def extract_from_meta_tags(soup: BeautifulSoup) -> ExtractedProduct:
 
 def extract_with_custom_selectors(soup: BeautifulSoup, selectors: dict) -> ExtractedProduct:
     """
-    Level 3 (optional): Custom CSS selectors from admin_marketplaces table.
+    Level 3 (optional): Custom CSS selectors from dim_marketplace (or listing scraper_config).
     selectors keys: "title", "price", "image", "original_price"
     """
     result = ExtractedProduct()

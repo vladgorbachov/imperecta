@@ -1,5 +1,7 @@
 """Dashboard API endpoints."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Query
 
 from app.common.deps import CurrentUser, DbSession
@@ -51,7 +53,7 @@ async def get_overview(
     db: DbSession,
     sort: str = Query("volatile", description="Sort: volatile, trending, gainers, losers, recent"),
     search: str | None = Query(None, min_length=2),
-    marketplace_id: int | None = Query(None),
+    marketplace_id: UUID | None = Query(None),
     limit: int = Query(50, ge=1, le=500, description="Max items per page"),
     offset: int = Query(0, ge=0),
 ) -> dict:

@@ -1,46 +1,73 @@
+"""Schemas for product pool (listings tied to dim_product / dim_marketplace)."""
+
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel
 
 
-class GlobalProductResponse(BaseModel):
-    id: int
-    marketplace_id: int
-    marketplace_name: str | None = None
-    marketplace_domain: str | None = None
-    url: str
+class PoolProductItem(BaseModel):
+    """Single row in the pool: listing + product + marketplace context."""
+
+    id: UUID
+    product_id: UUID
     title: str | None = None
     image_url: str | None = None
-    description: str | None = None
-    current_price: float | None = None
-    original_price: float | None = None
-    currency: str = "USD"
-    price_change_pct_24h: float | None = None
-    price_change_pct_7d: float | None = None
-    price_change_pct_30d: float | None = None
-    volatility_30d: float | None = None
-    status: str
-    last_scraped_at: datetime | None = None
+    url: str | None = None
+    marketplace_name: str | None = None
+    marketplace_domain: str | None = None
+    marketplace_code: str | None = None
+    country_code: str | None = None
+    price: float | None = None
+    currency: str | None = None
+    price_eur: float | None = None
+    price_change_pct: float | None = None
+    in_stock: bool | None = None
+    last_checked_at: datetime | None = None
+    status: str | None = None
+    is_active: bool | None = None
 
     model_config = {"from_attributes": True}
 
 
-class GlobalProductListResponse(BaseModel):
-    items: list[GlobalProductResponse]
+class PoolProductsResponse(BaseModel):
+    items: list[PoolProductItem]
     total: int
     limit: int
     offset: int
 
 
+class PoolStatsResponse(BaseModel):
+    total_products: int
+    total_listings: int
+    marketplaces_count: int
+    listings_with_price: int
+    last_updated: datetime | None = None
+    # Legacy keys (optional) for older clients / stubs
+    total_marketplaces: int | None = None
+    products_with_price: int | None = None
+    last_discovery_at: datetime | None = None
+    message: str | None = None
+
+
+class MarketplaceStatsItem(BaseModel):
+    marketplace_id: UUID
+    marketplace_name: str
+    marketplace_domain: str
+    country_code: str
+    listing_count: int
+
+
+class PoolCategoriesResponse(BaseModel):
+    marketplaces: list[MarketplaceStatsItem]
+
+
 class PoolCategorySummary(BaseModel):
+    """Legacy shape for GET /pool/marketplace-stats."""
+
     marketplace_domain: str
     marketplace_name: str | None = None
     product_count: int
     avg_price: float | None = None
 
 
-class PoolStatsResponse(BaseModel):
-    total_products: int
-    total_marketplaces: int
-    products_with_price: int
-    last_discovery_at: datetime | None = None

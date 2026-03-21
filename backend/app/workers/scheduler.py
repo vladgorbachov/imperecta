@@ -43,4 +43,12 @@ celery_app.conf.beat_schedule = {
         "task": "check_pool_completeness",
         "schedule": crontab(minute=30, hour="*/3"),  # Every 3 hours at :30
     },
+    "refresh-materialized-views": {
+        "task": "refresh_materialized_views",
+        "schedule": crontab(minute=15),  # Every hour at :15
+    },
+    "ensure-partitions-monthly": {
+        "task": "ensure_fact_price_partitions",
+        "schedule": crontab(minute=0, hour=2, day_of_month=1),  # 1st of month, 02:00 UTC
+    },
 }

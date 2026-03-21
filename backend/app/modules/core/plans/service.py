@@ -2,7 +2,7 @@
 
 from app.entitlements import get_limit, get_service_tier
 from app.entitlements.plan import ServiceTier
-from app.modules.core.models import UserPlan
+from app.entitlements.plan import UserPlan
 
 
 def get_product_limit(plan: UserPlan) -> int:
