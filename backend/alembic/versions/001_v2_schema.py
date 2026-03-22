@@ -10,8 +10,106 @@ branch_labels = None
 depends_on = None
 
 
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split SQL batch into single statements, preserving quoted sections."""
+    statements: list[str] = []
+    buffer: list[str] = []
+    index = 0
+    size = len(sql)
+    in_single_quote = False
+    in_double_quote = False
+    dollar_tag: str | None = None
+
+    while index < size:
+        char = sql[index]
+
+        if dollar_tag is not None:
+            if sql.startswith(dollar_tag, index):
+                buffer.append(dollar_tag)
+                index += len(dollar_tag)
+                dollar_tag = None
+                continue
+            buffer.append(char)
+            index += 1
+            continue
+
+        if in_single_quote:
+            buffer.append(char)
+            if char == "'":
+                if index + 1 < size and sql[index + 1] == "'":
+                    buffer.append("'")
+                    index += 2
+                    continue
+                in_single_quote = False
+            index += 1
+            continue
+
+        if in_double_quote:
+            buffer.append(char)
+            if char == '"':
+                if index + 1 < size and sql[index + 1] == '"':
+                    buffer.append('"')
+                    index += 2
+                    continue
+                in_double_quote = False
+            index += 1
+            continue
+
+        if char == "'":
+            in_single_quote = True
+            buffer.append(char)
+            index += 1
+            continue
+
+        if char == '"':
+            in_double_quote = True
+            buffer.append(char)
+            index += 1
+            continue
+
+        if char == "$":
+            probe = index + 1
+            while probe < size and (sql[probe].isalnum() or sql[probe] == "_"):
+                probe += 1
+            if probe < size and sql[probe] == "$":
+                tag = sql[index : probe + 1]
+                dollar_tag = tag
+                buffer.append(tag)
+                index = probe + 1
+                continue
+
+        if char == ";":
+            statement = "".join(buffer).strip()
+            if statement:
+                statements.append(statement)
+            buffer = []
+            index += 1
+            continue
+
+        buffer.append(char)
+        index += 1
+
+    trailing = "".join(buffer).strip()
+    if trailing:
+        statements.append(trailing)
+
+    return statements
+
+
 def upgrade() -> None:
     """Rebuild public schema; keep Alembic version table in alembic_meta."""
+    original_execute = op.execute
+
+    def _safe_execute(statement, *args, **kwargs):
+        if isinstance(statement, str):
+            for sql in _split_sql_statements(statement):
+                original_execute(sql, *args, **kwargs)
+            return None
+        return original_execute(statement, *args, **kwargs)
+
+    # asyncpg rejects multiple SQL commands in a single prepared statement.
+    op.execute = _safe_execute
+
     # Preserve Alembic bookkeeping outside public so DROP SCHEMA public CASCADE is safe.
     op.execute(
         """
