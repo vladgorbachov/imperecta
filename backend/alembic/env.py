@@ -41,24 +41,29 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    """Run migrations with a schema guard for v2 bootstrap."""
-    # Keep Alembic metadata outside public schema.
+    """Run migrations. Auto-detect if v2 schema needs to be applied."""
+    from sqlalchemy import text
+
+    # Ensure alembic_meta schema exists.
     connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
 
-    # If dim_date is missing, v2 was stamped but not actually applied.
-    v2_exists_result = connection.execute(
+    # Check if v2 tables exist (dim_date is created by 001_v2_schema).
+    result = connection.execute(
         text(
             "SELECT EXISTS ("
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_name = 'dim_date'"
+            "  SELECT 1 FROM information_schema.tables "
+            "  WHERE table_schema = 'public' AND table_name = 'dim_date'"
             ")"
         )
     )
-    v2_exists = bool(v2_exists_result.scalar())
+    v2_applied = result.scalar()
 
-    if not v2_exists:
-        connection.execute(text("DELETE FROM alembic_meta.alembic_version"))
-        connection.commit()
+    if not v2_applied:
+        # V2 schema not applied yet — reset alembic version if table exists.
+        try:
+            connection.execute(text("DELETE FROM alembic_meta.alembic_version"))
+        except Exception:
+            pass  # Table doesn't exist yet — that's fine, nothing to reset.
 
     context.configure(
         connection=connection,
