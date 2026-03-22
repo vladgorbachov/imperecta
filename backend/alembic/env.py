@@ -41,30 +41,37 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    """Run migrations. Auto-detect if v2 schema needs to be applied."""
+    """Run migrations with v2 schema detection and auto-reset."""
     from sqlalchemy import text
 
-    # Ensure alembic_meta schema exists.
+    # 1. Ensure alembic_meta schema exists.
     connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
 
-    # Check if v2 tables exist (dim_date is created by 001_v2_schema).
-    result = connection.execute(
+    # 2. Check if v2 schema was actually applied (dim_date exists?).
+    v2_applied = connection.execute(
         text(
             "SELECT EXISTS ("
             "  SELECT 1 FROM information_schema.tables "
             "  WHERE table_schema = 'public' AND table_name = 'dim_date'"
             ")"
         )
-    )
-    v2_applied = result.scalar()
+    ).scalar()
 
-    if not v2_applied:
-        # V2 schema not applied yet — reset alembic version if table exists.
-        try:
-            connection.execute(text("DELETE FROM alembic_meta.alembic_version"))
-        except Exception:
-            pass  # Table doesn't exist yet — that's fine, nothing to reset.
+    # 3. Check if alembic_version table exists in alembic_meta.
+    version_table_exists = connection.execute(
+        text(
+            "SELECT EXISTS ("
+            "  SELECT 1 FROM information_schema.tables "
+            "  WHERE table_schema = 'alembic_meta' AND table_name = 'alembic_version'"
+            ")"
+        )
+    ).scalar()
 
+    # 4. If version table exists but v2 NOT applied — reset version.
+    if version_table_exists and not v2_applied:
+        connection.execute(text("DELETE FROM alembic_meta.alembic_version"))
+
+    # 5. Configure and run.
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
