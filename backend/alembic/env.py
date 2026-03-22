@@ -42,11 +42,6 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations with v2 schema detection and auto-reset."""
-    from sqlalchemy import text
-
-    # 1. Ensure alembic_meta schema exists.
-    connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
-
     # 2. Check if v2 schema was actually applied (dim_date exists?).
     v2_applied = connection.execute(
         text(
