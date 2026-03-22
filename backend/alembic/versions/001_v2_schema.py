@@ -137,31 +137,6 @@ def upgrade() -> None:
         """
     )
 
-    # Backup marketplaces.
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = 'admin_marketplaces'
-            ) THEN
-                CREATE TEMP TABLE _marketplaces_backup AS
-                SELECT
-                    name, domain, base_url, country, region, currency,
-                    scraper_type, is_active, product_quota, requires_js,
-                    rate_limit_delay, custom_product_link_selector,
-                    custom_next_page_selector, custom_price_selector,
-                    custom_title_selector
-                FROM public.admin_marketplaces;
-                RAISE NOTICE 'Marketplaces backed up (% rows)', (SELECT count(*) FROM _marketplaces_backup);
-            ELSE
-                RAISE NOTICE 'No admin_marketplaces - skipping backup';
-            END IF;
-        END $$;
-        """
-    )
-
     op.execute("DROP SCHEMA public CASCADE;")
     op.execute("CREATE SCHEMA public;")
     op.execute("GRANT ALL ON SCHEMA public TO PUBLIC;")
@@ -920,92 +895,6 @@ def upgrade() -> None:
         );
         CREATE INDEX idx_exports_user ON data_exports (user_id);
         CREATE INDEX idx_exports_status ON data_exports (status);
-        """
-    )
-
-    # Restore marketplaces into dim_marketplace.
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM pg_catalog.pg_class c
-                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                WHERE c.relname = '_marketplaces_backup'
-                  AND n.nspname LIKE 'pg_temp%'
-            ) THEN
-                INSERT INTO dim_marketplace (
-                    marketplace_code, name, source_type, country_code,
-                    domain, base_url, currency_code, scraper_type, is_active
-                )
-                SELECT
-                    REPLACE(LOWER(b.domain), '.', '_'),
-                    b.name,
-                    'marketplace',
-                    CASE
-                        WHEN LENGTH(b.country) = 2 THEN UPPER(b.country)
-                        WHEN b.country ILIKE 'Russia%' THEN 'RU'
-                        WHEN b.country ILIKE 'Germany%' THEN 'DE'
-                        WHEN b.country ILIKE 'Ukraine%' THEN 'UA'
-                        WHEN b.country ILIKE 'Poland%' THEN 'PL'
-                        WHEN b.country ILIKE 'Moldova%' THEN 'MD'
-                        WHEN b.country ILIKE 'Lithuania%' THEN 'LT'
-                        WHEN b.country ILIKE 'Latvia%' THEN 'LV'
-                        WHEN b.country ILIKE 'Estonia%' THEN 'EE'
-                        WHEN b.country ILIKE 'Bulgaria%' THEN 'BG'
-                        WHEN b.country ILIKE 'Romania%' THEN 'RO'
-                        WHEN b.country ILIKE 'Hungary%' THEN 'HU'
-                        WHEN b.country ILIKE 'Georgia%' THEN 'GE'
-                        WHEN b.country ILIKE 'Armenia%' THEN 'AM'
-                        WHEN b.country ILIKE 'Azerbaijan%' THEN 'AZ'
-                        WHEN b.country ILIKE 'Kazakhstan%' THEN 'KZ'
-                        WHEN b.country ILIKE 'Uzbekistan%' THEN 'UZ'
-                        WHEN b.country ILIKE 'Belarus%' THEN 'BY'
-                        WHEN b.country ILIKE 'Turkey%' THEN 'TR'
-                        WHEN b.country ILIKE 'Czech%' THEN 'CZ'
-                        WHEN b.country ILIKE 'Netherlands%' THEN 'NL'
-                        WHEN b.country ILIKE 'France%' THEN 'FR'
-                        WHEN b.country ILIKE 'Spain%' THEN 'ES'
-                        WHEN b.country ILIKE 'Italy%' THEN 'IT'
-                        WHEN b.country ILIKE 'United Kingdom%' THEN 'UK'
-                        WHEN b.country ILIKE 'Serbia%' THEN 'RS'
-                        WHEN b.country ILIKE 'Croatia%' THEN 'HR'
-                        WHEN b.country ILIKE 'Slovakia%' THEN 'SK'
-                        WHEN b.country ILIKE 'Austria%' THEN 'AT'
-                        WHEN b.country ILIKE 'Belgium%' THEN 'BE'
-                        WHEN b.country ILIKE 'Finland%' THEN 'FI'
-                        WHEN b.country ILIKE 'Sweden%' THEN 'SE'
-                        WHEN b.country ILIKE 'Norway%' THEN 'NO'
-                        WHEN b.country ILIKE 'Denmark%' THEN 'DK'
-                        WHEN b.country ILIKE 'Switzerland%' THEN 'CH'
-                        WHEN b.country ILIKE 'Ireland%' THEN 'IE'
-                        WHEN b.country ILIKE 'Portugal%' THEN 'PT'
-                        WHEN b.country ILIKE 'Greece%' THEN 'GR'
-                        WHEN b.country ILIKE 'Slovenia%' THEN 'SI'
-                        WHEN b.country ILIKE 'Kyrgyzstan%' THEN 'KG'
-                        WHEN b.country ILIKE 'Tajikistan%' THEN 'TJ'
-                        ELSE UPPER(LEFT(b.country, 2))
-                    END,
-                    b.domain,
-                    b.base_url,
-                    CASE
-                        WHEN LENGTH(b.currency) <= 3 THEN UPPER(b.currency)
-                        ELSE 'EUR'
-                    END,
-                    CASE
-                        WHEN b.scraper_type IN ('web_api', 'playwright', 'httpx', 'api_official', 'rss', 'feed')
-                            THEN b.scraper_type
-                        ELSE 'web_api'
-                    END,
-                    COALESCE(b.is_active, true)
-                FROM _marketplaces_backup b
-                ON CONFLICT (marketplace_code) DO NOTHING;
-
-                RAISE NOTICE 'Marketplaces restored (% rows)', (SELECT count(*) FROM dim_marketplace);
-            ELSE
-                RAISE NOTICE 'No marketplace backup - skipping restore';
-            END IF;
-        END $$;
         """
     )
 
