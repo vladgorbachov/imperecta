@@ -41,11 +41,30 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    """Run migrations with given connection."""
+    """Run migrations with a schema guard for v2 bootstrap."""
+    # Keep Alembic metadata outside public schema.
+    connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
+
+    # If dim_date is missing, v2 was stamped but not actually applied.
+    v2_exists_result = connection.execute(
+        text(
+            "SELECT EXISTS ("
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = 'dim_date'"
+            ")"
+        )
+    )
+    v2_exists = bool(v2_exists_result.scalar())
+
+    if not v2_exists:
+        connection.execute(text("DELETE FROM alembic_meta.alembic_version"))
+        connection.commit()
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         version_table_schema="alembic_meta",
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
