@@ -110,22 +110,6 @@ def upgrade() -> None:
     # asyncpg rejects multiple SQL commands in a single prepared statement.
     op.execute = _safe_execute
 
-    # Preserve Alembic bookkeeping outside public so DROP SCHEMA public CASCADE is safe.
-    op.execute(
-        """
-        CREATE SCHEMA IF NOT EXISTS alembic_meta;
-        DO $$
-        BEGIN
-          IF EXISTS (
-            SELECT 1 FROM pg_catalog.pg_tables
-            WHERE schemaname = 'public' AND tablename = 'alembic_version'
-          ) THEN
-            ALTER TABLE public.alembic_version SET SCHEMA alembic_meta;
-          END IF;
-        END $$;
-        """
-    )
-
     # Backup users when migrating from v1.
     op.execute(
         """
