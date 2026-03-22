@@ -110,17 +110,54 @@ def upgrade() -> None:
     # asyncpg rejects multiple SQL commands in a single prepared statement.
     op.execute = _safe_execute
 
-    # Backup users when migrating from v1.
+    # Backup users (cast ENUM plan to text).
     op.execute(
         """
         DO $$
         BEGIN
-          IF EXISTS (
-            SELECT 1 FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = 'users'
-          ) THEN
-            CREATE TEMP TABLE _users_backup AS TABLE public.users WITH DATA;
-          END IF;
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'users'
+            ) THEN
+                CREATE TEMP TABLE _users_backup AS
+                SELECT
+                    id, email, password_hash, name, company_name,
+                    plan::text AS plan,
+                    trial_ends_at, language, ai_tone,
+                    is_superuser, force_password_change,
+                    telegram_chat_id, telegram_link_code,
+                    avatar_url, last_login_at,
+                    created_at, updated_at
+                FROM public.users;
+                RAISE NOTICE 'Users backed up (% rows)', (SELECT count(*) FROM _users_backup);
+            ELSE
+                RAISE NOTICE 'No users table - skipping backup';
+            END IF;
+        END $$;
+        """
+    )
+
+    # Backup marketplaces.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'admin_marketplaces'
+            ) THEN
+                CREATE TEMP TABLE _marketplaces_backup AS
+                SELECT
+                    name, domain, base_url, country, region, currency,
+                    scraper_type, is_active, product_quota, requires_js,
+                    rate_limit_delay, custom_product_link_selector,
+                    custom_next_page_selector, custom_price_selector,
+                    custom_title_selector
+                FROM public.admin_marketplaces;
+                RAISE NOTICE 'Marketplaces backed up (% rows)', (SELECT count(*) FROM _marketplaces_backup);
+            ELSE
+                RAISE NOTICE 'No admin_marketplaces - skipping backup';
+            END IF;
         END $$;
         """
     )
@@ -886,45 +923,80 @@ def upgrade() -> None:
         """
     )
 
-    # Restore users from v1 backup if present (temp table lives in pg_temp* for this session).
+    # Restore marketplaces into dim_marketplace.
     op.execute(
         """
         DO $$
-        DECLARE
-          r RECORD;
         BEGIN
-          FOR r IN
-            SELECT n.nspname AS sch, c.relname AS tbl
-            FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.relname = '_users_backup' AND n.nspname LIKE 'pg_temp%'
-          LOOP
-            EXECUTE format(
-              'INSERT INTO public.users (
-                id, email, password_hash, name, company_name, plan, trial_ends_at,
-                language, timezone, ai_tone, default_currency,
-                telegram_chat_id, telegram_link_code, telegram_username,
-                is_superuser, force_password_change, is_active,
-                avatar_url, last_login_at, last_login_ip, login_count,
-                created_at, updated_at
-              )
-              SELECT
-                id, email, password_hash, name, company_name,
-                COALESCE(plan, ''trial''::varchar),
-                trial_ends_at,
-                COALESCE(language, ''en''::varchar),
-                COALESCE(timezone, ''UTC''::varchar),
-                COALESCE(ai_tone, ''balanced''::varchar),
-                COALESCE(default_currency, ''EUR''::varchar),
-                telegram_chat_id, telegram_link_code, telegram_username,
-                COALESCE(is_superuser, false), COALESCE(force_password_change, false), COALESCE(is_active, true),
-                avatar_url, last_login_at, last_login_ip, COALESCE(login_count, 0),
-                COALESCE(created_at, now()), COALESCE(updated_at, now())
-              FROM %I.%I
-              ON CONFLICT (id) DO NOTHING',
-              r.sch, r.tbl
-            );
-          END LOOP;
+            IF EXISTS (
+                SELECT 1 FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = '_marketplaces_backup'
+                  AND n.nspname LIKE 'pg_temp%'
+            ) THEN
+                INSERT INTO dim_marketplace (
+                    marketplace_code, name, source_type, country_code,
+                    domain, base_url, currency_code, scraper_type, is_active
+                )
+                SELECT
+                    REPLACE(LOWER(b.domain), '.', '_'),
+                    b.name,
+                    'marketplace',
+                    UPPER(LEFT(b.country, 2)),
+                    b.domain,
+                    b.base_url,
+                    COALESCE(b.currency, 'EUR'),
+                    COALESCE(b.scraper_type, 'web_api'),
+                    COALESCE(b.is_active, true)
+                FROM _marketplaces_backup b
+                ON CONFLICT (marketplace_code) DO NOTHING;
+
+                RAISE NOTICE 'Marketplaces restored (% rows)', (SELECT count(*) FROM dim_marketplace);
+            ELSE
+                RAISE NOTICE 'No marketplace backup - skipping restore';
+            END IF;
+        END $$;
+        """
+    )
+
+    # Restore users from backup.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = '_users_backup'
+                  AND n.nspname LIKE 'pg_temp%'
+            ) THEN
+                INSERT INTO users (
+                    id, email, password_hash, name, company_name,
+                    plan, trial_ends_at, language, ai_tone,
+                    is_superuser, force_password_change,
+                    telegram_chat_id, telegram_link_code,
+                    avatar_url, last_login_at,
+                    created_at, updated_at
+                )
+                SELECT
+                    b.id, b.email, b.password_hash, b.name, b.company_name,
+                    COALESCE(b.plan, 'trial'),
+                    b.trial_ends_at,
+                    COALESCE(b.language, 'en'),
+                    COALESCE(b.ai_tone, 'balanced'),
+                    COALESCE(b.is_superuser, false),
+                    COALESCE(b.force_password_change, false),
+                    b.telegram_chat_id, b.telegram_link_code,
+                    b.avatar_url, b.last_login_at,
+                    COALESCE(b.created_at, now()),
+                    COALESCE(b.updated_at, now())
+                FROM _users_backup b
+                ON CONFLICT (email) DO NOTHING;
+
+                RAISE NOTICE 'Users restored (% rows)', (SELECT count(*) FROM users);
+            ELSE
+                RAISE NOTICE 'No backup found - skipping restore';
+            END IF;
         END $$;
         """
     )
