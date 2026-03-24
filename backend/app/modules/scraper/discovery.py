@@ -2,7 +2,7 @@
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from uuid import UUID
@@ -32,14 +32,32 @@ def _normalize_name(name: str) -> str:
 
 @dataclass
 class DiscoveryResult:
-    marketplace_id: str
-    marketplace_domain: str
-    status: str
-    products_found: int
-    products_new: int
-    pages_crawled: int
-    errors: list[str]
-    duration_seconds: int
+    """Result of discovering product URLs on a marketplace.
+
+    Field groups:
+    - Mandatory/system: marketplace_id, status, started_at, completed_at
+    - Counts: pages_scanned, candidate_urls_found, accepted_urls,
+      duplicate_urls, rejected_urls, persisted_listings
+    - Technical: job_id, errors, discovery_method
+    """
+
+    marketplace_id: UUID
+    status: str  # completed, partial, error, no_categories
+    started_at: datetime
+    completed_at: datetime | None = None
+
+    # Counts
+    pages_scanned: int = 0
+    candidate_urls_found: int = 0
+    accepted_urls: int = 0
+    duplicate_urls: int = 0
+    rejected_urls: int = 0
+    persisted_listings: int = 0
+
+    # Technical
+    job_id: UUID | None = None
+    errors: list[str] = field(default_factory=list)
+    discovery_method: str = "category_crawl"
 
 
 class DiscoveryCrawler:
@@ -81,7 +99,8 @@ class DiscoveryCrawler:
 
     async def discover(self, marketplace: DimMarketplace) -> DiscoveryResult:
         """Run discovery for one marketplace (ScrapeJob + listing crawl)."""
-        started = time.perf_counter()
+        started_perf = time.perf_counter()
+        started_at = datetime.now(timezone.utc)
         errors: list[str] = []
         mp_id = marketplace.id
         domain = (marketplace.domain or "").strip()
@@ -90,17 +109,21 @@ class DiscoveryCrawler:
             job_type="discovery",
             marketplace_id=mp_id,
             status="running",
-            started_at=datetime.now(timezone.utc),
+            started_at=started_at,
             config={"domain": domain},
         )
         self.db.add(job)
         await self.db.commit()
         await self.db.refresh(job)
 
-        products_found = 0
-        products_new = 0
-        pages_crawled = 0
+        pages_scanned = 0
+        candidate_urls_found = 0
+        accepted_urls = 0
+        duplicate_urls = 0
+        rejected_urls = 0
+        persisted_listings = 0
         status = "completed"
+        completed_at: datetime | None = None
 
         try:
             seed_url = (marketplace.base_url or f"https://{domain}").strip()
@@ -119,41 +142,69 @@ class DiscoveryCrawler:
             page_url: str | None = seed_url
             requires_js = bool(marketplace.requires_js)
 
-            while page_url and remaining > 0 and pages_crawled < 50:
+            while page_url and remaining > 0 and pages_scanned < 50:
                 listing_res = await self.pool.scrape_listing(
                     url=page_url,
                     custom_link_selector=marketplace.custom_product_link_selector,
                     custom_next_page_selector=marketplace.custom_next_page_selector,
                     requires_js=requires_js,
                 )
-                pages_crawled += 1
+                pages_scanned += 1
                 if not listing_res.success:
                     errors.append(listing_res.error or "listing_fetch_failed")
                     break
 
-                batch = [u for u in listing_res.product_urls if u not in seen_urls][:remaining]
+                candidate_batch = listing_res.product_urls
+                candidate_urls_found += len(candidate_batch)
+
+                deduped_batch = [u for u in candidate_batch if u not in seen_urls]
+                duplicate_urls += len(candidate_batch) - len(deduped_batch)
+
+                batch = deduped_batch[:remaining]
+                accepted_urls += len(batch)
+                rejected_urls += max(0, len(deduped_batch) - len(batch))
                 for u in batch:
                     seen_urls.add(u)
-                products_found += len(batch)
 
                 if batch:
                     saved = await self._save_product_urls(mp_id, batch)
-                    products_new += saved
+                    persisted_listings += saved
+                    duplicate_urls += max(0, len(batch) - saved)
                     remaining -= saved
 
                 page_url = listing_res.next_page_url
                 if not batch and not page_url:
                     break
 
-            job.status = "completed"
-            job.completed_at = datetime.now(timezone.utc)
-            job.duration_ms = int((time.perf_counter() - started) * 1000)
-            job.total_listings = products_found
-            job.successful = products_new
+            if errors and persisted_listings > 0:
+                status = "partial"
+            elif errors:
+                status = "error"
+            elif candidate_urls_found == 0:
+                status = "no_categories"
+            else:
+                status = "completed"
 
-            marketplace.last_discovery_at = datetime.now(timezone.utc)
-            marketplace.last_discovery_status = "completed"
-            marketplace.last_discovery_products_found = products_new
+            completed_at = datetime.now(timezone.utc)
+            job.status = "failed" if status == "error" else "completed"
+            job.completed_at = completed_at
+            job.duration_ms = int((time.perf_counter() - started_perf) * 1000)
+            job.total_listings = candidate_urls_found
+            job.successful = persisted_listings
+            job.failed = len(errors)
+            job.config = {
+                "domain": domain,
+                "pages_scanned": pages_scanned,
+                "candidate_urls_found": candidate_urls_found,
+                "accepted_urls": accepted_urls,
+                "duplicate_urls": duplicate_urls,
+                "rejected_urls": rejected_urls,
+                "discovery_method": "category_crawl",
+            }
+
+            marketplace.last_discovery_at = completed_at
+            marketplace.last_discovery_status = "failed" if status == "error" else status
+            marketplace.last_discovery_products_found = persisted_listings
 
             pool_count = await self.db.scalar(
                 select(func.count(FactListing.id)).where(
@@ -167,23 +218,41 @@ class DiscoveryCrawler:
         except Exception as exc:
             logger.exception("Discovery failed for %s", mp_id)
             errors.append(str(exc))
-            status = "failed"
+            status = "error"
+            completed_at = datetime.now(timezone.utc)
             job.status = "failed"
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = completed_at
+            job.duration_ms = int((time.perf_counter() - started_perf) * 1000)
+            job.total_listings = candidate_urls_found
+            job.successful = persisted_listings
+            job.failed = len(errors)
+            job.config = {
+                "domain": domain,
+                "pages_scanned": pages_scanned,
+                "candidate_urls_found": candidate_urls_found,
+                "accepted_urls": accepted_urls,
+                "duplicate_urls": duplicate_urls,
+                "rejected_urls": rejected_urls,
+                "discovery_method": "category_crawl",
+            }
             marketplace.last_discovery_status = "failed"
             try:
                 await self.db.commit()
             except Exception:
                 await self.db.rollback()
 
-        duration = int(time.perf_counter() - started)
         return DiscoveryResult(
-            marketplace_id=str(mp_id),
-            marketplace_domain=domain,
+            marketplace_id=mp_id,
             status=status,
-            products_found=products_found,
-            products_new=products_new,
-            pages_crawled=pages_crawled,
+            started_at=started_at,
+            completed_at=completed_at,
+            pages_scanned=pages_scanned,
+            candidate_urls_found=candidate_urls_found,
+            accepted_urls=accepted_urls,
+            duplicate_urls=duplicate_urls,
+            rejected_urls=rejected_urls,
+            persisted_listings=persisted_listings,
+            job_id=job.id,
             errors=errors,
-            duration_seconds=duration,
+            discovery_method="category_crawl",
         )
