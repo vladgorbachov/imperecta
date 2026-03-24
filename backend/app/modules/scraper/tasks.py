@@ -78,7 +78,7 @@ def discover_all_marketplaces():
                 for mp in marketplaces:
                     try:
                         res = await crawler.discover(mp)
-                        if res.status == "completed":
+                        if res.status in {"completed", "partial", "no_categories"}:
                             completed += 1
                         errors.extend(res.errors)
                     except Exception as exc:
@@ -120,7 +120,7 @@ def discover_single_marketplace(self, marketplace_id: str):
                 return {
                     "status": res.status,
                     "marketplace_id": str(marketplace.id),
-                    "products_new": res.products_new,
+                    "products_new": res.persisted_listings,
                     "errors": res.errors,
                 }
         finally:

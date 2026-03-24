@@ -8,9 +8,9 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
-from app.modules.scraper.engine import ScrapeResult, ScraperFactory
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -103,57 +103,83 @@ class GlobalScrapeService:
             custom_selectors=custom_selectors if custom_selectors else None,
             requires_js=requires_js,
         )
+        now = datetime.now(timezone.utc)
+        listing.last_checked_at = now
+        data = result.data
+        is_partial = result.is_partial
 
-        if not result.success or not result.data:
+        if not result.success or not data:
             listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
             listing.last_error = result.error or "scrape_failed"
-            try:
-                await self.db.commit()
-            except Exception as exc:
-                logger.error("Failed to save scrape error state: %s", exc)
-                await self.db.rollback()
-            return result
+        else:
+            # product_name is critical — missing name means partial result
+            is_partial = result.is_partial or (not data.title)
+            if is_partial:
+                logger.warning(
+                    "Missing product_name for %s - partial result",
+                    listing.external_url[:80],
+                )
 
-        data = result.data
-        now = datetime.now(timezone.utc)
-        listing.last_price = data.price
-        listing.last_currency_code = (data.currency or "USD")[:3]
-        listing.last_in_stock = True
-        listing.last_checked_at = now
-        listing.consecutive_errors = 0
-        listing.last_error = None
+            listing.last_price = data.price
+            listing.last_currency_code = data.currency[:3] if data.currency else None
+            listing.last_in_stock = data.in_stock
+            listing.consecutive_errors = 0
+            listing.last_error = None
 
-        product = await self.db.get(DimProduct, listing.product_id)
-        if product:
-            if data.title and (not product.name or product.name == listing.external_url):
-                product.name = data.title[:500]
-                product.name_normalized = _normalize_product_name(data.title)
-            if data.image_url and not product.image_url:
-                product.image_url = data.image_url
+            product = await self.db.get(DimProduct, listing.product_id)
+            if product:
+                if data.title and (not product.name or product.name == listing.external_url):
+                    product.name = data.title[:500]
+                    product.name_normalized = _normalize_product_name(data.title)
+                if data.image_url and not product.image_url:
+                    product.image_url = data.image_url
 
-        date_id = await _today_date_id(self.db)
-        await self.db.execute(
-            delete(FactPrice).where(
-                FactPrice.listing_id == listing.id,
-                FactPrice.date_id == date_id,
-            ),
-        )
-        prev = await _previous_price_snapshot(self.db, listing.id, date_id)
-        price_change_pct = None
-        if prev is not None and prev > 0 and data.price is not None:
-            price_change_pct = round((float(data.price) - prev) / prev * 100.0, 4)
+            should_write_price_snapshot = (
+                data.price is not None and data.price > 0 and bool(data.currency)
+            )
+            if should_write_price_snapshot:
+                date_id = await _today_date_id(self.db)
+                await self.db.execute(
+                    delete(FactPrice).where(
+                        FactPrice.listing_id == listing.id,
+                        FactPrice.date_id == date_id,
+                    ),
+                )
+                prev = await _previous_price_snapshot(self.db, listing.id, date_id)
+                price_change_pct = None
+                if prev is not None and prev > 0:
+                    price_change_pct = round((float(data.price) - prev) / prev * 100.0, 4)
 
-        price_record = FactPrice(
+                price_record = FactPrice(
+                    listing_id=listing.id,
+                    date_id=date_id,
+                    price=float(data.price),
+                    currency_code=data.currency[:3],
+                    original_price=float(data.original_price) if data.original_price else None,
+                    in_stock=data.in_stock,
+                    scraped_at=now,
+                    price_change_pct=price_change_pct,
+                )
+                self.db.add(price_record)
+            elif data.currency is None:
+                logger.warning(
+                    "Missing currency for %s, skipping price snapshot",
+                    listing.external_url[:80],
+                )
+
+        log_entry = ScrapeLog(
             listing_id=listing.id,
-            date_id=date_id,
-            price=float(data.price),
-            currency_code=(data.currency or "USD")[:3],
-            original_price=float(data.original_price) if data.original_price else None,
-            in_stock=True,
-            scraped_at=now,
-            price_change_pct=price_change_pct,
+            marketplace_id=listing.marketplace_id,
+            status=self._determine_log_status(result, is_partial),
+            url=listing.external_url,
+            price_found=float(data.price) if (result.success and data and data.price is not None) else None,
+            in_stock_found=data.in_stock if (result.success and data) else None,
+            duration_ms=result.duration_ms,
+            scraper_type=result.scraper_layer,
+            error_message=result.error,
+            error_category=self._categorize_error(result.error) if result.error else None,
         )
-        self.db.add(price_record)
+        self.db.add(log_entry)
 
         try:
             await self.db.commit()
@@ -168,6 +194,40 @@ class GlobalScrapeService:
             )
 
         return result
+
+    def _determine_log_status(self, result: PoolScrapeResult, is_partial: bool = False) -> str:
+        """Map scrape result to scrape_logs.status CHECK constraint value."""
+        if not result.success:
+            error = (result.error or "").lower()
+            if "fetch_failed" in error:
+                return "error"
+            if "timeout" in error:
+                return "timeout"
+            if "blocked" in error or "captcha" in error:
+                return "blocked"
+            if "price_not_found" in error:
+                return "price_not_found"
+            return "error"
+        if is_partial:
+            return "success"
+        return "success"
+
+    def _categorize_error(self, error: str) -> str | None:
+        """Classify error for scrape_logs.error_category."""
+        if not error:
+            return None
+        lowered = error.lower()
+        if "fetch" in lowered or "network" in lowered:
+            return "network"
+        if "parse" in lowered or "extract" in lowered:
+            return "parse"
+        if "timeout" in lowered:
+            return "network"
+        if "blocked" in lowered or "captcha" in lowered:
+            return "auth"
+        if "rate" in lowered:
+            return "rate_limit"
+        return "parse"
 
     async def get_stale_products(self, limit: int = 500) -> list[UUID]:
         """Listings that need refresh (oldest last_checked_at first)."""
@@ -199,22 +259,3 @@ class GlobalScrapeService:
         )
         result = await self.db.execute(stmt)
         return [r[0] for r in result.all()]
-
-
-def _detect_scraper_type(url: str, scraper_type_field: str | None) -> str:
-    return "universal"
-
-
-def _get_scraper(scraper_type: str, css_selector_price: str | None):
-    return ScraperFactory.create(
-        scraper_type,
-        css_selector_price=css_selector_price,
-    )
-
-
-async def scrape_competitor_product(
-    competitor_product_id: UUID,
-    db: AsyncSession,
-) -> ScrapeResult:
-    """Legacy competitor scrape removed; use FactListing + GlobalScrapeService."""
-    raise NotImplementedError("Use GlobalScrapeService.scrape_product(listing_id)")

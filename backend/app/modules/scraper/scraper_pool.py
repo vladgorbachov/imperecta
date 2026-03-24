@@ -33,12 +33,32 @@ MAX_VALID_PRICE = 9_999_999_999.99  # Max for Numeric(12,2)
 
 @dataclass
 class PoolScrapeResult:
+    """Result of scraping a single product URL.
+
+    Field groups:
+    - System/mandatory: success, url, error
+    - Extracted data container: data
+    - Technical: scraper_layer, duration_ms
+    - Derived quality flags: is_partial, is_empty, fields_extracted, fields_missing
+    """
+
+    # System
     success: bool
     url: str
+    error: str | None = None
+
+    # Extracted data container
     data: ExtractedProduct | None = None
+
+    # Technical
     scraper_layer: str | None = None
     duration_ms: int | None = None
-    error: str | None = None
+
+    # Derived quality flags (populated by scraper_pool before return)
+    is_partial: bool = False
+    is_empty: bool = False
+    fields_extracted: list[str] = field(default_factory=list)
+    fields_missing: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -80,10 +100,10 @@ class ScraperPool:
             return PoolScrapeResult(
                 success=False,
                 url=url,
+                error="fetch_failed",
                 data=None,
                 scraper_layer=None,
                 duration_ms=duration_ms,
-                error="fetch_failed",
             )
 
         merged = self._extract_all_levels(html, url, custom_selectors)
@@ -100,10 +120,10 @@ class ScraperPool:
             return PoolScrapeResult(
                 success=False,
                 url=url,
+                error="price_not_found",
                 data=None,
                 scraper_layer=used_layer,
                 duration_ms=duration_ms,
-                error="price_not_found",
             )
 
         logger.info(
@@ -113,13 +133,29 @@ class ScraperPool:
             merged.title[:50] if merged.title else None,
             merged.price,
         )
+        extracted_fields: list[str] = []
+        missing_fields: list[str] = []
+        for field_name in ["title", "price", "currency", "in_stock", "image_url", "description"]:
+            value = getattr(merged, field_name, None) if merged else None
+            if value is not None and value != "":
+                extracted_fields.append(field_name)
+            else:
+                missing_fields.append(field_name)
+
+        is_partial = merged.price is not None and not merged.title
+        is_empty = merged.price is None and not merged.title
+
         return PoolScrapeResult(
             success=True,
             url=url,
+            error=None,
             data=merged,
             scraper_layer=used_layer,
             duration_ms=duration_ms,
-            error=None,
+            is_partial=is_partial,
+            is_empty=is_empty,
+            fields_extracted=extracted_fields,
+            fields_missing=missing_fields,
         )
 
     async def fetch_html(self, url: str, requires_js: bool = False) -> str | None:
