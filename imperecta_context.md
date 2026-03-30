@@ -1,6 +1,13 @@
 # Imperecta Context (Current State)
 
-## 0) Parser Runtime Update (2026-03-24)
+## 0) Snapshot (2026-03-30)
+
+- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file.
+- Parser runtime: no `engine.py` under `modules/scraper`; path remains `tasks → discovery/service → scraper_pool → extractors`.
+- `modules/marketplaces/api.py`: admin marketplace CRUD/add-by-url/import still **stub** (`501` / empty list / `Pending migration to v2 schema`); pool/discovery/scraper admin live under `core/api_admin` + `scraper/api`.
+- Celery Beat: `scheduler.py` sets `celery_app.conf.beat_schedule = {}` (no periodic enqueue).
+
+## 0.1) Parser Runtime Update (2026-03-24)
 
 - `backend/app/modules/scraper/engine.py` removed from production runtime.
 - Canonical parser path: `tasks -> discovery/service -> scraper_pool -> extractors`.
@@ -146,6 +153,8 @@ Key runtime expectation:
   - `Imperecta_Cursor_Project_Description.md`
 - Backend audit:
   - `backend_full_audit_report.md`
+- Parser/scraper audit:
+  - `parsers_audit.md`
 - Migrations:
   - `backend/alembic/env.py`
   - `backend/alembic/versions/001_v2_schema.py`

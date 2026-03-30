@@ -1,8 +1,8 @@
 # Parsers Audit — Imperecta
 
-## 0. Актуализация (2026-03-24)
+## 0. Актуализация (2026-03-30)
 
-- `backend/app/modules/scraper/engine.py` удалён из runtime и из кода.
+- `backend/app/modules/scraper/engine.py` отсутствует в репозитории (не используется).
 - Каноничный runtime path парсера: `tasks -> discovery/service -> scraper_pool -> extractors`.
 - `ScraperPool` является единственным fetch+extract facade.
 - В `service.py` исправлена персистенция:
@@ -14,6 +14,7 @@
   - расширен `PoolScrapeResult` в `scraper_pool.py` (`is_partial`, `is_empty`, `fields_extracted`, `fields_missing`),
   - `DiscoveryCrawler.discover()` возвращает `DiscoveryResult` (вместо dict) с нормализованными счётчиками и статусами.
 - Beat schedule остаётся отключённым: `celery_app.conf.beat_schedule = {}`.
+- **Marketplaces admin (`modules/marketplaces/api.py`):** endpoints в основном заглушки (`501`, пустые списки, `Pending migration to v2 schema`); дедупликация квот и add-by-url не выполняют полную бизнес-логику до миграции UI. Операции пула/discovery/cleanup остаются в `core/api_admin` и `scraper/api`.
 
 Этот раздел является источником истины для parser runtime. Ниже могут встречаться исторические блоки.
 
@@ -137,7 +138,7 @@ Router:
 - prefix: `/admin/marketplaces`
 - auth: `get_current_superuser`
 
-Состояние: большинство endpoint'ов сейчас stub/501 и помечены как pending migration.
+Состояние (2026-03-30): `deduplicate` / `recalculate-quotas` / `set-requires-js` возвращают нейтральный payload с `Pending migration to v2 schema`; `GET ""` пустой список; `POST` add-by-url / import-file / delete — `501`; логи — `[]`. Не полагаться на эти endpoints для production-данных до миграции.
 
 ## 4.4 Core admin endpoints, связанные с parsing data (`modules/core/api_admin.py`)
 
