@@ -1,6 +1,6 @@
 # Imperecta — Описание проекта для Cursor IDE
 
-## Актуализация (текущее состояние, 2026-03-24)
+## Актуализация (текущее состояние, 2026-03-30)
 
 - **Alembic chain (actual head):** `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` (head). Файл `004_fix_real_state.py` добавляет repair-слой для production-состояния БД: приведение `users.plan` к `VARCHAR(20)`, удаление legacy tables/types/sequences, доинициализация app-таблиц v2, повторная гарантия `pg_trgm`.
 - **Parser runtime cleanup (2026-03-24):** `backend/app/modules/scraper/engine.py` удалён из production runtime path. Каноничный путь: `tasks -> discovery/service -> scraper_pool -> extractors`.
@@ -9,6 +9,7 @@
 - **Migration hardening:** в `backend/alembic/env.py` используется guard по фактическому наличию `dim_date` + проверка `alembic_meta.alembic_version` перед reset; в `001_v2_schema.py` используется `_split_sql_statements` + безопасный `op.execute` wrapper для asyncpg (один SQL statement на один execute).
 - **Users migration path:** `001_v2_schema.py` сохраняет backup пользователей с `plan::text`, далее restore users в новую таблицу; `003` и `004` закрывают случаи, когда БД осталась в смешанном legacy/v2 состоянии.
 - **Marketplace migration policy:** backup/restore `admin_marketplaces` из `001_v2_schema.py` удалён. Миграция 001 больше переносит только users; маркетплейсы предполагаются к загрузке отдельным импортом после стабилизации.
+- **Marketplaces admin API:** `modules/marketplaces/api.py` — заглушки (`501`, пустой список, `Pending migration to v2 schema`) для части операций; pool/discovery/diagnostics — `core/api_admin` и `scraper/api`.
 - **Celery Beat status:** в `backend/app/workers/scheduler.py` расписание жёстко отключено: `celery_app.conf.beat_schedule = {}` (не закомментированный словарь задач, а пустой dict).
 - **DB reality vs old notes:** более ранние блоки в документе ниже содержат часть устаревших формулировок (например, где head указан как `002_v2_additions`); источником истины считать этот раздел актуализации + текущие файлы миграций `003`/`004`.
 
@@ -22,7 +23,7 @@
 - Backend в модульной архитектуре `backend/app/modules/*`. Роутеры из `modules/*` под префиксом `/api` в `main.py`.
 - **Alembic:** цепочка `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` (head); старая цепочка 001–016 из репозитория удалена.
 - **Digests:** `generate_digest` из `app.modules.ai_analyst.claude_client`.
-- **Celery:** `celery_app.conf.include`: `modules` tasks (scraper, alerts, digests, market_data), `app.workers.cleanup_tasks`, `app.workers.maintenance_tasks`. Задачи обслуживания: `refresh_materialized_views` (REFRESH MV CONCURRENTLY), `ensure_fact_price_partitions` (партиции `fact_price` на следующие 3 месяца). Beat: плюс ежечасно `:15` (MV), 1-е число месяца 02:00 UTC (партиции); остальное — scrape_all, discover_all_marketplaces, scrape_all_pool_products, check_pool_completeness, ingest_market_data, ingest_commodities (4×/день), digests, cleanup.
+- **Celery:** `celery_app.conf.include`: `app.modules.scraper|alerts|digests|market_data.tasks`, `app.workers.cleanup_tasks`, `app.workers.maintenance_tasks`. Задачи обслуживания (ручной/будущий beat): `refresh_materialized_views`, `ensure_fact_price_partitions`. **Beat сейчас:** `celery_app.conf.beat_schedule = {}` в `scheduler.py` — периодические задачи не ставятся в очередь автоматически; целевые интервалы (MV :15, партиции 1-го числа, scrape/discovery/ingest/digests) применимы только после явного включения расписания.
 - **Decodo:** в `scraper/scraper_pool.py` — Decodo → httpx → Playwright; после успешного Decodo HTML не перезапрашивается. `scrape_pool_product` soft_time_limit=120, time_limit=150. **Price overflow:** MAX_VALID_PRICE=9_999_999_999.99 в scraper_pool и service; при overflow → price=None, discard. commit() в try/except с rollback. **_run_async:** shutdown_asyncgens перед loop.close() (Event loop is closed). **Celery:** broker_connection_retry, broker_transport_options retry_policy.
 - **Discovery:** двухуровневый: Level 1 — поиск URL категорий (homepage/sitemap); Level 2 — для каждой категории `extract_product_links` → URL товаров. Каждый URL товара = отдельная запись GlobalProduct. `extract_product_links` — строгая фильтрация: исключает /list/, /category/, /catalog/, /search, короткие пути; включает только product URLs (/\d{5,}, .html, /p/, /product/, 4+ сегментов). `discover_all_marketplaces` dispatch'ит `discover_single_marketplace.delay(id)` — каждая с fresh DB session. Batch commit каждые 50 записей + rollback recovery. POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/products/clear-pool`, GET `/api/admin/diagnostics/sample-products`.
 - **Crypto:** Binance API primary (50 монет), CoinGecko backup. `CryptoCompositeAdapter`, `BinanceCryptoAdapter`.
@@ -276,7 +277,7 @@ imperecta/
 │   │   ├── modules/                  # Доменная логика и API (см. «Backend: краткое описание»)
 │   │   │   ├── core/                 # auth, admin, telegram
 │   │   │   ├── marketplaces/
-│   │   │   ├── scraper/              # engine, discovery, scraper_pool, tasks
+│   │   │   ├── scraper/              # discovery, scraper_pool, extractors, service, tasks, api (engine удалён)
 │   │   │   ├── product_pool/
 │   │   │   ├── market_data/
 │   │   │   ├── dashboard/
@@ -593,7 +594,7 @@ imperecta/
 
 - `__init__.py` — пакетный инициализатор worker-модуля.
 - `celery_app.py` — создание и конфигурация Celery-приложения: `include` — `app.modules.*.tasks`, `app.workers.cleanup_tasks`, `app.workers.maintenance_tasks`.
-- `scheduler.py` — расписание периодических задач (beat): scrape, ingest, discovery, pool, digests, cleanup, **refresh_materialized_views** (каждый час :15), **ensure_fact_price_partitions** (1-е число 02:00 UTC).
+- `scheduler.py` — подключение beat: фактически `celery_app.conf.beat_schedule = {}` (периодические задачи отключены до явного включения). В коде задач по-прежнему доступны **refresh_materialized_views** и **ensure_fact_price_partitions** (maintenance_tasks).
 - `cleanup_tasks.py` — очистка устаревших технических и ценовых данных (`cleanup_old_data`).
 - `maintenance_tasks.py` — `refresh_materialized_views` (REFRESH MATERIALIZED VIEW CONCURRENTLY для MV из 001), `ensure_fact_price_partitions` (CREATE TABLE IF NOT EXISTS … PARTITION OF `fact_price`).
 
@@ -695,22 +696,24 @@ imperecta/
 
 ### Celery задачи
 
-| Задача | Триггер | Описание |
-|--------|---------|----------|
-| scrape_single | API / scrape_all | Парсинг одного competitor_product: fetch → extract → price_snapshots → competitor_product.last_price → ScrapeLog |
+**Примечание:** при пустом `beat_schedule` автоматический триггер по расписанию отключён; таблица описывает назначение задач и типичные интервалы после включения beat.
+
+| Задача | Триггер (при включённом beat) | Описание |
+|--------|------------------------------|----------|
+| scrape_single | API / scrape_all | Парсинг одного competitor_product: fetch → extract → snapshots → ScrapeLog |
 | scrape_user_products | API | Парсинг всех товаров пользователя (stagger) |
-| scrape_all | Beat каждые 6 ч | Очередь scrape_single для всех активных competitor_products |
-| ingest_market_data | Beat каждые 2 ч | Загрузка forex, crypto, fuel (без commodities); fresh engine+session per run |
-| ingest_commodities | Beat 0,6,12,18 UTC | Загрузка commodities (6 символов: XAU, XAG, XPT, XPD, WTI, BRENT) |
-| discover_all_marketplaces | Beat ежедневно 03:00 | Discovery URL товаров по активным маркетплейсам |
-| scrape_all_pool_products | Beat каждые 6 ч | Массовый скрейпинг stale товаров из global pool |
-| check_pool_completeness | Beat каждые 3 ч (:30) | Поиск и переочередь incomplete товаров в global pool |
-| cleanup_old_data | Beat вс 04:00 | Удаление: price_snapshots/scrape_logs 30 дн, api_logs 60 дн |
+| scrape_all | Beat каждые 6 ч | Очередь scrape_single для активных competitor_products |
+| ingest_market_data | Beat каждые 2 ч | Forex, crypto, fuel (без commodities); отдельный engine/session per run |
+| ingest_commodities | Beat 0,6,12,18 UTC | Commodities (XAU, XAG, XPT, XPD, WTI, BRENT) |
+| discover_all_marketplaces | Beat ежедневно 03:00 | Discovery по активным маркетплейсам (v2 pool) |
+| scrape_all_pool_products | Beat каждые 6 ч | Скрейпинг stale из пула (fact_listing / dim_product) |
+| check_pool_completeness | Beat каждые 3 ч (:30) | Переочередь incomplete в пуле |
+| cleanup_old_data | Beat вс 04:00 | Retention scrape_logs, api_logs и др. |
 | check_alerts | после scrape_single | Сравнение цен, email/Telegram |
 | schedule_weekly_digests | Beat пт 18:00 | Еженедельные дайджесты |
 | schedule_daily_digests | Beat ежедневно 08:00 | Ежедневные дайджесты (pro) |
-| refresh_materialized_views | Beat каждый час :15 | REFRESH MV CONCURRENTLY для `mv_daily_price_summary`, `mv_marketplace_health` |
-| ensure_fact_price_partitions | Beat 1-е число 02:00 UTC | Партиции `fact_price` на следующие 3 календарных месяца |
+| refresh_materialized_views | Beat каждый час :15 | REFRESH MV CONCURRENTLY `mv_daily_price_summary`, `mv_marketplace_health` |
+| ensure_fact_price_partitions | Beat 1-е число 02:00 UTC | Партиции `fact_price` на +3 месяца |
 
 ---
 
