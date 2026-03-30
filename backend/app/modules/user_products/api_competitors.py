@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter
 
 from app.common.deps import CurrentUser, DbSession
-from app.modules.marketplaces.api import MARKETPLACE_REGISTRY
+from app.modules.marketplaces.service import MarketplaceService
 
 router = APIRouter(prefix="/competitors", tags=["competitors"])
 
@@ -14,8 +14,9 @@ _MIG = "Endpoint pending migration to v2 schema"
 
 @router.get("/marketplaces")
 async def list_marketplaces(current_user: CurrentUser, db: DbSession) -> list[dict]:
-    _ = current_user, db
-    return [{"marketplace_id": reg["marketplace_id"], "name": reg["name"]} for reg in MARKETPLACE_REGISTRY]
+    _ = current_user
+    rows = await MarketplaceService(db).list_marketplaces()
+    return [{"marketplace_id": str(r.id), "name": r.name} for r in rows]
 
 
 @router.get("")
