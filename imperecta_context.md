@@ -1,10 +1,10 @@
 # Imperecta Context (Current State)
 
-## 0) Snapshot (2026-03-30)
+## 0) Snapshot (2026-03-31)
 
 - Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file.
 - Parser runtime: no `engine.py` under `modules/scraper`; path remains `tasks → discovery/service → scraper_pool → extractors`.
-- `modules/marketplaces/api.py`: admin marketplace CRUD/add-by-url/import still **stub** (`501` / empty list / `Pending migration to v2 schema`); pool/discovery/scraper admin live under `core/api_admin` + `scraper/api`.
+- **Marketplaces:** `MarketplaceService` + `modules/marketplaces/api.py` persist rows in `dim_marketplace` (add-by-url, import, delete, quotas, `requires_js`, logs). **POST `/api/admin/marketplaces/deduplicate`** is still a no-op merge (returns a message). Pool/diagnostics/cleanup: `core/api_admin` + `scraper/api`.
 - Celery Beat: `scheduler.py` sets `celery_app.conf.beat_schedule = {}` (no periodic enqueue).
 
 ## 0.1) Parser Runtime Update (2026-03-24)

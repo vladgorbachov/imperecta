@@ -1,6 +1,6 @@
 # Полный аудит backend (read-only)
 
-## Актуализация (текущее состояние, 2026-03-30)
+## Актуализация (текущее состояние, 2026-03-31)
 
 ### Миграции (head)
 - Цепочка: `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` (**head**). Версия Alembic: `alembic_meta.alembic_version`.
@@ -15,12 +15,12 @@
 - API и домены: только `backend/app/modules/*` (нет runtime `app/api/*`, `app/services/*`, `app/scrapers/*`).
 - Парсинг: `modules/scraper/` — `discovery.py`, `scraper_pool.py`, `extractors.py`, `service.py`, `tasks.py`, `api.py`; файла `engine.py` в модуле нет.
 - Admin pool/diagnostics: `modules/core/api_admin.py`. Scraper admin: `modules/scraper/api.py`.
-- **Marketplaces admin:** `modules/marketplaces/api.py` — заглушки (`501`, пустые ответы, `Pending migration to v2 schema`) до завершения миграции CRUD.
+- **Marketplaces admin:** `modules/marketplaces/service.py` (`MarketplaceService`) + `modules/marketplaces/api.py` — CRUD для `dim_marketplace` (список, add-by-url, импорт, удаление, квоты, `requires_js`, логи из `scrape_logs`). Исключение: **POST `/deduplicate`** пока без реализации merge дубликатов.
 
 ### Исторический блок ниже
 - Разделы **2–16** содержат снимок аудита с путями вида `app/api/*`, `app/scrapers/engine.py`, `workers/scrape_tasks.py` — эта структура **удалена** или переименована. Для текущей архитектуры ориентируйтесь на этот раздел актуализации и на `Imperecta_Cursor_Project_Description.md`.
 
-Дата актуализации: 2026-03-30
+Дата актуализации: 2026-03-31
 
 ### Hotfix forced migration (2026-03-21)
 - В `backend/alembic/env.py` перед `run_migrations()` добавлен runtime guard:
@@ -67,7 +67,7 @@
 - **Scraping:** Decodo → httpx → Playwright. Price overflow: MAX_VALID_PRICE в scraper_pool и service; при overflow → discard. commit() try/except + rollback. _run_async: shutdown_asyncgens перед loop.close(). Celery: broker_connection_retry, broker_transport_options retry_policy.
 - **Crypto:** Binance API primary (50 монет), CoinGecko backup. `BinanceCryptoAdapter`, `CryptoCompositeAdapter`.
 - **Commodities:** 6 символов (XAU, XAG, XPT, XPD, WTI, BRENT). Отдельная задача `ingest_commodities` 4×/день. GET `/api/markets/commodities` из БД.
-- **Admin:** GET `/api/admin/api-health`, GET `/api/admin/diagnostics/sample-products`, POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/products/clear-pool` (v2 dim_marketplace / fact_*). POST `/api/admin/marketplaces/deduplicate` в `marketplaces/api` — пока заглушка; реальная дедупликация/квоты — после миграции endpoints.
+- **Admin:** GET `/api/admin/api-health`, GET `/api/admin/diagnostics/sample-products`, POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/products/clear-pool` (v2 `fact_*`, `dim_marketplace`). Маркетплейсы: `MarketplaceService` + `/api/admin/marketplaces/*` (квоты, `requires_js`, импорт, логи); **POST `/deduplicate`** — без реализации слияния дубликатов.
 
 ### Изменения PR-1–PR-5
 - **PR-1:** `/api/analytics/dashboard/summary` вызывает `DashboardService.get_kpi()` (метод `get_dashboard_summary` отсутствовал).
@@ -82,9 +82,9 @@
 - Decodo: только при `decodo_enabled` и заданных credentials.
 
 ### Статус файла
-- Ниже — исторический аудит (разделы 1–16; пути `app/api/*`, `app/scrapers/*` устарели). Источник истины по текущей БД и ORM — блок «Актуализация (2026-03-30)» и `Imperecta_Database_Schema_v2.md`.
+- Ниже — исторический аудит (разделы 1–16; пути `app/api/*`, `app/scrapers/*` устарели). Источник истины по текущей БД и ORM — блок «Актуализация (2026-03-31)» и `Imperecta_Database_Schema_v2.md`.
 
-Дата снимка: 2026-03-30 (обновление актуализации), исторические разделы — 2026-03-15 и ранее.  
+Дата снимка: 2026-03-31 (обновление актуализации), исторические разделы — 2026-03-15 и ранее.  
 Режим: **только чтение**, без изменений кода.
 
 ---
@@ -240,7 +240,7 @@
 
 ### Ключевые замечания
 - `modules/core/api_admin.py`: prefix `/admin`, superuser-only. Endpoints: stats, users, claude-status, api-health, diagnostics/pool, products/cleanup-invalid, products/clear-user-data, products/clear-test-data.
-- `modules/marketplaces/api.py`: prefix `/admin/marketplaces`. Endpoints: deduplicate, recalculate-quotas, set-requires-js, GET "", logs, POST "", add-by-url, import-file, DELETE. Domain normalization и проверка дубликатов при add_by_url.
+- `modules/marketplaces/api.py`: prefix `/admin/marketplaces`. Endpoints: deduplicate (no-op merge), recalculate-quotas, set-requires-js, GET "", logs, POST "", add-by-url, import-file, import-text, DELETE. Нормализация URL и защита от дубликата по `domain` в `MarketplaceService.add_by_url`.
 - `modules/scraper/api.py`: prefix `/admin`. Endpoints: discovery/trigger/{id}, discovery/trigger-all, pool/trigger-scrape, trigger-scrape, scrape-activity, error-distribution.
 - В `api/markets.py` endpoint `/overview` уже читает из `ProductPoolService` (`L275-L300`).
 - В `api/telegram.py` есть как webhook без user auth (`/webhook`), так и user endpoints через `get_current_user`.

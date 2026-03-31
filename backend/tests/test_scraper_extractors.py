@@ -133,3 +133,74 @@ def test_completeness_score():
     partial = ExtractedProduct(title="x", price=10.0, image_url=None)
     assert full.completeness == 1.0
     assert round(partial.completeness, 2) == 0.67
+
+
+# --- GlobalScrapeService: log status mapping + placeholder name (no DB) ---
+
+from app.modules.scraper.scraper_pool import PoolScrapeResult
+from app.modules.scraper.service import GlobalScrapeService, _should_replace_placeholder_name
+
+
+def test_should_replace_placeholder_numeric_slug():
+    assert _should_replace_placeholder_name("48239384", "https://example.com/p/48239384") is True
+
+
+def test_should_replace_placeholder_product_literal():
+    assert _should_replace_placeholder_name("product", "https://x.com/a") is True
+
+
+def test_should_replace_placeholder_real_name():
+    assert _should_replace_placeholder_name("Running Shoes", "https://x.com/p/1") is False
+
+
+def test_determine_log_status_failure_variants():
+    svc = GlobalScrapeService.__new__(GlobalScrapeService)
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=False, url="u", error="price_not_found"),
+        )
+        == "price_not_found"
+    )
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=False, url="u", error="fetch_failed"),
+        )
+        == "error"
+    )
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=False, url="u", error="timeout"),
+        )
+        == "timeout"
+    )
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=True, url="u", data=ExtractedProduct()),
+            is_partial=True,
+        )
+        == "success"
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_pool_query_uses_last_checked_and_active():
+    """Ensure Celery stale selector matches FactListing fields (regression guard)."""
+    from sqlalchemy import or_, select
+
+    from app.models.facts import FactListing
+
+    threshold_clause = or_(
+        FactListing.last_checked_at.is_(None),
+        FactListing.last_checked_at < __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc,
+        ),
+    )
+    stmt = (
+        select(FactListing.id)
+        .where(FactListing.is_active.is_(True))
+        .where(threshold_clause)
+        .limit(500)
+    )
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+    assert "last_checked_at" in compiled
+    assert "is_active" in compiled

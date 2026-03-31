@@ -1,6 +1,6 @@
 # Parsers Audit — Imperecta
 
-## 0. Актуализация (2026-03-30)
+## 0. Актуализация (2026-03-31)
 
 - `backend/app/modules/scraper/engine.py` отсутствует в репозитории (не используется).
 - Каноничный runtime path парсера: `tasks -> discovery/service -> scraper_pool -> extractors`.
@@ -14,7 +14,7 @@
   - расширен `PoolScrapeResult` в `scraper_pool.py` (`is_partial`, `is_empty`, `fields_extracted`, `fields_missing`),
   - `DiscoveryCrawler.discover()` возвращает `DiscoveryResult` (вместо dict) с нормализованными счётчиками и статусами.
 - Beat schedule остаётся отключённым: `celery_app.conf.beat_schedule = {}`.
-- **Marketplaces admin (`modules/marketplaces/api.py`):** endpoints в основном заглушки (`501`, пустые списки, `Pending migration to v2 schema`); дедупликация квот и add-by-url не выполняют полную бизнес-логику до миграции UI. Операции пула/discovery/cleanup остаются в `core/api_admin` и `scraper/api`.
+- **Marketplaces / discovery prerequisite:** строки в `dim_marketplace` создаются через `MarketplaceService` и `modules/marketplaces/api.py` (CRUD, add-by-url, импорт, квоты, `requires_js`). **POST `/deduplicate`** пока без логики слияния дубликатов. Пул/cleanup/diagnostics — `core/api_admin` и `scraper/api`.
 
 Этот раздел является источником истины для parser runtime. Ниже могут встречаться исторические блоки.
 
@@ -138,7 +138,7 @@ Router:
 - prefix: `/admin/marketplaces`
 - auth: `get_current_superuser`
 
-Состояние (2026-03-30): `deduplicate` / `recalculate-quotas` / `set-requires-js` возвращают нейтральный payload с `Pending migration to v2 schema`; `GET ""` пустой список; `POST` add-by-url / import-file / delete — `501`; логи — `[]`. Не полагаться на эти endpoints для production-данных до миграции.
+Состояние (2026-03-31): рабочие endpoints поверх `MarketplaceService` и `dim_marketplace`: `GET ""` — список (формат админ-UI); `POST ""` / `POST /add-by-url` — добавление по URL; `POST /import-file`, `POST /import-text` — импорт URL построчно; `DELETE /{marketplace_id}`; `POST /recalculate-quotas`, `POST /set-requires-js`; `GET /{marketplace_id}/logs` — выборка из `scrape_logs`. `POST /deduplicate` — заглушка (сообщение о не реализованном merge).
 
 ## 4.4 Core admin endpoints, связанные с parsing data (`modules/core/api_admin.py`)
 
@@ -153,6 +153,7 @@ Router:
 ## 5. Связи между модулями (dependency graph)
 
 - `main.py` подключает роутеры parser-зависимых модулей: `scraper`, `pool`, `marketplaces`, `admin`.
+- `marketplaces/api.py` -> `marketplaces/service.py` (`MarketplaceService`) -> `DimMarketplace`.
 - `scraper/api.py` -> `scraper/tasks.py`.
 - `scraper/tasks.py` -> `scraper/discovery.py` + `scraper/service.py` + `scraper/scraper_pool.py`.
 - `scraper/service.py` -> `scraper/scraper_pool.py` + ORM (`DimProduct`, `FactListing`, `FactPrice`, `ScrapeLog`).
@@ -354,7 +355,7 @@ Startup задачи:
 ## 10. Риски и узкие места
 
 1. Качество извлечения зависит от marketplace-разметки; частичные результаты (`is_partial`) требуют мониторинга.
-2. `marketplaces/api.py` сейчас mostly stubs, может вводить в заблуждение админ-интерфейс.
+2. Дедупликация маркетплейсов по домену (`POST /deduplicate`) не реализована — возможны ручные дубликаты до отдельной задачи.
 3. `api_admin` имеет часть placeholder payload'ов (`scrape-activity`, `error-distribution` через scraper api stubs).
 4. При пустом beat parser-поток работает только вручную (это safe mode, но ограничивает automated freshness).
 
@@ -473,6 +474,6 @@ Parser stack в текущей версии:
 - технически полнофункционален для ручного запуска (discovery + scrape + persistence),
 - защищён от автоматического нежелательного запуска через пустой beat schedule,
 - имеет детальную extraction-логику и failover layers,
-- зависит от стабилизации/актуализации admin marketplace management API (часть endpoint'ов ещё stubs).
+- marketplace rows must exist in `dim_marketplace` (admin API) before meaningful discovery per marketplace.
 
 Для production-эксплуатации ключевой фактор — осознанное включение beat и постепенный rollout источников.
