@@ -22,6 +22,19 @@ def _normalize_product_name(raw: str) -> str:
     return s[:500]
 
 
+def _should_replace_placeholder_name(name: str | None, external_url: str) -> bool:
+    """True if dim_product.name is a discovery placeholder; scraped title should replace it."""
+    n = (name or "").strip()
+    if not n or n.lower() == "product":
+        return True
+    if n == external_url:
+        return True
+    compact = n.replace(" ", "").replace("-", "").replace("_", "")
+    if compact.isdigit():
+        return True
+    return False
+
+
 async def _today_date_id(db: AsyncSession) -> int:
     """YYYYMMDD surrogate for dim_date; ensures row exists for FK on fact_price."""
     from app.models.dimensions import DimDate
@@ -83,6 +96,9 @@ class GlobalScrapeService:
         if not listing:
             return PoolScrapeResult(success=False, url="", error="listing_not_found")
 
+        now = datetime.now(timezone.utc)
+        listing.last_checked_at = now
+
         mp = await self.db.get(DimMarketplace, listing.marketplace_id)
         requires_js = bool(mp.requires_js) if mp else False
 
@@ -98,13 +114,28 @@ class GlobalScrapeService:
             if v
         }
 
-        result = await self.pool.scrape_product(
-            url=listing.external_url,
-            custom_selectors=custom_selectors if custom_selectors else None,
-            requires_js=requires_js,
+        logger.info(
+            "pool_scrape start listing_id=%s url=%s",
+            listing_id,
+            (listing.external_url or "")[:200],
         )
-        now = datetime.now(timezone.utc)
-        listing.last_checked_at = now
+        try:
+            result = await self.pool.scrape_product(
+                url=listing.external_url,
+                custom_selectors=custom_selectors if custom_selectors else None,
+                requires_js=requires_js,
+            )
+        except Exception as exc:
+            logger.exception("pool_scrape exception listing_id=%s", listing_id)
+            err_text = f"exception:{exc.__class__.__name__}:{exc!s}"
+            result = PoolScrapeResult(
+                success=False,
+                url=listing.external_url,
+                error=err_text[:2000],
+                data=None,
+                duration_ms=None,
+            )
+
         data = result.data
         is_partial = result.is_partial
 
@@ -128,7 +159,10 @@ class GlobalScrapeService:
 
             product = await self.db.get(DimProduct, listing.product_id)
             if product:
-                if data.title and (not product.name or product.name == listing.external_url):
+                if data.title and _should_replace_placeholder_name(
+                    product.name,
+                    listing.external_url,
+                ):
                     product.name = data.title[:500]
                     product.name_normalized = _normalize_product_name(data.title)
                 if data.image_url and not product.image_url:
@@ -161,18 +195,29 @@ class GlobalScrapeService:
                     price_change_pct=price_change_pct,
                 )
                 self.db.add(price_record)
+                logger.info(
+                    "fact_price write listing_id=%s date_id=%s currency=%s",
+                    listing_id,
+                    date_id,
+                    data.currency[:3] if data.currency else None,
+                )
             elif data.currency is None:
                 logger.warning(
                     "Missing currency for %s, skipping price snapshot",
                     listing.external_url[:80],
                 )
 
+        log_status = self._determine_log_status(result, is_partial)
+        price_found = None
+        if result.success and data and data.price is not None:
+            price_found = float(data.price)
+
         log_entry = ScrapeLog(
             listing_id=listing.id,
             marketplace_id=listing.marketplace_id,
-            status=self._determine_log_status(result, is_partial),
+            status=log_status,
             url=listing.external_url,
-            price_found=float(data.price) if (result.success and data and data.price is not None) else None,
+            price_found=price_found,
             in_stock_found=data.in_stock if (result.success and data) else None,
             duration_ms=result.duration_ms,
             scraper_type=result.scraper_layer,
@@ -180,11 +225,22 @@ class GlobalScrapeService:
             error_category=self._categorize_error(result.error) if result.error else None,
         )
         self.db.add(log_entry)
+        logger.info(
+            "scrape_logs add listing_id=%s status=%s success=%s",
+            listing_id,
+            log_status,
+            result.success,
+        )
 
         try:
             await self.db.commit()
         except Exception as exc:
-            logger.error("Failed to save price: %s", exc)
+            logger.error(
+                "scrape persist rollback listing_id=%s err=%s",
+                listing_id,
+                exc,
+                exc_info=True,
+            )
             await self.db.rollback()
             return PoolScrapeResult(
                 success=False,
@@ -193,6 +249,7 @@ class GlobalScrapeService:
                 error="persist_failed",
             )
 
+        logger.info("pool_scrape done listing_id=%s result_success=%s", listing_id, result.success)
         return result
 
     def _determine_log_status(self, result: PoolScrapeResult, is_partial: bool = False) -> str:

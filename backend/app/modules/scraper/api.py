@@ -1,5 +1,6 @@
 """Admin API endpoints for scraper control (v2 migration stubs)."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -12,6 +13,8 @@ from app.modules.scraper.tasks import (
     scrape_all,
     scrape_all_pool_products,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/admin",
@@ -26,6 +29,7 @@ _MIGRATION_MSG = "Pending migration to v2 schema"
 async def admin_trigger_scrape(_current_user: CurrentSuperuser, _db: DbSession) -> dict:
     """Manually trigger scraping for stale pool listings."""
     task = scrape_all.delay()
+    logger.info("admin POST trigger-scrape task_id=%s", task.id)
     return {"message": "Scrape task queued", "task_id": str(task.id)}
 
 
@@ -36,22 +40,33 @@ async def trigger_discovery(
     _db: DbSession,
 ) -> dict:
     """Manually trigger discovery for one marketplace."""
-    discover_single_marketplace.delay(str(marketplace_id))
-    return {"status": "queued", "marketplace_id": str(marketplace_id)}
+    async_result = discover_single_marketplace.delay(str(marketplace_id))
+    logger.info(
+        "admin POST discovery/trigger marketplace_id=%s task_id=%s",
+        marketplace_id,
+        async_result.id,
+    )
+    return {
+        "status": "queued",
+        "marketplace_id": str(marketplace_id),
+        "task_id": str(async_result.id),
+    }
 
 
 @router.post("/discovery/trigger-all")
 async def trigger_discovery_all(_current_user: CurrentSuperuser, _db: DbSession) -> dict:
     """Manually trigger discovery for all active marketplaces."""
-    discover_all_marketplaces.delay()
-    return {"status": "queued"}
+    async_result = discover_all_marketplaces.delay()
+    logger.info("admin POST discovery/trigger-all task_id=%s", async_result.id)
+    return {"status": "queued", "task_id": str(async_result.id)}
 
 
 @router.post("/pool/trigger-scrape")
 async def trigger_pool_scrape(_current_user: CurrentSuperuser, _db: DbSession) -> dict:
     """Manually trigger scraping of stale pool products."""
-    scrape_all_pool_products.delay()
-    return {"status": "queued"}
+    async_result = scrape_all_pool_products.delay()
+    logger.info("admin POST pool/trigger-scrape task_id=%s", async_result.id)
+    return {"status": "queued", "task_id": str(async_result.id)}
 
 
 @router.get("/scrape-activity")

@@ -1,6 +1,6 @@
 # Imperecta — Описание проекта для Cursor IDE
 
-## Актуализация (текущее состояние, 2026-03-30)
+## Актуализация (текущее состояние, 2026-03-31)
 
 - **Alembic chain (actual head):** `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` (head). Файл `004_fix_real_state.py` добавляет repair-слой для production-состояния БД: приведение `users.plan` к `VARCHAR(20)`, удаление legacy tables/types/sequences, доинициализация app-таблиц v2, повторная гарантия `pg_trgm`.
 - **Parser runtime cleanup (2026-03-24):** `backend/app/modules/scraper/engine.py` удалён из production runtime path. Каноничный путь: `tasks -> discovery/service -> scraper_pool -> extractors`.
@@ -8,8 +8,8 @@
 - **Persistence hardening (2026-03-24):** в `scraper/service.py` удалены фейковые дефолты (`USD`, `in_stock=True`), `fact_price` пишется только при наличии currency, и добавлена обязательная запись в `scrape_logs` после каждой попытки scrape.
 - **Migration hardening:** в `backend/alembic/env.py` используется guard по фактическому наличию `dim_date` + проверка `alembic_meta.alembic_version` перед reset; в `001_v2_schema.py` используется `_split_sql_statements` + безопасный `op.execute` wrapper для asyncpg (один SQL statement на один execute).
 - **Users migration path:** `001_v2_schema.py` сохраняет backup пользователей с `plan::text`, далее restore users в новую таблицу; `003` и `004` закрывают случаи, когда БД осталась в смешанном legacy/v2 состоянии.
-- **Marketplace migration policy:** backup/restore `admin_marketplaces` из `001_v2_schema.py` удалён. Миграция 001 больше переносит только users; маркетплейсы предполагаются к загрузке отдельным импортом после стабилизации.
-- **Marketplaces admin API:** `modules/marketplaces/api.py` — заглушки (`501`, пустой список, `Pending migration to v2 schema`) для части операций; pool/discovery/diagnostics — `core/api_admin` и `scraper/api`.
+- **Marketplace migration policy:** backup/restore `admin_marketplaces` из `001_v2_schema.py` удалён. Миграция 001 больше переносит только users; строки `dim_marketplace` создаются через админ-API / импорт (не сиды в коде).
+- **Marketplaces admin API:** `modules/marketplaces/service.py` — `MarketplaceService` (CRUD для `dim_marketplace`): список, `add_by_url`, `import_from_text`, удаление, `update_marketplace` (в т.ч. `requires_js`), `recalculate_quotas`. `modules/marketplaces/api.py`: GET список (ответ в формате админ-UI), POST `/` и `/add-by-url`, POST `/import-file`, `/import-text`, DELETE по UUID, `/recalculate-quotas`, `/set-requires-js`, GET `/{id}/logs` (из `scrape_logs`). **POST `/deduplicate`** — пока без реализации дедупликации (возвращает сообщение, не 501). Диагностика пула и cleanup — по-прежнему `core/api_admin` и `scraper/api`. **GET `/api/competitors/marketplaces`** — список имён из `dim_marketplace` через `MarketplaceService`.
 - **Celery Beat status:** в `backend/app/workers/scheduler.py` расписание жёстко отключено: `celery_app.conf.beat_schedule = {}` (не закомментированный словарь задач, а пустой dict).
 - **DB reality vs old notes:** более ранние блоки в документе ниже содержат часть устаревших формулировок (например, где head указан как `002_v2_additions`); источником истины считать этот раздел актуализации + текущие файлы миграций `003`/`004`.
 

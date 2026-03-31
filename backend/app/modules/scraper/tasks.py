@@ -151,20 +151,40 @@ async def _run_scrape_all_pool() -> dict:
                 .limit(500),
             )
             stale_ids = [r[0] for r in result.all()]
+            logger.info("scrape_all_pool_products eligible_listings=%d", len(stale_ids))
             svc = GlobalScrapeService(db, scraper_pool)
             for lid in stale_ids:
                 try:
+                    listing_row = await db.get(FactListing, lid)
+                    url_hint = (listing_row.external_url if listing_row else "")[:160]
+                    logger.info("scrape_listing start listing_id=%s url=%s", lid, url_hint)
                     r = await svc.scrape_product(lid)
+                    logger.info(
+                        "scrape_listing end listing_id=%s success=%s err=%s",
+                        lid,
+                        r.success,
+                        (r.error or "")[:120],
+                    )
                     if r.success:
                         ok += 1
                     else:
                         failed += 1
                 except Exception:
-                    logger.exception("scrape listing %s", lid)
+                    logger.exception("scrape listing failed listing_id=%s", lid)
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        logger.exception("rollback after listing failure listing_id=%s", lid)
                     failed += 1
     finally:
         await engine.dispose()
 
+    logger.info(
+        "scrape_all_pool_products finished eligible=%d ok=%d failed=%d",
+        len(stale_ids),
+        ok,
+        failed,
+    )
     return {
         "queued": len(stale_ids),
         "scraped_ok": ok,
@@ -172,9 +192,10 @@ async def _run_scrape_all_pool() -> dict:
     }
 
 
-@celery_app.task(name="scrape_all_pool_products")
-def scrape_all_pool_products():
+@celery_app.task(bind=True, name="scrape_all_pool_products")
+def scrape_all_pool_products(self):
     """Scrape stale pool listings (last_checked_at null or older than 6 hours)."""
+    logger.info("scrape_all_pool_products started celery_id=%s", self.request.id)
     return _run_async(_run_scrape_all_pool())
 
 
@@ -219,7 +240,8 @@ def check_pool_completeness():
             async with session_factory() as db:
                 svc = GlobalScrapeService(db, scraper_pool)
                 incomplete = await svc.find_incomplete_products(limit=500)
-                return {"checked": len(incomplete), "listing_ids": [str(x) for x in incomplete[:50]]}
+                ids = [str(x) for x in incomplete[:50]]
+                return {"checked": len(incomplete), "listing_ids": ids}
         finally:
             await engine.dispose()
 
@@ -233,7 +255,10 @@ def check_pool_completeness():
 )
 def scrape_single(self, competitor_product_id: str):
     """Legacy competitor scrape removed — use scrape_pool_product(listing_id)."""
-    logger.warning("scrape_single is deprecated; use scrape_pool_product: %s", competitor_product_id)
+    logger.warning(
+        "scrape_single is deprecated; use scrape_pool_product: %s",
+        competitor_product_id,
+    )
     return {"status": "deprecated", "message": "Use scrape_pool_product with fact_listing UUID"}
 
 
