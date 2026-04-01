@@ -166,8 +166,21 @@ class GlobalScrapeService:
             )
 
         data = result.data
+        logger.info(
+            (
+                "scrape_product result: product_name=%s, price=%s, currency=%s, "
+                "in_stock=%s, fields_extracted=%s"
+            ),
+            getattr(data, "title", None) if data else None,
+            getattr(data, "price", None) if data else None,
+            getattr(data, "currency", None) if data else None,
+            getattr(result, "in_stock", None) if hasattr(result, "in_stock") else None,
+            getattr(result, "fields_extracted", None),
+        )
         is_partial = bool(result.is_partial)
-        in_stock_value = _optional_in_stock(data)
+        in_stock_value = getattr(result, "in_stock", None) if hasattr(result, "in_stock") else None
+        if in_stock_value is None:
+            in_stock_value = _optional_in_stock(data)
 
         if not result.success or not data:
             listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
@@ -205,6 +218,12 @@ class GlobalScrapeService:
                 and data.price > 0
                 and bool(data.currency)
             )
+            if not should_write_price_snapshot:
+                if not product_name_ok or not bool(data.currency):
+                    logger.info(
+                        "fact_price skipped: missing product_name or currency (listing_id=%s)",
+                        listing_id,
+                    )
             if should_write_price_snapshot:
                 date_id = _today_date_id(self.db)
                 self.db.execute(
@@ -246,7 +265,14 @@ class GlobalScrapeService:
                     listing.external_url[:80],
                 )
 
-        log_status = self._determine_log_status(result, is_partial)
+        has_title = bool(data and data.title and str(data.title).strip())
+        has_price = bool(data and data.price is not None)
+        log_status = self._determine_log_status(
+            result,
+            is_partial,
+            has_title=has_title if data is not None else None,
+            has_price=has_price if data is not None else None,
+        )
         price_found = None
         if result.success and data and data.price is not None:
             price_found = float(data.price)
@@ -291,7 +317,14 @@ class GlobalScrapeService:
         logger.info("pool_scrape done listing_id=%s result_success=%s", listing_id, result.success)
         return result
 
-    def _determine_log_status(self, result: PoolScrapeResult, is_partial: bool = False) -> str:
+    def _determine_log_status(
+        self,
+        result: PoolScrapeResult,
+        is_partial: bool = False,
+        *,
+        has_title: bool | None = None,
+        has_price: bool | None = None,
+    ) -> str:
         """Map scrape result to scrape_logs.status CHECK constraint value."""
         if not result.success:
             error = (result.error or "").lower()
@@ -302,9 +335,18 @@ class GlobalScrapeService:
             if "blocked" in error or "captcha" in error:
                 return "blocked"
             if "price_not_found" in error:
-                # Business partial outcome; DB allows only fixed CHECK values (no partial_success).
                 return "price_not_found"
             return "error"
+        if (
+            result.success
+            and result.data is not None
+            and has_title is not None
+            and has_price is not None
+        ):
+            if not has_title:
+                return "missing_critical_data"
+            if has_title and not has_price:
+                return "price_not_found"
         if is_partial:
             return "success"
         return "success"
