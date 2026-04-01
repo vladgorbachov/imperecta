@@ -190,6 +190,11 @@ class GlobalScrapeService:
             )
 
         data = result.data
+        # Legacy cleanup: any successful pool response clears stale error counters.
+        if result.success:
+            listing.last_error = None
+            listing.consecutive_errors = 0
+
         last_in_stock = (
             getattr(result, "in_stock", None)
             or getattr(data, "in_stock", None)
@@ -207,8 +212,9 @@ class GlobalScrapeService:
         is_partial = bool(result.is_partial)
 
         if not result.success or not data:
-            listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
-            listing.last_error = result.error or "scrape_failed"
+            if not result.success:
+                listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
+                listing.last_error = result.error or "scrape_failed"
         else:
             # product_name from extractor, or title as fallback when product_name is empty.
             product_name_ok = bool(
@@ -228,8 +234,6 @@ class GlobalScrapeService:
             listing.last_price = data.price
             listing.last_currency_code = data.currency[:3] if data.currency else None
             listing.last_in_stock = last_in_stock
-            listing.consecutive_errors = 0
-            listing.last_error = None
 
             product = self.db.get(DimProduct, listing.product_id)
             if product:
@@ -369,6 +373,12 @@ class GlobalScrapeService:
                 error="persist_failed",
             )
 
+        logger.info(
+            "SCRAPE COMPLETE listing_id=%s status=%s price=%s",
+            listing_id,
+            log_status,
+            price,
+        )
         logger.info("pool_scrape done listing_id=%s result_success=%s", listing_id, result.success)
         return result
 
