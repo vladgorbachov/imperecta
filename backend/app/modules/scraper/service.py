@@ -16,6 +16,16 @@ from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 logger = logging.getLogger(__name__)
 
 
+def _optional_in_stock(extracted: object | None) -> bool | None:
+    """Availability is optional on extractor payloads; never invent True/False."""
+    if extracted is None:
+        return None
+    raw = getattr(extracted, "in_stock", None)
+    if raw is None or isinstance(raw, bool):
+        return raw
+    return None
+
+
 def _normalize_product_name(raw: str) -> str:
     s = (raw or "").lower().strip()
     s = re.sub(r"\s+", " ", s)
@@ -137,15 +147,16 @@ class GlobalScrapeService:
             )
 
         data = result.data
-        is_partial = result.is_partial
+        is_partial = bool(result.is_partial)
+        in_stock_value = _optional_in_stock(data)
 
         if not result.success or not data:
             listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
             listing.last_error = result.error or "scrape_failed"
         else:
-            # product_name is critical — missing name means partial result
-            is_partial = result.is_partial or (not data.title)
-            if is_partial:
+            product_name_ok = bool(data.title and str(data.title).strip())
+            is_partial = bool(result.is_partial) or not product_name_ok
+            if not product_name_ok:
                 logger.warning(
                     "Missing product_name for %s - partial result",
                     listing.external_url[:80],
@@ -153,7 +164,7 @@ class GlobalScrapeService:
 
             listing.last_price = data.price
             listing.last_currency_code = data.currency[:3] if data.currency else None
-            listing.last_in_stock = data.in_stock
+            listing.last_in_stock = in_stock_value
             listing.consecutive_errors = 0
             listing.last_error = None
 
@@ -168,8 +179,12 @@ class GlobalScrapeService:
                 if data.image_url and not product.image_url:
                     product.image_url = data.image_url
 
+            # fact_price only with product name, positive price, and currency
             should_write_price_snapshot = (
-                data.price is not None and data.price > 0 and bool(data.currency)
+                product_name_ok
+                and data.price is not None
+                and data.price > 0
+                and bool(data.currency)
             )
             if should_write_price_snapshot:
                 date_id = await _today_date_id(self.db)
@@ -190,7 +205,7 @@ class GlobalScrapeService:
                     price=float(data.price),
                     currency_code=data.currency[:3],
                     original_price=float(data.original_price) if data.original_price else None,
-                    in_stock=data.in_stock,
+                    in_stock=in_stock_value,
                     scraped_at=now,
                     price_change_pct=price_change_pct,
                 )
@@ -200,6 +215,11 @@ class GlobalScrapeService:
                     listing_id,
                     date_id,
                     data.currency[:3] if data.currency else None,
+                )
+            elif not product_name_ok:
+                logger.warning(
+                    "Skipping price snapshot (no product title) for %s",
+                    listing.external_url[:80],
                 )
             elif data.currency is None:
                 logger.warning(
@@ -218,7 +238,7 @@ class GlobalScrapeService:
             status=log_status,
             url=listing.external_url,
             price_found=price_found,
-            in_stock_found=data.in_stock if (result.success and data) else None,
+            in_stock_found=in_stock_value if (result.success and data) else None,
             duration_ms=result.duration_ms,
             scraper_type=result.scraper_layer,
             error_message=result.error,

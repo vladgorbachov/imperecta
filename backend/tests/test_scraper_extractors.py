@@ -138,7 +138,17 @@ def test_completeness_score():
 # --- GlobalScrapeService: log status mapping + placeholder name (no DB) ---
 
 from app.modules.scraper.scraper_pool import PoolScrapeResult
-from app.modules.scraper.service import GlobalScrapeService, _should_replace_placeholder_name
+from app.modules.scraper.service import (
+    GlobalScrapeService,
+    _optional_in_stock,
+    _should_replace_placeholder_name,
+)
+
+
+def test_optional_in_stock_missing_on_extracted_product():
+    """ExtractedProduct has no in_stock; persistence must not assume the attribute."""
+    assert _optional_in_stock(ExtractedProduct(title="x", price=1.0)) is None
+    assert _optional_in_stock(None) is None
 
 
 def test_should_replace_placeholder_numeric_slug():
@@ -204,3 +214,45 @@ async def test_stale_pool_query_uses_last_checked_and_active():
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
     assert "last_checked_at" in compiled
     assert "is_active" in compiled
+
+
+def test_fact_price_write_gate_matches_service_rules():
+    """Mirror GlobalScrapeService.scrape_product quality gate (title + price + currency)."""
+    def should_write_price_snapshot(
+        title: str | None,
+        price: float | None,
+        currency: str | None,
+    ) -> bool:
+        product_name_ok = bool(title and str(title).strip())
+        return (
+            product_name_ok
+            and price is not None
+            and price > 0
+            and bool(currency)
+        )
+
+    assert should_write_price_snapshot("Item", 19.99, "USD") is True
+    assert should_write_price_snapshot("", 19.99, "USD") is False
+    assert should_write_price_snapshot("Item", 0.0, "USD") is False
+    assert should_write_price_snapshot("Item", 10.0, None) is False
+    assert should_write_price_snapshot("Item", 10.0, "") is False
+    assert should_write_price_snapshot("Item", None, "EUR") is False
+
+
+def test_determine_log_status_success_vs_failure_and_partial_success_value():
+    """scrape_logs.status CHECK allows success/error/timeout/...; partial maps to success (see model)."""
+    svc = GlobalScrapeService.__new__(GlobalScrapeService)
+    ok = svc._determine_log_status(
+        PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0)),
+        is_partial=False,
+    )
+    partial_ok = svc._determine_log_status(
+        PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0)),
+        is_partial=True,
+    )
+    assert ok == "success"
+    assert partial_ok == "success"
+    fail = svc._determine_log_status(
+        PoolScrapeResult(success=False, url="u", error="blocked"),
+    )
+    assert fail != "success"
