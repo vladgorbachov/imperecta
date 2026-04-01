@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
+from app.database import sync_session_factory
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
@@ -129,55 +130,54 @@ def discover_single_marketplace(self, marketplace_id: str):
     return _run_async(_do())
 
 
-async def _run_scrape_all_pool() -> dict:
-    """Scrape stale pool listings (last_checked_at null or older than 6 hours)."""
-    engine, session_factory = _make_session_factory()
+def _run_scrape_all_pool() -> dict:
+    """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers)."""
     scraper_pool = ScraperPool()
     threshold = datetime.now(timezone.utc) - timedelta(hours=6)
     stale_ids: list[UUID] = []
     ok = 0
     failed = 0
+    db = sync_session_factory()
     try:
-        async with session_factory() as db:
-            result = await db.execute(
-                select(FactListing.id)
-                .where(FactListing.is_active.is_(True))
-                .where(
-                    or_(
-                        FactListing.last_checked_at.is_(None),
-                        FactListing.last_checked_at < threshold,
-                    ),
-                )
-                .limit(500),
+        result = db.execute(
+            select(FactListing.id)
+            .where(FactListing.is_active.is_(True))
+            .where(
+                or_(
+                    FactListing.last_checked_at.is_(None),
+                    FactListing.last_checked_at < threshold,
+                ),
             )
-            stale_ids = [r[0] for r in result.all()]
-            logger.info("scrape_all_pool_products eligible_listings=%d", len(stale_ids))
-            svc = GlobalScrapeService(db, scraper_pool)
-            for lid in stale_ids:
-                try:
-                    listing_row = await db.get(FactListing, lid)
-                    url_hint = (listing_row.external_url if listing_row else "")[:160]
-                    logger.info("scrape_listing start listing_id=%s url=%s", lid, url_hint)
-                    r = await svc.scrape_product(lid)
-                    logger.info(
-                        "scrape_listing end listing_id=%s success=%s err=%s",
-                        lid,
-                        r.success,
-                        (r.error or "")[:120],
-                    )
-                    if r.success:
-                        ok += 1
-                    else:
-                        failed += 1
-                except Exception:
-                    logger.exception("scrape listing failed listing_id=%s", lid)
-                    try:
-                        await db.rollback()
-                    except Exception:
-                        logger.exception("rollback after listing failure listing_id=%s", lid)
+            .limit(500),
+        )
+        stale_ids = [r[0] for r in result.all()]
+        logger.info("scrape_all_pool_products eligible_listings=%d", len(stale_ids))
+        svc = GlobalScrapeService(db, scraper_pool)
+        for lid in stale_ids:
+            try:
+                listing_row = db.get(FactListing, lid)
+                url_hint = (listing_row.external_url if listing_row else "")[:160]
+                logger.info("scrape_listing start listing_id=%s url=%s", lid, url_hint)
+                r = svc.scrape_product(lid)
+                logger.info(
+                    "scrape_listing end listing_id=%s success=%s err=%s",
+                    lid,
+                    r.success,
+                    (r.error or "")[:120],
+                )
+                if r.success:
+                    ok += 1
+                else:
                     failed += 1
+            except Exception:
+                logger.exception("scrape listing failed listing_id=%s", lid)
+                try:
+                    db.rollback()
+                except Exception:
+                    logger.exception("rollback after listing failure listing_id=%s", lid)
+                failed += 1
     finally:
-        await engine.dispose()
+        db.close()
 
     logger.info(
         "scrape_all_pool_products finished eligible=%d ok=%d failed=%d",
@@ -196,7 +196,7 @@ async def _run_scrape_all_pool() -> dict:
 def scrape_all_pool_products(self):
     """Scrape stale pool listings (last_checked_at null or older than 6 hours)."""
     logger.info("scrape_all_pool_products started celery_id=%s", self.request.id)
-    return _run_async(_run_scrape_all_pool())
+    return _run_scrape_all_pool()
 
 
 @celery_app.task(
@@ -209,43 +209,35 @@ def scrape_all_pool_products(self):
 def scrape_pool_product(self, listing_id: str):
     """Scrape one FactListing by UUID."""
 
-    async def _do() -> dict:
-        engine, session_factory = _make_session_factory()
-        scraper_pool = ScraperPool()
-        try:
-            async with session_factory() as db:
-                lid = UUID(str(listing_id))
-                svc = GlobalScrapeService(db, scraper_pool)
-                r = await svc.scrape_product(lid)
-                return {
-                    "success": r.success,
-                    "listing_id": listing_id,
-                    "error": r.error,
-                    "url": r.url,
-                }
-        finally:
-            await engine.dispose()
-
-    return _run_async(_do())
+    scraper_pool = ScraperPool()
+    db = sync_session_factory()
+    try:
+        lid = UUID(str(listing_id))
+        svc = GlobalScrapeService(db, scraper_pool)
+        r = svc.scrape_product(lid)
+        return {
+            "success": r.success,
+            "listing_id": listing_id,
+            "error": r.error,
+            "url": r.url,
+        }
+    finally:
+        db.close()
 
 
 @celery_app.task(name="check_pool_completeness")
 def check_pool_completeness():
     """Count listings missing price or product image."""
 
-    async def _do() -> dict:
-        engine, session_factory = _make_session_factory()
-        scraper_pool = ScraperPool()
-        try:
-            async with session_factory() as db:
-                svc = GlobalScrapeService(db, scraper_pool)
-                incomplete = await svc.find_incomplete_products(limit=500)
-                ids = [str(x) for x in incomplete[:50]]
-                return {"checked": len(incomplete), "listing_ids": ids}
-        finally:
-            await engine.dispose()
-
-    return _run_async(_do())
+    scraper_pool = ScraperPool()
+    db = sync_session_factory()
+    try:
+        svc = GlobalScrapeService(db, scraper_pool)
+        incomplete = svc.find_incomplete_products(limit=500)
+        ids = [str(x) for x in incomplete[:50]]
+        return {"checked": len(incomplete), "listing_ids": ids}
+    finally:
+        db.close()
 
 
 @celery_app.task(
@@ -272,4 +264,4 @@ def scrape_user_products(user_id: str) -> None:
 @celery_app.task(name="scrape_all")
 def scrape_all() -> dict:
     """Alias: scrape stale pool listings (same logic as scrape_all_pool_products)."""
-    return _run_async(_run_scrape_all_pool())
+    return _run_scrape_all_pool()
