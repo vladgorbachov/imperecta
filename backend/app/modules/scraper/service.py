@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import re
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.app_tables import ScrapeLog
@@ -41,6 +43,13 @@ def _optional_in_stock(extracted: object | None) -> bool | None:
     return None
 
 
+def _payload_has_product_name_field(payload: object) -> bool:
+    """True when extractor dataclass defines product_name (strict log rules apply)."""
+    if not is_dataclass(payload):
+        return False
+    return any(f.name == "product_name" for f in fields(payload))
+
+
 def _normalize_product_name(raw: str) -> str:
     s = (raw or "").lower().strip()
     s = re.sub(r"\s+", " ", s)
@@ -61,36 +70,50 @@ def _should_replace_placeholder_name(name: str | None, external_url: str) -> boo
 
 
 def _today_date_id(db: Session) -> int:
-    """YYYYMMDD surrogate for dim_date; ensures row exists for FK on fact_price."""
+    """YYYYMMDD surrogate for dim_date; ensures row exists for FK on fact_price.
+
+    Deadlock-safe: SELECT first, INSERT ... ON CONFLICT DO NOTHING if missing,
+    then SELECT again (idempotent; concurrent workers do not block on add+flush).
+    """
+    import calendar
+
     from app.models.dimensions import DimDate
 
     today = datetime.now(timezone.utc).date()
     date_id = int(today.strftime("%Y%m%d"))
-    exists = db.execute(
+    row_id = db.execute(
         select(DimDate.date_id).where(DimDate.date_id == date_id),
     ).scalar_one_or_none()
-    if exists is not None:
+    if row_id is not None:
         return date_id
-    # Minimal dim_date row for ingestion/scrape paths when calendar not pre-seeded.
-    import calendar
 
     _, iso_week, iso_weekday = today.isocalendar()
-    row = DimDate(
-        date_id=date_id,
-        full_date=today,
-        year=today.year,
-        quarter=(today.month - 1) // 3 + 1,
-        month=today.month,
-        month_name=today.strftime("%B"),
-        week_iso=iso_week,
-        day_of_month=today.day,
-        day_of_week=iso_weekday,
-        day_name=today.strftime("%A"),
-        is_weekend=iso_weekday >= 6,
-        is_last_day_of_month=today.day == calendar.monthrange(today.year, today.month)[1],
+    stmt = (
+        pg_insert(DimDate)
+        .values(
+            date_id=date_id,
+            full_date=today,
+            year=today.year,
+            quarter=(today.month - 1) // 3 + 1,
+            month=today.month,
+            month_name=today.strftime("%B"),
+            week_iso=iso_week,
+            day_of_month=today.day,
+            day_of_week=iso_weekday,
+            day_name=today.strftime("%A"),
+            is_weekend=iso_weekday >= 6,
+            is_last_day_of_month=today.day
+            == calendar.monthrange(today.year, today.month)[1],
+        )
+        .on_conflict_do_nothing(index_elements=["date_id"])
     )
-    db.add(row)
-    db.flush()
+    db.execute(stmt)
+
+    row_id = db.execute(
+        select(DimDate.date_id).where(DimDate.date_id == date_id),
+    ).scalar_one_or_none()
+    if row_id is None:
+        raise RuntimeError(f"dim_date row missing after upsert for date_id={date_id}")
     return date_id
 
 
@@ -166,27 +189,28 @@ class GlobalScrapeService:
             )
 
         data = result.data
+        last_in_stock = getattr(result, "in_stock", None) or getattr(
+            data,
+            "in_stock",
+            None,
+        )
+        # Debug: trace extractor fields (product_name vs title) for fact_price and logs.
         logger.info(
-            (
-                "scrape_product result: product_name=%s, price=%s, currency=%s, "
-                "in_stock=%s, fields_extracted=%s"
-            ),
+            "EXTRACTED: product_name=%s | title=%s | price=%s | currency=%s | in_stock=%s",
+            getattr(data, "product_name", None) if data else None,
             getattr(data, "title", None) if data else None,
             getattr(data, "price", None) if data else None,
             getattr(data, "currency", None) if data else None,
-            getattr(result, "in_stock", None) if hasattr(result, "in_stock") else None,
-            getattr(result, "fields_extracted", None),
+            last_in_stock,
         )
         is_partial = bool(result.is_partial)
-        in_stock_value = getattr(result, "in_stock", None) if hasattr(result, "in_stock") else None
-        if in_stock_value is None:
-            in_stock_value = _optional_in_stock(data)
 
         if not result.success or not data:
             listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
             listing.last_error = result.error or "scrape_failed"
         else:
-            product_name_ok = bool(data.title and str(data.title).strip())
+            _raw_name = getattr(data, "product_name", None) or getattr(data, "title", None)
+            product_name_ok = bool(data and _raw_name and str(_raw_name).strip())
             is_partial = bool(result.is_partial) or not product_name_ok
             if not product_name_ok:
                 logger.warning(
@@ -196,18 +220,24 @@ class GlobalScrapeService:
 
             listing.last_price = data.price
             listing.last_currency_code = data.currency[:3] if data.currency else None
-            listing.last_in_stock = in_stock_value
+            listing.last_in_stock = last_in_stock
             listing.consecutive_errors = 0
             listing.last_error = None
 
             product = self.db.get(DimProduct, listing.product_id)
             if product:
-                if data.title and _should_replace_placeholder_name(
+                effective_name = getattr(data, "product_name", None) or getattr(
+                    data,
+                    "title",
+                    None,
+                )
+                if effective_name and _should_replace_placeholder_name(
                     product.name,
                     listing.external_url,
                 ):
-                    product.name = data.title[:500]
-                    product.name_normalized = _normalize_product_name(data.title)
+                    label = str(effective_name)
+                    product.name = label[:500]
+                    product.name_normalized = _normalize_product_name(label)
                 if data.image_url and not product.image_url:
                     product.image_url = data.image_url
 
@@ -243,7 +273,7 @@ class GlobalScrapeService:
                     price=float(data.price),
                     currency_code=data.currency[:3],
                     original_price=float(data.original_price) if data.original_price else None,
-                    in_stock=in_stock_value,
+                    in_stock=last_in_stock,
                     scraped_at=now,
                     price_change_pct=price_change_pct,
                 )
@@ -265,13 +295,10 @@ class GlobalScrapeService:
                     listing.external_url[:80],
                 )
 
-        has_title = bool(data and data.title and str(data.title).strip())
-        has_price = bool(data and data.price is not None)
         log_status = self._determine_log_status(
             result,
             is_partial,
-            has_title=has_title if data is not None else None,
-            has_price=has_price if data is not None else None,
+            data=data if result.success else None,
         )
         price_found = None
         if result.success and data and data.price is not None:
@@ -283,7 +310,7 @@ class GlobalScrapeService:
             status=log_status,
             url=listing.external_url,
             price_found=price_found,
-            in_stock_found=in_stock_value if (result.success and data) else None,
+            in_stock_found=last_in_stock if (result.success and data) else None,
             duration_ms=result.duration_ms,
             scraper_type=result.scraper_layer,
             error_message=result.error,
@@ -322,6 +349,7 @@ class GlobalScrapeService:
         result: PoolScrapeResult,
         is_partial: bool = False,
         *,
+        data: object | None = None,
         has_title: bool | None = None,
         has_price: bool | None = None,
     ) -> str:
@@ -337,16 +365,33 @@ class GlobalScrapeService:
             if "price_not_found" in error:
                 return "price_not_found"
             return "error"
-        if (
-            result.success
-            and result.data is not None
-            and has_title is not None
-            and has_price is not None
-        ):
-            if not has_title:
-                return "missing_critical_data"
-            if has_title and not has_price:
-                return "price_not_found"
+        payload = data if data is not None else result.data
+        if result.success and payload is not None:
+            # Unit tests: explicit has_title/has_price without passing data= (legacy API).
+            if (
+                data is None
+                and has_title is not None
+                and has_price is not None
+            ):
+                if not has_title:
+                    return "missing_critical_data"
+                if has_title and not has_price:
+                    return "price_not_found"
+            elif data is not None:
+                # scrape_product: if product_name exists on payload type but is empty while title
+                # exists — missing_critical_data (title-only extractors use title fallback for writes).
+                pn_field = _payload_has_product_name_field(payload)
+                pn_raw = getattr(payload, "product_name", None)
+                pn_ok = bool(pn_raw and str(pn_raw).strip())
+                t_raw = getattr(payload, "title", None)
+                t_ok = bool(t_raw and str(t_raw).strip())
+                if pn_field:
+                    if not pn_ok:
+                        return "missing_critical_data"
+                elif not t_ok:
+                    return "missing_critical_data"
+                if getattr(payload, "price", None) is None:
+                    return "price_not_found"
         if is_partial:
             return "success"
         return "success"
