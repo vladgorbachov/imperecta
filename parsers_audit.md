@@ -1,20 +1,24 @@
 # Parsers Audit — Imperecta
 
-## 0. Актуализация (2026-03-31)
+## 0. Актуализация (2026-04-01)
 
 - `backend/app/modules/scraper/engine.py` отсутствует в репозитории (не используется).
 - Каноничный runtime path парсера: `tasks -> discovery/service -> scraper_pool -> extractors`.
 - `ScraperPool` является единственным fetch+extract facade.
-- В `service.py` исправлена персистенция:
-  - удалён фейковый default currency (`USD`), snapshot пишется только при наличии `currency`,
-  - удалён хардкод `in_stock=True`, используется извлечённое `data.in_stock`,
-  - `last_checked_at` обновляется на каждом scrape attempt,
-  - добавлена запись в `scrape_logs` для успешных и неуспешных попыток.
-- Внутренние parser-контракты формализованы dataclass:
-  - расширен `PoolScrapeResult` в `scraper_pool.py` (`is_partial`, `is_empty`, `fields_extracted`, `fields_missing`),
-  - `DiscoveryCrawler.discover()` возвращает `DiscoveryResult` (вместо dict) с нормализованными счётчиками и статусами.
-- Beat schedule остаётся отключённым: `celery_app.conf.beat_schedule = {}`.
-- **Marketplaces / discovery prerequisite:** строки в `dim_marketplace` создаются через `MarketplaceService` и `modules/marketplaces/api.py` (CRUD, add-by-url, импорт, квоты, `requires_js`). **POST `/deduplicate`** пока без логики слияния дубликатов. Пул/cleanup/diagnostics — `core/api_admin` и `scraper/api`.
+- В **`service.py` (`GlobalScrapeService`)** персистенция pool-scrape:
+  - **sync `Session`** (Celery); **`_run_coro_in_worker`** только для async `ScraperPool.scrape_product` (избегание `MissingGreenlet` в worker).
+  - `fact_price` только при **title + price > 0 + currency**; `in_stock` через optional/`getattr` (у **`ExtractedProduct` нет поля `in_stock`**).
+  - `last_checked_at` на каждой попытке; **`scrape_logs` всегда** (при существующем листинге).
+  - Статусы лога: в т.ч. **`missing_critical_data`**, **`price_not_found`** (см. `_determine_log_status` + `has_title`/`has_price`); debug `logger.info` после результата пула.
+- Внутренние parser-контракты: `PoolScrapeResult` с quality-полями; `DiscoveryResult` в discovery.
+- Beat: `celery_app.conf.beat_schedule = {}`.
+- **Marketplaces:** как ранее; **POST `/deduplicate`** — заглушка.
+- **Pool Celery tasks (`tasks.py`):** `_run_scrape_all_pool` — **синхронный** `sync_session_factory`, без `_run_async` для этого пути; discovery — async engine + `_run_async`.
+- **Git:** не добавлять `--trailer "Made-with: Cursor"` в коммиты.
+
+## 0.1) Архив актуализации (2026-03-31)
+
+- См. выше; ранее указывалось `data.in_stock` — фактически у `ExtractedProduct` атрибута нет, используется безопасное чтение.
 
 Этот раздел является источником истины для parser runtime. Ниже могут встречаться исторические блоки.
 
@@ -193,8 +197,9 @@ Router:
 ## 7.1 `modules/scraper/tasks.py` (orchestration layer)
 
 Назначение:
-- Celery bridge между API и async бизнес-логикой.
-- Управление lifecycle async loop в sync Celery process (`_run_async`).
+- Celery bridge между API и бизнес-логикой.
+- **Discovery:** `_run_async` + локальный async engine/session factory.
+- **Pool scrape:** **`sync_session_factory()`** + синхронный `GlobalScrapeService.scrape_product` (без async сессии для listing/price/log).
 
 Основные задачи:
 - `discover_all_marketplaces`
@@ -208,9 +213,9 @@ Router:
   - `scrape_user_products` (delegates)
 
 Наблюдения:
-- Для каждой задачи создаётся локальный async engine/session factory.
-- Для stale-логики scrape используется порог `6h`.
-- Time limits заданы для точечных задач (`scrape_pool_product`: soft 120s / hard 150s).
+- Для **discovery** — локальный async engine per task run.
+- Для **pool scrape** — один sync session на run; порог stale **`6h`**.
+- Time limits: `scrape_pool_product` soft 120s / hard 150s.
 
 ## 7.2 `modules/scraper/discovery.py` (crawler)
 
@@ -274,21 +279,21 @@ Router:
 ## 7.5 `modules/scraper/service.py` (DB persistence layer)
 
 Назначение:
-- Связка `FactListing -> Scrape -> FactPrice`.
+- Связка `FactListing -> Scrape -> FactPrice` + `ScrapeLog`.
 
 Ключевые сценарии:
-- `scrape_product(listing_id)`:
+- `scrape_product(listing_id)` — **синхронный метод**:
   - читает listing и marketplace config/selectors,
-  - вызывает `ScraperPool.scrape_product`,
+  - вызывает **`_run_coro_in_worker(self.pool.scrape_product(...))`**,
   - обновляет denormalized `FactListing.last_*`,
-  - upsert-like per-day запись `FactPrice` (через delete same day + insert),
-  - считает `price_change_pct`.
+  - `FactPrice` только при валидном title/price/currency; delete same day + insert; `price_change_pct`.
 - `_today_date_id`:
   - гарантирует наличие `dim_date` surrogate.
 
 Наблюдения:
-- Ошибки сохраняются в `consecutive_errors`, `last_error`.
-- Есть rollback-safe commit handling.
+- Ошибки: `consecutive_errors`, `last_error`.
+- Commit/rollback при persist errors.
+- Debug-логирование результата пула; статусы `scrape_logs` с учётом `missing_critical_data` / `price_not_found` при успехе с неполными данными.
 
 ## 7.6 Runtime contracts (current)
 
@@ -400,9 +405,15 @@ def discover_all_marketplaces():
 ```
 
 ```python
+def _run_scrape_all_pool() -> dict:
+    db = sync_session_factory()
+    ...
+    svc = GlobalScrapeService(db, scraper_pool)
+    r = svc.scrape_product(lid)  # sync
+
 @celery_app.task(name="scrape_all_pool_products")
-def scrape_all_pool_products():
-    return _run_async(_run_scrape_all_pool())
+def scrape_all_pool_products(self):
+    return _run_scrape_all_pool()
 ```
 
 ### 11.3 `backend/app/modules/scraper/discovery.py`
@@ -448,13 +459,12 @@ def extract_product_links(soup: BeautifulSoup, base_url: str, custom_selector: s
 
 ```python
 class GlobalScrapeService:
-    async def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
-        listing = await self.db.get(FactListing, listing_id)
+    def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
+        listing = self.db.get(FactListing, listing_id)
         ...
-        result = await self.pool.scrape_product(...)
+        result = _run_coro_in_worker(self.pool.scrape_product(...))
         ...
-        price_record = FactPrice(...)
-        self.db.add(price_record)
+        self.db.commit()
 ```
 
 ### 11.7 `backend/app/workers/scheduler.py`

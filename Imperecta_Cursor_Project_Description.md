@@ -1,6 +1,14 @@
 # Imperecta — Описание проекта для Cursor IDE
 
-## Актуализация (текущее состояние, 2026-03-31)
+## Актуализация (текущее состояние, 2026-04-01)
+
+- **Git / коммиты:** запрещено добавлять в коммиты трейлеры вида `--trailer "Made-with: Cursor"` и любые аналогичные метки «сделано ассистентом»; сообщения коммитов — обычные, без таких трейлеров.
+- **Pool scrape в Celery (greenlet / MissingGreenlet):** путь `scrape_all_pool_products` / `scrape_all` / `scrape_pool_product` / `check_pool_completeness` использует **`sync_session_factory` + psycopg2** из `database.py` для ORM; **`GlobalScrapeService.scrape_product`** — **синхронный `Session`**. Асинхронный **`ScraperPool.scrape_product`** вызывается через **`_run_coro_in_worker`** (отдельный event loop на вызов). Discovery-задачи по-прежнему через локальный async engine + `_run_async`.
+- **`ExtractedProduct`:** поля `title`, `price`, `currency`, … — **нет `in_stock`**; наличие на складе берётся через **`getattr`/optional**, без хардкода `True`.
+- **`scrape_logs.status`:** колонка расширена до **VARCHAR(32)**; в CHECK добавлено **`missing_critical_data`**; при успешном scrape с данными: нет title → `missing_critical_data`, есть title но `price is None` → `price_not_found`; debug-лог после пула: product_name/price/currency/in_stock/fields_extracted; при пропуске `fact_price` из‑за отсутствия названия или валюты — `logger.info` с текстом про skip.
+- **`fact_price`:** пишется только при **непустом названии (title)**, **price > 0** и **непустой валюте**; `scrape_logs` пишется на каждую попытку (при существующем листинге).
+
+## Актуализация (архив, 2026-03-31)
 
 - **Alembic chain (actual head):** `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` (head). Файл `004_fix_real_state.py` добавляет repair-слой для production-состояния БД: приведение `users.plan` к `VARCHAR(20)`, удаление legacy tables/types/sequences, доинициализация app-таблиц v2, повторная гарантия `pg_trgm`.
 - **Parser runtime cleanup (2026-03-24):** `backend/app/modules/scraper/engine.py` удалён из production runtime path. Каноничный путь: `tasks -> discovery/service -> scraper_pool -> extractors`.
@@ -742,3 +750,4 @@ imperecta/
 - Не делать ничего сверх того, что запрошено
 - При изменении backend — не трогать frontend и наоборот
 - При изменении конфигурации — не трогать бизнес-логику
+- **Git:** не использовать `--trailer "Made-with: Cursor"` и подобные трейлеры атрибуции ИИ в коммитах

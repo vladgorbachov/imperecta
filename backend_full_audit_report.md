@@ -1,6 +1,14 @@
 # Полный аудит backend (read-only)
 
-## Актуализация (текущее состояние, 2026-03-31)
+## Актуализация (текущее состояние, 2026-04-01)
+
+- **Git:** не добавлять в коммиты трейлеры `--trailer "Made-with: Cursor"` и аналоги.
+- **Celery pool scrape:** `modules/scraper/tasks.py` — `_run_scrape_all_pool`, `scrape_pool_product`, `check_pool_completeness` используют **`sync_session_factory`**; **`GlobalScrapeService.scrape_product`** — синхронный `Session`; async только **`ScraperPool.scrape_product`** через **`_run_coro_in_worker`** в `service.py` (устранение `MissingGreenlet` в fork workers).
+- **`database.py`:** по-прежнему `async_session_maker` для FastAPI и **`sync_session_factory`** для workers; pool path — sync ORM.
+- **`scrape_logs`:** модель допускает статус **`missing_critical_data`**; колонка **`status` — String(32)**; на production после деплоя кода может потребоваться **ALTER** CHECK/колонки, если БД ещё со старым ограничением.
+- См. также `Imperecta_Cursor_Project_Description.md`, `parsers_audit.md`, `imperecta_context.md`.
+
+## Актуализация (архив, 2026-03-31)
 
 ### Миграции (head)
 - Цепочка: `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` (**head**). Версия Alembic: `alembic_meta.alembic_version`.
