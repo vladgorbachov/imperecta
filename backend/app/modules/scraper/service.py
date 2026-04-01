@@ -1,12 +1,13 @@
 """Global pool scraping: FactListing → FactPrice, DimProduct enrichment."""
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
@@ -14,6 +15,20 @@ from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
+
+
+def _run_coro_in_worker(coro):
+    """Fresh event loop for async pool I/O only (Celery fork + sync DB session)."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        loop.close()
 
 
 def _optional_in_stock(extracted: object | None) -> bool | None:
@@ -45,19 +60,21 @@ def _should_replace_placeholder_name(name: str | None, external_url: str) -> boo
     return False
 
 
-async def _today_date_id(db: AsyncSession) -> int:
+def _today_date_id(db: Session) -> int:
     """YYYYMMDD surrogate for dim_date; ensures row exists for FK on fact_price."""
     from app.models.dimensions import DimDate
 
     today = datetime.now(timezone.utc).date()
     date_id = int(today.strftime("%Y%m%d"))
-    exists = await db.scalar(select(DimDate.date_id).where(DimDate.date_id == date_id))
+    exists = db.execute(
+        select(DimDate.date_id).where(DimDate.date_id == date_id),
+    ).scalar_one_or_none()
     if exists is not None:
         return date_id
     # Minimal dim_date row for ingestion/scrape paths when calendar not pre-seeded.
     import calendar
 
-    iso_year, iso_week, iso_weekday = today.isocalendar()
+    _, iso_week, iso_weekday = today.isocalendar()
     row = DimDate(
         date_id=date_id,
         full_date=today,
@@ -73,17 +90,17 @@ async def _today_date_id(db: AsyncSession) -> int:
         is_last_day_of_month=today.day == calendar.monthrange(today.year, today.month)[1],
     )
     db.add(row)
-    await db.flush()
+    db.flush()
     return date_id
 
 
-async def _previous_price_snapshot(
-    db: AsyncSession,
+def _previous_price_snapshot(
+    db: Session,
     listing_id: UUID,
     before_date_id: int,
 ) -> float | None:
     """Latest prior fact_price.price for change_pct."""
-    row = await db.execute(
+    row = db.execute(
         select(FactPrice.price)
         .where(FactPrice.listing_id == listing_id, FactPrice.date_id < before_date_id)
         .order_by(FactPrice.date_id.desc())
@@ -96,20 +113,20 @@ async def _previous_price_snapshot(
 class GlobalScrapeService:
     """Scrape pool listings and persist FactPrice + listing denormalized fields."""
 
-    def __init__(self, db: AsyncSession, scraper_pool: ScraperPool):
+    def __init__(self, db: Session, scraper_pool: ScraperPool):
         self.db = db
         self.pool = scraper_pool
 
-    async def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
-        """Scrape a single listing and save to fact_price."""
-        listing = await self.db.get(FactListing, listing_id)
+    def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
+        """Scrape a single listing and save to fact_price (sync Session; pool I/O is async)."""
+        listing = self.db.get(FactListing, listing_id)
         if not listing:
             return PoolScrapeResult(success=False, url="", error="listing_not_found")
 
         now = datetime.now(timezone.utc)
         listing.last_checked_at = now
 
-        mp = await self.db.get(DimMarketplace, listing.marketplace_id)
+        mp = self.db.get(DimMarketplace, listing.marketplace_id)
         requires_js = bool(mp.requires_js) if mp else False
 
         cfg = listing.scraper_config if isinstance(listing.scraper_config, dict) else {}
@@ -130,10 +147,12 @@ class GlobalScrapeService:
             (listing.external_url or "")[:200],
         )
         try:
-            result = await self.pool.scrape_product(
-                url=listing.external_url,
-                custom_selectors=custom_selectors if custom_selectors else None,
-                requires_js=requires_js,
+            result = _run_coro_in_worker(
+                self.pool.scrape_product(
+                    url=listing.external_url,
+                    custom_selectors=custom_selectors if custom_selectors else None,
+                    requires_js=requires_js,
+                ),
             )
         except Exception as exc:
             logger.exception("pool_scrape exception listing_id=%s", listing_id)
@@ -168,7 +187,7 @@ class GlobalScrapeService:
             listing.consecutive_errors = 0
             listing.last_error = None
 
-            product = await self.db.get(DimProduct, listing.product_id)
+            product = self.db.get(DimProduct, listing.product_id)
             if product:
                 if data.title and _should_replace_placeholder_name(
                     product.name,
@@ -187,14 +206,14 @@ class GlobalScrapeService:
                 and bool(data.currency)
             )
             if should_write_price_snapshot:
-                date_id = await _today_date_id(self.db)
-                await self.db.execute(
+                date_id = _today_date_id(self.db)
+                self.db.execute(
                     delete(FactPrice).where(
                         FactPrice.listing_id == listing.id,
                         FactPrice.date_id == date_id,
                     ),
                 )
-                prev = await _previous_price_snapshot(self.db, listing.id, date_id)
+                prev = _previous_price_snapshot(self.db, listing.id, date_id)
                 price_change_pct = None
                 if prev is not None and prev > 0:
                     price_change_pct = round((float(data.price) - prev) / prev * 100.0, 4)
@@ -253,7 +272,7 @@ class GlobalScrapeService:
         )
 
         try:
-            await self.db.commit()
+            self.db.commit()
         except Exception as exc:
             logger.error(
                 "scrape persist rollback listing_id=%s err=%s",
@@ -261,7 +280,7 @@ class GlobalScrapeService:
                 exc,
                 exc_info=True,
             )
-            await self.db.rollback()
+            self.db.rollback()
             return PoolScrapeResult(
                 success=False,
                 url=listing.external_url,
@@ -283,6 +302,7 @@ class GlobalScrapeService:
             if "blocked" in error or "captcha" in error:
                 return "blocked"
             if "price_not_found" in error:
+                # Business partial outcome; DB allows only fixed CHECK values (no partial_success).
                 return "price_not_found"
             return "error"
         if is_partial:
@@ -306,7 +326,7 @@ class GlobalScrapeService:
             return "rate_limit"
         return "parse"
 
-    async def get_stale_products(self, limit: int = 500) -> list[UUID]:
+    def get_stale_products(self, limit: int = 500) -> list[UUID]:
         """Listings that need refresh (oldest last_checked_at first)."""
         threshold = datetime.now(timezone.utc) - timedelta(hours=24)
         stmt = (
@@ -318,14 +338,14 @@ class GlobalScrapeService:
             .order_by(FactListing.last_checked_at.asc().nullsfirst())
             .limit(limit)
         )
-        result = await self.db.execute(stmt)
+        result = self.db.execute(stmt)
         return [r[0] for r in result.all()]
 
-    async def recalculate_analytics(self, product_id: UUID) -> None:
+    def recalculate_analytics(self, product_id: UUID) -> None:
         """Hook for downstream analytics refresh (no-op until materialized views)."""
         _ = product_id
 
-    async def find_incomplete_products(self, limit: int = 100) -> list[UUID]:
+    def find_incomplete_products(self, limit: int = 100) -> list[UUID]:
         """Listings missing price or image (enrichment backlog)."""
         stmt = (
             select(FactListing.id)
@@ -334,5 +354,5 @@ class GlobalScrapeService:
             .where((FactListing.last_price.is_(None)) | (DimProduct.image_url.is_(None)))
             .limit(limit)
         )
-        result = await self.db.execute(stmt)
+        result = self.db.execute(stmt)
         return [r[0] for r in result.all()]
