@@ -108,6 +108,7 @@ def _today_date_id(db: Session) -> int:
         .on_conflict_do_nothing(index_elements=["date_id"])
     )
     db.execute(stmt)
+    db.flush()
 
     row_id = db.execute(
         select(DimDate.date_id).where(DimDate.date_id == date_id),
@@ -194,13 +195,13 @@ class GlobalScrapeService:
             "in_stock",
             None,
         )
-        # Debug: trace extractor fields (product_name vs title) for fact_price and logs.
+        # Debug: log raw extractor fields (product_name vs title) for fact_price and diagnostics.
         logger.info(
-            "EXTRACTED: product_name=%s | title=%s | price=%s | currency=%s | in_stock=%s",
-            getattr(data, "product_name", None) if data else None,
-            getattr(data, "title", None) if data else None,
-            getattr(data, "price", None) if data else None,
-            getattr(data, "currency", None) if data else None,
+            "EXTRACTED → product_name=%s | title=%s | price=%s | currency=%s | in_stock=%s",
+            getattr(data, "product_name", None),
+            getattr(data, "title", None),
+            getattr(data, "price", None),
+            getattr(data, "currency", None),
             last_in_stock,
         )
         is_partial = bool(result.is_partial)
@@ -209,8 +210,14 @@ class GlobalScrapeService:
             listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
             listing.last_error = result.error or "scrape_failed"
         else:
-            _raw_name = getattr(data, "product_name", None) or getattr(data, "title", None)
-            product_name_ok = bool(data and _raw_name and str(_raw_name).strip())
+            # product_name from extractor, or title as fallback when product_name is empty.
+            product_name_ok = bool(
+                data
+                and (
+                    getattr(data, "product_name", None)
+                    or getattr(data, "title", None)
+                ),
+            )
             is_partial = bool(result.is_partial) or not product_name_ok
             if not product_name_ok:
                 logger.warning(
