@@ -245,10 +245,14 @@ def test_determine_log_status_success_vs_failure_and_partial_success_value():
     ok = svc._determine_log_status(
         PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0)),
         is_partial=False,
+        has_title=True,
+        has_price=True,
     )
     partial_ok = svc._determine_log_status(
         PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0)),
         is_partial=True,
+        has_title=True,
+        has_price=True,
     )
     assert ok == "success"
     assert partial_ok == "success"
@@ -256,3 +260,25 @@ def test_determine_log_status_success_vs_failure_and_partial_success_value():
         PoolScrapeResult(success=False, url="u", error="blocked"),
     )
     assert fail != "success"
+
+
+def test_determine_log_status_missing_title_or_price():
+    svc = GlobalScrapeService.__new__(GlobalScrapeService)
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=True, url="u", data=ExtractedProduct()),
+            is_partial=False,
+            has_title=False,
+            has_price=False,
+        )
+        == "missing_critical_data"
+    )
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=None)),
+            is_partial=False,
+            has_title=True,
+            has_price=False,
+        )
+        == "price_not_found"
+    )
