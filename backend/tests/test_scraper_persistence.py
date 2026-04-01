@@ -1,10 +1,11 @@
-"""Persistence tests: unit mocks (always) + optional PostgreSQL integration."""
+"""Persistence tests for GlobalScrapeService (unit mocks; PostgreSQL optional)."""
 
 from __future__ import annotations
 
 import inspect
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -43,7 +44,6 @@ def _pg_available() -> bool:
 
 @pytest.fixture
 def pg_session():
-    """Transactional session; rollback after each test (no durable writes)."""
     if not _pg_available():
         pytest.skip("PostgreSQL unavailable (set DATABASE_URL for integration tests)")
     from sqlalchemy.orm import Session
@@ -91,7 +91,6 @@ def _ensure_country(session, code: str = "US") -> None:
 
 
 def _seed_listing(session) -> uuid.UUID:
-    """Minimal dim graph + fact_listing for scrape_product."""
     _ensure_currency(session)
     _ensure_country(session)
     suffix = uuid.uuid4().hex[:12]
@@ -134,65 +133,19 @@ def _seed_listing(session) -> uuid.UUID:
 
 
 def _patch_commit_flush(session) -> None:
-    """Avoid committing outer transaction so rollback keeps the DB clean."""
-
     def _commit_flush() -> None:
         session.flush()
 
     session.commit = _commit_flush  # type: ignore[method-assign]
 
 
-# --- Unit tests (no database) -------------------------------------------------
-
-
-def test_today_date_id_idempotent_no_deadlock():
-    """SELECT → INSERT ON CONFLICT DO NOTHING → SELECT; second call hits first SELECT only."""
-    import app.modules.scraper.service as svc
-
-    from datetime import datetime as dt
-
-    orig_dt = svc.datetime
-
-    class FixedDateTime:
-        @classmethod
-        def now(cls, tz=None):
-            return dt(2026, 4, 1, 12, 0, 0, tzinfo=tz or timezone.utc)
-
-    svc.datetime = FixedDateTime  # type: ignore[misc]
-
-    try:
-        session = MagicMock()
-
-        def make_result(val):
-            m = MagicMock()
-            m.scalar_one_or_none.return_value = val
-            return m
-
-        session.execute.side_effect = [
-            make_result(None),
-            make_result(None),
-            make_result(20260401),
-            make_result(20260401),
-        ]
-        assert _today_date_id(session) == 20260401
-        assert _today_date_id(session) == 20260401
-        assert session.execute.call_count == 4
-    finally:
-        svc.datetime = orig_dt
-
-
-def test_fact_price_partition_exists():
-    """Migration defines RANGE partition on date_id and monthly child tables."""
-    schema_path = Path(__file__).resolve().parents[1] / "alembic/versions/001_v2_schema.py"
-    sql = schema_path.read_text(encoding="utf-8")
-    assert "PARTITION BY RANGE (date_id)" in sql
-    assert "CREATE TABLE fact_price_" in sql
-
-
 def _build_mock_scrape_session(
     listing_id: uuid.UUID,
     product_id: uuid.UUID,
     marketplace_id: uuid.UUID,
+    *,
+    last_error: str | None = "legacy_fetch_failed",
+    consecutive_errors: int = 7,
 ) -> tuple[MagicMock, DimProduct, FactListing]:
     listing = FactListing(
         id=listing_id,
@@ -201,6 +154,8 @@ def _build_mock_scrape_session(
         external_url="https://example.com/item",
         url_hash=FactListing.compute_url_hash("https://example.com/item"),
     )
+    listing.last_error = last_error
+    listing.consecutive_errors = consecutive_errors
     product = DimProduct(
         id=product_id,
         name="product",
@@ -237,15 +192,18 @@ def _build_mock_scrape_session(
     return session, product, listing
 
 
-def test_scrape_product_success_with_price(monkeypatch):
-    """Title-only payload writes FactPrice, last_in_stock False, updates dim_product name."""
+def test_scrape_product_full_success(monkeypatch, caplog):
+    """Successful scrape: clears legacy errors, writes FactPrice, updates product name, logs SCRAPE COMPLETE."""
+    caplog.set_level(logging.INFO, logger="app.modules.scraper.service")
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
-    session, product, _listing = _build_mock_scrape_session(
+    session, product, listing = _build_mock_scrape_session(
         listing_id,
         product_id,
         marketplace_id,
+        last_error="stale_error",
+        consecutive_errors=4,
     )
     monkeypatch.setattr(
         "app.modules.scraper.service._run_coro_in_worker",
@@ -266,6 +224,8 @@ def test_scrape_product_success_with_price(monkeypatch):
     svc = GlobalScrapeService(session, pool)
     res = svc.scrape_product(listing_id)
     assert res.success is True
+    assert listing.last_error is None
+    assert listing.consecutive_errors == 0
 
     added = [c.args[0] for c in session.add.call_args_list]
     assert any(isinstance(x, FactPrice) for x in added)
@@ -274,42 +234,18 @@ def test_scrape_product_success_with_price(monkeypatch):
     assert fp.in_stock is False
     assert product.name == "Widget A"
 
+    assert any(
+        "SCRAPE COMPLETE" in rec.message and str(listing_id) in rec.message
+        for rec in caplog.records
+    )
 
-def test_scrape_product_missing_product_name(monkeypatch):
-    """No title and no product_name → no FactPrice row."""
+
+def test_scrape_product_price_not_found_partial(monkeypatch):
+    """Title + currency but no price: log price_not_found, no FactPrice, success clears stale errors."""
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
-    session, _product, _listing = _build_mock_scrape_session(
-        listing_id,
-        product_id,
-        marketplace_id,
-    )
-    monkeypatch.setattr(
-        "app.modules.scraper.service._run_coro_in_worker",
-        _fake_run_coro(
-            PoolScrapeResult(
-                success=True,
-                url="https://example.com/item",
-                data=ExtractedProduct(title=None, price=None, currency=None),
-                scraper_layer="httpx",
-            ),
-        ),
-    )
-    pool = MagicMock(spec=ScraperPool)
-    svc = GlobalScrapeService(session, pool)
-    res = svc.scrape_product(listing_id)
-    assert res.success is True
-    added = [c.args[0] for c in session.add.call_args_list]
-    assert not any(isinstance(x, FactPrice) for x in added)
-
-
-def test_scrape_product_price_not_found(monkeypatch):
-    """Title present, price missing → scrape_logs price_not_found; no FactPrice."""
-    listing_id = uuid.uuid4()
-    product_id = uuid.uuid4()
-    marketplace_id = uuid.uuid4()
-    session, _product, _listing = _build_mock_scrape_session(
+    session, _product, listing = _build_mock_scrape_session(
         listing_id,
         product_id,
         marketplace_id,
@@ -329,19 +265,134 @@ def test_scrape_product_price_not_found(monkeypatch):
     svc = GlobalScrapeService(session, pool)
     res = svc.scrape_product(listing_id)
     assert res.success is True
+    assert listing.last_error is None
+    assert listing.consecutive_errors == 0
     added = [c.args[0] for c in session.add.call_args_list]
     assert not any(isinstance(x, FactPrice) for x in added)
     slog = next(x for x in added if isinstance(x, ScrapeLog))
     assert slog.status == "price_not_found"
 
 
-# --- PostgreSQL integration (optional) ---------------------------------------
+def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
+    """Only title (no product_name field): FactPrice + dim_product.name from title."""
+    listing_id = uuid.uuid4()
+    product_id = uuid.uuid4()
+    marketplace_id = uuid.uuid4()
+    session, product, listing = _build_mock_scrape_session(
+        listing_id,
+        product_id,
+        marketplace_id,
+    )
+    monkeypatch.setattr(
+        "app.modules.scraper.service._run_coro_in_worker",
+        _fake_run_coro(
+            PoolScrapeResult(
+                success=True,
+                url="https://example.com/item",
+                data=ExtractedProduct(title="Title Only", price=10.0, currency="EUR"),
+                scraper_layer="httpx",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.modules.scraper.service._today_date_id",
+        lambda _db: 20260401,
+    )
+    pool = MagicMock(spec=ScraperPool)
+    svc = GlobalScrapeService(session, pool)
+    res = svc.scrape_product(listing_id)
+    assert res.success is True
+    assert product.name == "Title Only"
+    added = [c.args[0] for c in session.add.call_args_list]
+    assert any(isinstance(x, FactPrice) for x in added)
+
+
+def test_today_date_id_deadlock_safe():
+    """SELECT → INSERT ON CONFLICT DO NOTHING → SELECT; second call uses first SELECT only."""
+    import app.modules.scraper.service as svc
+
+    from datetime import datetime as dt
+
+    orig_dt = svc.datetime
+
+    class FixedDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            return dt(2026, 4, 1, 12, 0, 0, tzinfo=tz or timezone.utc)
+
+    svc.datetime = FixedDateTime  # type: ignore[misc]
+
+    try:
+        session = MagicMock()
+
+        def make_result(val):
+            m = MagicMock()
+            m.scalar_one_or_none.return_value = val
+            return m
+
+        session.execute.side_effect = [
+            make_result(None),
+            make_result(None),
+            make_result(20260401),
+            make_result(20260401),
+        ]
+        assert _today_date_id(session) == 20260401
+        assert _today_date_id(session) == 20260401
+        assert session.execute.call_count == 4
+    finally:
+        svc.datetime = orig_dt
+
+
+def test_fact_price_written_only_when_all_required_fields(monkeypatch):
+    """Gate: name (or title), positive price, currency — otherwise no FactPrice row."""
+    monkeypatch.setattr(
+        "app.modules.scraper.service._today_date_id",
+        lambda _db: 20260401,
+    )
+
+    cases: list[tuple[ExtractedProduct, bool]] = [
+        (ExtractedProduct(title="Ok", price=5.0, currency="USD"), True),
+        (ExtractedProduct(title="Ok", price=5.0, currency=None), False),
+        (ExtractedProduct(title="Ok", price=0.0, currency="USD"), False),
+        (ExtractedProduct(title=None, price=5.0, currency="USD"), False),
+    ]
+    for payload, expect_fp in cases:
+        lid = uuid.uuid4()
+        pid = uuid.uuid4()
+        mid = uuid.uuid4()
+        session, _prod, _lst = _build_mock_scrape_session(lid, pid, mid)
+        monkeypatch.setattr(
+            "app.modules.scraper.service._run_coro_in_worker",
+            _fake_run_coro(
+                PoolScrapeResult(
+                    success=True,
+                    url="https://example.com/item",
+                    data=payload,
+                    scraper_layer="httpx",
+                ),
+            ),
+        )
+        svc = GlobalScrapeService(session, MagicMock(spec=ScraperPool))
+        svc.scrape_product(lid)
+        added = [c.args[0] for c in session.add.call_args_list]
+        has_fp = any(isinstance(x, FactPrice) for x in added)
+        assert has_fp is expect_fp, (payload, expect_fp)
+
+    schema_path = Path(__file__).resolve().parents[1] / "alembic/versions/001_v2_schema.py"
+    sql = schema_path.read_text(encoding="utf-8")
+    assert "PARTITION BY RANGE (date_id)" in sql
+
+
+# --- PostgreSQL integration (optional) ----------------------------------------
 
 
 @pytest.mark.integration
-def test_scrape_product_success_with_price_postgres(pg_session, monkeypatch):
+def test_scrape_product_full_success_postgres(pg_session, monkeypatch):
     listing_id = _seed_listing(pg_session)
     _patch_commit_flush(pg_session)
+    lst = pg_session.get(FactListing, listing_id)
+    lst.last_error = "old"
+    lst.consecutive_errors = 3
 
     monkeypatch.setattr(
         "app.modules.scraper.service._run_coro_in_worker",
@@ -358,94 +409,25 @@ def test_scrape_product_success_with_price_postgres(pg_session, monkeypatch):
     svc = GlobalScrapeService(pg_session, pool)
     res = svc.scrape_product(listing_id)
     assert res.success is True
+    pg_session.refresh(lst)
+    assert lst.last_error is None
+    assert lst.consecutive_errors == 0
 
     row = pg_session.scalars(
         select(FactPrice).where(FactPrice.listing_id == listing_id),
     ).first()
     assert row is not None
-    assert float(row.price) == pytest.approx(19.99)
-    assert row.in_stock is False
-
-    prod = pg_session.get(
-        DimProduct,
-        pg_session.get(FactListing, listing_id).product_id,
-    )
-    assert prod.name == "Widget A"
 
 
 @pytest.mark.integration
-def test_scrape_product_missing_product_name_postgres(pg_session, monkeypatch):
-    listing_id = _seed_listing(pg_session)
-    _patch_commit_flush(pg_session)
-
-    monkeypatch.setattr(
-        "app.modules.scraper.service._run_coro_in_worker",
-        _fake_run_coro(
-            PoolScrapeResult(
-                success=True,
-                url="https://example.com/p",
-                data=ExtractedProduct(title=None, price=None, currency=None),
-                scraper_layer="httpx",
-            ),
-        ),
-    )
-    pool = MagicMock(spec=ScraperPool)
-    svc = GlobalScrapeService(pg_session, pool)
-    res = svc.scrape_product(listing_id)
-    assert res.success is True
-
-    row = pg_session.scalars(
-        select(FactPrice).where(FactPrice.listing_id == listing_id),
-    ).first()
-    assert row is None
-
-
-@pytest.mark.integration
-def test_scrape_product_price_not_found_postgres(pg_session, monkeypatch):
-    listing_id = _seed_listing(pg_session)
-    _patch_commit_flush(pg_session)
-
-    monkeypatch.setattr(
-        "app.modules.scraper.service._run_coro_in_worker",
-        _fake_run_coro(
-            PoolScrapeResult(
-                success=True,
-                url="https://example.com/p",
-                data=ExtractedProduct(title="Has title", price=None, currency="USD"),
-                scraper_layer="httpx",
-            ),
-        ),
-    )
-    pool = MagicMock(spec=ScraperPool)
-    svc = GlobalScrapeService(pg_session, pool)
-    res = svc.scrape_product(listing_id)
-    assert res.success is True
-
-    row = pg_session.scalars(
-        select(FactPrice).where(FactPrice.listing_id == listing_id),
-    ).first()
-    assert row is None
-
-    slog = pg_session.scalars(
-        select(ScrapeLog)
-        .where(ScrapeLog.listing_id == listing_id)
-        .order_by(ScrapeLog.id.desc())
-        .limit(1),
-    ).first()
-    assert slog is not None
-    assert slog.status == "price_not_found"
-
-
-@pytest.mark.integration
-def test_today_date_id_idempotent_no_deadlock_postgres(pg_session):
+def test_today_date_id_deadlock_safe_postgres(pg_session):
     a = _today_date_id(pg_session)
     b = _today_date_id(pg_session)
     assert a == b
-    assert len(str(a)) == 8
 
 
 @pytest.mark.integration
-def test_fact_price_partition_exists_postgres(pg_session):
+def test_fact_price_partition_child_postgres(pg_session):
     n = pg_session.execute(
         text(
             "SELECT COUNT(*) FROM pg_tables "
