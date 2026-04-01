@@ -190,10 +190,10 @@ class GlobalScrapeService:
             )
 
         data = result.data
-        last_in_stock = getattr(result, "in_stock", None) or getattr(
-            data,
-            "in_stock",
-            None,
+        last_in_stock = (
+            getattr(result, "in_stock", None)
+            or getattr(data, "in_stock", None)
+            or False
         )
         # Debug: log raw extractor fields (product_name vs title) for fact_price and diagnostics.
         logger.info(
@@ -233,18 +233,25 @@ class GlobalScrapeService:
 
             product = self.db.get(DimProduct, listing.product_id)
             if product:
-                effective_name = getattr(data, "product_name", None) or getattr(
-                    data,
-                    "title",
-                    None,
-                )
-                if effective_name and _should_replace_placeholder_name(
-                    product.name,
-                    listing.external_url,
-                ):
-                    label = str(effective_name)
-                    product.name = label[:500]
-                    product.name_normalized = _normalize_product_name(label)
+                pn = getattr(data, "product_name", None)
+                tt = getattr(data, "title", None)
+                pn_nonempty = bool(pn and str(pn).strip())
+                if pn_nonempty:
+                    label = str(pn).strip()[:500]
+                elif tt and str(tt).strip():
+                    label = str(tt).strip()[:500]
+                else:
+                    label = None
+                if label:
+                    if not pn_nonempty:
+                        product.name = label[:500]
+                        product.name_normalized = _normalize_product_name(label)
+                    elif _should_replace_placeholder_name(
+                        product.name,
+                        listing.external_url,
+                    ):
+                        product.name = label[:500]
+                        product.name_normalized = _normalize_product_name(label)
                 if data.image_url and not product.image_url:
                     product.image_url = data.image_url
 
@@ -329,6 +336,20 @@ class GlobalScrapeService:
             listing_id,
             log_status,
             result.success,
+        )
+
+        product_name_used = getattr(data, "product_name", None) if data else None
+        title = getattr(data, "title", None) if data else None
+        price = getattr(data, "price", None) if data else None
+        currency = getattr(data, "currency", None) if data else None
+        logger.info(
+            "FINAL PERSIST: product_name=%s | title=%s | price=%s | currency=%s | in_stock=%s | status=%s",
+            product_name_used,
+            title,
+            price,
+            currency,
+            last_in_stock,
+            log_status,
         )
 
         try:
