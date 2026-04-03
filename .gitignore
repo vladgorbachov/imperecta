@@ -41,6 +41,10 @@ npm-debug.log*
 !.dev.vars.example
 !.env.example
 
+# Python coverage
+.coverage
+htmlcov/
+
 # E2E
 e2e/test-results/
 e2e/playwright-report/

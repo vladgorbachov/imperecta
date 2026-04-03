@@ -1,82 +1,18 @@
-"""Integration and unit tests for universal extractors and scraper pool."""
+"""Unit tests for extractors, log status mapping, and pool (no outbound HTTP)."""
 
 import pytest
-import httpx
-from bs4 import BeautifulSoup
 
 from app.modules.scraper.extractors import (
     ExtractedProduct,
-    extract_auto_detect,
-    extract_from_jsonld,
-    extract_from_meta_tags,
-    extract_product_links,
     merge_results,
     parse_price_text,
 )
-from app.modules.scraper.scraper_pool import ScraperPool
-import app.modules.scraper.scraper_pool as scraper_pool_module
-
-
-async def _fetch_html(urls: list[str]) -> tuple[str, str] | tuple[None, None]:
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        for url in urls:
-            try:
-                response = await client.get(url)
-                if response.status_code < 400 and response.text:
-                    return url, response.text
-            except Exception:
-                continue
-    return None, None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_extract_jsonld_real_page():
-    """Fetch real product page and validate JSON-LD extraction."""
-    url, html = await _fetch_html(
-        [
-            "https://www.allbirds.com/products/mens-tree-runners",
-            "https://www.lego.com/en-us/product/tuxedo-cat-21349",
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        ]
-    )
-    if not url or not html:
-        pytest.skip("No reachable product page for integration test")
-    result = extract_from_jsonld(BeautifulSoup(html, "html.parser"))
-    if result.price is None or result.title is None:
-        pytest.skip(f"JSON-LD not available in selected page: {url}")
-    assert result.title is not None
-    assert result.price is not None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_extract_meta_real_page():
-    """Fetch real page and validate meta tags extraction."""
-    url, html = await _fetch_html(
-        [
-            "https://www.allbirds.com/products/mens-tree-runners",
-            "https://www.lego.com/en-us/product/tuxedo-cat-21349",
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        ]
-    )
-    if not url or not html:
-        pytest.skip("No reachable page for integration test")
-    result = extract_from_meta_tags(BeautifulSoup(html, "html.parser"))
-    if result.title is None and result.image_url is None and result.price is None:
-        pytest.skip(f"Meta extraction unavailable for selected page: {url}")
-    assert result.title is not None or result.image_url is not None or result.price is not None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_extract_auto_detect():
-    """Auto-detect should find price on page without strict structured tags."""
-    _, html = await _fetch_html(["https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"])
-    if not html:
-        pytest.skip("books.toscrape.com is not reachable")
-    result = extract_auto_detect(BeautifulSoup(html, "html.parser"))
-    assert result.price is not None
+from app.modules.scraper.scraper_pool import PoolScrapeResult
+from app.modules.scraper.service import (
+    GlobalScrapeService,
+    _optional_in_stock,
+    _should_replace_placeholder_name,
+)
 
 
 def test_merge_results():
@@ -97,52 +33,12 @@ def test_parse_price_text():
     assert parse_price_text("1.299,50 €") == 1299.50
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_extract_product_links():
-    """Category page should produce product URLs."""
-    url = "https://webscraper.io/test-sites/e-commerce/static/computers/laptops"
-    _, html = await _fetch_html([url])
-    if not html:
-        pytest.skip("webscraper.io is not reachable")
-    soup = BeautifulSoup(html, "html.parser")
-    links = extract_product_links(soup, url)
-    assert isinstance(links, list)
-    assert len(links) > 0
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_scraper_pool_failover():
-    """When Decodo is disabled, pool should fetch through fallback layers."""
-    previous = scraper_pool_module.settings.decodo_enabled
-    scraper_pool_module.settings.decodo_enabled = False
-    try:
-        pool = ScraperPool()
-        result = await pool.scrape_product("https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html")
-        if not result.success:
-            pytest.skip("Fallback layers could not scrape integration page")
-        assert result.scraper_layer in {"httpx", "playwright"}
-    finally:
-        scraper_pool_module.settings.decodo_enabled = previous
-
-
 def test_completeness_score():
     """Completeness score should match required fields ratio."""
     full = ExtractedProduct(title="x", price=10.0, image_url="img")
     partial = ExtractedProduct(title="x", price=10.0, image_url=None)
     assert full.completeness == 1.0
     assert round(partial.completeness, 2) == 0.67
-
-
-# --- GlobalScrapeService: log status mapping + placeholder name (no DB) ---
-
-from app.modules.scraper.scraper_pool import PoolScrapeResult
-from app.modules.scraper.service import (
-    GlobalScrapeService,
-    _optional_in_stock,
-    _should_replace_placeholder_name,
-)
 
 
 def test_optional_in_stock_missing_on_extracted_product():
@@ -185,10 +81,14 @@ def test_determine_log_status_failure_variants():
     )
     assert (
         svc._determine_log_status(
-            PoolScrapeResult(success=True, url="u", data=ExtractedProduct()),
+            PoolScrapeResult(
+                success=True,
+                url="u",
+                data=ExtractedProduct(title="T", price=1.0, currency="USD"),
+            ),
             is_partial=True,
         )
-        == "success"
+        == "missing_critical_data"
     )
 
 
@@ -218,17 +118,19 @@ async def test_stale_pool_query_uses_last_checked_and_active():
 
 def test_fact_price_write_gate_matches_service_rules():
     """Mirror GlobalScrapeService.scrape_product quality gate (title + price + currency)."""
+
     def should_write_price_snapshot(
         title: str | None,
         price: float | None,
         currency: str | None,
     ) -> bool:
         product_name_ok = bool(title and str(title).strip())
+        curr_ok = currency is not None and str(currency).strip() != ""
         return (
             product_name_ok
             and price is not None
             and price > 0
-            and bool(currency)
+            and curr_ok
         )
 
     assert should_write_price_snapshot("Item", 19.99, "USD") is True
@@ -240,22 +142,22 @@ def test_fact_price_write_gate_matches_service_rules():
 
 
 def test_determine_log_status_success_vs_failure_and_partial_success_value():
-    """scrape_logs.status CHECK allows success/error/timeout/...; partial maps to success (see model)."""
+    """scrape_logs.status: full payload with currency → success; is_partial → missing_critical_data."""
     svc = GlobalScrapeService.__new__(GlobalScrapeService)
     ok = svc._determine_log_status(
-        PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0)),
+        PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0, currency="USD")),
         is_partial=False,
         has_title=True,
         has_price=True,
     )
     partial_ok = svc._determine_log_status(
-        PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0)),
+        PoolScrapeResult(success=True, url="u", data=ExtractedProduct(title="T", price=1.0, currency="USD")),
         is_partial=True,
         has_title=True,
         has_price=True,
     )
     assert ok == "success"
-    assert partial_ok == "success"
+    assert partial_ok == "missing_critical_data"
     fail = svc._determine_log_status(
         PoolScrapeResult(success=False, url="u", error="blocked"),
     )
@@ -282,3 +184,32 @@ def test_determine_log_status_missing_title_or_price():
         )
         == "price_not_found"
     )
+
+
+def test_determine_log_status_error_categories():
+    svc = GlobalScrapeService.__new__(GlobalScrapeService)
+    assert svc._determine_log_status(PoolScrapeResult(success=False, url="u", error="parse_error:foo")) == "parse_error"
+    assert svc._determine_log_status(PoolScrapeResult(success=False, url="u", error="not_found:x")) == "not_found"
+    assert svc._determine_log_status(PoolScrapeResult(success=False, url="u", error="captcha")) == "captcha"
+
+
+def test_determine_log_status_is_empty():
+    svc = GlobalScrapeService.__new__(GlobalScrapeService)
+    assert (
+        svc._determine_log_status(
+            PoolScrapeResult(success=True, url="u", data=None, is_empty=True),
+            is_partial=False,
+        )
+        == "missing_critical_data"
+    )
+
+
+def test_determine_log_status_currency_in_fields_missing():
+    svc = GlobalScrapeService.__new__(GlobalScrapeService)
+    r = PoolScrapeResult(
+        success=True,
+        url="u",
+        data=ExtractedProduct(title="T", price=9.0, currency=None),
+        fields_missing=["currency", "image_url"],
+    )
+    assert svc._determine_log_status(r, is_partial=True, data=r.data) == "missing_critical_data"

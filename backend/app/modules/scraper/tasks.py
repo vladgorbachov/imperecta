@@ -1,15 +1,17 @@
 """Celery tasks for discovery and scraping (v2 dim/fact tables)."""
 
 import asyncio
-import logging
+import traceback
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+import structlog
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
 from app.database import sync_session_factory
+from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
@@ -18,7 +20,7 @@ from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 
 def _run_async(coro):
@@ -54,6 +56,36 @@ def _make_session_factory() -> tuple:
     return engine, factory
 
 
+def _persist_technical_error_log(listing_id: UUID, tb: str) -> None:
+    """Write scrape_logs row for unhandled task failure (separate sync session)."""
+    db = sync_session_factory()
+    try:
+        listing = db.get(FactListing, listing_id)
+        if not listing:
+            slog.warning("technical_error_skip_no_listing", listing_id=str(listing_id))
+            return
+        entry = ScrapeLog(
+            listing_id=listing.id,
+            marketplace_id=listing.marketplace_id,
+            status="technical_error",
+            url=listing.external_url or "",
+            error_message=tb[:20000],
+            scraper_type="celery",
+            error_category="technical",
+        )
+        db.add(entry)
+        db.commit()
+        slog.info("technical_error_logged", listing_id=str(listing_id))
+    except Exception:
+        slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 @celery_app.task(name="discover_all_marketplaces")
 def discover_all_marketplaces():
     """Run discovery for each active DimMarketplace."""
@@ -74,7 +106,7 @@ def discover_all_marketplaces():
                 )
                 marketplaces = list(result.scalars().all())
                 seen = len(marketplaces)
-                logger.info("discover_all_marketplaces: %d active marketplaces", seen)
+                slog.info("discover_all_marketplaces", active_count=seen)
                 crawler = DiscoveryCrawler(db, scraper_pool)
                 for mp in marketplaces:
                     try:
@@ -83,7 +115,7 @@ def discover_all_marketplaces():
                             completed += 1
                         errors.extend(res.errors)
                     except Exception as exc:
-                        logger.exception("Discovery failed for %s: %s", mp.id, exc)
+                        slog.exception("discovery_failed", marketplace_id=str(mp.id), error=str(exc))
                         errors.append(str(exc))
         finally:
             await engine.dispose()
@@ -132,6 +164,21 @@ def discover_single_marketplace(self, marketplace_id: str):
 
 def _run_scrape_all_pool() -> dict:
     """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers)."""
+    try:
+        return _run_scrape_all_pool_impl()
+    except Exception:
+        tb = traceback.format_exc()
+        slog.exception("scrape_all_pool_fatal", traceback=tb)
+        return {
+            "queued": 0,
+            "scraped_ok": 0,
+            "scraped_failed": 0,
+            "error": "technical_error",
+            "traceback": tb,
+        }
+
+
+def _run_scrape_all_pool_impl() -> dict:
     scraper_pool = ScraperPool()
     threshold = datetime.now(timezone.utc) - timedelta(hours=6)
     stale_ids: list[UUID] = []
@@ -151,39 +198,41 @@ def _run_scrape_all_pool() -> dict:
             .limit(500),
         )
         stale_ids = [r[0] for r in result.all()]
-        logger.info("scrape_all_pool_products eligible_listings=%d", len(stale_ids))
+        slog.info("scrape_all_pool_products", eligible_listings=len(stale_ids))
         svc = GlobalScrapeService(db, scraper_pool)
         for lid in stale_ids:
             try:
                 listing_row = db.get(FactListing, lid)
                 url_hint = (listing_row.external_url if listing_row else "")[:160]
-                logger.info("scrape_listing start listing_id=%s url=%s", lid, url_hint)
+                slog.info("scrape_listing_start", listing_id=str(lid), url=url_hint)
                 r = svc.scrape_product(lid)
-                logger.info(
-                    "scrape_listing end listing_id=%s success=%s err=%s",
-                    lid,
-                    r.success,
-                    (r.error or "")[:120],
+                slog.info(
+                    "scrape_listing_end",
+                    listing_id=str(lid),
+                    success=r.success,
+                    err=(r.error or "")[:120],
                 )
                 if r.success:
                     ok += 1
                 else:
                     failed += 1
             except Exception:
-                logger.exception("scrape listing failed listing_id=%s", lid)
+                tb = traceback.format_exc()
+                slog.exception("scrape_listing_failed", listing_id=str(lid), traceback=tb)
                 try:
                     db.rollback()
                 except Exception:
-                    logger.exception("rollback after listing failure listing_id=%s", lid)
+                    slog.exception("rollback_after_listing_failure", listing_id=str(lid))
+                _persist_technical_error_log(lid, tb)
                 failed += 1
     finally:
         db.close()
 
-    logger.info(
-        "scrape_all_pool_products finished eligible=%d ok=%d failed=%d",
-        len(stale_ids),
-        ok,
-        failed,
+    slog.info(
+        "scrape_all_pool_products_finished",
+        eligible=len(stale_ids),
+        ok=ok,
+        failed=failed,
     )
     return {
         "queued": len(stale_ids),
@@ -195,7 +244,7 @@ def _run_scrape_all_pool() -> dict:
 @celery_app.task(bind=True, name="scrape_all_pool_products")
 def scrape_all_pool_products(self):
     """Scrape stale pool listings (last_checked_at null or older than 6 hours)."""
-    logger.info("scrape_all_pool_products started celery_id=%s", self.request.id)
+    slog.info("scrape_all_pool_products_started", celery_id=self.request.id)
     return _run_scrape_all_pool()
 
 
@@ -209,6 +258,25 @@ def scrape_all_pool_products(self):
 def scrape_pool_product(self, listing_id: str):
     """Scrape one FactListing by UUID."""
 
+    try:
+        return _scrape_pool_product_impl(listing_id)
+    except Exception:
+        tb = traceback.format_exc()
+        slog.exception("scrape_pool_product_fatal", listing_id=listing_id, traceback=tb)
+        try:
+            _persist_technical_error_log(UUID(str(listing_id)), tb)
+        except Exception:
+            slog.exception("scrape_pool_product_technical_log_failed", listing_id=listing_id)
+        return {
+            "success": False,
+            "listing_id": listing_id,
+            "error": "technical_error",
+            "traceback": tb,
+            "url": None,
+        }
+
+
+def _scrape_pool_product_impl(listing_id: str) -> dict:
     scraper_pool = ScraperPool()
     db = sync_session_factory()
     try:
@@ -247,9 +315,10 @@ def check_pool_completeness():
 )
 def scrape_single(self, competitor_product_id: str):
     """Legacy competitor scrape removed — use scrape_pool_product(listing_id)."""
-    logger.warning(
-        "scrape_single is deprecated; use scrape_pool_product: %s",
-        competitor_product_id,
+    slog.warning(
+        "scrape_single_deprecated",
+        hint="use scrape_pool_product",
+        competitor_product_id=competitor_product_id,
     )
     return {"status": "deprecated", "message": "Use scrape_pool_product with fact_listing UUID"}
 
@@ -257,7 +326,7 @@ def scrape_single(self, competitor_product_id: str):
 @celery_app.task(name="app.workers.scrape_tasks.scrape_user_products")
 def scrape_user_products(user_id: str) -> None:
     """Enqueue pool scrape for listings linked to user products (future)."""
-    logger.info("scrape_user_products(%s): delegating to pool scrape task", user_id)
+    slog.info("scrape_user_products_delegate", user_id=user_id)
     scrape_all_pool_products.delay()
 
 
