@@ -137,7 +137,11 @@ def _previous_price_snapshot(
 
 
 class GlobalScrapeService:
-    """Scrape pool listings and persist FactPrice + listing denormalized fields."""
+    """Scrape pool listings and persist FactPrice + listing denormalized fields.
+
+    Emits ScrapeLog rows with status/error classification (including technical_error
+    paths), applies fact_price quality gates, and resolves dim_date for snapshots.
+    """
 
     def __init__(self, db: Session, scraper_pool: ScraperPool):
         self.db = db

@@ -81,7 +81,11 @@ class ListingScrapeResult:
 
 
 class ScraperPool:
-    """Priority: Decodo API -> httpx direct -> Playwright headless."""
+    """Priority: Decodo API -> httpx direct -> Playwright headless.
+
+    Fetches HTML once per URL, runs JSON-LD/meta/custom/auto extractors, and
+    retries each transport with backoff before trying the next layer.
+    """
 
     async def scrape_product(
         self,

@@ -4,13 +4,43 @@ from __future__ import annotations
 
 import inspect
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
+from uuid import UUID
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.models.dimensions import DimCountry, DimCurrency, DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.scraper.scraper_pool import PoolScrapeResult
+
+
+@dataclass(frozen=True)
+class ListingRow:
+    """Minimal listing row for integration tests (IDs and URLs from fact_listing)."""
+
+    id: UUID
+    external_url: str
+
+
+def load_active_listings_from_db(limit: int = 72) -> Sequence[ListingRow]:
+    """Load real FactListing rows (active). Requires PostgreSQL (sync engine)."""
+    from app.database import sync_session_factory
+
+    session = sync_session_factory()
+    try:
+        stmt = (
+            select(FactListing.id, FactListing.external_url)
+            .where(FactListing.is_active.is_(True))
+            .where(FactListing.external_url.is_not(None))
+            .where(FactListing.external_url != "")
+            .limit(limit)
+        )
+        rows = session.execute(stmt).all()
+        return [ListingRow(id=r[0], external_url=str(r[1]).strip()) for r in rows]
+    finally:
+        session.close()
 
 
 def _fake_run_coro(result: PoolScrapeResult):
