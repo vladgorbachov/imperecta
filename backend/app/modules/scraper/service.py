@@ -7,6 +7,7 @@ from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 
 def _run_coro_in_worker(coro):
@@ -165,10 +167,10 @@ class GlobalScrapeService:
             if v
         }
 
-        logger.info(
-            "pool_scrape start listing_id=%s url=%s",
-            listing_id,
-            (listing.external_url or "")[:200],
+        slog.info(
+            "pool_scrape_start",
+            listing_id=str(listing_id),
+            url=(listing.external_url or "")[:200],
         )
         try:
             result = _run_coro_in_worker(
@@ -179,7 +181,7 @@ class GlobalScrapeService:
                 ),
             )
         except Exception as exc:
-            logger.exception("pool_scrape exception listing_id=%s", listing_id)
+            slog.exception("pool_scrape_exception", listing_id=str(listing_id))
             err_text = f"exception:{exc.__class__.__name__}:{exc!s}"
             result = PoolScrapeResult(
                 success=False,
@@ -200,14 +202,16 @@ class GlobalScrapeService:
             or getattr(data, "in_stock", None)
             or False
         )
-        # Debug: log raw extractor fields (product_name vs title) for fact_price and diagnostics.
-        logger.info(
-            "EXTRACTED → product_name=%s | title=%s | price=%s | currency=%s | in_stock=%s",
-            getattr(data, "product_name", None),
-            getattr(data, "title", None),
-            getattr(data, "price", None),
-            getattr(data, "currency", None),
-            last_in_stock,
+        slog.info(
+            "EXTRACTED",
+            product_name=getattr(data, "product_name", None),
+            title=getattr(data, "title", None),
+            price=getattr(data, "price", None),
+            currency=getattr(data, "currency", None),
+            in_stock=last_in_stock,
+            is_partial=getattr(result, "is_partial", False),
+            is_empty=getattr(result, "is_empty", False),
+            fields_missing=getattr(result, "fields_missing", []),
         )
         is_partial = bool(result.is_partial)
 
@@ -215,7 +219,7 @@ class GlobalScrapeService:
             if not result.success:
                 listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
                 listing.last_error = result.error or "scrape_failed"
-        else:
+        elif data:
             # product_name from extractor, or title as fallback when product_name is empty.
             product_name_ok = bool(
                 data
@@ -259,15 +263,17 @@ class GlobalScrapeService:
                 if data.image_url and not product.image_url:
                     product.image_url = data.image_url
 
-            # fact_price only with product name, positive price, and currency
+            # fact_price: product_name_ok, price > 0, currency present (non-empty string)
+            curr_raw = getattr(data, "currency", None)
+            currency_ok = curr_raw is not None and str(curr_raw).strip() != ""
             should_write_price_snapshot = (
                 product_name_ok
                 and data.price is not None
                 and data.price > 0
-                and bool(data.currency)
+                and currency_ok
             )
             if not should_write_price_snapshot:
-                if not product_name_ok or not bool(data.currency):
+                if not product_name_ok or not currency_ok:
                     logger.info(
                         "fact_price skipped: missing product_name or currency (listing_id=%s)",
                         listing_id,
@@ -335,28 +341,29 @@ class GlobalScrapeService:
             error_category=self._categorize_error(result.error) if result.error else None,
         )
         self.db.add(log_entry)
-        logger.info(
-            "scrape_logs add listing_id=%s status=%s success=%s",
-            listing_id,
-            log_status,
-            result.success,
+        slog.info(
+            "scrape_logs_queued",
+            listing_id=str(listing_id),
+            status=log_status,
+            success=result.success,
         )
 
         product_name_used = getattr(data, "product_name", None) if data else None
         title = getattr(data, "title", None) if data else None
         price = getattr(data, "price", None) if data else None
         currency = getattr(data, "currency", None) if data else None
-        logger.info(
-            "FINAL PERSIST: product_name=%s | title=%s | price=%s | currency=%s | in_stock=%s | status=%s",
-            product_name_used,
-            title,
-            price,
-            currency,
-            last_in_stock,
-            log_status,
+        slog.info(
+            "FINAL_PERSIST",
+            product_name=product_name_used,
+            title=title,
+            price=price,
+            currency=currency,
+            in_stock=last_in_stock,
+            status=log_status,
         )
 
         try:
+            self.db.flush()
             self.db.commit()
         except Exception as exc:
             logger.error(
@@ -373,13 +380,15 @@ class GlobalScrapeService:
                 error="persist_failed",
             )
 
-        logger.info(
-            "SCRAPE COMPLETE listing_id=%s status=%s price=%s",
-            listing_id,
-            log_status,
-            price,
+        slog.info(
+            "SCRAPE_COMPLETE",
+            listing_id=str(listing_id),
+            status=log_status,
+            price=price,
+            currency=currency,
+            in_stock=last_in_stock,
         )
-        logger.info("pool_scrape done listing_id=%s result_success=%s", listing_id, result.success)
+        slog.info("pool_scrape_done", listing_id=str(listing_id), result_success=result.success)
         return result
 
     def _determine_log_status(
@@ -394,17 +403,30 @@ class GlobalScrapeService:
         """Map scrape result to scrape_logs.status CHECK constraint value."""
         if not result.success:
             error = (result.error or "").lower()
-            if "fetch_failed" in error:
-                return "error"
-            if "timeout" in error:
-                return "timeout"
-            if "blocked" in error or "captcha" in error:
-                return "blocked"
+            if "parse_error" in error:
+                return "parse_error"
             if "price_not_found" in error:
                 return "price_not_found"
+            if "not_found" in error:
+                return "not_found"
+            if "captcha" in error:
+                return "captcha"
+            if "blocked" in error:
+                return "blocked"
+            if "timeout" in error:
+                return "timeout"
+            if "fetch_failed" in error:
+                return "error"
             return "error"
+
+        if getattr(result, "is_empty", False):
+            return "missing_critical_data"
+
         payload = data if data is not None else result.data
+        fields_missing = list(getattr(result, "fields_missing", []) or [])
         if result.success and payload is not None:
+            if "currency" in fields_missing and getattr(payload, "price", None) is not None:
+                return "missing_critical_data"
             # Unit tests: explicit has_title/has_price without passing data= (legacy API).
             if (
                 data is None
@@ -416,8 +438,6 @@ class GlobalScrapeService:
                 if has_title and not has_price:
                     return "price_not_found"
             elif data is not None:
-                # scrape_product: if product_name exists on payload type but is empty while title
-                # exists — missing_critical_data (title-only extractors use title fallback for writes).
                 pn_field = _payload_has_product_name_field(payload)
                 pn_raw = getattr(payload, "product_name", None)
                 pn_ok = bool(pn_raw and str(pn_raw).strip())
@@ -430,8 +450,12 @@ class GlobalScrapeService:
                     return "missing_critical_data"
                 if getattr(payload, "price", None) is None:
                     return "price_not_found"
+                curr = getattr(payload, "currency", None)
+                if curr is None or not str(curr).strip():
+                    return "missing_critical_data"
+
         if is_partial:
-            return "success"
+            return "missing_critical_data"
         return "success"
 
     def _categorize_error(self, error: str) -> str | None:

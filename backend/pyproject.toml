@@ -14,4 +14,16 @@ select = ["E", "F", "I", "N", "W"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "tests"]
+markers = [
+    "integration: tests that need PostgreSQL and/or real network fetches",
+]
+
+[tool.coverage.run]
+source = ["app/modules/scraper"]
+omit = [
+    "**/proxy_manager.py",
+]
+
+[tool.coverage.report]
+show_missing = true

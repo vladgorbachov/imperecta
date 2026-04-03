@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
-import logging
 import uuid
 from datetime import timezone
 from pathlib import Path
@@ -13,123 +11,12 @@ import pytest
 from sqlalchemy import select, text
 
 from app.models.app_tables import ScrapeLog
-from app.models.dimensions import DimCountry, DimCurrency, DimMarketplace, DimProduct
+from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _today_date_id
-
-
-def _fake_run_coro(result: PoolScrapeResult):
-    """Return fixed scrape result; close pool coroutine to avoid RuntimeWarning."""
-
-    def _inner(coro):
-        if inspect.iscoroutine(coro):
-            coro.close()
-        return result
-
-    return _inner
-
-
-def _pg_available() -> bool:
-    try:
-        from app.database import sync_engine
-
-        with sync_engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
-
-
-@pytest.fixture
-def pg_session():
-    if not _pg_available():
-        pytest.skip("PostgreSQL unavailable (set DATABASE_URL for integration tests)")
-    from sqlalchemy.orm import Session
-
-    from app.database import sync_engine
-
-    conn = sync_engine.connect()
-    trans = conn.begin()
-    session = Session(bind=conn)
-    try:
-        yield session
-    finally:
-        trans.rollback()
-        session.close()
-        conn.close()
-
-
-def _ensure_currency(session, code: str = "USD") -> None:
-    from app.models.dimensions import DimCurrency
-
-    if session.get(DimCurrency, code):
-        return
-    session.add(
-        DimCurrency(
-            currency_code=code,
-            name="US Dollar",
-            symbol="$",
-        ),
-    )
-    session.flush()
-
-
-def _ensure_country(session, code: str = "US") -> None:
-    if session.get(DimCountry, code):
-        return
-    session.add(
-        DimCountry(
-            country_code=code,
-            name="United States",
-            region="Other",
-            currency_code="USD",
-        ),
-    )
-    session.flush()
-
-
-def _seed_listing(session) -> uuid.UUID:
-    _ensure_currency(session)
-    _ensure_country(session)
-    suffix = uuid.uuid4().hex[:12]
-    mp_code = f"mp_persist_{suffix}"
-    mp = DimMarketplace(
-        marketplace_code=mp_code,
-        name="Test MP",
-        source_type="direct_retail",
-        country_code="US",
-        operates_in=["US"],
-        domain="example.com",
-        base_url="https://example.com",
-        currency_code="USD",
-        scraper_type="httpx",
-    )
-    session.add(mp)
-    session.flush()
-
-    product_id = uuid.uuid4()
-    product = DimProduct(
-        id=product_id,
-        name="product",
-        name_normalized="product",
-    )
-    session.add(product)
-    session.flush()
-
-    listing_id = uuid.uuid4()
-    url = f"https://example.com/p/{suffix}"
-    listing = FactListing(
-        id=listing_id,
-        product_id=product_id,
-        marketplace_id=mp.id,
-        external_url=url,
-        url_hash=FactListing.compute_url_hash(url),
-    )
-    session.add(listing)
-    session.flush()
-    return listing_id
+from fixtures.scraper_fixtures import _fake_run_coro, _seed_listing, pg_session
 
 
 def _patch_commit_flush(session) -> None:
@@ -192,9 +79,8 @@ def _build_mock_scrape_session(
     return session, product, listing
 
 
-def test_scrape_product_full_success(monkeypatch, caplog):
-    """Successful scrape: clears legacy errors, writes FactPrice, updates product name, logs SCRAPE COMPLETE."""
-    caplog.set_level(logging.INFO, logger="app.modules.scraper.service")
+def test_scrape_product_full_success(monkeypatch):
+    """Successful scrape: clears legacy errors, writes FactPrice, updates product name."""
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
@@ -233,15 +119,11 @@ def test_scrape_product_full_success(monkeypatch, caplog):
     assert float(fp.price) == pytest.approx(19.99)
     assert fp.in_stock is False
     assert product.name == "Widget A"
-
-    assert any(
-        "SCRAPE COMPLETE" in rec.message and str(listing_id) in rec.message
-        for rec in caplog.records
-    )
+    assert session.commit.called
 
 
 def test_scrape_product_price_not_found_partial(monkeypatch):
-    """Title + currency but no price: log price_not_found, no FactPrice, success clears stale errors."""
+    """Pool reports price_not_found: no FactPrice, scrape_logs price_not_found, listing error counters."""
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
@@ -249,14 +131,16 @@ def test_scrape_product_price_not_found_partial(monkeypatch):
         listing_id,
         product_id,
         marketplace_id,
+        consecutive_errors=0,
     )
     monkeypatch.setattr(
         "app.modules.scraper.service._run_coro_in_worker",
         _fake_run_coro(
             PoolScrapeResult(
-                success=True,
+                success=False,
                 url="https://example.com/item",
-                data=ExtractedProduct(title="Has title", price=None, currency="USD"),
+                error="price_not_found",
+                data=None,
                 scraper_layer="httpx",
             ),
         ),
@@ -264,9 +148,9 @@ def test_scrape_product_price_not_found_partial(monkeypatch):
     pool = MagicMock(spec=ScraperPool)
     svc = GlobalScrapeService(session, pool)
     res = svc.scrape_product(listing_id)
-    assert res.success is True
-    assert listing.last_error is None
-    assert listing.consecutive_errors == 0
+    assert res.success is False
+    assert listing.last_error == "price_not_found"
+    assert listing.consecutive_errors == 1
     added = [c.args[0] for c in session.add.call_args_list]
     assert not any(isinstance(x, FactPrice) for x in added)
     slog = next(x for x in added if isinstance(x, ScrapeLog))
@@ -353,6 +237,7 @@ def test_fact_price_written_only_when_all_required_fields(monkeypatch):
     cases: list[tuple[ExtractedProduct, bool]] = [
         (ExtractedProduct(title="Ok", price=5.0, currency="USD"), True),
         (ExtractedProduct(title="Ok", price=5.0, currency=None), False),
+        (ExtractedProduct(title="Ok", price=5.0, currency=""), False),
         (ExtractedProduct(title="Ok", price=0.0, currency="USD"), False),
         (ExtractedProduct(title=None, price=5.0, currency="USD"), False),
     ]
@@ -378,7 +263,7 @@ def test_fact_price_written_only_when_all_required_fields(monkeypatch):
         has_fp = any(isinstance(x, FactPrice) for x in added)
         assert has_fp is expect_fp, (payload, expect_fp)
 
-    schema_path = Path(__file__).resolve().parents[1] / "alembic/versions/001_v2_schema.py"
+    schema_path = Path(__file__).resolve().parents[2] / "alembic/versions/001_v2_schema.py"
     sql = schema_path.read_text(encoding="utf-8")
     assert "PARTITION BY RANGE (date_id)" in sql
 
