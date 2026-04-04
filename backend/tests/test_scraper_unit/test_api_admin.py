@@ -62,3 +62,12 @@ def test_scrape_activity_and_error_distribution(admin_client):
     assert admin_client.get("/api/admin/error-distribution").status_code == 200
 
 
+def test_scrape_diagnostics_and_test_single_in_openapi_schema(admin_client):
+    schema = admin_client.app.openapi()
+    paths = schema.get("paths", {})
+    assert "/api/admin/scrape-diagnostics" in paths
+    assert "get" in paths["/api/admin/scrape-diagnostics"]
+    assert "/api/admin/scrape/test-single/{listing_id}" in paths
+    assert "post" in paths["/api/admin/scrape/test-single/{listing_id}"]
+
+
