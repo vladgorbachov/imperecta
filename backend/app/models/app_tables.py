@@ -416,7 +416,7 @@ class ScrapeLog(Base):
         nullable=False,
         index=True,
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     price_found: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     in_stock_found: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
