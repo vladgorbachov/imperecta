@@ -6,9 +6,10 @@ import ssl
 from logging.config import fileConfig
 from uuid import uuid4
 
-from alembic import context
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
+
+from alembic import context
 from app.database import Base
 from app.models import *  # noqa: F401,F403 — loads all models into Base.metadata
 
@@ -24,6 +25,14 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Drift repair: stamp when v2 exists but alembic_version was lost (before 007 chain).
+_STAMP_DRIFT_REVISION = "006_scrape_logs_status_length"
+
+
+def render_item(type_, obj, autogen_context):
+    """Autogenerate hook: keep default rendering for stable schema comparison."""
+    return False
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
@@ -34,6 +43,8 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         version_table_schema="alembic_meta",
+        compare_type=True,
+        render_item=render_item,
     )
 
     with context.begin_transaction():
@@ -41,8 +52,19 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    """Run migrations with v2 schema detection and auto-reset."""
-    # 2. Check if v2 schema was actually applied (dim_date exists?).
+    """Run migrations with v2 schema detection, drift repair, and auto-reset."""
+    connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
+    connection.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS alembic_meta.alembic_version (
+                version_num VARCHAR(32) NOT NULL,
+                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+            )
+            """
+        )
+    )
+
     v2_applied = connection.execute(
         text(
             "SELECT EXISTS ("
@@ -52,7 +74,6 @@ def do_run_migrations(connection: Connection) -> None:
         )
     ).scalar()
 
-    # 3. Check if alembic_version table exists in alembic_meta.
     version_table_exists = connection.execute(
         text(
             "SELECT EXISTS ("
@@ -62,16 +83,24 @@ def do_run_migrations(connection: Connection) -> None:
         )
     ).scalar()
 
-    # 4. If version table exists but v2 NOT applied — reset version.
     if version_table_exists and not v2_applied:
         connection.execute(text("DELETE FROM alembic_meta.alembic_version"))
 
-    # 5. Configure and run.
+    nver = connection.execute(text("SELECT COUNT(*) FROM alembic_meta.alembic_version")).scalar()
+    if v2_applied and int(nver or 0) == 0:
+        connection.execute(
+            text(
+                "INSERT INTO alembic_meta.alembic_version (version_num) "
+                f"VALUES ('{_STAMP_DRIFT_REVISION}') ON CONFLICT DO NOTHING"
+            )
+        )
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         version_table_schema="alembic_meta",
         compare_type=True,
+        render_item=render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -96,12 +125,21 @@ async def run_async_migrations() -> None:
         "prepared_statement_cache_size": 0,
         "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
     }
+    session_settings = {
+        "lock_timeout": "10s",
+        "statement_timeout": "60s",
+    }
     if "supabase.com" in url:
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
         connect_args["ssl"] = ssl_ctx
-        connect_args["server_settings"] = {"search_path": "public"}
+        connect_args["server_settings"] = {
+            **session_settings,
+            "search_path": "public",
+        }
+    else:
+        connect_args["server_settings"] = dict(session_settings)
 
     connectable = create_async_engine(
         url, poolclass=pool.NullPool, connect_args=connect_args

@@ -404,7 +404,7 @@ class GlobalScrapeService:
         has_title: bool | None = None,
         has_price: bool | None = None,
     ) -> str:
-        """Map scrape result to scrape_logs.status CHECK constraint value."""
+        """Map scrape result to scrape_logs.status VARCHAR(50) CHECK constraint value."""
         if not result.success:
             error = (result.error or "").lower()
             if "parse_error" in error:
