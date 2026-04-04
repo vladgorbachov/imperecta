@@ -97,3 +97,28 @@ def test_scrape_logs_status_column_at_least_varchar_50():
     assert data_type == "text" or (
         char_len is not None and char_len >= 50
     ), f"expected TEXT or VARCHAR(50+), got {data_type!r} len={char_len!r}"
+
+
+@pytest.mark.integration
+def test_migration_chain_idempotent_no_deadlock():
+    """Running `alembic upgrade head` twice must succeed (idempotent chain, no deadlock)."""
+    url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta_test",
+    )
+    env = {**os.environ, "DATABASE_URL": url}
+    for run in (1, 2):
+        proc = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            cwd=BACKEND_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        err = (proc.stderr or "") + (proc.stdout or "")
+        if proc.returncode != 0 and _pg_unavailable(err):
+            pytest.skip(f"Postgres unavailable: {proc.stderr}")
+        assert proc.returncode == 0, (
+            f"run {run}: {proc.stdout}\n{proc.stderr}"
+        )

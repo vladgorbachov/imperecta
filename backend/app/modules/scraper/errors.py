@@ -16,6 +16,20 @@ class ScrapeError(Exception):
         return f"{self.code}:{self.detail}" if self.detail else self.code
 
 
+# Canonical scrape_logs.status CHECK values (VARCHAR(50); migrations 006–007).
+SCRAPE_LOG_STATUSES: tuple[str, ...] = (
+    "success",
+    "error",
+    "timeout",
+    "blocked",
+    "captcha",
+    "not_found",
+    "price_not_found",
+    "parse_error",
+    "missing_critical_data",
+    "technical_error",
+)
+
 # Codes aligned with scrape_logs CHECK (via mapping in service layer)
 FETCH_FAILED = "fetch_failed"
 TIMEOUT = "timeout"
