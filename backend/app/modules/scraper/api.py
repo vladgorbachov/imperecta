@@ -62,8 +62,9 @@ def _serialize_pool_result(r: PoolScrapeResult) -> dict:
         "duration_ms": r.duration_ms,
         "is_partial": r.is_partial,
         "is_empty": r.is_empty,
-        "fields_extracted": list(r.fields_extracted),
-        "fields_missing": list(r.fields_missing),
+        "extracted_fields": list(r.extracted_fields),
+        "missing_fields": list(r.missing_fields),
+        "log_status": r.log_status,
     }
     if r.data:
         out["data"] = asdict(r.data)
@@ -90,11 +91,11 @@ async def _sample_result_from_db(db: DbSession) -> dict | None:
             price=float(row.price_found),
             currency=None,
         )
-    fields_extracted: list[str] = []
-    fields_missing: list[str] = []
+    extracted_fields: list[str] = []
+    missing_fields: list[str] = []
     if data is not None:
-        fields_extracted = [k for k, v in asdict(data).items() if v is not None]
-        fields_missing = [k for k, v in asdict(data).items() if v is None]
+        extracted_fields = [k for k, v in asdict(data).items() if v is not None]
+        missing_fields = [k for k, v in asdict(data).items() if v is None]
     pr = PoolScrapeResult(
         success=True,
         url=row.url,
@@ -104,8 +105,8 @@ async def _sample_result_from_db(db: DbSession) -> dict | None:
         duration_ms=row.duration_ms,
         is_partial=bool(data is not None and data.title is None),
         is_empty=data is None,
-        fields_extracted=fields_extracted,
-        fields_missing=fields_missing,
+        extracted_fields=extracted_fields,
+        missing_fields=missing_fields,
     )
     return _serialize_pool_result(pr)
 
@@ -151,7 +152,11 @@ async def trigger_pool_scrape(_current_user: CurrentSuperuser, _db: DbSession) -
     """Manually trigger scraping of stale pool products."""
     async_result = scrape_all_pool_products.delay()
     logger.info("admin POST pool/trigger-scrape task_id=%s", async_result.id)
-    return {"status": "queued", "task_id": str(async_result.id)}
+    return {
+        "status": "queued",
+        "task_id": str(async_result.id),
+        "message": "Pool scrape task queued",
+    }
 
 
 @router.get("/scrape-activity")

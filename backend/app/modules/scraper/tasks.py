@@ -241,7 +241,15 @@ def _run_scrape_all_pool_impl() -> dict:
     }
 
 
-@celery_app.task(bind=True, name="scrape_all_pool_products")
+@celery_app.task(
+    bind=True,
+    name="scrape_all_pool_products",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 1},
+    soft_time_limit=120,
+    time_limit=150,
+)
 def scrape_all_pool_products(self):
     """Scrape stale pool listings (last_checked_at null or older than 6 hours)."""
     slog.info("scrape_all_pool_products_started", celery_id=self.request.id)
@@ -251,7 +259,9 @@ def scrape_all_pool_products(self):
 @celery_app.task(
     name="scrape_pool_product",
     bind=True,
-    max_retries=1,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 1},
     soft_time_limit=120,
     time_limit=150,
 )
