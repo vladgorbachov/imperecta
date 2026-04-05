@@ -176,6 +176,8 @@ class GlobalScrapeService:
             listing_id=str(listing_id),
             url=(listing.external_url or "")[:200],
         )
+        listing.last_error = None
+        listing.consecutive_errors = 0
         try:
             result = _run_coro_in_worker(
                 self.pool.scrape_product(
@@ -215,7 +217,7 @@ class GlobalScrapeService:
             in_stock=last_in_stock,
             is_partial=getattr(result, "is_partial", False),
             is_empty=getattr(result, "is_empty", False),
-            fields_missing=getattr(result, "fields_missing", []),
+            missing_fields=getattr(result, "missing_fields", []),
         )
         is_partial = bool(result.is_partial)
 
@@ -328,6 +330,7 @@ class GlobalScrapeService:
             is_partial,
             data=data if result.success else None,
         )
+        result.log_status = log_status
         price_found = None
         if result.success and data and data.price is not None:
             price_found = float(data.price)
@@ -392,6 +395,11 @@ class GlobalScrapeService:
             currency=currency,
             in_stock=last_in_stock,
         )
+        print(
+            f"SCRAPE COMPLETE listing_id={listing_id} status={log_status} "
+            f"price={price} currency={currency!s}",
+            flush=True,
+        )
         slog.info("pool_scrape_done", listing_id=str(listing_id), result_success=result.success)
         return result
 
@@ -407,6 +415,10 @@ class GlobalScrapeService:
         """Map scrape result to scrape_logs.status VARCHAR(50) CHECK constraint value."""
         if not result.success:
             error = (result.error or "").lower()
+            if error.startswith("exception:"):
+                return "technical_error"
+            if "price_overflow" in error:
+                return "technical_error"
             if "parse_error" in error:
                 return "parse_error"
             if "price_not_found" in error:
@@ -427,7 +439,7 @@ class GlobalScrapeService:
             return "missing_critical_data"
 
         payload = data if data is not None else result.data
-        fields_missing = list(getattr(result, "fields_missing", []) or [])
+        fields_missing = list(getattr(result, "missing_fields", []) or [])
         if result.success and payload is not None:
             if "currency" in fields_missing and getattr(payload, "price", None) is not None:
                 return "missing_critical_data"

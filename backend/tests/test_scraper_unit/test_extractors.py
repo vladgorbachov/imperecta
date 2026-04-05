@@ -2,8 +2,12 @@
 
 import pytest
 
+from bs4 import BeautifulSoup
+
 from app.modules.scraper.extractors import (
     ExtractedProduct,
+    extract_from_jsonld,
+    merge_and_finalize,
     merge_results,
     parse_price_text,
 )
@@ -24,6 +28,27 @@ def test_merge_results():
     assert merged.title == "A"
     assert merged.price == 99.5
     assert merged.image_url == "https://img.example/1.jpg"
+
+
+def test_merge_and_finalize_fills_title_from_document():
+    """merge_and_finalize applies DOM fallback when all extractors omit title."""
+    html = "<html><head><title>Doc Title</title></head><body></body></html>"
+    soup = BeautifulSoup(html, "html.parser")
+    merged = merge_and_finalize(soup, "https://shop.example/p/item-one", ExtractedProduct())
+    assert merged.title == "Doc Title"
+
+
+def test_extract_from_jsonld_uses_page_title_when_name_missing():
+    """JSON-LD Product without name still yields title via _ensure_title."""
+    html = """
+    <html><head><title>Shelf Label</title>
+    <script type="application/ld+json">
+    {"@type":"Product","offers":{"price":"3","priceCurrency":"USD"}}
+    </script></head><body></body></html>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    ep = extract_from_jsonld(soup, "https://example.com/p/abc")
+    assert ep.title == "Shelf Label"
 
 
 def test_parse_price_text():
@@ -204,12 +229,12 @@ def test_determine_log_status_is_empty():
     )
 
 
-def test_determine_log_status_currency_in_fields_missing():
+def test_determine_log_status_currency_in_missing_fields():
     svc = GlobalScrapeService.__new__(GlobalScrapeService)
     r = PoolScrapeResult(
         success=True,
         url="u",
         data=ExtractedProduct(title="T", price=9.0, currency=None),
-        fields_missing=["currency", "image_url"],
+        missing_fields=["currency", "image_url"],
     )
     assert svc._determine_log_status(r, is_partial=True, data=r.data) == "missing_critical_data"

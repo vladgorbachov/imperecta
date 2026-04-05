@@ -25,8 +25,8 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Drift repair: stamp when v2 exists but alembic_version was lost (before 007 chain).
-_STAMP_DRIFT_REVISION = "006_scrape_logs_status_length"
+# Drift repair: stamp when v2 exists but alembic_version was lost (before full chain).
+_STAMP_DRIFT_REVISION = "008_fix_alembic_version_length"
 
 
 def render_item(type_, obj, autogen_context):
@@ -58,7 +58,7 @@ def do_run_migrations(connection: Connection) -> None:
         text(
             """
             CREATE TABLE IF NOT EXISTS alembic_meta.alembic_version (
-                version_num VARCHAR(32) NOT NULL,
+                version_num VARCHAR(255) NOT NULL,
                 CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
             )
             """

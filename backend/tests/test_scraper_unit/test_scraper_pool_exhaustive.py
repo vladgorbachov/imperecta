@@ -38,7 +38,7 @@ async def test_scrape_product_parse_error_in_extract(monkeypatch):
         raise ValueError("parse")
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
-    monkeypatch.setattr(sp, "merge_results", boom)
+    monkeypatch.setattr(sp, "merge_and_finalize", boom)
     r = await pool.scrape_product("https://shop.example/p/2")
     assert not r.success and "parse_error" in (r.error or "")
 
@@ -57,7 +57,7 @@ async def test_scrape_product_price_overflow_discarded(monkeypatch):
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
     r = await pool.scrape_product("https://x.com/p")
-    assert not r.success and r.error == "price_not_found"
+    assert not r.success and r.error == "price_overflow"
 
 
 @pytest.mark.asyncio

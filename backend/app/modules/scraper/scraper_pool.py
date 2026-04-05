@@ -24,7 +24,7 @@ from app.modules.scraper.extractors import (
     extract_from_meta_tags,
     extract_product_links,
     extract_with_custom_selectors,
-    merge_results,
+    merge_and_finalize,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,8 @@ HTTP_TIMEOUT_SEC = 25.0
 DECODO_TIMEOUT_SEC = 60.0
 PLAYWRIGHT_GOTO_TIMEOUT_MS = 35_000
 PLAYWRIGHT_WAIT_MS = 2_500
+# Cap raw HTML attached to PoolScrapeResult when Decodo is off (debug only).
+_MAX_DEBUG_RAW_HTML_CHARS = 200_000
 
 
 @dataclass
@@ -48,7 +50,8 @@ class PoolScrapeResult:
     - System/mandatory: success, url, error
     - Extracted data container: data
     - Technical: scraper_layer, duration_ms
-    - Derived quality flags: is_partial, is_empty, fields_extracted, fields_missing
+    - Derived quality flags: is_partial, is_empty, extracted_fields, missing_fields
+    - Persistence: log_status (set by GlobalScrapeService); raw_html when debugging without Decodo
     """
 
     # System
@@ -66,8 +69,10 @@ class PoolScrapeResult:
     # Derived quality flags (populated by scraper_pool before return)
     is_partial: bool = False
     is_empty: bool = False
-    fields_extracted: list[str] = field(default_factory=list)
-    fields_missing: list[str] = field(default_factory=list)
+    extracted_fields: list[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
+    log_status: str | None = None
+    raw_html: str | None = None
 
 
 @dataclass
@@ -104,7 +109,17 @@ class ScraperPool:
         used_layer = None
         last_error = "fetch_failed"
         for layer_name in layers:
+            layer_started = time.perf_counter()
             html, layer_err = await self._fetch_layer_with_retries(layer_name, url)
+            layer_ms = int((time.perf_counter() - layer_started) * 1000)
+            logger.info(
+                "scrape_layer layer=%s duration_ms=%s ok=%s error=%s url=%s",
+                layer_name,
+                layer_ms,
+                bool(html),
+                (layer_err or "")[:500],
+                url[:120],
+            )
             if html:
                 used_layer = layer_name
                 break
@@ -112,6 +127,10 @@ class ScraperPool:
                 last_error = layer_err
 
         duration_ms = int((time.perf_counter() - started) * 1000)
+        raw_debug: str | None = None
+        if html and not settings.decodo_enabled:
+            raw_debug = html[:_MAX_DEBUG_RAW_HTML_CHARS]
+
         if not html:
             return PoolScrapeResult(
                 success=False,
@@ -121,6 +140,7 @@ class ScraperPool:
                 scraper_layer=None,
                 duration_ms=duration_ms,
                 is_empty=True,
+                raw_html=raw_debug,
             )
 
         try:
@@ -134,16 +154,26 @@ class ScraperPool:
                 data=None,
                 scraper_layer=used_layer,
                 duration_ms=duration_ms,
+                raw_html=raw_debug,
             )
 
-        if merged.price is not None and (
-            merged.price > MAX_VALID_PRICE or merged.price <= 0
-        ):
+        if merged.price is not None and merged.price > MAX_VALID_PRICE:
             logger.warning(
                 "Price overflow %.2f for %s, discarding",
                 merged.price,
                 url[:80],
             )
+            return PoolScrapeResult(
+                success=False,
+                url=url,
+                error="price_overflow",
+                data=None,
+                scraper_layer=used_layer,
+                duration_ms=duration_ms,
+                is_empty=not bool(merged.title),
+                raw_html=raw_debug,
+            )
+        if merged.price is not None and merged.price <= 0:
             merged.price = None
         if merged.price is None:
             return PoolScrapeResult(
@@ -154,6 +184,7 @@ class ScraperPool:
                 scraper_layer=used_layer,
                 duration_ms=duration_ms,
                 is_empty=not bool(merged.title),
+                raw_html=raw_debug,
             )
 
         logger.info(
@@ -188,8 +219,9 @@ class ScraperPool:
             duration_ms=duration_ms,
             is_partial=is_partial,
             is_empty=is_empty,
-            fields_extracted=extracted_fields,
-            fields_missing=missing_fields,
+            extracted_fields=extracted_fields,
+            missing_fields=missing_fields,
+            raw_html=raw_debug,
         )
 
     async def fetch_html(self, url: str, requires_js: bool = False) -> str | None:
@@ -406,12 +438,12 @@ class ScraperPool:
         custom_selectors: dict | None,
     ) -> ExtractedProduct:
         soup = BeautifulSoup(html, "html.parser")
-        jsonld = extract_from_jsonld(soup)
-        meta = extract_from_meta_tags(soup)
+        jsonld = extract_from_jsonld(soup, url)
+        meta = extract_from_meta_tags(soup, url)
         custom = (
-            extract_with_custom_selectors(soup, custom_selectors)
+            extract_with_custom_selectors(soup, custom_selectors, url)
             if custom_selectors
             else ExtractedProduct()
         )
         auto = extract_auto_detect(soup, url)
-        return merge_results(jsonld, meta, custom, auto)
+        return merge_and_finalize(soup, url, jsonld, meta, custom, auto)

@@ -19,6 +19,9 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+# Max chars stored for debug/raw extraction traces (avoid huge strings in logs).
+_MAX_TITLE_LEN = 1000
+
 _CURRENCY_SYMBOLS = {
     "$": "USD",
     "€": "EUR",
@@ -76,6 +79,42 @@ class ExtractedProduct:
         return [field_name for field_name in required if getattr(self, field_name) is None]
 
 
+def _fallback_title_from_page(soup: BeautifulSoup, page_url: str = "") -> str | None:
+    """Derive a non-empty title when Product name / og:title are absent."""
+    if soup.title and soup.title.string:
+        raw = soup.title.string.strip()
+        if raw:
+            for sep in ("|", "—", "-"):
+                if sep in raw:
+                    raw = raw.split(sep, 1)[0].strip()
+                    break
+            if raw:
+                return raw[:_MAX_TITLE_LEN]
+    h1 = soup.find("h1")
+    if h1:
+        t = h1.get_text(strip=True)
+        if t:
+            return t[:_MAX_TITLE_LEN]
+    if page_url:
+        parsed = urlparse(page_url)
+        segments = [s for s in parsed.path.split("/") if s]
+        if segments:
+            last = segments[-1].replace("-", " ").replace("_", " ").strip()
+            if last and len(last) > 2:
+                return last[:_MAX_TITLE_LEN]
+    return None
+
+
+def _ensure_title(ep: ExtractedProduct, soup: BeautifulSoup, page_url: str = "") -> None:
+    """Guarantee title is set when the DOM offers any reasonable fallback."""
+    cur = getattr(ep, "title", None)
+    if cur is not None and str(cur).strip():
+        return
+    fb = _fallback_title_from_page(soup, page_url)
+    if fb:
+        ep.title = fb
+
+
 def _find_product_nodes(item: dict) -> list[dict]:
     nodes: list[dict] = []
     node_type = item.get("@type")
@@ -99,7 +138,7 @@ def _find_product_nodes(item: dict) -> list[dict]:
     return nodes
 
 
-def extract_from_jsonld(soup: BeautifulSoup) -> ExtractedProduct:
+def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedProduct:
     """Level 1: JSON-LD."""
     scripts = soup.find_all("script", type="application/ld+json")
     for script in scripts:
@@ -146,7 +185,7 @@ def extract_from_jsonld(soup: BeautifulSoup) -> ExtractedProduct:
                 if isinstance(currency, str):
                     currency = currency.upper()
 
-                return ExtractedProduct(
+                ep = ExtractedProduct(
                     title=product.get("name"),
                     price=price,
                     original_price=original_price,
@@ -154,10 +193,14 @@ def extract_from_jsonld(soup: BeautifulSoup) -> ExtractedProduct:
                     image_url=image if isinstance(image, str) else None,
                     description=description if isinstance(description, str) else None,
                 )
-    return ExtractedProduct()
+                _ensure_title(ep, soup, page_url)
+                return ep
+    ep = ExtractedProduct()
+    _ensure_title(ep, soup, page_url)
+    return ep
 
 
-def extract_from_meta_tags(soup: BeautifulSoup) -> ExtractedProduct:
+def extract_from_meta_tags(soup: BeautifulSoup, page_url: str = "") -> ExtractedProduct:
     """Level 2: OpenGraph + meta."""
     result = ExtractedProduct()
     price_props = [
@@ -203,10 +246,15 @@ def extract_from_meta_tags(soup: BeautifulSoup) -> ExtractedProduct:
     if desc and desc.get("content"):
         result.description = str(desc["content"]).strip()[:2000]
 
+    _ensure_title(result, soup, page_url)
     return result
 
 
-def extract_with_custom_selectors(soup: BeautifulSoup, selectors: dict) -> ExtractedProduct:
+def extract_with_custom_selectors(
+    soup: BeautifulSoup,
+    selectors: dict,
+    page_url: str = "",
+) -> ExtractedProduct:
     """
     Level 3 (optional): Custom CSS selectors from dim_marketplace (or listing scraper_config).
     selectors keys: "title", "price", "image", "original_price"
@@ -239,6 +287,7 @@ def extract_with_custom_selectors(soup: BeautifulSoup, selectors: dict) -> Extra
         if element:
             result.original_price = parse_price_text(element.get_text(strip=True))
 
+    _ensure_title(result, soup, page_url)
     return result
 
 
@@ -346,6 +395,7 @@ def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
         if desc and desc.get("content"):
             result.description = str(desc["content"]).strip()[:2000]
 
+    _ensure_title(result, soup, url)
     return result
 
 
@@ -394,6 +444,23 @@ def merge_results(*results: ExtractedProduct) -> ExtractedProduct:
             if value is not None:
                 setattr(merged, field_name, value)
                 break
+    return merged
+
+
+def merge_and_finalize(
+    soup: BeautifulSoup,
+    page_url: str,
+    *results: ExtractedProduct,
+) -> ExtractedProduct:
+    """Merge extractor outputs and ensure title fallback from the full DOM."""
+    merged = merge_results(*results)
+    _ensure_title(merged, soup, page_url)
+    logger.debug(
+        "EXTRACTED title=%s price=%s currency=%s",
+        merged.title,
+        merged.price,
+        merged.currency,
+    )
     return merged
 
 
