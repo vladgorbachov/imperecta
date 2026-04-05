@@ -1,19 +1,25 @@
 # Parsers Audit — Imperecta
 
-## 0. Актуализация (2026-04-01)
+## 0. Актуализация (2026-04-04)
 
 - `backend/app/modules/scraper/engine.py` отсутствует в репозитории (не используется).
+- **Alembic head:** `007_fix_migration_deadlock_and_meta` — цепочка **`005`** (CHECK + **`technical_error`**, идемпотентно), **`006`** (**`status` `VARCHAR(50)`**), **`007`** (мета Alembic, таймауты). ORM **`ScrapeLog.status`** — согласован с **`VARCHAR(50)`** и **`errors.SCRAPE_LOG_STATUSES`**.
 - Каноничный runtime path парсера: `tasks -> discovery/service -> scraper_pool -> extractors`.
 - `ScraperPool` является единственным fetch+extract facade.
 - В **`service.py` (`GlobalScrapeService`)** персистенция pool-scrape:
   - **sync `Session`** (Celery); **`_run_coro_in_worker`** только для async `ScraperPool.scrape_product` (избегание `MissingGreenlet` в worker).
-  - `fact_price` только при **title + price > 0 + currency**; `in_stock` через optional/`getattr` (у **`ExtractedProduct` нет поля `in_stock`**).
+  - При **`result.success`:** немедленно **`listing.last_error = None`**, **`listing.consecutive_errors = 0`** (сброс устаревшей ошибки). При **`not result.success`:** инкремент `consecutive_errors` и **`last_error`**. Успех без тела `data` не увеличивает счётчик ошибок.
+  - **`fact_price`:** пишется только если **`product_name_ok`** — непустой **`getattr(data, "product_name")` или `getattr(data, "title")`**, плюс **`price > 0`**, плюс непустая **валюта**. **`dim_product.name`:** если `product_name` пустой, но есть **`title`**, имя сохраняется с **title**; если `product_name` задан — обновление по прежним правилам placeholder/replace.
+  - **`_today_date_id`:** `SELECT` существующей строки **`dim_date`** → при отсутствии — **`INSERT … ON CONFLICT (date_id) DO NOTHING`** (PostgreSQL) → **`session.flush()`** → повторный **`SELECT`** (идемпотентность, снижение deadlock при конкуренции за календарную строку).
+  - **`last_in_stock`:** `result.in_stock` → `data.in_stock` → **`False`** для денормализации и UI.
   - `last_checked_at` на каждой попытке; **`scrape_logs` всегда** (при существующем листинге).
-  - Статусы лога: в т.ч. **`missing_critical_data`**, **`price_not_found`** (см. `_determine_log_status` + `has_title`/`has_price`); debug `logger.info` после результата пула.
+  - Логи: **`EXTRACTED →`** (сырые поля пула), **`FINAL PERSIST`** (перед commit), после успешного commit — **`SCRAPE COMPLETE listing_id=… status=… price=…`**, затем **`pool_scrape done`**.
+  - Статусы лога: **`missing_critical_data`**, **`price_not_found`**, **`technical_error`** и др.; **`technical_error`** также пишется из **`tasks._persist_technical_error_log`** при исключениях в pool Celery-задачах. **`_determine_log_status`** при вызове из `scrape_product` получает **`data=`**; для unit-тестов без `data=` сохраняется ветка с **`has_title`/`has_price`**.
 - Внутренние parser-контракты: `PoolScrapeResult` с quality-полями; `DiscoveryResult` в discovery.
 - Beat: `celery_app.conf.beat_schedule = {}`.
 - **Marketplaces:** как ранее; **POST `/deduplicate`** — заглушка.
 - **Pool Celery tasks (`tasks.py`):** `_run_scrape_all_pool` — **синхронный** `sync_session_factory`, без `_run_async` для этого пути; discovery — async engine + `_run_async`.
+- **Тесты:** `backend/tests/test_scraper_unit/` и `backend/tests/test_scraper_integration/` + `backend/tests/fixtures/scraper_fixtures.py`. Файлы **`test_scraper_persistence.py`** / **`test_scraper_extractors.py`** в корне `tests/` удалены.
 - **Git:** не добавлять `--trailer "Made-with: Cursor"` в коммиты.
 
 ## 0.1) Архив актуализации (2026-03-31)
@@ -216,6 +222,7 @@ Router:
 - Для **discovery** — локальный async engine per task run.
 - Для **pool scrape** — один sync session на run; порог stale **`6h`**.
 - Time limits: `scrape_pool_product` soft 120s / hard 150s.
+- При необработанном исключении в pool-пути — **`_persist_technical_error_log`** пишет **`scrape_logs`** со статусом **`technical_error`** (нужны миграции **005–007**: CHECK, **`VARCHAR(50)`**, repair **`alembic_meta`**).
 
 ## 7.2 `modules/scraper/discovery.py` (crawler)
 
@@ -279,21 +286,26 @@ Router:
 ## 7.5 `modules/scraper/service.py` (DB persistence layer)
 
 Назначение:
-- Связка `FactListing -> Scrape -> FactPrice` + `ScrapeLog`.
+- Связка `FactListing -> Scrape -> FactPrice` + `ScrapeLog` + обновление `DimProduct` (имя, картинка).
 
 Ключевые сценарии:
 - `scrape_product(listing_id)` — **синхронный метод**:
   - читает listing и marketplace config/selectors,
   - вызывает **`_run_coro_in_worker(self.pool.scrape_product(...))`**,
-  - обновляет denormalized `FactListing.last_*`,
-  - `FactPrice` только при валидном title/price/currency; delete same day + insert; `price_change_pct`.
+  - при **`result.success`** сбрасывает **`last_error`** и **`consecutive_errors`** (legacy cleanup),
+  - при **`not result.success`** увеличивает **`consecutive_errors`** и выставляет **`last_error`**,
+  - обновляет denormalized **`FactListing.last_*`** при наличии `data`,
+  - **`FactPrice`:** только при **`product_name` или `title`**, **`price > 0`**, непустая **валюта**; для текущего дня — delete по `(listing_id, date_id)` + insert; **`price_change_pct`** от предыдущего снимка,
+  - **`dim_product`:** при отсутствии `product_name` заполняет имя из **`title`**; при наличии `product_name` — обновление при placeholder (см. **`_should_replace_placeholder_name`**),
+  - пишет **`scrape_logs`**, затем **`commit`**; при ошибке commit — **`rollback`** и возврат `persist_failed`.
 - `_today_date_id`:
-  - гарантирует наличие `dim_date` surrogate.
+  - **`SELECT`** по **`date_id`** (сегодня UTC, YYYYMMDD),
+  - если нет строки — **`INSERT` `DimDate` + `ON CONFLICT (date_id) DO NOTHING`**, **`flush`**, **`SELECT` снова** (или RuntimeError если строка так и не видна).
 
 Наблюдения:
-- Ошибки: `consecutive_errors`, `last_error`.
-- Commit/rollback при persist errors.
-- Debug-логирование результата пула; статусы `scrape_logs` с учётом `missing_critical_data` / `price_not_found` при успехе с неполными данными.
+- Логирование: **`EXTRACTED →`**, **`FINAL PERSIST`**, после успешного commit — **`SCRAPE COMPLETE`**, **`pool_scrape done`**.
+- Статусы `scrape_logs`: **`missing_critical_data`**, **`price_not_found`** и др. через **`_determine_log_status`**.
+- Тесты: **`test_scraper_unit/`**, **`test_scraper_integration/`**, **`fixtures/scraper_fixtures.py`**.
 
 ## 7.6 Runtime contracts (current)
 

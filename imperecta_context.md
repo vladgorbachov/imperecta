@@ -1,13 +1,22 @@
 # Imperecta Context (Current State)
 
-## 0) Snapshot (2026-04-01)
+## 0) Snapshot (2026-04-04)
 
-- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file.
+- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file (Alembic head **007**, `scrape_logs.status` **VARCHAR(50)**).
+- **Alembic head:** `007_fix_migration_deadlock_and_meta` — цепочка **`005`** (идемпотентный CHECK + **`technical_error`**), **`006`** (`status` → **`VARCHAR(50)`**), **`007`** (repair **`alembic_meta`**, таймауты, опциональный reset пустого `public`). ORM **`ScrapeLog.status`** = **`String(50)`**; см. **`errors.SCRAPE_LOG_STATUSES`**.
 - Parser runtime: no `engine.py` under `modules/scraper`; path remains `tasks → discovery/service → scraper_pool → extractors`.
 - **Marketplaces:** `MarketplaceService` + `modules/marketplaces/api.py` persist rows in `dim_marketplace` (add-by-url, import, delete, quotas, `requires_js`, logs). **POST `/api/admin/marketplaces/deduplicate`** is still a no-op merge (returns a message). Pool/diagnostics/cleanup: `core/api_admin` + `scraper/api`.
 - Celery Beat: `scheduler.py` sets `celery_app.conf.beat_schedule = {}` (no periodic enqueue).
 - **Pool scraping in workers:** `GlobalScrapeService` uses **sync `Session`** (`sync_session_factory` from `database.py`). Only `ScraperPool.scrape_product` runs async inside `_run_coro_in_worker(...)` to avoid `MissingGreenlet` in prefork workers. Discovery tasks still use a dedicated async engine + `_run_async`.
-- **`scrape_logs`:** extended status values include `missing_critical_data` (model CHECK + `VARCHAR(32)`); mapping uses extracted title/price presence; debug logs after each pool result for troubleshooting Decodo vs `fact_price` skips.
+- **`GlobalScrapeService.scrape_product` (persistence layer, `modules/scraper/service.py`):**
+  - On **`result.success`:** clears **legacy** `listing.last_error` and `listing.consecutive_errors` immediately (before branching on `data`). Failed pool responses (`not result.success`) still increment `consecutive_errors` and set `last_error`; a successful response with **no** extracted `data` no longer increments the error counter (only hard failures do).
+  - **`fact_price` write gate:** `product_name_ok` is true if **`product_name` or `title`** is present (extractors often populate `title` only). Row is written only when `product_name_ok`, `price > 0`, and non-empty **currency** (no default USD).
+  - **`dim_product`:** if `product_name` is empty but **`title`** is present, **`dim_product.name`** (and `name_normalized`) are updated from **title** (placeholder replacement path still applies when `product_name` is non-empty).
+  - **`last_in_stock`:** `getattr(result, "in_stock", None) or getattr(data, "in_stock", None) or False` so listings and `fact_price.in_stock` are never left as ambiguous `NULL` when availability is unknown (UI can show a boolean).
+  - **`dim_date` for today:** `_today_date_id` is **deadlock-safe**: `SELECT` by `date_id` → if missing, **`INSERT … ON CONFLICT (date_id) DO NOTHING`** (PostgreSQL) → `flush()` → **`SELECT` again**; concurrent workers do not rely on `add`+`flush` alone.
+  - **Logging (troubleshooting):** `EXTRACTED →` (raw extractor fields), `FINAL PERSIST` (product_name, title, price, currency, in_stock, `log_status`), after successful DB commit **`SCRAPE COMPLETE listing_id=… status=… price=…`**, then `pool_scrape done`.
+- **`scrape_logs`:** extended status values include `missing_critical_data`, `price_not_found`, **`technical_error`** (model CHECK + **`VARCHAR(50)`**; Celery `tasks.py` — **`_persist_technical_error_log`** при необработанных исключениях в pool-задачах). `_determine_log_status` takes optional `data=` from `scrape_product`; unit tests may pass explicit `has_title`/`has_price` without `data=`. When `data` is passed, logic distinguishes dataclasses **with** a `product_name` field (strict catalog-quality rules) vs legacy **title-only** payloads (`ExtractedProduct`).
+- **Tests (scraper):** каталоги **`backend/tests/test_scraper_unit/`** и **`backend/tests/test_scraper_integration/`** (в т.ч. **`test_migrations_upgrade.py`**: `alembic upgrade head`, длина колонки `status`, двойной прогон head) плюс **`backend/tests/fixtures/scraper_fixtures.py`**. Отдельные файлы `test_scraper_persistence.py` / `test_scraper_extractors.py` в корне `tests/` **удалены** — сценарии перенесены в `test_scraper_unit/` (в т.ч. persistence, extractors, tasks, `technical_error`).
 - **Git policy:** do **not** add commit trailers such as `Made-with: Cursor`.
 
 ## 0.1) Parser Runtime Update (2026-03-24)
@@ -100,7 +109,15 @@ Current chain:
 1. `001_v2_schema`
 2. `002_v2_additions`
 3. `003_fix_users_columns`
-4. `004_fix_real_state` (current head)
+4. `004_fix_real_state`
+5. `005_scrape_logs_technical_error`
+6. `006_scrape_logs_status_length`
+7. `007_fix_migration_deadlock_and_meta` (current head)
+
+### Why 005–007 exist
+- **005:** Ensures DB CHECK `ck_scrape_logs_status` allows **`technical_error`** (idempotent if `scrape_logs` missing), aligned with ORM and worker error logging.
+- **006:** Widens **`scrape_logs.status`** to **`VARCHAR(50)`** for production drift (e.g. legacy `VARCHAR(20)`).
+- **007:** Repairs **`alembic_meta.alembic_version`** when empty but v2 exists; sets session DDL timeouts; optional recreate of empty **`public`** only when safe (see migration file). **`env.py`** mirrors meta repair + `render_item` + `lock_timeout`/`statement_timeout` in `connect_args`.
 
 ### Why 003 and 004 exist
 - `003_fix_users_columns` adds missing `users` fields with `IF NOT EXISTS` and retries `pg_trgm` extension creation.
@@ -143,8 +160,8 @@ Key runtime expectation:
 - Background jobs writing data while schema is in transition.
 
 ### Controls in place
-- Migration guards in Alembic env for v2 detection/reset behavior.
-- SQL statement splitter for asyncpg-safe single-statement execution.
+- Migration guards in Alembic env for v2 detection/reset behavior, **`alembic_meta`** table creation, and drift stamp **`006`** when v2 exists but version rows are missing.
+- SQL statement splitter for asyncpg-safe single-statement execution (migrations **001**, **005–007**).
 - Additive fix migrations (`003`, `004`) that avoid brittle one-shot assumptions.
 - Disabled beat schedule during stabilization.
 
@@ -164,13 +181,16 @@ Key runtime expectation:
   - `backend/alembic/versions/002_v2_additions.py`
   - `backend/alembic/versions/003_fix_users_columns.py`
   - `backend/alembic/versions/004_fix_real_state.py`
+  - `backend/alembic/versions/005_scrape_logs_technical_error.py`
+  - `backend/alembic/versions/006_scrape_logs_status_length.py`
+  - `backend/alembic/versions/007_fix_migration_deadlock_and_meta.py`
 
 ---
 
 ## 10) Practical Verification Checklist
 
 For deployment validation:
-- `alembic upgrade head` reaches `004_fix_real_state` without errors.
+- `alembic upgrade head` reaches `007_fix_migration_deadlock_and_meta` without errors.
 - App startup succeeds (`from app.main import app`).
 - `users` table contains v2-required columns.
 - Legacy tables/types are absent or neutralized.
