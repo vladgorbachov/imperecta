@@ -3,7 +3,6 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
 
 from app.common.deps import CurrentSuperuser, CurrentUser, DbSession
 from app.modules.product_pool.schemas import (
@@ -16,20 +15,6 @@ from app.modules.product_pool.service import ProductPoolService
 router = APIRouter(prefix="/pool", tags=["product-pool"])
 
 _MIG = "Endpoint pending migration to v2 schema"
-
-
-class PoolBulkDeleteBody(BaseModel):
-    product_ids: list[int]
-
-
-@router.delete("/products/bulk")
-async def bulk_delete_pool_products(
-    body: PoolBulkDeleteBody,
-    _current_user: CurrentSuperuser,
-    db: DbSession,
-) -> dict:
-    _ = db, body
-    return {"deleted": 0, "message": _MIG}
 
 
 @router.get("/products", response_model=PoolProductsResponse)

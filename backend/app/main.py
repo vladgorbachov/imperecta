@@ -2,7 +2,11 @@
 
 import asyncio
 import logging
+import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
@@ -41,8 +45,35 @@ if settings.sentry_dsn:
     sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
 
 
+async def _run_alembic_upgrade_head() -> None:
+    """Apply DB migrations via subprocess (same as Docker CMD); failures are logged only."""
+    backend_root = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "DATABASE_URL": settings.database_url}
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=str(backend_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode != 0:
+            logger.warning(
+                "alembic upgrade head failed (exit=%s): stderr=%s stdout=%s",
+                proc.returncode,
+                proc.stderr,
+                proc.stdout,
+            )
+        else:
+            logger.info("alembic upgrade head completed successfully")
+    except Exception as exc:
+        logger.warning("alembic upgrade head raised: %s", exc)
+
+
 async def _ensure_tables() -> None:
-    """Create tables in background so app can accept healthchecks immediately."""
+    """ORM safety net after Alembic (no-op if migrations already created objects)."""
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -92,10 +123,17 @@ async def _setup_telegram_webhook() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start app immediately; create DB tables in background for Railway healthcheck."""
-    asyncio.create_task(_ensure_tables())
+    """Run migrations first, then bootstrap data; Telegram webhook in background."""
+    await _run_alembic_upgrade_head()
+    try:
+        await _ensure_superuser()
+    except Exception as exc:
+        logger.warning("ensure_superuser failed: %s", exc)
+    try:
+        await _ensure_tables()
+    except Exception as exc:
+        logger.warning("ensure_tables failed: %s", exc)
     asyncio.create_task(_setup_telegram_webhook())
-    asyncio.create_task(_ensure_superuser())
     yield
 
 

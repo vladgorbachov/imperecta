@@ -189,8 +189,3 @@ async def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession) 
     return _build_user_response(current_user)
 
 
-@router.delete("/avatar")
-async def delete_avatar(current_user: CurrentUser, db: DbSession) -> dict:
-    current_user.avatar_url = None
-    await db.flush()
-    return {"message": "Avatar removed"}

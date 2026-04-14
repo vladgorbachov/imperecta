@@ -17,20 +17,10 @@ def test_run_async_executes_coro():
     assert scraper_tasks._run_async(add_one()) == 41
 
 
-def test_scrape_single_deprecated():
-    out = scraper_tasks.scrape_single.run("legacy-id")
-    assert out.get("status") == "deprecated"
-
-
-def test_scrape_user_products_enqueues(monkeypatch):
-    called = {}
-
-    def fake_delay():
-        called["ok"] = True
-
-    monkeypatch.setattr(scraper_tasks.scrape_all_pool_products, "delay", fake_delay)
-    scraper_tasks.scrape_user_products("user-uuid")
-    assert called.get("ok") is True
+def test_legacy_tasks_removed():
+    assert not hasattr(scraper_tasks, "scrape_single")
+    assert not hasattr(scraper_tasks, "scrape_user_products")
+    assert not hasattr(scraper_tasks, "scrape_all")
 
 
 @pytest.mark.integration

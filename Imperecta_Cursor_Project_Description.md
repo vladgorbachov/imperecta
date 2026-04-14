@@ -3,7 +3,7 @@
 ## Актуализация (текущее состояние, 2026-04-04)
 
 - **Git / коммиты:** запрещено добавлять в коммиты трейлеры вида `--trailer "Made-with: Cursor"` и любые аналогичные метки «сделано ассистентом»; сообщения коммитов — обычные, без таких трейлеров.
-- **Alembic head:** `007_fix_migration_deadlock_and_meta` — после **`005`** (идемпотентный CHECK `ck_scrape_logs_status` + **`technical_error`**), **`006`** (`scrape_logs.status` → **`VARCHAR(50)`** на drifted БД), **`007`** (восстановление **`alembic_meta.alembic_version`**, таймауты сессии, опциональное пересоздание пустого `public`). ORM `ScrapeLog.status` — **`String(50)`**; канонические строки статусов — **`errors.SCRAPE_LOG_STATUSES`**.
+- **Alembic head:** `009_full_v2_schema_rebuild` — идемпотентная полная DDL v2 (**31** таблица в `public`, партиции **`fact_price`**, MV, сиды **`dim_date` / `dim_currency` / `dim_country`**). Цепочка **`001`–`008`** сохранена; **`008`** — ширина **`alembic_meta.alembic_version.version_num`** (VARCHAR(255)); **`007`** — repair meta, таймауты, опциональный сброс пустого **`public`**; **`005`–`006`** — **`scrape_logs`**. **`alembic/env.py`:** после **`run_sync(do_run_migrations)`** — **`await connection.commit()`** (фикс отката DDL в async). Drift stamp: **`009_full_v2_schema_rebuild`**. **`app/main.py`:** при старте — **`alembic upgrade head`**, затем **`ensure_superuser`**, **`create_all`** (ошибки не валят процесс). ORM `ScrapeLog.status` — **`String(50)`**; канонические строки статусов — **`errors.SCRAPE_LOG_STATUSES`**.
 - **Celery pool tasks:** при необработанных исключениях в worker вызывается **`_persist_technical_error_log`** (`tasks.py`) — запись в `scrape_logs` со статусом `technical_error` и трассой (если листинг существует).
 - **Pool scrape в Celery (greenlet / MissingGreenlet):** путь `scrape_all_pool_products` / `scrape_all` / `scrape_pool_product` / `check_pool_completeness` использует **`sync_session_factory` + psycopg2** из `database.py` для ORM; **`GlobalScrapeService.scrape_product`** — **синхронный `Session`**. Асинхронный **`ScraperPool.scrape_product`** вызывается через **`_run_coro_in_worker`** (отдельный event loop на вызов). Discovery-задачи по-прежнему через локальный async engine + `_run_async`.
 - **`ExtractedProduct`:** поля `title`, `price`, `currency`, … — **нет `in_stock`**; наличие на складе берётся через **`getattr`/optional**, без хардкода `True`. Для **`last_in_stock`** на листинге и в **`fact_price`:** цепочка **`result.in_stock` → `data.in_stock` → `False`**, чтобы пустое состояние не оставалось неоднозначным `NULL` в UI.
@@ -15,18 +15,18 @@
 
 ## Актуализация (архив, 2026-03-31)
 
-- **Alembic chain (actual head):** `001_v2_schema` → `002_v2_additions` → `003_fix_users_columns` → `004_fix_real_state` → `005_scrape_logs_technical_error` → `006_scrape_logs_status_length` → **`007_fix_migration_deadlock_and_meta` (head)**. `004_fix_real_state.py` — repair-слой для production: `users.plan` → `VARCHAR(20)`, legacy cleanup, app-таблицы v2, `pg_trgm`. **`005`** — идемпотентный CHECK `scrape_logs.status` + **`technical_error`**. **`006`** — ширина колонки **`status`** до **`VARCHAR(50)`**. **`007`** — мета Alembic, таймауты DDL, безопасный optional `DROP` только для пустого `public` при неполном v2.
+- **Alembic chain (исторический снимок):** до появления **`008`/`009`** head считался **`007_fix_migration_deadlock_and_meta`**. `004_fix_real_state.py` — repair-слой для production: `users.plan` → `VARCHAR(20)`, legacy cleanup, app-таблицы v2, `pg_trgm`. **`005`** — идемпотентный CHECK `scrape_logs.status` + **`technical_error`**. **`006`** — ширина колонки **`status`** до **`VARCHAR(50)`**. **`007`** — мета Alembic, таймауты DDL, безопасный optional `DROP` только для пустого `public` при неполном v2.
 - **Parser runtime cleanup (2026-03-24):** `backend/app/modules/scraper/engine.py` удалён из production runtime path. Каноничный путь: `tasks -> discovery/service -> scraper_pool -> extractors`.
 - **Parser contracts (2026-03-24):** `PoolScrapeResult` расширен quality-полями (`is_partial`, `is_empty`, `fields_extracted`, `fields_missing`), `discover()` в `discovery.py` возвращает `DiscoveryResult` dataclass.
 - **Persistence hardening (2026-03-24):** в `scraper/service.py` удалены фейковые дефолты (`USD`, `in_stock=True`), `fact_price` пишется только при наличии currency, и добавлена обязательная запись в `scrape_logs` после каждой попытки scrape.
-- **Migration hardening:** в `backend/alembic/env.py` — `CREATE SCHEMA/TABLE` для **`alembic_meta.alembic_version`**, guard по **`dim_date`**, при пустой версии и наличии v2 — **досев** ревизии **`006_scrape_logs_status_length`** (drift repair); **`context.configure(..., compare_type=True, render_item=...)`**; **`connect_args["server_settings"]`**: **`lock_timeout`** 10s, **`statement_timeout`** 60s (+ **`search_path`** на Supabase). В **`001_v2_schema.py`** и миграциях **005–007** — **`_split_sql_statements`** + безопасный **`op.execute`** (один SQL statement на execute, asyncpg).
+- **Migration hardening:** в `backend/alembic/env.py` — `CREATE SCHEMA/TABLE` для **`alembic_meta.alembic_version`**, guard по **`dim_date`**, при пустой версии и наличии v2 — **досев** ревизии **`009_full_v2_schema_rebuild`** (drift repair); **`context.configure(..., compare_type=True, render_item=...)`**; **`connect_args["server_settings"]`**: **`lock_timeout`** 10s, **`statement_timeout`** 60s (+ **`search_path`** на Supabase); **после `run_sync` — `await connection.commit()`**. В **`001_v2_schema.py`**, **`009_*.py`** и миграциях **005–008** — **`_split_sql_statements`** + безопасный **`op.execute`** (один SQL statement на execute, asyncpg).
 - **Users migration path:** `001_v2_schema.py` сохраняет backup пользователей с `plan::text`, далее restore users в новую таблицу; `003` и `004` закрывают случаи, когда БД осталась в смешанном legacy/v2 состоянии.
 - **Marketplace migration policy:** backup/restore `admin_marketplaces` из `001_v2_schema.py` удалён. Миграция 001 больше переносит только users; строки `dim_marketplace` создаются через админ-API / импорт (не сиды в коде).
 - **Marketplaces admin API:** `modules/marketplaces/service.py` — `MarketplaceService` (CRUD для `dim_marketplace`): список, `add_by_url`, `import_from_text`, удаление, `update_marketplace` (в т.ч. `requires_js`), `recalculate_quotas`. `modules/marketplaces/api.py`: GET список (ответ в формате админ-UI), POST `/` и `/add-by-url`, POST `/import-file`, `/import-text`, DELETE по UUID, `/recalculate-quotas`, `/set-requires-js`, GET `/{id}/logs` (из `scrape_logs`). **POST `/deduplicate`** — пока без реализации дедупликации (возвращает сообщение, не 501). Диагностика пула и cleanup — по-прежнему `core/api_admin` и `scraper/api`. **GET `/api/competitors/marketplaces`** — список имён из `dim_marketplace` через `MarketplaceService`.
 - **Celery Beat status:** в `backend/app/workers/scheduler.py` расписание жёстко отключено: `celery_app.conf.beat_schedule = {}` (не закомментированный словарь задач, а пустой dict).
-- **DB reality vs old notes:** более ранние блоки в документе ниже могут упоминать устаревший head; источником истины считать раздел актуализации и файлы `backend/alembic/versions/` (текущий head — **`007_fix_migration_deadlock_and_meta`**).
+- **DB reality vs old notes:** более ранние блоки в документе ниже могут упоминать устаревший head; источником истины считать раздел актуализации и файлы `backend/alembic/versions/` (текущий head — **`009_full_v2_schema_rebuild`**).
 
-- **Hotfix forced migration (2026-03-21):** в `backend/alembic/env.py` добавлена защитная проверка фактического применения v2 перед `run_migrations()`. Если таблица `public.dim_date` отсутствует (случай stamped head без реального DDL), выполняется `DELETE FROM alembic_meta.alembic_version`, после чего миграции `001_v2_schema` и `002_v2_additions` запускаются повторно. В `context.configure(...)` включены `compare_type=True` и `render_item` (стабильное сравнение схемы для autogenerate). Дополнительно: при потере строк в **`alembic_version`** при живой v2 — досев **`006_scrape_logs_status_length`** до прогона цепочки.
+- **Hotfix forced migration (2026-03-21):** в `backend/alembic/env.py` добавлена защитная проверка фактического применения v2 перед `run_migrations()`. Если таблица `public.dim_date` отсутствует (случай stamped head без реального DDL), выполняется `DELETE FROM alembic_meta.alembic_version`, после чего миграции запускаются повторно. В `context.configure(...)` включены `compare_type=True` и `render_item` (стабильное сравнение схемы для autogenerate). Дополнительно: при потере строк в **`alembic_version`** при живой v2 — досев **`009_full_v2_schema_rebuild`** до прогона цепочки.
 - **Hotfix asyncpg statement safety (2026-03-21):** в `backend/alembic/versions/001_v2_schema.py` добавлен `_split_sql_statements()` и безопасная обёртка `op.execute`, которая разбивает SQL-батчи на отдельные statements. Это устраняет ошибки asyncpg вида "cannot insert multiple commands into a prepared statement" и гарантирует правило: один SQL statement на один execute.
 - **Hotfix Celery Beat freeze (2026-03-21):** в `backend/app/workers/scheduler.py` установлен пустой scheduler (`celery_app.conf.beat_schedule = {}`). Автоматический discovery/scraping/ingestion/digests/maintenance не запускается до поэтапной валидации парсеров на v2.
 
@@ -34,7 +34,7 @@
 - **Миграция `002_v2_additions` (base additions):** без DROP данных — `fact_crypto_price`, `fact_commodity_price`, `fact_fuel_price`; в `dim_marketplace` — поля discovery/scraping (quota, `products_in_pool`, `requires_js`, `rate_limit_delay`, custom CSS-селекторы, статусы last discovery); в `fact_listing` — `url_hash` (уникальный индекс, дедупликация URL); в `users` — `preferences` (JSONB, вместо legacy `markets_preferences`); исправление `dim_date.week_iso` через `EXTRACT(WEEK FROM full_date)`; `DROP EXTENSION IF EXISTS jsonb_plperl` (Supabase).
 - **ORM:** `backend/app/models/core.py`, `dimensions.py`, `facts.py`, `app_tables.py`; единый реэкспорт в `models/__init__.py` для Alembic metadata.
 - Backend в модульной архитектуре `backend/app/modules/*`. Роутеры из `modules/*` под префиксом `/api` в `main.py`.
-- **Alembic:** цепочка `001` → `002` → `003` → `004` → `005` → `006` → `007` (head); старая цепочка 001–016 из репозитория удалена.
+- **Alembic:** цепочка `001` → … → `008` → **`009_full_v2_schema_rebuild` (head)**; старая цепочка 001–016 из репозитория удалена.
 - **Digests:** `generate_digest` из `app.modules.ai_analyst.claude_client`.
 - **Celery:** `celery_app.conf.include`: `app.modules.scraper|alerts|digests|market_data.tasks`, `app.workers.cleanup_tasks`, `app.workers.maintenance_tasks`. Задачи обслуживания (ручной/будущий beat): `refresh_materialized_views`, `ensure_fact_price_partitions`. **Beat сейчас:** `celery_app.conf.beat_schedule = {}` в `scheduler.py` — периодические задачи не ставятся в очередь автоматически; целевые интервалы (MV :15, партиции 1-го числа, scrape/discovery/ingest/digests) применимы только после явного включения расписания.
 - **Decodo:** в `scraper/scraper_pool.py` — Decodo → httpx → Playwright; после успешного Decodo HTML не перезапрашивается. `scrape_pool_product` soft_time_limit=120, time_limit=150. **Price overflow:** MAX_VALID_PRICE=9_999_999_999.99 в scraper_pool и service; при overflow → price=None, discard. commit() в try/except с rollback. **_run_async:** shutdown_asyncgens перед loop.close() (Event loop is closed). **Celery:** broker_connection_retry, broker_transport_options retry_policy.
@@ -201,7 +201,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 - **Python 3.12** + **FastAPI** — REST API
 - **SQLAlchemy 2.0 (async)** + **asyncpg** — ORM и подключение к PostgreSQL
 - **SQLAlchemy (sync)** + **psycopg2** — sync_session_factory для Celery workers; ingest_market_data создаёт локальный async engine/session (не использует глобальный), чтобы избежать ошибки «different event loop» при повторном запуске
-- **Alembic** — миграции БД (head: `007_fix_migration_deadlock_and_meta`; таблица версий в схеме `alembic_meta`)
+- **Alembic** — миграции БД (head: **`009_full_v2_schema_rebuild`**; таблица версий в схеме **`alembic_meta`**, **`version_num` VARCHAR(255)**)
 - **Celery** + **Redis** — фоновые задачи (парсинг, алерты, дайджесты)
 - **Decodo Web Scraping API** — основной метод парсинга (managed, anti-bot; DECODO_USERNAME, DECODO_PASSWORD, DECODO_ENABLED)
 - **Playwright** — fallback для JS-rendered страниц при отключённом или недоступном Decodo
@@ -277,7 +277,7 @@ Imperecta — SaaS-платформа конкурентной разведки 
 imperecta/
 ├── backend/
 │   ├── alembic/
-│   │   ├── env.py                    # Alembic async; version_table_schema=alembic_meta
+│   │   ├── env.py                    # Alembic async; version_table_schema=alembic_meta; commit after run_sync
 │   │   └── versions/
 │   │       ├── 001_v2_schema.py      # Full v2 rebuild: dims, facts, seeds, MVs, fact_price partitions
 │   │       ├── 002_v2_additions.py   # Crypto/commodity/fuel facts, discovery cols, url_hash, preferences, fixes
@@ -286,6 +286,8 @@ imperecta/
 │   │       ├── 005_scrape_logs_technical_error.py # idempotent CHECK + technical_error
 │   │       ├── 006_scrape_logs_status_length.py   # status VARCHAR(50)
 │   │       ├── 007_fix_migration_deadlock_and_meta.py # alembic_meta repair, timeouts, safe public reset
+│   │       ├── 008_fix_alembic_version_length.py    # version_num VARCHAR(255)
+│   │       ├── 009_full_v2_schema_rebuild.py       # idempotent full v2 DDL (head)
 │   │       └── .gitkeep
 │   ├── alembic.ini                   # Alembic config
 │   ├── app/
@@ -573,7 +575,7 @@ imperecta/
 
 ### backend/app (модульная архитектура)
 
-- `main.py` — инициализация FastAPI-приложения, middleware, CORS, health-check и подключение роутеров ТОЛЬКО из `modules/*`.
+- `main.py` — инициализация FastAPI-приложения, middleware, CORS, health-check и подключение роутеров ТОЛЬКО из `modules/*`; lifespan: **`alembic upgrade head`** → **`ensure_superuser`** → **`create_all`** (try/except), затем фоновый Telegram webhook.
 - `config.py` — централизованные настройки приложения через переменные окружения.
 - `database.py` — async/sync подключения к PostgreSQL, фабрики сессий для API и workers.
 - `common/deps.py` — общие зависимости FastAPI (DB session, текущий пользователь, superuser-проверки).
@@ -622,7 +624,7 @@ imperecta/
 
 ### backend/alembic и backend/alembic/versions
 
-- `alembic/env.py` — async-миграции; `version_table_schema='alembic_meta'` (версия не теряется при `DROP SCHEMA public CASCADE` в `001_v2_schema`).
+- `alembic/env.py` — async-миграции; `version_table_schema='alembic_meta'`; **`await connection.commit()`** после `run_sync(do_run_migrations)`; drift stamp **`009_full_v2_schema_rebuild`**.
 - `versions/001_v2_schema.py` — star schema v2, extensions, партиции `fact_price` (202601–202612), seeds, MV, восстановление `users`. `downgrade` — `NotImplementedError`.
 - `versions/002_v2_additions.py` — инкрементальные ALTER/CREATE: три fact-таблицы рынков, поля discovery в `dim_marketplace`, `url_hash`, `users.preferences`, фикс `week_iso`, `DROP EXTENSION IF EXISTS jsonb_plperl`. `downgrade` — откат ADD/DROP.
 - `versions/003_fix_users_columns.py` — additive migration: гарантирует наличие v2-колонок в `users` и `pg_trgm` (`IF NOT EXISTS`).
@@ -630,6 +632,8 @@ imperecta/
 - `versions/005_scrape_logs_technical_error.py` — идемпотентно: DROP/ADD `ck_scrape_logs_status` (в т.ч. **`technical_error`**) или skip, если таблицы нет.
 - `versions/006_scrape_logs_status_length.py` — `scrape_logs.status` → **`VARCHAR(50)`** (идемпотентно).
 - `versions/007_fix_migration_deadlock_and_meta.py` — восстановление **`alembic_meta`**, таймауты, условный сброс пустого **`public`**.
+- `versions/008_fix_alembic_version_length.py` — **`alembic_meta.alembic_version.version_num`** → **VARCHAR(255)**.
+- `versions/009_full_v2_schema_rebuild.py` — **head**: идемпотентная полная DDL v2 (IF NOT EXISTS, сиды, партиции, MV).
 - Старая цепочка миграций 001–016 из репозитория удалена; при необходимости история — только в git.
 
 ### backend/tests (контрактные и security тесты)
@@ -749,7 +753,7 @@ imperecta/
 - [x] Frontend: Landing, 15+ страниц, entitlements, AIAnalystRoute (locked), PlanLimitBanner
 - [x] Auth: JWT, «Запомнить меня», telegram-link/disconnect в auth
 - [x] Entitlements: Trial/Free/Paid Full, AI Analyst только для Paid
-- [x] Миграции Alembic v2: `001`–`007` (head: `007_fix_migration_deadlock_and_meta`; `alembic_meta`)
+- [x] Миграции Alembic v2: `001`–`009` (head: **`009_full_v2_schema_rebuild`**; `alembic_meta`, `version_num` VARCHAR(255))
 - [x] Локальная разработка: docker-compose
 - [x] CI: ruff, pytest, eslint, vitest, build, security
 - [x] Markets: overview переключён на global pool (`/api/markets/overview`), API `/api/pool/*`, discovery/scraping celery tasks, обновлённый beat schedule

@@ -2,8 +2,9 @@
 
 ## 0) Snapshot (2026-04-04)
 
-- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file (Alembic head **007**, `scrape_logs.status` **VARCHAR(50)**).
-- **Alembic head:** `007_fix_migration_deadlock_and_meta` — цепочка **`005`** (идемпотентный CHECK + **`technical_error`**), **`006`** (`status` → **`VARCHAR(50)`**), **`007`** (repair **`alembic_meta`**, таймауты, опциональный reset пустого `public`). ORM **`ScrapeLog.status`** = **`String(50)`**; см. **`errors.SCRAPE_LOG_STATUSES`**.
+- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file (Alembic head **009**, `scrape_logs.status` **VARCHAR(50)**).
+- **Alembic head:** `009_full_v2_schema_rebuild` — идемпотентная полная DDL v2 (расширения, **`alembic_meta`**, **31** таблица в `public`, партиции **`fact_price`**, MV, сиды `dim_*`). Предшествуют **`008_fix_alembic_version_length`** (ширина **`version_num`**), **`007`** (repair **`alembic_meta`**, таймауты, опциональный reset пустого **`public`**), **`005`**/**`006`** — **`scrape_logs`**. **`alembic/env.py`:** после `run_sync(do_run_migrations)` — **`await connection.commit()`** (иначе DDL мог откатываться при выходе из async-контекста). Drift stamp в **`env.py`**: **`009_full_v2_schema_rebuild`**. ORM **`ScrapeLog.status`** = **`String(50)`**; см. **`errors.SCRAPE_LOG_STATUSES`**.
+- **`app/main.py` lifespan:** `alembic upgrade head` (subprocess) → **`ensure_superuser`** → **`Base.metadata.create_all`** (ошибки логируются, процесс не падает); webhook Telegram — в фоне.
 - Parser runtime: no `engine.py` under `modules/scraper`; path remains `tasks → discovery/service → scraper_pool → extractors`.
 - **Marketplaces:** `MarketplaceService` + `modules/marketplaces/api.py` persist rows in `dim_marketplace` (add-by-url, import, delete, quotas, `requires_js`, logs). **POST `/api/admin/marketplaces/deduplicate`** is still a no-op merge (returns a message). Pool/diagnostics/cleanup: `core/api_admin` + `scraper/api`.
 - Celery Beat: `scheduler.py` sets `celery_app.conf.beat_schedule = {}` (no periodic enqueue).
@@ -62,7 +63,7 @@ The system combines a React frontend, FastAPI backend, PostgreSQL (Supabase), an
 - Stack: FastAPI + SQLAlchemy 2 (async API) + Celery.
 - Pattern: module-based backend under `backend/app/modules/*`.
 - API prefix: `/api` for business endpoints.
-- Startup responsibilities: schema checks/migrations readiness, `ensure_superuser`, Telegram webhook setup.
+- Startup responsibilities: `alembic upgrade head`, `ensure_superuser`, `create_all`, Telegram webhook (see `main.py` lifespan).
 
 ### Data & Infra
 - PostgreSQL on Supabase.
@@ -105,19 +106,23 @@ The project uses a star-schema-style v2 model:
 
 ## 5) Alembic Migration Chain (Current)
 
-Current chain:
+Current chain (head **`009_full_v2_schema_rebuild`**):
 1. `001_v2_schema`
 2. `002_v2_additions`
 3. `003_fix_users_columns`
 4. `004_fix_real_state`
 5. `005_scrape_logs_technical_error`
 6. `006_scrape_logs_status_length`
-7. `007_fix_migration_deadlock_and_meta` (current head)
+7. `007_fix_migration_deadlock_and_meta`
+8. `008_fix_alembic_version_length`
+9. **`009_full_v2_schema_rebuild`** (head)
 
-### Why 005–007 exist
+### Why 005–009 exist
 - **005:** Ensures DB CHECK `ck_scrape_logs_status` allows **`technical_error`** (idempotent if `scrape_logs` missing), aligned with ORM and worker error logging.
 - **006:** Widens **`scrape_logs.status`** to **`VARCHAR(50)`** for production drift (e.g. legacy `VARCHAR(20)`).
 - **007:** Repairs **`alembic_meta.alembic_version`** when empty but v2 exists; sets session DDL timeouts; optional recreate of empty **`public`** only when safe (see migration file). **`env.py`** mirrors meta repair + `render_item` + `lock_timeout`/`statement_timeout` in `connect_args`.
+- **008:** Widens **`alembic_meta.alembic_version.version_num`** to **VARCHAR(255)** for long revision ids.
+- **009:** Idempotent **full v2 star-schema DDL** (no `DROP SCHEMA CASCADE`): creates missing tables, indexes, CHECKs, **`fact_price`** monthly partitions, materialized views, and **`dim_*`** seeds with **`ON CONFLICT DO NOTHING`**. Use when earlier revisions were stamped without real DDL (Docker/Supabase-safe).
 
 ### Why 003 and 004 exist
 - `003_fix_users_columns` adds missing `users` fields with `IF NOT EXISTS` and retries `pg_trgm` extension creation.
@@ -160,7 +165,7 @@ Key runtime expectation:
 - Background jobs writing data while schema is in transition.
 
 ### Controls in place
-- Migration guards in Alembic env for v2 detection/reset behavior, **`alembic_meta`** table creation, and drift stamp **`006`** when v2 exists but version rows are missing.
+- Migration guards in Alembic env for v2 detection/reset behavior, **`alembic_meta`** table creation, and drift stamp **`009_full_v2_schema_rebuild`** when v2 exists but version rows are missing.
 - SQL statement splitter for asyncpg-safe single-statement execution (migrations **001**, **005–007**).
 - Additive fix migrations (`003`, `004`) that avoid brittle one-shot assumptions.
 - Disabled beat schedule during stabilization.
@@ -177,20 +182,14 @@ Key runtime expectation:
   - `parsers_audit.md`
 - Migrations:
   - `backend/alembic/env.py`
-  - `backend/alembic/versions/001_v2_schema.py`
-  - `backend/alembic/versions/002_v2_additions.py`
-  - `backend/alembic/versions/003_fix_users_columns.py`
-  - `backend/alembic/versions/004_fix_real_state.py`
-  - `backend/alembic/versions/005_scrape_logs_technical_error.py`
-  - `backend/alembic/versions/006_scrape_logs_status_length.py`
-  - `backend/alembic/versions/007_fix_migration_deadlock_and_meta.py`
+  - `backend/alembic/versions/001_v2_schema.py` … `009_full_v2_schema_rebuild.py` (see chain in §5)
 
 ---
 
 ## 10) Practical Verification Checklist
 
 For deployment validation:
-- `alembic upgrade head` reaches `007_fix_migration_deadlock_and_meta` without errors.
+- `alembic upgrade head` reaches **`009_full_v2_schema_rebuild`** without errors; **`public`** has **31** base tables (+ **`fact_price`** partitions); **`alembic_meta.alembic_version`** has one row.
 - App startup succeeds (`from app.main import app`).
 - `users` table contains v2-required columns.
 - Legacy tables/types are absent or neutralized.

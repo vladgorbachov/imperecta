@@ -180,14 +180,6 @@ async def set_requires_js(
     return MarketplaceResponse.model_validate(mp)
 
 
-@router.post("/deduplicate")
-async def deduplicate_marketplaces(
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-) -> dict:
-    return {"message": "Deduplication not yet implemented", "duplicates_found": 0}
-
-
 @router.get("/{marketplace_id}/logs")
 async def marketplace_logs(
     marketplace_id: UUID,

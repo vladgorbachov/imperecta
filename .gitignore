@@ -6,6 +6,7 @@ __pycache__/
 venv/
 env/
 .env.local
+
 .env*
 # Build
 dist/
@@ -50,3 +51,7 @@ e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
 e2e/backend.db
+
+# DB backups
+db/backups/*
+!db/backups/.gitkeep

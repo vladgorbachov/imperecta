@@ -22,14 +22,65 @@ logger = logging.getLogger(__name__)
 # Max chars stored for debug/raw extraction traces (avoid huge strings in logs).
 _MAX_TITLE_LEN = 1000
 
-_CURRENCY_SYMBOLS = {
-    "$": "USD",
+_CURRENCY_SYMBOLS: dict[str, str] = {
     "€": "EUR",
+    "$": "USD",
     "£": "GBP",
     "₴": "UAH",
     "₽": "RUB",
     "zł": "PLN",
+    "₺": "TRY",
+    "₸": "KZT",
+    "₾": "GEL",
+    "₼": "AZN",
+    "лв": "BGN",
+    "kč": "CZK",
+    "kr": "SEK",
+    "ft": "HUF",
     "lei": "RON",
+    "din": "RSD",
+    "ден": "MKD",
+    "сўм": "UZS",
+    "сом": "KGS",
+    "br": "BYN",
+    "sm": "TJS",
+}
+
+# ISO codes mentioned as text near prices (case-insensitive match after a space).
+_CURRENCY_TEXT_CODES: dict[str, str] = {
+    "usd": "USD",
+    "eur": "EUR",
+    "gbp": "GBP",
+    "uah": "UAH",
+    "грн": "UAH",
+    "rub": "RUB",
+    "руб": "RUB",
+    "р.": "RUB",
+    "pln": "PLN",
+    "ron": "RON",
+    "try": "TRY",
+    "tl": "TRY",
+    "kzt": "KZT",
+    "тг": "KZT",
+    "тенге": "KZT",
+    "byn": "BYN",
+    "бел.руб": "BYN",
+    "gel": "GEL",
+    "azn": "AZN",
+    "man": "AZN",
+    "bgn": "BGN",
+    "czk": "CZK",
+    "sek": "SEK",
+    "nok": "NOK",
+    "dkk": "DKK",
+    "huf": "HUF",
+    "hrk": "HRK",
+    "rsd": "RSD",
+    "mdl": "MDL",
+    "chf": "CHF",
+    "uzs": "UZS",
+    "kgs": "KGS",
+    "tjs": "TJS",
 }
 
 _EXCLUDED_LINK_HINTS = (
@@ -47,12 +98,65 @@ _EXCLUDED_LINK_HINTS = (
     "catalog",
     "search",
     "account",
+    "compare",
+    "help",
+    "faq",
+    "about",
+    "contact",
+    "blog",
+    "news",
+    "privacy",
+    "terms",
+    "return",
+    "delivery",
+    "shipping",
+    "brands",
+    "seller",
+    "magazin",
+    "otzyvy",
+    "/reviews",
 )
 
-_PRODUCT_LINK_HINTS = ("/product/", "/products/", "/item/", "/p/", "/tovar/", "/dp/")
+_PRODUCT_LINK_HINTS = (
+    "/product/",
+    "/products/",
+    "/item/",
+    "/p/",
+    "/tovar/",
+    "/dp/",
+    "/catalog/product/",
+    "/detail/",
+    "/offer/",
+    "/sku/",
+)
+
+# CIS marketplace SKU-style patterns (Wildberries, Ozon, Kaspi, Rozetka, etc.)
+_CIS_PRODUCT_PATH_RE = re.compile(
+    r"/(?:catalog|detail)/\d{4,}"
+    r"|/(?:product|tovar|sku)/[\w-]{4,}"
+    r"|/p/\d+",
+)
 
 # Path segments that indicate category/listing page, not product
-_CATEGORY_PATH_SEGMENTS = ("catalog", "c", "category", "shop", "categories", "katalog")
+_CATEGORY_PATH_SEGMENTS = (
+    "catalog",
+    "c",
+    "category",
+    "shop",
+    "categories",
+    "katalog",
+    "collection",
+    "collections",
+    "promo",
+    "sale",
+    "akcii",
+    "rasprodazha",
+    "new",
+    "novinki",
+    "top",
+    "best",
+    "popular",
+)
 
 
 @dataclass
@@ -65,6 +169,8 @@ class ExtractedProduct:
     currency: str | None = None
     image_url: str | None = None
     description: str | None = None
+    price_raw_text: str | None = None
+    currency_raw: str | None = None
 
     @property
     def completeness(self) -> float:
@@ -162,14 +268,18 @@ def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedPro
 
                 price = None
                 original_price = None
+                raw_price: str | None = None
                 if "price" in offers:
-                    price = parse_price_text(str(offers.get("price")))
+                    raw_price = str(offers.get("price"))[:500]
+                    price = parse_price_text(raw_price)
                 elif "lowPrice" in offers:
-                    price = parse_price_text(str(offers.get("lowPrice")))
+                    raw_price = str(offers.get("lowPrice"))[:500]
+                    price = parse_price_text(raw_price)
                     if "highPrice" in offers:
                         original_price = parse_price_text(str(offers.get("highPrice")))
                 elif "highPrice" in offers:
-                    price = parse_price_text(str(offers.get("highPrice")))
+                    raw_price = str(offers.get("highPrice"))[:500]
+                    price = parse_price_text(raw_price)
 
                 image = product.get("image")
                 if isinstance(image, list):
@@ -181,9 +291,12 @@ def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedPro
                 if isinstance(description, str) and len(description) > 2000:
                     description = description[:2000]
 
-                currency = offers.get("priceCurrency") if isinstance(offers, dict) else None
-                if isinstance(currency, str):
-                    currency = currency.upper()
+                currency_src = offers.get("priceCurrency") if isinstance(offers, dict) else None
+                currency = None
+                currency_raw_val: str | None = None
+                if isinstance(currency_src, str) and currency_src.strip():
+                    currency_raw_val = currency_src.strip()[:20]
+                    currency = currency_src.strip().upper()[:3]
 
                 ep = ExtractedProduct(
                     title=product.get("name"),
@@ -192,6 +305,8 @@ def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedPro
                     currency=currency,
                     image_url=image if isinstance(image, str) else None,
                     description=description if isinstance(description, str) else None,
+                    price_raw_text=raw_price,
+                    currency_raw=currency_raw_val,
                 )
                 _ensure_title(ep, soup, page_url)
                 return ep
@@ -215,16 +330,24 @@ def extract_from_meta_tags(soup: BeautifulSoup, page_url: str = "") -> Extracted
         )
         if not node or not node.get("content"):
             continue
-        result.price = parse_price_text(node["content"])
-        if result.price is None:
+        raw_meta = str(node["content"]).strip()[:500]
+        parsed = parse_price_text(raw_meta)
+        if parsed is None:
             continue
+        result.price = parsed
+        result.price_raw_text = raw_meta
         if currency_prop:
             cur = soup.find("meta", property=currency_prop) or soup.find(
                 "meta",
                 attrs={"name": currency_prop},
             )
             if cur and cur.get("content"):
-                result.currency = str(cur.get("content")).upper()
+                result.currency_raw = str(cur.get("content")).strip()[:20]
+                result.currency = str(cur.get("content")).strip().upper()[:3]
+        if result.currency is None and result.price is not None:
+            result.currency = _detect_currency(raw_meta)
+            if result.currency:
+                result.currency_raw = raw_meta
         break
 
     for prop in ["og:title", "twitter:title"]:
@@ -271,7 +394,11 @@ def extract_with_custom_selectors(
     if price_selector:
         element = soup.select_one(price_selector)
         if element:
-            result.price = parse_price_text(element.get_text(strip=True))
+            raw_px = element.get_text(strip=True)[:500]
+            parsed_px = parse_price_text(raw_px)
+            result.price = parsed_px
+            if parsed_px is not None:
+                result.price_raw_text = raw_px
 
     image_selector = selectors.get("image")
     if image_selector:
@@ -292,23 +419,11 @@ def extract_with_custom_selectors(
 
 
 def _detect_currency(text: str) -> str | None:
-    lowered = text.lower()
-    for symbol, code in _CURRENCY_SYMBOLS.items():
-        if symbol in lowered:
-            return code
-    if " usd" in lowered:
-        return "USD"
-    if " eur" in lowered:
-        return "EUR"
-    if " uah" in lowered:
-        return "UAH"
-    if " rub" in lowered:
-        return "RUB"
-    if " pln" in lowered:
-        return "PLN"
-    if " ron" in lowered:
-        return "RON"
-    return None
+    """Detect currency from symbols or textual codes embedded in *text*."""
+    result = parse_currency_symbol(text)
+    if result:
+        return result
+    return parse_currency_code(text)
 
 
 def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
@@ -360,8 +475,14 @@ def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
     if candidates:
         candidates.sort(key=lambda item: item[0], reverse=True)
         best = candidates[0][1]
-        result.price = parse_price_text(best)
-        result.currency = _detect_currency(best)
+        parsed = parse_price_text(best)
+        result.price = parsed
+        if parsed is not None:
+            result.price_raw_text = best[:500]
+            detected = _detect_currency(best)
+            if detected:
+                result.currency = detected
+                result.currency_raw = best[:100]
 
     best_img_url = None
     best_img_area = -1
@@ -400,33 +521,78 @@ def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
 
 
 def parse_price_text(text: str) -> float | None:
-    """Parse price from text like '1 299,50 ₴', '$49.99', '1.299,50 €'."""
+    """Parse price from text containing EU / CIS / Anglo-Saxon number formats.
+
+    Supported patterns:
+      1,234.56   (US/UK)         →  1234.56
+      1.234,56   (DE/FR/RU/UA)   →  1234.56
+      1 234,56   (RU/UA/KZ)      →  1234.56
+      1 234.56   (rarely)        →  1234.56
+      1234,56    (short EU)      →  1234.56
+      1234.56    (plain)         →  1234.56
+      1234       (integer)       →  1234.0
+    """
     if not text:
         return None
 
-    cleaned = str(text).strip()
-    cleaned = re.sub(r"\s+", "", cleaned)
-    cleaned = re.sub(r"[^\d,.\-]", "", cleaned)
-    match = re.search(r"(\d[\d.,]*\d|\d+)", cleaned)
+    raw = str(text).strip()
+
+    # Collapse non-breaking spaces and thin spaces to regular space.
+    raw = raw.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
+
+    # Strip everything except digits, comma, dot, space, hyphen/minus.
+    cleaned = re.sub(r"[^\d,.\s\-]", "", raw)
+    # Collapse spaces around separators (e.g. "1 234 , 56" → "1 234,56").
+    cleaned = re.sub(r"\s*([,.])\s*", r"\1", cleaned)
+
+    # Extract the number portion (digits, commas, dots, spaces as thousand seps).
+    match = re.search(r"(\d[\d,.\s]*\d|\d+)", cleaned)
     if not match:
         return None
-    value = match.group(1)
+    value = match.group(1).strip()
 
-    if "," in value and "." in value:
+    # Determine the role of commas and dots.
+    has_comma = "," in value
+    has_dot = "." in value
+    has_space = " " in value
+
+    if has_comma and has_dot:
+        # Mixed: last separator is decimal, earlier ones are thousands.
         if value.rfind(",") > value.rfind("."):
-            value = value.replace(".", "").replace(",", ".")
+            value = value.replace(" ", "").replace(".", "").replace(",", ".")
         else:
-            value = value.replace(",", "")
-    elif "," in value:
-        parts = value.split(",")
-        if len(parts[-1]) in (1, 2):
-            value = value.replace(",", ".")
+            value = value.replace(" ", "").replace(",", "")
+    elif has_comma and not has_dot:
+        parts = value.replace(" ", "").split(",")
+        if len(parts) == 2 and len(parts[-1]) in (1, 2):
+            # "1234,56" or "1 234,5" — comma is decimal.
+            value = value.replace(" ", "").replace(",", ".")
+        elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
+            # "1,234,567" — commas are thousands.
+            value = value.replace(" ", "").replace(",", "")
         else:
-            value = value.replace(",", "")
-    elif "." in value:
-        parts = value.split(".")
-        if len(parts) > 1 and len(parts[-1]) == 3:
-            value = value.replace(".", "")
+            # Ambiguous; treat last comma as decimal if fractional part ≤ 2 digits.
+            last_part = parts[-1]
+            if len(last_part) <= 2:
+                value = ",".join(parts[:-1]).replace(",", "") + "." + last_part
+                value = value.replace(" ", "")
+            else:
+                value = value.replace(" ", "").replace(",", "")
+    elif has_dot and not has_comma:
+        parts = value.replace(" ", "").split(".")
+        if len(parts) == 2 and len(parts[-1]) in (1, 2):
+            # "1234.56" — dot is decimal.
+            value = value.replace(" ", "")
+        elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
+            # "1.234.567" — dots are thousands.
+            value = value.replace(" ", "").replace(".", "")
+        else:
+            # Default: last dot is decimal.
+            value = value.replace(" ", "")
+    elif has_space:
+        # "1 234" — spaces are thousands, no decimal.
+        value = value.replace(" ", "")
+    # else: plain integer/already clean.
 
     try:
         number = float(value)
@@ -435,10 +601,36 @@ def parse_price_text(text: str) -> float | None:
         return None
 
 
+def parse_currency_symbol(text: str) -> str | None:
+    """Detect currency ISO code from symbol characters in *text*."""
+    for symbol, code in _CURRENCY_SYMBOLS.items():
+        if symbol in text.lower():
+            return code
+    return None
+
+
+def parse_currency_code(text: str) -> str | None:
+    """Detect currency ISO code from textual code / abbreviation near a price."""
+    lowered = text.lower()
+    for token, code in _CURRENCY_TEXT_CODES.items():
+        if token in lowered:
+            return code
+    return None
+
+
 def merge_results(*results: ExtractedProduct) -> ExtractedProduct:
     """Merge multiple extraction results. First non-None value wins."""
     merged = ExtractedProduct()
-    for field_name in ["title", "price", "original_price", "currency", "image_url", "description"]:
+    for field_name in [
+        "title",
+        "price",
+        "original_price",
+        "currency",
+        "image_url",
+        "description",
+        "price_raw_text",
+        "currency_raw",
+    ]:
         for result in results:
             value = getattr(result, field_name, None)
             if value is not None:
@@ -465,9 +657,11 @@ def merge_and_finalize(
 
 
 def _looks_like_product_url(path: str) -> bool:
-    """Product URLs: .html (allo), product hints, 4+ digits, or 3+ path segments (hotline)."""
+    """Product URLs: .html, product hints, CIS SKU patterns, 4+ digit IDs, or 3+ segments."""
     lowered = path.lower()
     if any(hint in lowered for hint in _PRODUCT_LINK_HINTS):
+        return True
+    if _CIS_PRODUCT_PATH_RE.search(lowered):
         return True
     if re.search(r"/\d{4,}", lowered):
         return True

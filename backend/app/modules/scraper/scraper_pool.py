@@ -120,6 +120,14 @@ class ScraperPool:
                 (layer_err or "")[:500],
                 url[:120],
             )
+            logger.info(
+                "fetch_layer_attempt layer=%s duration_ms=%s ok=%s error_preview=%s url=%s",
+                layer_name,
+                layer_ms,
+                bool(html),
+                ((layer_err or "")[:300] if layer_err else None),
+                url[:200],
+            )
             if html:
                 used_layer = layer_name
                 break
@@ -187,13 +195,6 @@ class ScraperPool:
                 raw_html=raw_debug,
             )
 
-        logger.info(
-            "Scraping %s: layer=%s, title=%s, price=%s",
-            url[:80],
-            used_layer,
-            merged.title[:50] if merged.title else None,
-            merged.price,
-        )
         extracted_fields: list[str] = []
         missing_fields: list[str] = []
         for field_name in ["title", "price", "currency", "in_stock", "image_url", "description"]:
@@ -209,6 +210,29 @@ class ScraperPool:
             or not cur_ok
         )
         is_empty = merged.price is None and not merged.title
+
+        logger.info(
+            "fetch_extract_complete layer=%s duration_ms=%s "
+            "fields_extracted=%s fields_missing=%s "
+            "price_raw_text=%s currency_raw=%s "
+            "detected_currency=%s title_preview=%s price_numeric=%s",
+            used_layer,
+            duration_ms,
+            extracted_fields,
+            missing_fields,
+            getattr(merged, "price_raw_text", None),
+            getattr(merged, "currency_raw", None),
+            merged.currency,
+            (merged.title[:80] if merged.title else None),
+            merged.price,
+        )
+        logger.info(
+            "Scraping %s: layer=%s, title=%s, price=%s",
+            url[:80],
+            used_layer,
+            merged.title[:50] if merged.title else None,
+            merged.price,
+        )
 
         return PoolScrapeResult(
             success=True,

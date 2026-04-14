@@ -216,9 +216,15 @@ def _run_scrape_all_pool_impl() -> dict:
                     ok += 1
                 else:
                     failed += 1
-            except Exception:
+            except Exception as exc:
                 tb = traceback.format_exc()
                 slog.exception("scrape_listing_failed", listing_id=str(lid), traceback=tb)
+                slog.error(
+                    "exception_before_technical_error_log",
+                    listing_id=str(lid),
+                    exc_type=exc.__class__.__name__,
+                    exc_message=str(exc)[:2000],
+                )
                 try:
                     db.rollback()
                 except Exception:
@@ -270,9 +276,15 @@ def scrape_pool_product(self, listing_id: str):
 
     try:
         return _scrape_pool_product_impl(listing_id)
-    except Exception:
+    except Exception as exc:
         tb = traceback.format_exc()
         slog.exception("scrape_pool_product_fatal", listing_id=listing_id, traceback=tb)
+        slog.error(
+            "exception_before_technical_error_log",
+            listing_id=listing_id,
+            exc_type=exc.__class__.__name__,
+            exc_message=str(exc)[:2000],
+        )
         try:
             _persist_technical_error_log(UUID(str(listing_id)), tb)
         except Exception:
@@ -318,29 +330,3 @@ def check_pool_completeness():
         db.close()
 
 
-@celery_app.task(
-    name="scrape_single",
-    bind=True,
-    max_retries=2,
-)
-def scrape_single(self, competitor_product_id: str):
-    """Legacy competitor scrape removed — use scrape_pool_product(listing_id)."""
-    slog.warning(
-        "scrape_single_deprecated",
-        hint="use scrape_pool_product",
-        competitor_product_id=competitor_product_id,
-    )
-    return {"status": "deprecated", "message": "Use scrape_pool_product with fact_listing UUID"}
-
-
-@celery_app.task(name="app.workers.scrape_tasks.scrape_user_products")
-def scrape_user_products(user_id: str) -> None:
-    """Enqueue pool scrape for listings linked to user products (future)."""
-    slog.info("scrape_user_products_delegate", user_id=user_id)
-    scrape_all_pool_products.delay()
-
-
-@celery_app.task(name="scrape_all")
-def scrape_all() -> dict:
-    """Alias: scrape stale pool listings (same logic as scrape_all_pool_products)."""
-    return _run_scrape_all_pool()
