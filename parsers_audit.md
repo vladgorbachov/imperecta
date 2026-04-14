@@ -3,7 +3,7 @@
 ## 0. Актуализация (2026-04-04)
 
 - `backend/app/modules/scraper/engine.py` отсутствует в репозитории (не используется).
-- **Alembic head:** `007_fix_migration_deadlock_and_meta` — цепочка **`005`** (CHECK + **`technical_error`**, идемпотентно), **`006`** (**`status` `VARCHAR(50)`**), **`007`** (мета Alembic, таймауты). ORM **`ScrapeLog.status`** — согласован с **`VARCHAR(50)`** и **`errors.SCRAPE_LOG_STATUSES`**.
+- **Alembic head:** **`009_full_v2_schema_rebuild`** — идемпотентная полная DDL v2; цепочка включает **`005`** (CHECK + **`technical_error`**), **`006`** (**`status` `VARCHAR(50)`**), **`007`** (мета Alembic, таймауты), **`008`** (ширина **`version_num`**). ORM **`ScrapeLog.status`** — согласован с **`VARCHAR(50)`** и **`errors.SCRAPE_LOG_STATUSES`**.
 - Каноничный runtime path парсера: `tasks -> discovery/service -> scraper_pool -> extractors`.
 - `ScraperPool` является единственным fetch+extract facade.
 - В **`service.py` (`GlobalScrapeService`)** персистенция pool-scrape:
@@ -222,7 +222,7 @@ Router:
 - Для **discovery** — локальный async engine per task run.
 - Для **pool scrape** — один sync session на run; порог stale **`6h`**.
 - Time limits: `scrape_pool_product` soft 120s / hard 150s.
-- При необработанном исключении в pool-пути — **`_persist_technical_error_log`** пишет **`scrape_logs`** со статусом **`technical_error`** (нужны миграции **005–007**: CHECK, **`VARCHAR(50)`**, repair **`alembic_meta`**).
+- При необработанном исключении в pool-пути — **`_persist_technical_error_log`** пишет **`scrape_logs`** со статусом **`technical_error`** (нужны миграции **005–009**: CHECK, **`VARCHAR(50)`**, repair **`alembic_meta`**, полная DDL v2 в **009**).
 
 ## 7.2 `modules/scraper/discovery.py` (crawler)
 

@@ -13,16 +13,16 @@ from sqlalchemy import func, select
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.config import Settings
-from app.database import sync_session_factory
+from app.database import sync_engine, sync_session_factory
 from app.models.app_tables import ScrapeLog
 from app.models.facts import FactListing
+from app.modules.scraper.db_diagnostics import collect_db_diagnostics
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.modules.scraper.tasks import (
     discover_all_marketplaces,
     discover_single_marketplace,
-    scrape_all,
     scrape_all_pool_products,
 )
 
@@ -33,9 +33,6 @@ router = APIRouter(
     tags=["scraper"],
     dependencies=[Depends(get_current_superuser)],
 )
-
-_MIGRATION_MSG = "Pending migration to v2 schema"
-
 
 def _decodo_tcp_reachable(api_url: str) -> bool:
     """Return True if Decodo API host accepts TCP (no mock payload; infrastructure check)."""
@@ -111,14 +108,6 @@ async def _sample_result_from_db(db: DbSession) -> dict | None:
     return _serialize_pool_result(pr)
 
 
-@router.post("/trigger-scrape")
-async def admin_trigger_scrape(_current_user: CurrentSuperuser, _db: DbSession) -> dict:
-    """Manually trigger scraping for stale pool listings."""
-    task = scrape_all.delay()
-    logger.info("admin POST trigger-scrape task_id=%s", task.id)
-    return {"message": "Scrape task queued", "task_id": str(task.id)}
-
-
 @router.post("/discovery/trigger/{marketplace_id}")
 async def trigger_discovery(
     marketplace_id: UUID,
@@ -159,33 +148,14 @@ async def trigger_pool_scrape(_current_user: CurrentSuperuser, _db: DbSession) -
     }
 
 
-@router.get("/scrape-activity")
-async def admin_scrape_activity(_db: DbSession, _current_user: CurrentSuperuser) -> dict:
-    """Return scrape activity data for chart (placeholder)."""
-    now = datetime.now(timezone.utc)
-    labels = []
-    for i in range(6, -1, -1):
-        day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
-        labels.append(day_start.strftime("%Y-%m-%d"))
-    return {
-        "labels": labels,
-        "datasets": [
-            {"label": "Успешно", "data": [0] * 7},
-            {"label": "Ошибки", "data": [0] * 7},
-        ],
-        "message": _MIGRATION_MSG,
-    }
+@router.post("/db-diagnostics")
+async def admin_db_diagnostics(_current_user: CurrentSuperuser) -> dict:
+    """Run SQL diagnostics (Alembic version, counts, recent listings/logs, dim/fact row counts)."""
 
+    def _run() -> dict:
+        return collect_db_diagnostics(sync_engine)
 
-@router.get("/error-distribution")
-async def admin_error_distribution(_db: DbSession, _current_user: CurrentSuperuser) -> dict:
-    """Return error distribution for pie chart (placeholder)."""
-    categories = ["timeout", "blocked", "selector_not_found", "connection_error", "other"]
-    return {
-        "labels": categories,
-        "data": [0] * len(categories),
-        "message": _MIGRATION_MSG,
-    }
+    return await run_in_threadpool(_run)
 
 
 @router.get("/scrape-diagnostics")

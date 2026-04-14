@@ -26,7 +26,8 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Drift repair: stamp when v2 exists but alembic_version was lost (before full chain).
-_STAMP_DRIFT_REVISION = "008_fix_alembic_version_length"
+# Must match migration chain head (009_full_v2_schema_rebuild).
+_STAMP_DRIFT_REVISION = "009_full_v2_schema_rebuild"
 
 
 def render_item(type_, obj, autogen_context):
@@ -150,6 +151,9 @@ async def run_async_migrations() -> None:
         await connection.execute(text("CREATE SCHEMA IF NOT EXISTS alembic_meta"))
         await connection.commit()
         await connection.run_sync(do_run_migrations)
+        # Required: Alembic DDL runs on the sync bridge; without this commit, the async
+        # connection may roll back on context exit (empty DB despite "success").
+        await connection.commit()
 
     await connectable.dispose()
 

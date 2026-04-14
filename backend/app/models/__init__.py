@@ -1,7 +1,7 @@
 """All ORM models for Alembic metadata discovery.
 
 Alembic head revision is tracked in alembic_meta.alembic_version (see migrations);
-current chain ends at 008_fix_alembic_version_length (wide version_num).
+current chain ends at 009_full_v2_schema_rebuild (idempotent v2 DDL).
 """
 
 from app.models.core import User, UserProduct, UserSubscription  # noqa: F401

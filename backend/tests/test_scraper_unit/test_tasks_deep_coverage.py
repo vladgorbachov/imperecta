@@ -254,15 +254,6 @@ def test_scrape_all_pool_products_task_runs(monkeypatch):
     assert out["queued"] == 0
 
 
-def test_scrape_all_alias(monkeypatch):
-    monkeypatch.setattr(
-        scraper_tasks,
-        "_run_scrape_all_pool",
-        lambda: {"queued": 1},
-    )
-    assert scraper_tasks.scrape_all()["queued"] == 1
-
-
 def test_check_pool_completeness_mocked(monkeypatch):
     db = MagicMock()
     db.close = MagicMock()

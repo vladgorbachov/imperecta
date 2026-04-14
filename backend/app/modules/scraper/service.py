@@ -209,7 +209,8 @@ class GlobalScrapeService:
             or False
         )
         slog.info(
-            "EXTRACTED",
+            "EXTRACTED_DATA",
+            line="EXTRACTED DATA → product_name/title/price/currency/in_stock",
             product_name=getattr(data, "product_name", None),
             title=getattr(data, "title", None),
             price=getattr(data, "price", None),
@@ -272,11 +273,20 @@ class GlobalScrapeService:
             # fact_price: product_name_ok, price > 0, currency present (non-empty string)
             curr_raw = getattr(data, "currency", None)
             currency_ok = curr_raw is not None and str(curr_raw).strip() != ""
+            price_ok = data.price is not None and data.price > 0
             should_write_price_snapshot = (
                 product_name_ok
-                and data.price is not None
-                and data.price > 0
+                and price_ok
                 and currency_ok
+            )
+            slog.info(
+                "PERSISTENCE_GATE",
+                line="PERSISTENCE GATE → product_name_ok / price_ok / currency_ok",
+                product_name_ok=product_name_ok,
+                price_ok=price_ok,
+                currency_ok=currency_ok,
+                price_raw_text=getattr(data, "price_raw_text", None),
+                currency_raw=getattr(data, "currency_raw", None),
             )
             if not should_write_price_snapshot:
                 if not product_name_ok or not currency_ok:
@@ -361,6 +371,11 @@ class GlobalScrapeService:
         currency = getattr(data, "currency", None) if data else None
         slog.info(
             "FINAL_PERSIST",
+            line=(
+                f"FINAL PERSIST → listing_id={listing_id} status={log_status} "
+                f"price={price!s}"
+            ),
+            listing_id=str(listing_id),
             product_name=product_name_used,
             title=title,
             price=price,
@@ -389,16 +404,19 @@ class GlobalScrapeService:
 
         slog.info(
             "SCRAPE_COMPLETE",
+            line="SCRAPE COMPLETE",
             listing_id=str(listing_id),
             status=log_status,
             price=price,
             currency=currency,
             in_stock=last_in_stock,
-        )
-        print(
-            f"SCRAPE COMPLETE listing_id={listing_id} status={log_status} "
-            f"price={price} currency={currency!s}",
-            flush=True,
+            success=result.success,
+            error=result.error,
+            scraper_layer=result.scraper_layer,
+            duration_ms=result.duration_ms,
+            log_status=log_status,
+            is_partial=result.is_partial,
+            is_empty=result.is_empty,
         )
         slog.info("pool_scrape_done", listing_id=str(listing_id), result_success=result.success)
         return result
@@ -442,6 +460,12 @@ class GlobalScrapeService:
         fields_missing = list(getattr(result, "missing_fields", []) or [])
         if result.success and payload is not None:
             if "currency" in fields_missing and getattr(payload, "price", None) is not None:
+                slog.warning(
+                    "price_parsed_no_currency",
+                    price=getattr(payload, "price", None),
+                    price_raw_text=getattr(payload, "price_raw_text", None),
+                    currency_raw=getattr(payload, "currency_raw", None),
+                )
                 return "missing_critical_data"
             # Unit tests: explicit has_title/has_price without passing data= (legacy API).
             if (
@@ -468,6 +492,12 @@ class GlobalScrapeService:
                     return "price_not_found"
                 curr = getattr(payload, "currency", None)
                 if curr is None or not str(curr).strip():
+                    slog.warning(
+                        "price_parsed_no_currency",
+                        price=getattr(payload, "price", None),
+                        price_raw_text=getattr(payload, "price_raw_text", None),
+                        currency_raw=getattr(payload, "currency_raw", None),
+                    )
                     return "missing_critical_data"
 
         if is_partial:

@@ -15,6 +15,30 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_UPGRADE_HEAD = [sys.executable, "-m", "alembic", "upgrade", "head"]
 
 
+def _run_alembic_upgrade_head_twice() -> None:
+    """Assert two consecutive `alembic upgrade head` runs succeed (idempotent chain)."""
+    url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta_test",
+    )
+    env = {**os.environ, "DATABASE_URL": url}
+    for run in (1, 2):
+        proc = subprocess.run(
+            _ALEMBIC_UPGRADE_HEAD,
+            cwd=BACKEND_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        err = (proc.stderr or "") + (proc.stdout or "")
+        if proc.returncode != 0 and _pg_unavailable(err):
+            pytest.skip(f"Postgres unavailable: {proc.stderr}")
+        assert proc.returncode == 0, (
+            f"run {run}: {proc.stdout}\n{proc.stderr}"
+        )
+
+
 def _sync_database_url() -> str:
     url = os.environ.get(
         "DATABASE_URL",
@@ -104,7 +128,7 @@ def test_scrape_logs_status_column_at_least_varchar_50():
 
 @pytest.mark.integration
 def test_alembic_version_num_at_least_varchar_255():
-    """alembic_meta.alembic_version.version_num must fit long revision ids (migration 008)."""
+    """alembic_meta.alembic_version.version_num must fit long revision ids (008+ chain)."""
     url = os.environ.get(
         "DATABASE_URL",
         "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta_test",
@@ -151,23 +175,10 @@ def test_alembic_version_num_at_least_varchar_255():
 @pytest.mark.integration
 def test_migration_chain_idempotent_no_deadlock():
     """Running `alembic upgrade head` twice must succeed (idempotent chain, no deadlock)."""
-    url = os.environ.get(
-        "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta_test",
-    )
-    env = {**os.environ, "DATABASE_URL": url}
-    for run in (1, 2):
-        proc = subprocess.run(
-            _ALEMBIC_UPGRADE_HEAD,
-            cwd=BACKEND_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        err = (proc.stderr or "") + (proc.stdout or "")
-        if proc.returncode != 0 and _pg_unavailable(err):
-            pytest.skip(f"Postgres unavailable: {proc.stderr}")
-        assert proc.returncode == 0, (
-            f"run {run}: {proc.stdout}\n{proc.stderr}"
-        )
+    _run_alembic_upgrade_head_twice()
+
+
+@pytest.mark.integration
+def test_migrations_upgrade():
+    """Alias per pipeline QA: double `upgrade head` (VARCHAR(50) status checked elsewhere)."""
+    _run_alembic_upgrade_head_twice()
