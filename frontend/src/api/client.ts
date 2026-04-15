@@ -1,12 +1,19 @@
 import axios from "axios";
 
-// VITE_API_URL: absolute URL for production (Cloudflare Pages); empty = Vite proxy in dev
-let API_URL = import.meta.env.VITE_API_URL || "";
-// Force HTTPS when page is served over HTTPS to avoid Mixed Content blocking
-if (typeof window !== "undefined" && window.location?.protocol === "https:" && API_URL.startsWith("http://")) {
-  API_URL = API_URL.replace("http://", "https://");
+const API_URL = import.meta.env.VITE_API_URL;
+if (!API_URL) {
+  throw new Error("VITE_API_URL is required");
 }
-export const apiBaseUrl = API_URL ? `${API_URL}/api` : "/api";
+
+// Force HTTPS when page is served over HTTPS to avoid Mixed Content blocking
+const normalizedApiUrl =
+  typeof window !== "undefined" &&
+  window.location?.protocol === "https:" &&
+  API_URL.startsWith("http://")
+    ? API_URL.replace("http://", "https://")
+    : API_URL;
+
+export const apiBaseUrl = `${normalizedApiUrl}/api`;
 
 export const apiClient = axios.create({
   baseURL: apiBaseUrl,
