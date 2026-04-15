@@ -7,8 +7,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application configuration for cloud deploy (Railway + Supabase + Upstash)."""
 
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta"
-    redis_url: str = "redis://localhost:6379/0"
+    database_url: str
+    redis_url: str
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 30
@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     decodo_password: str = ""  # Railway: set from Decodo dashboard
     decodo_enabled: bool = True  # Railway: true = primary scraping via Decodo
     sentry_dsn: str = ""
-    allowed_origins: str = "http://localhost:5173,https://imperecta.pages.dev"
-    app_env: str = "development"
+    allowed_origins: str = "https://imperecta.pages.dev"
+    app_env: str = "production"
     port: int = 8000
 
     debug: bool = False
@@ -49,10 +49,21 @@ class Settings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:
-        """Ensure DATABASE_URL uses asyncpg driver."""
-        if not v.startswith("postgresql+asyncpg://"):
-            raise ValueError("DATABASE_URL must start with postgresql+asyncpg://")
-        return v
+        """Validate DATABASE_URL and normalize common SQLAlchemy-compatible forms."""
+        value = v.strip()
+        if not value:
+            raise ValueError("DATABASE_URL is required and cannot be empty")
+
+        # Supabase often provides a standard PostgreSQL URL. Normalize it for async SQLAlchemy.
+        if value.startswith("postgresql://"):
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError(
+                "DATABASE_URL must start with postgresql+asyncpg:// "
+                "or postgresql:// (auto-converted)"
+            )
+        return value
 
     @model_validator(mode="after")
     def validate_telegram_webhook_secret(self) -> "Settings":
