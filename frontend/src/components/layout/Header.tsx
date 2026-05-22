@@ -49,11 +49,11 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
   return (
     <header
       className={cn(
-        "flex h-16 min-h-[56px] shrink-0 items-center justify-between px-4 backdrop-blur-xl safe-area-top sm:h-[4.5rem] sm:px-5 md:px-7",
+        "flex h-[3.6rem] min-h-[51px] shrink-0 items-center justify-between px-[0.9rem] backdrop-blur-xl safe-area-top sm:h-[4.05rem] sm:px-[1.125rem] md:px-[1.575rem]",
         "bg-[var(--background-mid)] border-b border-[var(--glass-border)]"
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-[0.675rem]">
         {onMenuClick && (
           <Button
             variant="ghost"
@@ -66,12 +66,12 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           </Button>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+      <div className="flex shrink-0 items-center gap-[0.45rem] sm:gap-[0.55rem]">
         <Button
           variant="ghost"
           size="icon"
           className={cn(
-            "min-h-12 min-w-12 touch-manipulation sm:min-h-11 sm:min-w-11",
+            "min-h-11 min-w-11 touch-manipulation sm:min-h-10 sm:min-w-10",
             "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]",
             "hover:shadow-[0_0_12px_var(--accent-glow)] transition-all duration-200"
           )}
@@ -88,7 +88,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           variant="ghost"
           size="icon"
           className={cn(
-            "relative min-h-12 min-w-12 touch-manipulation sm:min-h-11 sm:min-w-11",
+            "relative min-h-11 min-w-11 touch-manipulation sm:min-h-10 sm:min-w-10",
             "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]"
           )}
           aria-label={t("common.notifications")}
@@ -113,11 +113,11 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className="relative min-h-12 min-w-12 rounded-full touch-manipulation sm:min-h-11 sm:min-w-11 p-0"
+              className="relative min-h-11 min-w-11 rounded-full touch-manipulation sm:min-h-10 sm:min-w-10 p-0"
               aria-label={t("auth.profile")}
             >
               <Avatar
-                className="size-10 sm:size-10 ring-2 ring-[var(--accent)]"
+                className="size-9 sm:size-9 ring-2 ring-[var(--accent)]"
                 style={{ boxShadow: "0 0 12px var(--accent-glow)" }}
               >
                 <AvatarImage src={user?.avatar_url ?? undefined} alt={user?.name} />

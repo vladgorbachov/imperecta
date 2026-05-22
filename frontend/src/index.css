@@ -113,7 +113,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--foreground);
   --primary: 199 89% 48%;
-  --primary-foreground: #ffffff;
+  --primary-foreground: #061423;
   --secondary: var(--background-mid);
   --secondary-foreground: var(--foreground);
   --destructive: 0 72% 51%;
@@ -219,7 +219,8 @@
   --card: var(--background-surface);
   --muted: #f1f5f9;
   --color-accent: var(--accent);
-  --primary: 199 89% 42%;
+  --primary: 199 89% 36%;
+  --primary-foreground: #0f172a;
   --secondary: #f1f5f9;
   --input: var(--glass-border);
   --ring: 199 89% 42%;

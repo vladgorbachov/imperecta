@@ -113,8 +113,8 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-3 rounded-lg py-3 text-sm transition-all duration-200",
-        showLabels ? "ps-3.5 pe-3.5" : "justify-center ps-2.5 pe-2.5",
+        "group relative flex items-center gap-[0.675rem] rounded-lg py-[0.675rem] text-sm transition-all duration-200",
+        showLabels ? "ps-[0.8rem] pe-[0.8rem]" : "justify-center ps-[0.55rem] pe-[0.55rem]",
         isActive
           ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
           : "text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
@@ -176,7 +176,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
   return (
     <Collapsible defaultOpen className="px-2">
       {showLabels && (
-        <div className="flex w-full items-center justify-between gap-2 py-2.5">
+        <div className="flex w-full items-center justify-between gap-2 py-[0.55rem]">
           <CollapsibleTrigger
             className="flex flex-1 items-center text-left text-xs font-medium uppercase tracking-wider text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
@@ -186,7 +186,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
         </div>
       )}
       <CollapsibleContent>
-        <div className="space-y-1 py-1.5">{children}</div>
+        <div className="space-y-1 py-1">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -287,7 +287,7 @@ export function Sidebar({
       className={cn(
         "flex flex-col text-[var(--foreground)] transition-[width] duration-300 ease-in-out",
         "border-e border-[var(--glass-border)]",
-        isMobile ? "w-full" : collapsed ? "w-[72px]" : "w-[280px]"
+        isMobile ? "w-full" : collapsed ? "w-16" : "w-[252px]"
       )}
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />

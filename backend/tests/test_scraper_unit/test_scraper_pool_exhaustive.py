@@ -83,6 +83,27 @@ async def test_fetch_html_decodo_paths(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fetch_html_decodo_429_rate_limit(monkeypatch):
+    pool = ScraperPool()
+    monkeypatch.setattr(sp.settings, "decodo_enabled", True)
+    monkeypatch.setattr(sp.settings, "decodo_username", "u")
+    monkeypatch.setattr(sp.settings, "decodo_password", "p")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 429
+
+    class CM:
+        async def __aenter__(self):
+            return MagicMock(post=AsyncMock(return_value=mock_resp))
+
+        async def __aexit__(self, *a):
+            return None
+
+    monkeypatch.setattr(sp.httpx, "AsyncClient", lambda **k: CM())
+    out, err = await pool._fetch_html_decodo("https://example.com")
+    assert out is None and err == "rate_limit"
+
+
+@pytest.mark.asyncio
 async def test_listing_scrape_result_and_fetch_html_none(monkeypatch):
     pool = ScraperPool()
 
@@ -99,7 +120,23 @@ async def test_listing_scrape_result_and_fetch_html_none(monkeypatch):
 async def test_map_layer_error_variants():
     pool = ScraperPool()
     assert "timeout" in pool._map_layer_error("timeout", "httpx")
+    assert "rate_limit" in pool._map_layer_error("rate_limit", "decodo")
     assert "fetch_failed" in pool._map_layer_error("fetch_failed", "httpx")
+
+
+@pytest.mark.asyncio
+async def test_fetch_layer_with_retries_stops_on_rate_limit(monkeypatch):
+    pool = ScraperPool()
+    attempts = {"n": 0}
+
+    async def fake_once(_layer: str, _url: str):
+        attempts["n"] += 1
+        return None, "rate_limit"
+
+    monkeypatch.setattr(pool, "_fetch_by_layer_once", fake_once)
+    _out, err = await pool._fetch_layer_with_retries("decodo", "https://example.com")
+    assert attempts["n"] == 1
+    assert err == "rate_limit:decodo"
 
 
 @pytest.mark.asyncio

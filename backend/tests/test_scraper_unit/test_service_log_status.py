@@ -11,6 +11,7 @@ from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
+    _compute_price_change_pct,
     _optional_in_stock,
     _payload_has_product_name_field,
     _previous_price_snapshot,
@@ -118,6 +119,14 @@ def test_previous_price_snapshot():
     row.scalar_one_or_none.return_value = 9.5
     session.execute.return_value = row
     assert _previous_price_snapshot(session, lid, 20260101) == 9.5
+
+
+def test_compute_price_change_pct_bounds():
+    assert _compute_price_change_pct(None, 10.0) is None
+    assert _compute_price_change_pct(0.0, 10.0) is None
+    assert _compute_price_change_pct(100.0, 120.0) == 20.0
+    # Numeric(8,4) cap protection: values above 9999.9999 become NULL.
+    assert _compute_price_change_pct(1.0, 1000.0) is None
 
 
 def test_recalculate_analytics_noop():

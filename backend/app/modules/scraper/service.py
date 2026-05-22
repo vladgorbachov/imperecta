@@ -35,6 +35,7 @@ _SCRAPE_LOG_STATUSES = (
     "missing_critical_data",
     "technical_error",
 )
+_MAX_ABS_PRICE_CHANGE_PCT = 9_999.9999
 
 
 def _run_coro_in_worker(coro: Awaitable[_CORO_RESULT]) -> _CORO_RESULT:
@@ -184,6 +185,16 @@ def _previous_price_snapshot(
     )
     val = row.scalar_one_or_none()
     return float(val) if val is not None else None
+
+
+def _compute_price_change_pct(prev_price: float | None, current_price: float) -> float | None:
+    """Compute bounded price change percent for Numeric(8,4) column."""
+    if prev_price is None or prev_price <= 0:
+        return None
+    pct = round((float(current_price) - prev_price) / prev_price * 100.0, 4)
+    if abs(pct) > _MAX_ABS_PRICE_CHANGE_PCT:
+        return None
+    return pct
 
 
 class GlobalScrapeService:
@@ -359,9 +370,14 @@ class GlobalScrapeService:
                     ),
                 )
                 prev = _previous_price_snapshot(self.db, listing.id, date_id)
-                price_change_pct = None
-                if prev is not None and prev > 0:
-                    price_change_pct = round((float(data.price) - prev) / prev * 100.0, 4)
+                price_change_pct = _compute_price_change_pct(prev, float(data.price))
+                if prev is not None and prev > 0 and price_change_pct is None:
+                    logger.warning(
+                        "price_change_pct_out_of_range listing_id=%s prev=%s current=%s",
+                        listing_id,
+                        prev,
+                        float(data.price),
+                    )
 
                 price_record = FactPrice(
                     listing_id=listing.id,

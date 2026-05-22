@@ -25,7 +25,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
   return (
     <div
       className={cn(
-        "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between",
+        "flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between",
         className
       )}
     >
@@ -53,7 +53,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
         )}
       </div>
       {actions && (
-        <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>
+        <div className="flex shrink-0 flex-wrap gap-1.5">{actions}</div>
       )}
     </div>
   );

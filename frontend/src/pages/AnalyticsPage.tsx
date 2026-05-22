@@ -123,11 +123,11 @@ export function AnalyticsPage() {
     : 0;
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-6">
       <PageHeader title="nav.analytics" />
 
       <Tabs defaultValue="trends">
-        <TabsList className="glass-card w-full flex-wrap rounded-2xl p-1.5 sm:w-auto">
+        <TabsList className="glass-card w-full flex-wrap rounded-2xl p-[0.325rem] sm:w-auto">
           <TabsTrigger value="trends">{t("analytics.tabTrends")}</TabsTrigger>
           <TabsTrigger value="forecasts">
             {t("analytics.tabForecasts")} <Sparkles className="ml-1 size-3" />
@@ -135,7 +135,7 @@ export function AnalyticsPage() {
           <TabsTrigger value="comparison">{t("analytics.tabComparison")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="trends" className="mt-6 space-y-6">
+        <TabsContent value="trends" className="mt-5 space-y-5">
           <div className="flex flex-wrap gap-2">
             {(["7d", "30d", "90d"] as const).map((p) => (
               <Button
@@ -188,7 +188,7 @@ export function AnalyticsPage() {
             competitors={competitorList}
           />
 
-          <div className="glass-card rounded-2xl p-5">
+          <div className="glass-card rounded-2xl p-[1.125rem]">
             <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
               <Sparkles className="size-4" />
               {t("analytics.aiSummary")}
@@ -199,11 +199,11 @@ export function AnalyticsPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="forecasts" className="mt-6 space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
+        <TabsContent value="forecasts" className="mt-5 space-y-5">
+          <div className="grid gap-5 lg:grid-cols-2">
             <div className="space-y-4">
               <h3 className="text-base font-semibold">{t("analytics.priceForecast14d")}</h3>
-              <div className="glass-card h-72 rounded-2xl p-5">
+              <div className="glass-card h-64 rounded-2xl p-[1.125rem]">
                 {forecastData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -253,7 +253,7 @@ export function AnalyticsPage() {
 
             <div className="space-y-4">
               <h3 className="text-base font-semibold">{t("analytics.marketForecastQuestion")}</h3>
-              <div className="glass-card rounded-2xl p-5">
+              <div className="glass-card rounded-2xl p-[1.125rem]">
                 {marketText ? (
                   <>
                     <p className="mb-4 text-sm text-muted-foreground">
@@ -279,8 +279,8 @@ export function AnalyticsPage() {
 
         </TabsContent>
 
-        <TabsContent value="comparison" className="mt-6">
-          <div className="glass-card rounded-2xl p-6">
+        <TabsContent value="comparison" className="mt-5">
+          <div className="glass-card rounded-2xl p-5">
             <MarketComparisonSection products={productList} competitors={competitorList} />
           </div>
         </TabsContent>

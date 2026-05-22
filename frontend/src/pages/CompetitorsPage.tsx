@@ -344,7 +344,7 @@ export function CompetitorsPage() {
   };
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-6">
       <PageHeader
         title="nav.competitors"
         actions={
@@ -356,8 +356,8 @@ export function CompetitorsPage() {
       />
 
       {/* Toolbar */}
-      <div className="glass-card flex flex-col gap-4 rounded-2xl p-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-2">
+      <div className="glass-card flex flex-col gap-[0.9rem] rounded-2xl p-[0.9rem] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex w-full flex-col gap-[0.9rem] sm:flex-row sm:items-center sm:gap-2">
           <div className="relative flex-1 sm:max-w-64">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -367,7 +367,7 @@ export function CompetitorsPage() {
               className="w-full pl-9"
             />
           </div>
-          <div className="glass-card flex rounded-xl border border-input bg-background p-1">
+          <div className="glass-card flex rounded-xl border border-input bg-background p-[0.225rem]">
             <Button
               variant={viewMode === "grid" ? "secondary" : "ghost"}
               size="sm"
@@ -413,7 +413,7 @@ export function CompetitorsPage() {
           }}
         />
       ) : viewMode === "grid" ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-[0.9rem] sm:grid-cols-2 sm:gap-[1.125rem] lg:grid-cols-3">
           {filteredCompetitors.map((c) => (
             <CompetitorCard
               key={c.id}
@@ -548,7 +548,7 @@ function CompetitorCard({
         : "competitors.strengthWeak";
 
   return (
-    <div className="glass-card flex flex-col rounded-xl border border-border bg-card p-5 shadow-sm dark:border-border dark:bg-card">
+    <div className="glass-card flex flex-col rounded-xl border border-border bg-card p-[1.125rem] shadow-sm dark:border-border dark:bg-card">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <a
@@ -568,11 +568,11 @@ function CompetitorCard({
         <CircularScore value={score} size={44} strokeWidth={3} />
       </div>
 
-      <div className="mt-4 h-11">
+      <div className="mt-[0.9rem] h-10">
         <PriceSparkline data={sparklineData} />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-[0.9rem] flex flex-wrap items-center gap-2">
         <span
           className={cn(
             "rounded-md border px-2 py-0.5 text-xs font-medium",
@@ -588,7 +588,7 @@ function CompetitorCard({
         </span>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="mt-[1.125rem] flex flex-wrap gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -782,7 +782,7 @@ function ExpandableCompetitorRow({
               expanded ? "max-h-[600px]" : "max-h-0"
             )}
           >
-            <div className="border-t border-border px-5 py-5 dark:border-border">
+            <div className="border-t border-border px-[1.125rem] py-[1.125rem] dark:border-border">
               <div className="mb-4 flex justify-end">
                 <Button size="sm" variant="outline" onClick={onAddProduct}>
                   <Plus className="mr-2 size-4" />
