@@ -29,7 +29,7 @@ class UserRegister(BaseModel):
     password: str = Field(min_length=8)
     name: str | None = Field(None, max_length=255)
     company_name: str | None = Field(None, max_length=255)
-    language: str = "en"
+    language: str
 
     _validate_lang = field_validator("language")(_validate_language)
 
@@ -87,11 +87,11 @@ class UserResponse(BaseModel):
     plan: str
     trial_ends_at: datetime | None = None
     language: str
-    timezone: str = "UTC"
-    ai_tone: str = "balanced"
-    default_currency: str = "EUR"
-    is_superuser: bool = False
-    is_active: bool = True
+    timezone: str | None = None
+    ai_tone: str | None = None
+    default_currency: str | None = None
+    is_superuser: bool | None = None
+    is_active: bool | None = None
     avatar_url: str | None = None
     last_login_at: datetime | None = None
     created_at: datetime

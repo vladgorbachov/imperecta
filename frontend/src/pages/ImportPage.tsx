@@ -87,19 +87,11 @@ function parseCsv(
   return { headers, rows, allRows, totalRows: allRows.length };
 }
 
-const COLUMN_ALIASES = new Map<string, (typeof KNOWN_COLUMNS)[number]>([
-  ["name", "name"], ["nazvanie", "name"], ["название", "name"], ["product", "name"],
-  ["title", "name"], ["product_name", "name"],
-  ["sku", "sku"], ["артикул", "sku"], ["article", "sku"],
-  ["price", "price"], ["цена", "price"], ["cost", "price"],
-  ["url", "url"], ["link", "url"], ["ссылка", "url"],
-  ["category", "category"], ["категория", "category"], ["marketplace", "category"],
-]);
-
 function autoMapColumn(header: string): (typeof KNOWN_COLUMNS)[number] | null {
-  const lower = header.toLowerCase().trim();
-  const normalized = lower.replace(/\s+/g, "_");
-  return COLUMN_ALIASES.get(normalized) ?? COLUMN_ALIASES.get(lower) ?? null;
+  const normalized = header.toLowerCase().trim().replace(/\s+/g, "_");
+  return KNOWN_COLUMNS.includes(normalized as (typeof KNOWN_COLUMNS)[number])
+    ? (normalized as (typeof KNOWN_COLUMNS)[number])
+    : null;
 }
 
 function formatFileSize(bytes: number): string {
@@ -173,7 +165,7 @@ export function ImportPage() {
           });
           setColumnMap(map);
           setAutoCategorizeDismissed(false);
-        } catch (err) {
+        } catch {
           toast.error(t("import.error"));
           setFile(null);
         }
@@ -398,7 +390,7 @@ export function ImportPage() {
               )}
               {canAddProducts && (
                 <p className="text-xs text-muted-foreground dark:text-muted-foreground">
-                  Поддерживаемые форматы: .csv, .tsv, .xls, .xlsx, .xlsm
+                  {t("import.supportedFormats")}
                 </p>
               )}
               <Button

@@ -8,18 +8,34 @@ import { apiClient } from "./client";
 
 export interface MarketsPreferences {
   preferred_country_code: string | null;
+  dashboard_widgets?: string[];
   favorite_instrument_ids: string[];
-  favorite_forex?: string[];
-  favorite_crypto?: string[];
-  favorite_commodities?: string[];
+  forex_favorites?: string[];
+  crypto_favorites?: string[];
+  commodity_favorites?: string[];
 }
 
 export interface MarketsPreferencesUpdate {
   preferred_country_code?: string | null;
+  dashboard_widgets?: string[];
   favorite_instrument_ids?: string[];
-  favorite_forex?: string[];
-  favorite_crypto?: string[];
-  favorite_commodities?: string[];
+  forex_favorites?: string[];
+  crypto_favorites?: string[];
+  commodity_favorites?: string[];
+}
+
+export interface MarketsInstrumentOption {
+  symbol: string;
+  name: string | null;
+  rank?: number | null;
+  category?: string | null;
+  market_cap_usd?: number | null;
+}
+
+export interface MarketsInstrumentsResponse {
+  forex: MarketsInstrumentOption[];
+  crypto: MarketsInstrumentOption[];
+  commodities: MarketsInstrumentOption[];
 }
 
 // --- Refresh metadata ---
@@ -231,6 +247,9 @@ export const marketsApi = {
   getPreferences: () =>
     apiClient.get<MarketsPreferences>("/markets/preferences"),
 
+  getInstruments: () =>
+    apiClient.get<MarketsInstrumentsResponse>("/markets/instruments"),
+
   updatePreferences: (body: MarketsPreferencesUpdate) =>
     apiClient.put<MarketsPreferences>("/markets/preferences", body),
 
@@ -297,6 +316,7 @@ export const marketsQueryKeys = {
   all: ["markets"] as const,
   countries: () => [...marketsQueryKeys.all, "countries"] as const,
   preferences: () => [...marketsQueryKeys.all, "preferences"] as const,
+  instruments: () => [...marketsQueryKeys.all, "instruments"] as const,
   refreshMetadata: () => [...marketsQueryKeys.all, "refresh-metadata"] as const,
   forex: () => [...marketsQueryKeys.all, "forex"] as const,
   crypto: () => [...marketsQueryKeys.all, "crypto"] as const,

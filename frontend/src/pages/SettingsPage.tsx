@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "@/api/auth";
 import { analyticsApi } from "@/api/analytics";
 import { useAuthStore } from "@/stores/authStore";
+import { useEntitlements } from "@/hooks/useEntitlements";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -30,20 +31,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const BOT_USERNAME = "@ImperectaBot";
-const BOT_URL = "https://t.me/ImperectaBot";
 const CODE_DURATION_SEC = 300;
-function getPlanLimits(plan: string): { products: number; competitors: number } {
-  switch (plan) {
-    case "trial": return { products: 999, competitors: 999 };
-    case "starter": return { products: 50, competitors: 15 };
-    case "business": return { products: 100, competitors: 30 };
-    case "pro": return { products: 999, competitors: 999 };
-    default: return { products: 999, competitors: 999 };
-  }
-}
-
-const TRIAL_DAYS_TOTAL = 14;
 
 const AVATAR_MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB
 
@@ -57,11 +45,13 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const setUser = useAuthStore((s) => s.setUser);
   const updateLanguage = useAuthStore((s) => s.updateLanguage);
+  const { limits: entitlementLimits, trialDurationDays } = useEntitlements();
 
   const [profileForm, setProfileForm] = useState({ name: "", company_name: "" });
   const [avatarUrl, setAvatarUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
+  const [telegramBotUrl, setTelegramBotUrl] = useState<string | null>(null);
   const [codeSecondsLeft, setCodeSecondsLeft] = useState(0);
   const [digestTone, setDigestTone] = useState<"conservative" | "balanced" | "aggressive">(
     "balanced"
@@ -140,6 +130,7 @@ export function SettingsPage() {
     },
     onSuccess: (data) => {
       setTelegramCode(data.code);
+      setTelegramBotUrl(data.bot_url ?? null);
       setCodeSecondsLeft(CODE_DURATION_SEC);
       toast.success(t("auth.codeGenerated"));
     },
@@ -236,8 +227,11 @@ export function SettingsPage() {
     }
   };
 
-  const plan = (u?.plan ?? "trial").toLowerCase();
-  const limits = getPlanLimits(plan);
+  const plan = (u?.plan ?? "").toLowerCase();
+  const limits = {
+    products: entitlementLimits?.products ?? 0,
+    competitors: entitlementLimits?.competitors ?? 0,
+  };
   const productsCount = summary?.total_products ?? 0;
   const competitorsCount = summary?.total_competitors ?? 0;
   const productsPercent = limits.products > 0 ? (productsCount / limits.products) * 100 : 0;
@@ -249,6 +243,9 @@ export function SettingsPage() {
   const trialDaysLeft = trialEndsAt
     ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
     : 0;
+  const botDisplayName = telegramBotUrl
+    ? telegramBotUrl.split("/").filter(Boolean).pop() ?? null
+    : null;
 
   const formatCountdown = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -395,7 +392,7 @@ export function SettingsPage() {
                     />
                     <span className="font-medium">{t("settings.telegramConnected")}</span>
                     <span className="text-muted-foreground dark:text-muted-foreground">
-                      {BOT_USERNAME}
+                      {botDisplayName ? `@${botDisplayName}` : ""}
                     </span>
                   </div>
                   <Button
@@ -428,16 +425,18 @@ export function SettingsPage() {
                         </Button>
                       </div>
                       <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                        {t("settings.codeInstruction", { bot: BOT_USERNAME })}
+                        {t("settings.codeInstruction", { bot: botDisplayName ? `@${botDisplayName}` : "" })}
                       </p>
-                      <a
-                        href={BOT_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block text-sm text-primary hover:underline dark:text-primary"
-                      >
-                        {BOT_URL}
-                      </a>
+                      {telegramBotUrl && (
+                        <a
+                          href={telegramBotUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-sm text-primary hover:underline dark:text-primary"
+                        >
+                          {telegramBotUrl}
+                        </a>
+                      )}
                       <p className="font-mono text-lg font-medium">
                         {formatCountdown(codeSecondsLeft)}
                       </p>
@@ -569,8 +568,8 @@ export function SettingsPage() {
                     {t("settings.trialDaysLeft", { count: trialDaysLeft })}
                   </p>
                   <Progress
-                    value={Math.max(0, TRIAL_DAYS_TOTAL - trialDaysLeft)}
-                    max={TRIAL_DAYS_TOTAL}
+                    value={Math.max(0, trialDurationDays - trialDaysLeft)}
+                    max={trialDurationDays}
                     className="h-2"
                   />
                 </div>

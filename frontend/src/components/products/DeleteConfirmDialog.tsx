@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 
 interface DeleteConfirmDialogProps {
@@ -28,31 +29,26 @@ export function DeleteConfirmDialog({
   count,
   isLoading,
 }: DeleteConfirmDialogProps) {
-  const label =
-    count === 1
-      ? "1 товар"
-      : count < 5
-        ? `${count} товара`
-        : `${count} товаров`;
+  const { t } = useTranslation();
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onCancel()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Удалить товары?</DialogTitle>
+          <DialogTitle>{t("products.deleteDialogTitle")}</DialogTitle>
           <DialogDescription>
-            Вы собираетесь удалить {label}. Это действие нельзя отменить.
+            {t("products.deleteDialogDescription", { count })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={isLoading}>
-            Отмена
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={isLoading}>
             {isLoading ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
-              "Удалить"
+              t("common.delete")
             )}
           </Button>
         </DialogFooter>

@@ -9,42 +9,48 @@ class Settings(BaseSettings):
 
     database_url: str
     redis_url: str
-    jwt_secret: str = "change-me-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_expiration_minutes: int = 30
-    jwt_refresh_expiration_days: int = 7
-    jwt_refresh_expiration_days_remember: int = 30  # "Remember me" refresh token TTL
+    jwt_secret: str
+    jwt_algorithm: str
+    jwt_expiration_minutes: int
+    jwt_refresh_expiration_days: int
+    jwt_refresh_expiration_days_remember: int
 
     claude_api_key: str | None = None
-    market_data_forex_url: str = "https://api.frankfurter.app/latest"
-    market_data_crypto_url: str = "https://api.coingecko.com/api/v3/coins/markets"
-    market_data_commodities_url: str = ""
-    goldapi_key: str = ""  # GoldAPI.io: XAU, XAG, XPT, XPD (36h cache)
-    alpha_vantage_key: str = ""  # Alpha Vantage: WTI, Brent, Natural Gas (24h cache)
-    market_data_fuel_url: str = ""
-    market_data_timeout_seconds: int = 15
-    market_data_retry_attempts: int = 3
-    claude_model: str = "claude-sonnet-4-20250514"
+    market_data_forex_url: str
+    market_data_crypto_url: str
+    market_data_commodities_url: str | None = None
+    goldapi_key: str | None = None
+    alpha_vantage_key: str | None = None
+    market_data_fuel_url: str | None = None
+    market_data_timeout_seconds: int
+    market_data_retry_attempts: int
+    claude_model: str
     resend_api_key: str | None = None
-    email_from: str = "noreply@imperecta.com"
+    email_from: str
     telegram_bot_token: str | None = None
+    telegram_bot_url: str | None = None
     telegram_webhook_secret: str | None = None  # Validates X-Telegram-Bot-Api-Secret-Token
-    app_url: str = "https://imperecta-production.up.railway.app"
+    app_url: str
 
-    proxy_list: str = ""
-    proxy_sticky_duration: int = 10  # minutes for sticky session
-    proxy_country_routing: bool = True  # use geo-targeted proxies
+    proxy_list: str | None = None
+    proxy_sticky_duration: int
+    proxy_country_routing: bool
 
-    decodo_api_url: str = "https://scraper-api.decodo.com/v2/"
-    decodo_username: str = ""  # Railway: set from Decodo dashboard
-    decodo_password: str = ""  # Railway: set from Decodo dashboard
-    decodo_enabled: bool = True  # Railway: true = primary scraping via Decodo
-    sentry_dsn: str = ""
-    allowed_origins: str = "https://imperecta.pages.dev"
-    app_env: str = "production"
-    port: int = 8000
+    decodo_api_url: str
+    decodo_username: str | None = None
+    decodo_password: str | None = None
+    decodo_enabled: bool
+    sentry_dsn: str | None = None
+    allowed_origins: str
+    app_env: str
+    port: int
 
     debug: bool = False
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: str | None = None
+    bootstrap_admin_name: str | None = None
+    bootstrap_admin_language: str | None = None
+    bootstrap_admin_plan: str | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -75,6 +81,15 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_bootstrap_admin(self) -> "Settings":
+        """Bootstrap admin credentials must be provided as a pair."""
+        if bool(self.bootstrap_admin_email) != bool(self.bootstrap_admin_password):
+            raise ValueError(
+                "BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD must be set together."
+            )
+        return self
+
     @property
     def proxy_url(self) -> str | None:
         """Primary proxy URL from PROXY_LIST."""
@@ -91,12 +106,8 @@ class Settings(BaseSettings):
 
     @property
     def origins_list(self) -> list[str]:
-        """Return allowed origins as list of strings. Always includes production frontend."""
-        origins = [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
-        production_frontend = "https://imperecta.pages.dev"
-        if production_frontend not in origins:
-            origins.append(production_frontend)
-        return origins
+        """Return allowed origins as list of strings."""
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
     class Config:
         env_file = ".env"

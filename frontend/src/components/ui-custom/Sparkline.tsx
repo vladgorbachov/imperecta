@@ -1,4 +1,5 @@
 import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
+import { useTranslation } from "react-i18next";
 
 export interface SparklinePoint {
   date?: string;
@@ -10,7 +11,7 @@ interface SparklineProps {
   className?: string;
 }
 
-function formatSparklineDate(value?: string): string {
+function formatSparklineDate(value: string | undefined, locale: string): string {
   if (!value) {
     return "—";
   }
@@ -18,25 +19,28 @@ function formatSparklineDate(value?: string): string {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return parsed.toLocaleDateString("ru-RU", {
+  return parsed.toLocaleDateString(locale, {
     day: "2-digit",
     month: "short",
   });
 }
 
-function formatSparklinePrice(value: number): string {
-  return new Intl.NumberFormat("ru-RU", {
+function formatSparklinePrice(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(value);
 }
 
 export function Sparkline({ points, className }: SparklineProps) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language || "en";
+
   if (points.length < 2) {
     return (
       <div className={className}>
         <div className="flex h-12 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
-          Нет истории
+          {t("market.overview.noHistory")}
         </div>
       </div>
     );
@@ -52,8 +56,8 @@ export function Sparkline({ points, className }: SparklineProps) {
       <ResponsiveContainer width="100%" height={48}>
         <LineChart data={points} margin={{ top: 6, right: 4, left: 4, bottom: 6 }}>
           <Tooltip
-            formatter={(value: number) => `${formatSparklinePrice(value)} ₽`}
-            labelFormatter={(label: string) => formatSparklineDate(label)}
+            formatter={(value: number) => `${formatSparklinePrice(value, locale)} ${t("common.currency")}`}
+            labelFormatter={(label: string) => formatSparklineDate(label, locale)}
             contentStyle={{
               background: "var(--background-elevated)",
               border: "1px solid var(--glass-border)",

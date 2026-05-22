@@ -8,7 +8,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable
 
 import httpx
 from sqlalchemy import asc, func, nullslast, select
@@ -164,12 +164,25 @@ class MarketDataService:
         await self.db.refresh(user)
         return await self.get_preferences(user)
 
-    async def get_ticker(self, country_code: str) -> list[dict[str, Any]]:
+    async def get_ticker(
+        self,
+        country_code: str,
+        forex_favorites: Iterable[str] | None = None,
+        crypto_favorites: Iterable[str] | None = None,
+        commodity_favorites: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Build ticker from latest forex + crypto + commodities (+ fuel from DB when available)."""
+        forex_set = {value.strip().upper() for value in (forex_favorites or []) if value}
+        crypto_set = {value.strip().upper() for value in (crypto_favorites or []) if value}
+        commodity_set = {value.strip().upper() for value in (commodity_favorites or []) if value}
+
         items: list[dict[str, Any]] = []
         for fx in await self.get_forex():
             cc = fx["currency_code"]
             if cc == "EUR":
+                continue
+            symbol = f"EUR/{cc}"
+            if forex_set and symbol.upper() not in forex_set:
                 continue
             rte = fx["rate_to_eur"]
             if rte and rte > 0:
@@ -177,23 +190,29 @@ class MarketDataService:
             else:
                 display = rte
             items.append({
-                "symbol": f"EUR/{cc}",
+                "symbol": symbol,
                 "name": cc,
                 "price": display,
                 "change_pct": None,
                 "type": "forex",
             })
         for c in (await self.get_crypto())[:5]:
+            symbol = str(c["symbol"]).upper()
+            if crypto_set and symbol not in crypto_set:
+                continue
             items.append({
-                "symbol": c["symbol"],
+                "symbol": symbol,
                 "name": c.get("name", c["symbol"]),
                 "price": c["price_usd"],
                 "change_pct": c.get("change_24h_pct"),
                 "type": "crypto",
             })
         for cm in await self.get_commodities():
+            symbol = str(cm["symbol"]).upper()
+            if commodity_set and symbol not in commodity_set:
+                continue
             items.append({
-                "symbol": cm["symbol"],
+                "symbol": symbol,
                 "name": cm["name"],
                 "price": cm["price_usd"],
                 "change_pct": cm.get("change_24h_pct"),
@@ -211,6 +230,64 @@ class MarketDataService:
                 "currency_code": row["currency_code"],
             })
         return items
+
+    async def get_available_forex_instruments(self) -> list[dict[str, Any]]:
+        """Return forex symbols available in DB for instrument selection UI."""
+        rows = await self.get_forex()
+        options: list[dict[str, Any]] = []
+        for idx, row in enumerate(rows):
+            code = row.get("currency_code")
+            if not code or code == "EUR":
+                continue
+            options.append({
+                "symbol": f"EUR/{code}",
+                "name": str(code),
+                "rank": idx + 1,
+                "category": "forex",
+                "market_cap_usd": None,
+            })
+        options.sort(key=lambda item: item["symbol"])
+        return options
+
+    async def get_available_crypto_instruments(self) -> list[dict[str, Any]]:
+        """Return crypto symbols available in DB for instrument selection UI."""
+        rows = await self.get_crypto()
+        options: list[dict[str, Any]] = [
+            {
+                "symbol": str(row["symbol"]).upper(),
+                "name": row.get("name") or str(row["symbol"]).upper(),
+                "rank": row.get("rank"),
+                "category": "crypto",
+                "market_cap_usd": row.get("market_cap_usd"),
+            }
+            for row in rows
+            if row.get("symbol")
+        ]
+        options.sort(
+            key=lambda item: (
+                item["rank"] if isinstance(item["rank"], int) else 999999,
+                -(float(item["market_cap_usd"]) if item["market_cap_usd"] is not None else 0.0),
+                item["symbol"],
+            )
+        )
+        return options
+
+    async def get_available_commodity_instruments(self) -> list[dict[str, Any]]:
+        """Return commodity symbols available in DB for instrument selection UI."""
+        rows = await self.get_commodities()
+        options: list[dict[str, Any]] = [
+            {
+                "symbol": str(row["symbol"]).upper(),
+                "name": row.get("name") or str(row["symbol"]).upper(),
+                "rank": None,
+                "category": row.get("commodity_type"),
+                "market_cap_usd": None,
+            }
+            for row in rows
+            if row.get("symbol")
+        ]
+        options.sort(key=lambda item: item["symbol"])
+        return options
 
     async def get_refresh_metadata(self) -> list[dict[str, Any]]:
         """Latest api_logs rows for market_data service (refresh audit)."""
@@ -365,40 +442,27 @@ async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
     if cached is not None:
         return cached
 
+    from app.modules.market_data.providers.forex_adapter import ForexUnifiedAdapter
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"https://open.er-api.com/v6/latest/{base}")
-            resp.raise_for_status()
-            data = resp.json()
-
-        if data.get("result") != "success":
-            logger.error("ExchangeRate API error: %s", data.get("error-type"))
-            return []
-
-        rates = data.get("rates", {})
-        targets = [
-            "USD", "GBP", "CHF", "JPY", "CNY",
-            "RUB", "UAH", "KZT", "BYN", "GEL", "AMD", "UZS", "MDL",
-            "PLN", "RON", "HUF", "CZK", "BGN", "TRY", "SEK", "NOK", "DKK",
-        ]
-
-        result = []
-        for cur in targets:
-            if cur in rates and cur != base:
-                result.append({
-                    "pair": f"{base}/{cur}",
-                    "rate": round(rates[cur], 4),
-                    "change_24h": None,
-                })
-
-        _set_cached(f"forex_{base}", result)
-        logger.info("Forex rates fetched: %d pairs (base=%s)", len(result), base)
-        return result
-    except httpx.TimeoutException:
-        logger.error("Forex API timeout")
-        return _get_cached(f"forex_{base}", ttl=86400) or []
+        adapter = ForexUnifiedAdapter(timeout=15.0)
+        items = await adapter.fetch()
+        normalized = []
+        for dto in items:
+            pair = dto.symbol.upper()
+            if not pair.startswith(f"{base.upper()}/"):
+                continue
+            normalized.append({
+                "pair": pair,
+                "rate": round(float(dto.bid), 6),
+                "change_24h": dto.change_24h,
+            })
+        normalized.sort(key=lambda row: row["pair"])
+        _set_cached(f"forex_{base}", normalized)
+        logger.info("Forex rates fetched via unified adapter: %d pairs (base=%s)", len(normalized), base)
+        return normalized
     except Exception as error:
-        logger.error("Forex API error: %s", error)
+        logger.error("Forex unified provider error: %s", error)
         return _get_cached(f"forex_{base}", ttl=86400) or []
 
 
@@ -407,9 +471,9 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
     if cached is not None:
         return (cached, True)
 
-    from app.modules.market_data.providers.crypto_adapter import CryptoCompositeAdapter
+    from app.modules.market_data.providers.crypto_adapter import CryptoUnifiedAdapter
 
-    adapter = CryptoCompositeAdapter(timeout=15.0)
+    adapter = CryptoUnifiedAdapter(timeout=15.0)
     items = await adapter.fetch()
 
     result = [
@@ -605,13 +669,35 @@ async def fetch_energy() -> dict:
 
 
 async def fetch_commodities() -> tuple[list[dict], str | None, bool]:
-    metals = await fetch_metals()
-    energy = await fetch_energy()
+    cached = _get_cached("commodities", ttl=ALPHA_VANTAGE_TTL)
+    if cached is not None:
+        return (cached, None, True)
 
-    all_items = metals.get("items", []) + energy.get("items", [])
-    errors = [e for e in [metals.get("error"), energy.get("error")] if e]
-    error_msg = "; ".join(errors) if errors else None
-    return (all_items, error_msg, False)
+    from app.modules.market_data.providers.commodities_adapter import CommoditiesUnifiedAdapter
+
+    try:
+        adapter = CommoditiesUnifiedAdapter(timeout=15.0)
+        items = await adapter.fetch()
+        normalized_items = [
+            {
+                "name": dto.name or dto.symbol,
+                "symbol": dto.symbol,
+                "price": float(dto.price),
+                "unit": dto.unit or "",
+                "change_24h": dto.change_24h,
+            }
+            for dto in items
+        ]
+        _set_cached("commodities", normalized_items)
+        if not normalized_items:
+            return ([], "Commodities providers unavailable (Gold API and Alpha Vantage/Yahoo)", False)
+        return (normalized_items, None, False)
+    except Exception as error:
+        logger.warning("Unified commodities fetch failed: %s", error)
+        fallback = _get_cached("commodities", ttl=GOLDAPI_TTL) or []
+        if fallback:
+            return (fallback, "Using cached commodities data", True)
+        return ([], "Commodities providers unavailable (Gold API and Alpha Vantage/Yahoo)", False)
 
 
 def _fuel_facts_to_legacy_dict(rows: list[dict[str, Any]], country_code: str) -> dict[str, Any]:
@@ -692,11 +778,26 @@ async def get_fuel_prices(country_code: str, db: AsyncSession | None = None) -> 
     return None
 
 
-async def get_ticker_data(country_code: str = "UA", db: AsyncSession | None = None) -> list[dict]:
+async def get_ticker_data(
+    country_code: str = "UA",
+    db: AsyncSession | None = None,
+    forex_favorites: Iterable[str] | None = None,
+    crypto_favorites: Iterable[str] | None = None,
+    commodity_favorites: Iterable[str] | None = None,
+) -> list[dict]:
     """Assemble ticker data for the scrolling bar. Uses v2 facts when available."""
+    forex_set = {value.strip().upper() for value in (forex_favorites or []) if value}
+    crypto_set = {value.strip().upper() for value in (crypto_favorites or []) if value}
+    commodity_set = {value.strip().upper() for value in (commodity_favorites or []) if value}
+
     if db is not None:
         mds = MarketDataService(db)
-        db_rows = await mds.get_ticker(country_code)
+        db_rows = await mds.get_ticker(
+            country_code,
+            forex_favorites=forex_set,
+            crypto_favorites=crypto_set,
+            commodity_favorites=commodity_set,
+        )
         if db_rows:
             return _legacy_ticker_rows_from_db(db_rows)
 
@@ -704,9 +805,12 @@ async def get_ticker_data(country_code: str = "UA", db: AsyncSession | None = No
 
     forex = await fetch_forex_rates("EUR")
     for pair in forex[:6]:
+        symbol = str(pair["pair"]).upper()
+        if forex_set and symbol not in forex_set:
+            continue
         items.append({
             "type": "forex",
-            "label": pair["pair"],
+            "label": symbol,
             "value": pair["rate"],
             "change": pair.get("change_24h"),
             "prefix": "",
@@ -716,9 +820,12 @@ async def get_ticker_data(country_code: str = "UA", db: AsyncSession | None = No
     try:
         crypto_data, _ = await fetch_crypto_prices()
         for coin in crypto_data[:5]:
+            symbol = str(coin["symbol"]).upper()
+            if crypto_set and symbol not in crypto_set:
+                continue
             items.append({
                 "type": "crypto",
-                "label": coin["symbol"],
+                "label": symbol,
                 "value": coin["price"],
                 "change": coin["change_24h"],
                 "prefix": "$",
@@ -730,6 +837,9 @@ async def get_ticker_data(country_code: str = "UA", db: AsyncSession | None = No
     try:
         commodities, _, _ = await fetch_commodities()
         for item in (commodities or [])[:3]:
+            symbol = str(item.get("symbol", "")).upper()
+            if commodity_set and symbol not in commodity_set:
+                continue
             name = item.get("name") or item.get("symbol", "")
             items.append({
                 "type": "commodity",
@@ -824,6 +934,20 @@ class MarketsService:
     async def get_refresh_metadata(self) -> list[dict]:
         mds = MarketDataService(self.db)
         return await mds.get_refresh_metadata()
+
+    async def get_available_instruments(self) -> dict[str, list[dict[str, str]]]:
+        """Return available instrument lists for user-configurable ticker widgets."""
+        mds = MarketDataService(self.db)
+        forex, crypto, commodities = await asyncio.gather(
+            mds.get_available_forex_instruments(),
+            mds.get_available_crypto_instruments(),
+            mds.get_available_commodity_instruments(),
+        )
+        return {
+            "forex": forex,
+            "crypto": crypto,
+            "commodities": commodities,
+        }
 
     async def get_category_analytics(self) -> dict:
         return {"items": [], "last_refreshed_at": None}

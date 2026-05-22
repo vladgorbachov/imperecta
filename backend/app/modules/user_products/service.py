@@ -7,10 +7,19 @@ from uuid import UUID
 import pandas as pd
 
 
-def parse_products_file(content: bytes, filename: str, user_id: UUID) -> tuple[list[dict], list[dict]]:
+def parse_products_file(
+    content: bytes,
+    filename: str,
+    user_id: UUID,
+    currency_code: str,
+) -> tuple[list[dict], list[dict]]:
     """Parse CSV, TSV, or Excel file (.xls, .xlsx, .xlsm). Returns (products_to_create, errors)."""
     errors: list[dict] = []
     products: list[dict] = []
+
+    normalized_currency = (currency_code or "").strip().upper()
+    if not normalized_currency:
+        return [], [{"row": 0, "message": "Currency code is required for import."}]
 
     try:
         if filename.lower().endswith(".csv"):
@@ -61,7 +70,7 @@ def parse_products_file(content: bytes, filename: str, user_id: UUID) -> tuple[l
                     "name": str(name).strip()[:500],
                     "sku": str(sku).strip()[:100] if sku and str(sku).strip() else None,
                     "current_price": price,
-                    "currency": "RUB",
+                    "currency": normalized_currency,
                     "url": str(url).strip() if url and str(url).strip() else None,
                     "category": str(category).strip()[:200] if category and str(category).strip() else None,
                 }

@@ -11,7 +11,7 @@ from app.config import Settings
 
 logger = logging.getLogger(__name__)
 settings = Settings()
-BOT_URL = "https://t.me/ImperectaBot"
+BOT_URL = settings.telegram_bot_url or ""
 
 
 def _md_to_html(md: str) -> str:

@@ -159,9 +159,9 @@ describe("AdminPage parsing section", () => {
   it("renders marketplace and run history blocks", () => {
     renderPage();
 
-    expect(screen.getByText("Тестовые маркетплейсы")).toBeInTheDocument();
+    expect(screen.getByText("admin.pool.marketplaces")).toBeInTheDocument();
     expect(screen.getByText("Test Market")).toBeInTheDocument();
-    expect(screen.getByText("История тестовых запусков")).toBeInTheDocument();
+    expect(screen.getByText("admin.pool.discoveryLogs")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /job-1-uu/i })).toBeInTheDocument();
   });
 
@@ -169,7 +169,7 @@ describe("AdminPage parsing section", () => {
     renderPage();
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Добавить 5 тестовых маркетплейсов" })[0],
+      screen.getAllByRole("button", { name: "common.add" })[0],
     );
 
     await waitFor(() => {
@@ -181,7 +181,7 @@ describe("AdminPage parsing section", () => {
     renderPage();
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Запустить полный цикл тестового парсинга" })[0],
+      screen.getAllByRole("button", { name: "admin.pool.triggerScraping" })[0],
     );
 
     await waitFor(() => {
@@ -200,9 +200,9 @@ describe("AdminPage parsing section", () => {
     fireEvent.click(row);
 
     await waitFor(() => {
-      expect(screen.getByText("Разбивка времени выполнения и статистика по каждому маркетплейсу.")).toBeInTheDocument();
-      expect(screen.getByText("Breakdown времени")).toBeInTheDocument();
-      expect(screen.getByText("По маркетплейсам")).toBeInTheDocument();
+      expect(screen.getAllByText("admin.pool.diagnostics").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("admin.pool.diagnosticsResult").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("admin.pool.marketplaces").length).toBeGreaterThan(0);
       expect(screen.getByText("example.com")).toBeInTheDocument();
     });
   });
@@ -214,6 +214,6 @@ describe("AdminPage parsing section", () => {
 
     renderPage();
 
-    expect(screen.getByText("Доступ запрещён")).toBeInTheDocument();
+    expect(screen.getByText("common.error")).toBeInTheDocument();
   });
 });

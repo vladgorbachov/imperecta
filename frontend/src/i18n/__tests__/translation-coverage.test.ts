@@ -24,6 +24,12 @@ interface HardcodedViolation {
   text: string;
 }
 
+interface CyrillicViolation {
+  filePath: string;
+  lineNumber: number;
+  line: string;
+}
+
 async function listFilesRecursive(directoryPath: string): Promise<string[]> {
   const entries = await readdir(directoryPath, { withFileTypes: true });
   const files: string[] = [];
@@ -125,6 +131,58 @@ describe("translation coverage diagnostics", () => {
     expect(
       missingUsageDiagnostics,
       `Translation key usage gaps:\n${missingUsageDiagnostics.slice(0, 60).join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("fails on hardcoded Cyrillic UI text outside locales", async () => {
+    const violations: CyrillicViolation[] = [];
+    const scanDirs = ["pages", "components"];
+
+    for (const directory of scanDirs) {
+      const absolute = path.join(SOURCE_ROOT, directory);
+      if (!(await stat(absolute).catch(() => null))) continue;
+      const files = await listFilesRecursive(absolute);
+      const tsxFiles = files.filter((file) => file.endsWith(".tsx") && !file.endsWith(".test.tsx"));
+
+      for (const filePath of tsxFiles) {
+        const source = await readFile(filePath, "utf-8");
+        const lines = source.split(/\r?\n/);
+        lines.forEach((line, index) => {
+          if (!/[А-Яа-яЁё]/.test(line)) return;
+          if (
+            filePath.endsWith(path.join("pages", "ImportPage.tsx")) &&
+            line.includes("COLUMN_ALIASES")
+          ) {
+            return;
+          }
+          if (
+            filePath.endsWith(path.join("pages", "ImportPage.tsx")) &&
+            (line.includes("название") ||
+              line.includes("артикул") ||
+              line.includes("цена") ||
+              line.includes("ссылка") ||
+              line.includes("категория"))
+          ) {
+            // Import parser supports localized CSV headers on purpose.
+            return;
+          }
+
+          violations.push({
+            filePath,
+            lineNumber: index + 1,
+            line: line.trim(),
+          });
+        });
+      }
+    }
+
+    const preview = violations
+      .slice(0, 80)
+      .map((item) => `${path.relative(FRONTEND_ROOT, item.filePath)}:${item.lineNumber} ${item.line}`);
+
+    expect(
+      violations,
+      `Hardcoded non-English UI text detected:\n${preview.join("\n")}`,
     ).toEqual([]);
   });
 

@@ -4,6 +4,7 @@
  */
 
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { Loader2, Trash2 } from "lucide-react";
 
 interface SelectionActionBarProps {
@@ -19,19 +20,15 @@ export function SelectionActionBar({
   onClear,
   isDeleting,
 }: SelectionActionBarProps) {
-  const label =
-    selectedCount === 1
-      ? "Выбрано: 1 товар"
-      : selectedCount < 5
-        ? `Выбрано: ${selectedCount} товара`
-        : `Выбрано: ${selectedCount} товаров`;
+  const { t } = useTranslation();
+  const label = t("products.selectedCount", { count: selectedCount });
 
   return (
     <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--glass-border)] bg-[var(--background-elevated)]/95 px-4 py-3 backdrop-blur">
       <span className="text-sm font-medium">{label}</span>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" onClick={onClear} disabled={isDeleting}>
-          Снять выделение
+          {t("products.clearSelection")}
         </Button>
         <Button
           variant="destructive"
@@ -44,7 +41,7 @@ export function SelectionActionBar({
           ) : (
             <Trash2 className="size-4" />
           )}{" "}
-          Удалить выбранные
+          {t("products.deleteSelected")}
         </Button>
       </div>
     </div>
