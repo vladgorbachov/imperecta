@@ -28,6 +28,8 @@ from app.modules.market_data.service import (
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 
+BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
+
 COUNTRIES = [
     {"code": "AM", "name": "Armenia", "name_local": "Армения", "flag": "🇦🇲", "region": "cis"},
     {"code": "AZ", "name": "Azerbaijan", "name_local": "Азербайджан", "flag": "🇦🇿", "region": "cis"},
@@ -35,6 +37,8 @@ COUNTRIES = [
     {"code": "KZ", "name": "Kazakhstan", "name_local": "Казахстан", "flag": "🇰🇿", "region": "cis"},
     {"code": "KG", "name": "Kyrgyzstan", "name_local": "Кыргызстан", "flag": "🇰🇬", "region": "cis"},
     {"code": "MD", "name": "Moldova", "name_local": "Молдова", "flag": "🇲🇩", "region": "cis"},
+    {"code": "BY", "name": "Belarus", "name_local": "Беларусь", "flag": "🇧🇾", "region": "cis"},
+    {"code": "RU", "name": "Russia", "name_local": "Россия", "flag": "🇷🇺", "region": "cis"},
     {"code": "TJ", "name": "Tajikistan", "name_local": "Таджикистан", "flag": "🇹🇯", "region": "cis"},
     {"code": "TM", "name": "Turkmenistan", "name_local": "Туркменистан", "flag": "🇹🇲", "region": "cis"},
     {"code": "UA", "name": "Ukraine", "name_local": "Украина", "flag": "🇺🇦", "region": "cis"},
@@ -46,20 +50,29 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _load_active_country_codes(db: DbSession) -> set[str]:
+    result = await db.execute(
+        select(DimCountry.country_code)
+        .where(DimCountry.is_active.is_(True))
+    )
+    return set(result.scalars().all())
+
+
 @router.get("/countries")
 async def get_countries(current_user: CurrentUser, db: DbSession) -> list[dict]:
-    _ = current_user
     meta = [
         {"code": "EUROPE", "name": "Europe", "name_local": "Европа", "flag": "🇪🇺", "region": "meta", "is_region": True},
         {"code": "CIS", "name": "CIS", "name_local": "СНГ", "flag": "🌍", "region": "meta", "is_region": True},
         {"separator": True},
     ]
-    result = await db.execute(
-        select(DimCountry.country_code)
-        .where(DimCountry.is_active.is_(True))
-    )
-    active_codes = set(result.scalars().all())
-    countries = [country for country in COUNTRIES if country["code"] in active_codes]
+    active_codes = await _load_active_country_codes(db)
+    is_superuser = bool(getattr(current_user, "is_superuser", False))
+    countries = [
+        country
+        for country in COUNTRIES
+        if country["code"] in active_codes
+        and (is_superuser or country["code"] not in BLOCKED_PUBLIC_COUNTRY_CODES)
+    ]
     return meta + countries
 
 

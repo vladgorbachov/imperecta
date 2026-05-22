@@ -31,7 +31,6 @@ async def list_pool_products(
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    _ = current_user
     service = ProductPoolService(db)
     items, total = await service.list_products(
         sort=sort,
@@ -40,22 +39,25 @@ async def list_pool_products(
         category=category,
         limit=limit,
         offset=offset,
+        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
     return PoolProductsResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/categories")
 async def pool_categories(current_user: CurrentUser, db: DbSession) -> list[dict]:
-    _ = current_user
     service = ProductPoolService(db)
-    return await service.get_categories()
+    return await service.get_categories(
+        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
+    )
 
 
 @router.get("/marketplace-stats", response_model=list[PoolCategorySummary])
 async def pool_marketplace_stats(current_user: CurrentUser, db: DbSession):
-    _ = current_user
     service = ProductPoolService(db)
-    return await service.get_marketplace_stats()
+    return await service.get_marketplace_stats(
+        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
+    )
 
 
 @router.get("/stats", response_model=PoolStatsResponse)
@@ -72,7 +74,10 @@ async def search_pool(
     q: str = Query(..., min_length=2),
     limit: int = Query(50, ge=1, le=200),
 ):
-    _ = current_user
     service = ProductPoolService(db)
-    items = await service.search_products(query=q, limit=limit)
+    items = await service.search_products(
+        query=q,
+        limit=limit,
+        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
+    )
     return {"items": items, "total": len(items), "message": _MIG}

@@ -1,51 +1,22 @@
-// MOBILE-2026: fully responsive + bottom nav + drawer
-
-/**
- * Administration page for superusers.
- * Stats, Claude API status, add marketplace, scrape activity, error distribution,
- * marketplace table, users table.
- */
-
-import { useState } from "react";
-import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
-import {
-  Users,
-  Store,
-  Activity,
-  AlertTriangle,
-  Brain,
-  Loader2,
-  Plus,
-  Trash2,
-  ChevronDown,
-  ChevronRight,
-  RefreshCw,
-  Stethoscope,
-  Calculator,
-  Play,
-  Scissors,
-  Merge,
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Clock3, Copy, Loader2, Play, Plus } from "lucide-react";
 import { toast } from "sonner";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui-custom/PageHeader";
+import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -54,1208 +25,590 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Progress } from "@/components/ui/progress";
+import { useAuthStore } from "@/stores/authStore";
 import {
-  Tooltip as TooltipRoot,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
+  useAddParsingTestMarketplaces,
   useAdminStats,
-  useAdminMarketplaces,
-  useMarketplaceLogs,
-  useScrapeActivity,
-  useErrorDistribution,
-  useAdminUsers,
-  useClaudeStatus,
-  useAddMarketplace,
-  useDeleteMarketplace,
-  useMarketsIngest,
-  useApiHealth,
+  useParsingJobStatus,
+  useParsingTestMarketplaces,
+  useParsingTestRuns,
+  useRunParsingFullTest,
 } from "@/hooks/useAdmin";
-import {
-  runPoolDiagnostics,
-  recalculateQuotas,
-  triggerDiscoveryAll,
-  triggerPoolScrape,
-  clearUserProducts,
-  cleanupInvalidProducts,
-  clearPool,
-  deduplicateMarketplaces,
-  type PoolDiagnostics,
-} from "@/api/admin";
-import { formatRelativeTime } from "@/lib/formatters";
-import type { AdminMarketplace as AdminMarketplaceType } from "@/api/admin";
-import { marketsApi, marketsQueryKeys } from "@/api/markets";
 
-function getCountryFlag(country: string): string {
-  switch (country) {
-    case "RU":
-      return "🇷🇺";
-    case "KZ":
-      return "🇰🇿";
-    case "BY":
-      return "🇧🇾";
-    case "UA":
-      return "🇺🇦";
-    case "DE":
-      return "🇩🇪";
-    case "PL":
-      return "🇵🇱";
-    case "XX":
-      return "🌐";
-    default:
-      return country;
-  }
+const RUNS_PAGE_SIZE = 20;
+const RUNS_LIMIT = 500;
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
-function ClaudeStatusCard() {
-  const { t, i18n } = useTranslation();
-  const { data, isLoading, refetch, isFetching } = useClaudeStatus();
-  const [expanded, setExpanded] = useState(false);
-
-  if (isLoading || !data) {
-    return (
-      <Card>
-        <CardHeader className="pb-2">
-          <Skeleton className="h-4 w-24" />
-        </CardHeader>
-        <CardContent>
-          <Skeleton className="h-8 w-16" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const health = data.health;
-  const stats = data.stats;
-
-  if (!health && !stats) {
-    return (
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-          <p className="text-sm font-medium text-muted-foreground">
-            {t("admin.claude.title")}
-          </p>
-          <Brain className="size-4 shrink-0 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">
-            {data.configured
-              ? t("admin.claude.configured", { model: data.model ?? "—" })
-              : t("admin.claude.notConfigured")}
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={(e) => {
-              e.stopPropagation();
-              refetch();
-            }}
-            disabled={isFetching}
-            className="mt-2"
-          >
-            {isFetching ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="size-4" />
-            )}{" "}
-            {t("admin.claude.checkNow")}
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const status = health?.status ?? "not_configured";
-
-  const statusLabel =
-    status === "online"
-      ? t("admin.claude.online")
-      : status === "error" || status === "auth_error"
-        ? t("admin.claude.error")
-        : status === "timeout"
-          ? t("admin.claude.timeout")
-          : status === "rate_limited"
-            ? t("admin.claude.rateLimited")
-            : status === "overloaded"
-              ? t("admin.claude.overloaded")
-              : status === "not_configured"
-                ? t("admin.claude.notConfigured")
-                : t("admin.claude.error");
-
-  const dotColor =
-    status === "online"
-      ? "bg-green-500"
-      : status === "error" || status === "auth_error"
-        ? "bg-red-500"
-        : status === "timeout" || status === "rate_limited" || status === "overloaded"
-          ? "bg-[var(--color-promo)]"
-          : "bg-muted-foreground";
-
-  return (
-    <Card
-      className="cursor-pointer transition-colors hover:border-primary/30"
-      onClick={() => setExpanded(!expanded)}
-    >
-      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-        <p className="text-sm font-medium text-muted-foreground">
-          {t("admin.claude.title")}
-        </p>
-        <div className="flex items-center gap-2">
-          <span
-            className={`inline-block size-2 rounded-full ${dotColor} ${status === "online" ? "animate-pulse" : ""}`}
-          />
-          <Brain className="size-4 shrink-0 text-muted-foreground" />
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{statusLabel}</div>
-        <p className="text-xs text-muted-foreground">
-          {t("admin.claude.latency", { ms: health?.latency_ms ?? 0 })}
-        </p>
-        {expanded && stats && (
-          <div className="mt-4 space-y-2 border-t pt-4 text-xs">
-            <p>
-              {t("admin.claude.calls24h")}: {stats.calls_24h} (
-              {stats.successful_24h} / {stats.failed_24h})
-            </p>
-            <p>
-              {t("admin.claude.avgLatency")}: {stats.avg_latency_ms} ms
-            </p>
-            <p>
-              {t("admin.claude.tokens24h")}: {stats.total_tokens_24h}
-            </p>
-            <p>
-              {t("admin.claude.lastSuccess")}:{" "}
-              {stats.last_success_at
-                ? formatRelativeTime(stats.last_success_at, i18n.language || "en")
-                : "—"}
-            </p>
-            {stats.last_error && (
-              <p className="text-destructive">
-                {t("admin.claude.lastError")}: {stats.last_error}
-              </p>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={(e) => {
-                e.stopPropagation();
-                refetch();
-              }}
-              disabled={isFetching}
-            >
-              {isFetching ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="size-4" />
-              )}{" "}
-              {t("admin.claude.checkNow")}
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+function formatDuration(seconds: number | null): string {
+  if (seconds == null || Number.isNaN(seconds)) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const mm = Math.floor(total / 60)
+    .toString()
+    .padStart(2, "0");
+  const ss = (total % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
 }
 
-/**
- * Pool management workflow:
- * 1. Click "Диагностика пула" to see current state
- * 2. If quotas are 0 → click "Пересчитать квоты"
- * 3. Click "Запустить Discovery" → wait 5-10 min
- * 4. Click "Диагностика пула" again to check progress
- * 5. When products appear → click "Запустить Scraping"
- * 6. Check Dashboard → Market Overview should show products
- */
-function PoolManagementCard() {
-  const { t } = useTranslation();
-  const [diagnostics, setDiagnostics] = useState<PoolDiagnostics | null>(null);
-  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
-  const [loadingAction, setLoadingAction] = useState<string | null>(null);
-
-  const fetchDiagnostics = async () => {
-    setLoadingDiagnostics(true);
-    try {
-      const { data } = await runPoolDiagnostics();
-      setDiagnostics(data);
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingDiagnostics(false);
-    }
-  };
-
-  const handleRecalculateQuotas = async () => {
-    setLoadingAction("quotas");
-    try {
-      await recalculateQuotas();
-      toast.success(t("admin.pool.quotasRecalculated"));
-      await fetchDiagnostics();
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const handleTriggerDiscovery = async () => {
-    setLoadingAction("discovery");
-    try {
-      await triggerDiscoveryAll();
-      toast.success(t("admin.pool.discoveryLaunched"));
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const handleTriggerScrape = async () => {
-    setLoadingAction("scrape");
-    try {
-      await triggerPoolScrape();
-      toast.success(t("admin.pool.scrapingLaunched"));
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const handleClearUserProducts = async () => {
-    if (!confirm(t("admin.pool.clearConfirm"))) {
-      return;
-    }
-    setLoadingAction("clear");
-    try {
-      const { data } = await clearUserProducts();
-      toast.success(t("admin.pool.clearedCount", { count: data.deleted_products }));
-      await fetchDiagnostics();
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const handleCleanupInvalid = async () => {
-    setLoadingAction("cleanup");
-    try {
-      const { data } = await cleanupInvalidProducts();
-      const parts = [
-        data.deleted_long_urls > 0 && `${data.deleted_long_urls} длинных URL`,
-        data.deleted_invalid_urls > 0 && `${data.deleted_invalid_urls} невалидных`,
-        (data.deleted_category_pages ?? 0) > 0 &&
-          `${data.deleted_category_pages} страниц категорий`,
-      ].filter(Boolean);
-      toast.success(parts.length ? `Удалено: ${parts.join(", ")}` : "Нечего удалять");
-      await fetchDiagnostics();
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const handleClearPool = async () => {
-    if (!confirm("Удалить ВСЕ товары из пула? Запустите Discovery заново после этого.")) {
-      return;
-    }
-    setLoadingAction("clearPool");
-    try {
-      const { data } = await clearPool();
-      toast.success(`Пул очищен: удалено ${data.deleted} товаров`);
-      await fetchDiagnostics();
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const handleDeduplicate = async () => {
-    setLoadingAction("deduplicate");
-    try {
-      const { data } = await deduplicateMarketplaces();
-      toast.success(`Объединено: ${data.merged} дубликатов`);
-      await fetchDiagnostics();
-    } catch {
-      toast.error(t("common.error"));
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("admin.pool.title")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="default"
-              size="sm"
-              onClick={fetchDiagnostics}
-              disabled={loadingDiagnostics}
-            >
-              {loadingDiagnostics ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Stethoscope className="mr-2 size-4" />
-              )}
-              {t("admin.pool.diagnostics")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRecalculateQuotas}
-              disabled={loadingAction === "quotas"}
-              className="border-amber-500 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400 dark:hover:bg-amber-500/20"
-            >
-              {loadingAction === "quotas" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Calculator className="mr-2 size-4" />
-              )}
-              {t("admin.pool.recalculateQuotas")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleTriggerDiscovery}
-              disabled={loadingAction === "discovery"}
-              className="border-green-600 bg-green-600/10 text-green-700 hover:bg-green-600/20 dark:text-green-400 dark:hover:bg-green-600/20"
-            >
-              {loadingAction === "discovery" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Play className="mr-2 size-4" />
-              )}
-              {t("admin.pool.triggerDiscovery")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleTriggerScrape}
-              disabled={loadingAction === "scrape"}
-              className="border-green-600 bg-green-600/10 text-green-700 hover:bg-green-600/20 dark:text-green-400 dark:hover:bg-green-600/20"
-            >
-              {loadingAction === "scrape" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 size-4" />
-              )}
-              {t("admin.pool.triggerScraping")}
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleClearUserProducts}
-              disabled={loadingAction === "clear"}
-            >
-              {loadingAction === "clear" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Scissors className="mr-2 size-4" />
-              )}
-              {t("admin.pool.clearUserProducts")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCleanupInvalid}
-              disabled={loadingAction === "cleanup"}
-            >
-              {loadingAction === "cleanup" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 size-4" />
-              )}
-              Очистить невалидные товары
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDeduplicate}
-              disabled={loadingAction === "deduplicate"}
-            >
-              {loadingAction === "deduplicate" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Merge className="mr-2 size-4" />
-              )}
-              Дедупликация маркетплейсов
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleClearPool}
-              disabled={loadingAction === "clearPool"}
-              className="border-red-500/50 text-red-600 hover:bg-red-500/10 dark:text-red-400"
-            >
-              {loadingAction === "clearPool" ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Scissors className="mr-2 size-4" />
-              )}
-              Очистить пул полностью
-            </Button>
-          </div>
-          {diagnostics && (
-            <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-              <p className="text-sm font-medium text-muted-foreground">
-                {t("admin.pool.diagnosticsResult")}
-              </p>
-              <div className="space-y-1 text-sm">
-                <p>
-                  {t("admin.pool.marketplaces")}:{" "}
-                  {diagnostics.marketplaces?.total ?? 0}{" "}
-                  ({t("admin.pool.active")}:{" "}
-                  {diagnostics.marketplaces?.active ?? 0}, quota=0:{" "}
-                  {diagnostics.markplaces?.zero_quota ?? 0})
-                </p>
-                <p>
-                  {t("admin.pool.productsInPool")}:{" "}
-                  {diagnostics.global_products?.total ?? 0}
-                </p>
-                <p>
-                  {t("admin.pool.priceSnapshots")}:{" "}
-                  {diagnostics.price_snapshots ?? 0}
-                </p>
-                <p>
-                  {t("admin.pool.discoveryLogs")}:{" "}
-                  {diagnostics.discovery_logs?.total ?? 0}
-                </p>
-                {(diagnostics.diagnosis ?? []).length > 0 && (
-                  <>
-                    <p className="mt-2 font-medium text-amber-600 dark:text-amber-400">
-                      ⚠️ {t("admin.pool.problems")}:
-                    </p>
-                    <ul className="list-inside list-disc space-y-1 text-muted-foreground">
-                      {(diagnostics.diagnosis ?? []).map((msg, i) => (
-                        <li key={i}>{msg}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
-              <details className="mt-2">
-                <summary className="cursor-pointer text-xs text-muted-foreground hover:underline">
-                  {t("admin.pool.showRawJson")}
-                </summary>
-                <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted/50 p-2 text-xs">
-                  {JSON.stringify(diagnostics, null, 2)}
-                </pre>
-              </details>
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
+function statusBadgeVariant(status: "running" | "completed" | "failed") {
+  if (status === "completed") return "default";
+  if (status === "failed") return "destructive";
+  return "secondary";
 }
 
-const API_STATUS_LABELS: Record<string, string> = {
-  forex: "Frankfurter (Forex)",
-  crypto: "Binance (Crypto)",
-  commodities: "GoldAPI + Alpha Vantage",
-  fuel: "Fuel",
-  decodo: "Decodo (Scraping)",
-  claude: "Claude AI",
-  resend: "Resend (Email)",
-  telegram: "Telegram Bot",
-};
-
-function ApiHealthSection() {
-  const { data, isLoading } = useApiHealth();
-
-  if (isLoading || !data) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Состояние API</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Skeleton className="h-32 w-full" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const providers = data.providers ?? {};
-  const apiKeys = data.api_keys ?? {};
-
-  const getStatusDot = (key: string, prov: { status?: string } | undefined, cfg: { configured?: boolean } | undefined) => {
-    if (["decodo", "claude", "resend", "telegram"].includes(key)) {
-      return cfg?.configured ? "🟢" : "⚪";
-    }
-    if (prov?.status === "success") return "🟢";
-    if (prov?.status === "error") return "🔴";
-    if (prov?.status === "running") return "🟡";
-    return "🟡";
-  };
-
-  const getStatusLabel = (key: string, prov: { status?: string; error?: string } | undefined, cfg: { configured?: boolean } | undefined) => {
-    if (["decodo", "claude", "resend", "telegram"].includes(key)) {
-      return cfg?.configured ? "Настроен" : "Не настроен";
-    }
-    if (prov?.status === "success") return "Работает";
-    if (prov?.status === "error") return prov?.error ?? "Ошибка";
-    if (prov?.status === "running") return "Выполняется";
-    return "—";
-  };
-
-  const rows = [
-    "forex",
-    "crypto",
-    "commodities",
-    "fuel",
-    "decodo",
-    "claude",
-    "resend",
-    "telegram",
-  ];
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Состояние API</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>API</TableHead>
-              <TableHead>Статус</TableHead>
-              <TableHead>Обновлено</TableHead>
-              <TableHead>Данные</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((key) => {
-              const prov = providers[key];
-              const cfgKey =
-                key === "forex"
-                  ? "frankfurter"
-                  : key === "crypto"
-                    ? "binance"
-                    : key === "commodities"
-                      ? "goldapi"
-                      : key;
-              const cfg = apiKeys[cfgKey];
-              const name = cfg?.name ?? API_STATUS_LABELS[key] ?? key;
-              return (
-                <TableRow key={key}>
-                  <TableCell>
-                    {getStatusDot(key, prov, cfg)} {name}
-                  </TableCell>
-                  <TableCell>{getStatusLabel(key, prov, cfg)}</TableCell>
-                  <TableCell>
-                    {prov?.last_refresh
-                      ? formatRelativeTime(prov.last_refresh, "ru")
-                      : "—"}
-                  </TableCell>
-                  <TableCell>{prov?.items_count ?? "—"}</TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
+function statusLabel(status: "running" | "completed" | "failed"): string {
+  if (status === "completed") return "Успешно";
+  if (status === "failed") return "С ошибками";
+  return "В процессе";
 }
 
-function MarketsRefreshCard() {
-  const { t, i18n } = useTranslation();
-  const ingest = useMarketsIngest();
-  const { data: refreshMetadata } = useQuery({
-    queryKey: marketsQueryKeys.refreshMetadata(),
-    queryFn: async () => {
-      const { data } = await marketsApi.getRefreshMetadata();
-      return data;
-    },
-  });
+function marketplaceActivityLabel(status: "running" | "completed" | "failed"): string {
+  return status === "running" ? "Активен" : "Неактивен";
+}
 
-  const lastSuccess = refreshMetadata?.items?.find(
-    (i) => i.refresh_type === "forex" || i.refresh_type === "crypto"
-  )?.last_successful_refresh;
-  const lastError = refreshMetadata?.items?.find(
-    (i) => i.refresh_type === "forex" || i.refresh_type === "crypto"
-  )?.last_failed_refresh;
-
-  const handleRefresh = async () => {
-    try {
-      await ingest.mutateAsync();
-      toast.success(t("admin.markets.refreshEnqueued"));
-    } catch {
-      toast.error(t("admin.markets.refreshError"));
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("admin.markets.title")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-muted-foreground">
-            {lastSuccess ? (
-              <span>
-                {t("admin.markets.lastRefresh")}:{" "}
-                {formatRelativeTime(lastSuccess, i18n.language || "en")}
-              </span>
-            ) : lastError ? (
-              <span className="text-destructive">
-                {t("admin.markets.lastRefresh")}: {t("admin.claude.error")}
-              </span>
-            ) : (
-              <span>{t("markets.analytics.noData")}</span>
-            )}
-          </div>
-          <Button
-            onClick={handleRefresh}
-            disabled={ingest.isPending}
-            variant="outline"
-          >
-            {ingest.isPending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="size-4" />
-            )}{" "}
-            {t("admin.markets.refresh")}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
+function stageToProgress(stage: string | null, status: "running" | "completed" | "failed"): number {
+  if (status === "completed") return 100;
+  if (status === "failed") return 100;
+  if (!stage) return 5;
+  if (stage === "queued") return 10;
+  if (stage === "discovery") return 35;
+  if (stage === "scrape") return 70;
+  if (stage === "persist") return 90;
+  return 15;
 }
 
 export function AdminPage() {
-  const { t, i18n } = useTranslation();
-  const locale = i18n.language || "en";
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [detailsJobId, setDetailsJobId] = useState<string | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const previousActiveStatus = useRef<"running" | "completed" | "failed" | null>(null);
 
-  const [addUrl, setAddUrl] = useState("");
-  const [expandedMarketplace, setExpandedMarketplace] = useState<string | null>(
-    null
-  );
+  const { data: stats } = useAdminStats();
+  const marketplacesQuery = useParsingTestMarketplaces();
+  const runsQuery = useParsingTestRuns(RUNS_LIMIT);
+  const addMarketplaces = useAddParsingTestMarketplaces();
+  const runPipeline = useRunParsingFullTest();
 
-  const { data: stats, isLoading: statsLoading } = useAdminStats();
-  const { data: marketplaces } = useAdminMarketplaces();
-  const { data: scrapeActivity } = useScrapeActivity();
-  const { data: errorDistribution } = useErrorDistribution();
-  const { data: users } = useAdminUsers();
-
-  const addMarketplace = useAddMarketplace();
-  const deleteMarketplace = useDeleteMarketplace();
-
-  const handleAddMarketplace = async () => {
-    const url = addUrl.trim();
-    if (!url) return;
-    try {
-      await addMarketplace.mutateAsync(url);
-      toast.success(t("admin.addMarketplace.success"));
-      setAddUrl("");
-    } catch (err: unknown) {
-      const msg =
-        err &&
-        typeof err === "object" &&
-        "response" in err &&
-        err.response &&
-        typeof err.response === "object" &&
-        "data" in err.response
-          ? (err.response.data as { detail?: string }).detail
-          : t("common.error");
-      toast.error(typeof msg === "string" ? msg : t("common.error"));
-    }
-  };
-
-  const sortedMarketplaces = [...(marketplaces ?? [])].sort((a, b) => {
-    const statusOrder = (s: AdminMarketplaceType) =>
-      s.last_scrape_status === "error" ? 0 : s.last_scrape_status ? 1 : 2;
-    return statusOrder(a) - statusOrder(b);
+  const activeStatusQuery = useParsingJobStatus(activeJobId, {
+    enabled: Boolean(activeJobId),
+    refetchInterval: 4500,
+  });
+  const detailsStatusQuery = useParsingJobStatus(detailsJobId, {
+    enabled: isDetailsOpen && Boolean(detailsJobId),
+    refetchInterval: isDetailsOpen ? 4500 : false,
   });
 
-  const errorRate = stats?.error_rate_today ?? 0;
-  const errorRateColor =
-    errorRate < 5
-      ? "text-[var(--color-price-down)]"
-      : errorRate <= 15
-        ? "text-[var(--color-promo)]"
-        : "text-[var(--color-price-up)]";
+  const sortedRuns = useMemo(() => {
+    const source = runsQuery.data ?? [];
+    return [...source].sort((a, b) => {
+      const aa = a.started_at ? new Date(a.started_at).getTime() : 0;
+      const bb = b.started_at ? new Date(b.started_at).getTime() : 0;
+      return bb - aa;
+    });
+  }, [runsQuery.data]);
 
-  return (
-    <div className="space-y-8">
-      <h1 className="font-display text-2xl font-bold tracking-tight">
-        {t("admin.title")}
-      </h1>
+  const totalPages = Math.max(1, Math.ceil(sortedRuns.length / RUNS_PAGE_SIZE));
+  const pagedRuns = useMemo(() => {
+    const safePage = Math.min(Math.max(historyPage, 1), totalPages);
+    const start = (safePage - 1) * RUNS_PAGE_SIZE;
+    return sortedRuns.slice(start, start + RUNS_PAGE_SIZE);
+  }, [historyPage, sortedRuns, totalPages]);
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+  useEffect(() => {
+    setHistoryPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    const status = activeStatusQuery.data?.status;
+    if (!status) return;
+
+    if (previousActiveStatus.current === "running" && (status === "completed" || status === "failed")) {
+      const summary = activeStatusQuery.data?.metadata?.summary;
+      if (status === "completed") {
+        toast.success(
+          `Тест завершён: listings ${summary?.listings_created ?? 0}, prices ${summary?.prices_saved ?? 0}, errors ${summary?.errors_count ?? 0}`,
+        );
+      } else {
+        toast.error(
+          `Тест завершился с ошибками: listings ${summary?.listings_created ?? 0}, prices ${summary?.prices_saved ?? 0}, errors ${summary?.errors_count ?? 0}`,
+        );
+      }
+      setActiveJobId(null);
+      queryClient.invalidateQueries({ queryKey: ["admin", "parsing", "test-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "parsing", "test-marketplaces"] });
+    }
+
+    previousActiveStatus.current = status;
+  }, [activeStatusQuery.data, queryClient]);
+
+  if (!user?.is_superuser) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="nav.admin" />
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              {t("admin.stats.users")}
-            </p>
-            <Users className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-12" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {stats?.users_count ?? stats?.users ?? 0}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              {t("admin.stats.marketplaces")}
-            </p>
-            <Store className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-12" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {stats?.marketplaces_count ?? stats?.marketplaces ?? 0}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("admin.stats.activeMarketplaces", {
-                    count:
-                      stats?.active_marketplaces_count ?? stats?.marketplaces ?? 0,
-                  })}
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              {t("admin.stats.scrapesToday")}
-            </p>
-            <Activity className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-12" />
-            ) : (
-              <>
-                <div className="text-2xl font-bold">
-                  {stats?.total_scrapes_today ?? 0}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {stats?.successful_scrapes_today ?? 0} /{" "}
-                  {stats?.failed_scrapes_today ?? 0}
-                </p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              {t("admin.stats.errors")}
-            </p>
-            <AlertTriangle className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-12" />
-            ) : (
-              <div className={`text-2xl font-bold ${errorRateColor}`}>
-                {t("admin.stats.errorRate", {
-                  rate: errorRate,
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <ClaudeStatusCard />
-      </div>
-
-      {/* Add marketplace */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("admin.addMarketplace.title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
-            <Input
-              placeholder={t("admin.addMarketplace.placeholder")}
-              value={addUrl}
-              onChange={(e) => setAddUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddMarketplace()}
+          <CardContent className="pt-6">
+            <EmptyState
+              title="Доступ запрещён"
+              description="Раздел администрирования парсинга доступен только superuser-аккаунтам."
             />
-            <Button
-              onClick={handleAddMarketplace}
-              disabled={addMarketplace.isPending || !addUrl.trim()}
-            >
-              {addMarketplace.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Plus className="size-4" />
-              )}{" "}
-              {t("admin.addMarketplace.button")}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-      <MarketsRefreshCard />
+  const activeStatus = activeStatusQuery.data;
+  const detailsStatus = detailsStatusQuery.data;
+  const currentStage = activeStatus?.current_stage ?? "queued";
+  const progress = stageToProgress(currentStage, activeStatus?.status ?? "running");
 
-      {/* API status */}
-      <ApiHealthSection />
+  return (
+    <div className="space-y-6">
+      <PageHeader title="nav.admin" />
 
-      {/* Scrape activity chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("admin.scrapeActivity.title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!scrapeActivity ? (
-            <Skeleton className="h-64 w-full" />
-          ) : (
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={scrapeActivity.labels.map((l, i) => ({
-                    date: l,
-                    success: scrapeActivity.datasets[0]?.data.at(i) ?? 0,
-                    errors: scrapeActivity.datasets[1]?.data.at(i) ?? 0,
-                  }))}
-                >
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="success" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="errors" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="parsing" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="overview">Обзор</TabsTrigger>
+          <TabsTrigger value="parsing">Тестовый парсинг</TabsTrigger>
+        </TabsList>
 
-      {/* Pool management — after Scrape activity */}
-      <PoolManagementCard />
+        <TabsContent value="overview" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Системные показатели</CardTitle>
+              <CardDescription>
+                Краткая сводка superuser-админки. Основной рабочий блок находится во вкладке
+                «Тестовый парсинг».
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Пользователи</p>
+                <p className="text-2xl font-semibold">{stats?.users_count ?? stats?.users ?? 0}</p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Маркетплейсы</p>
+                <p className="text-2xl font-semibold">
+                  {stats?.marketplaces_count ?? stats?.marketplaces ?? 0}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Листинги</p>
+                <p className="text-2xl font-semibold">{stats?.total_products_monitored ?? 0}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Error distribution */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("admin.errorDistribution.title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!errorDistribution ? (
-            <Skeleton className="h-64 w-full" />
-          ) : (
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={errorDistribution.labels.map((l, i) => ({
-                      name: l,
-                      value: errorDistribution.data.at(i) ?? 0,
-                    }))}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={80}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={({ name, value }) =>
-                      value > 0 ? `${name}: ${value}` : ""
-                    }
-                  >
-                    {errorDistribution.labels.map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={
-                          [
-                            "#f59e0b",
-                            "#ef4444",
-                            "#8b5cf6",
-                            "#06b6d4",
-                            "#6b7280",
-                          ][i % 5]
-                        }
-                      />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        <TabsContent value="parsing" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Администрирование парсинга</CardTitle>
+              <CardDescription>
+                Единая точка управления тестовым пулом маркетплейсов и полным циклом
+                discovery → scrape → persist.
+              </CardDescription>
+            </CardHeader>
+          </Card>
 
-      {/* Marketplaces table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("admin.marketplaces.title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead></TableHead>
-                <TableHead>{t("common.name")}</TableHead>
-                <TableHead>{t("admin.marketplaces.country")}</TableHead>
-                <TableHead>{t("common.status")}</TableHead>
-                <TableHead>{t("admin.marketplaces.successRate")}</TableHead>
-                <TableHead>{t("admin.marketplaces.lastScrape")}</TableHead>
-                <TableHead>{t("admin.marketplaces.products")}</TableHead>
-                <TableHead>{t("common.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedMarketplaces.map((mp) => (
-                <MarketplaceRow
-                  key={mp.marketplace_id}
-                  mp={mp}
-                  expanded={expandedMarketplace === mp.marketplace_id}
-                  onToggle={() =>
-                    setExpandedMarketplace(
-                      expandedMarketplace === mp.marketplace_id
-                        ? null
-                        : mp.marketplace_id
-                    )
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle>Тестовые маркетплейсы</CardTitle>
+                <CardDescription>
+                  Список тестового пула с показателями успешности и последними запусками.
+                </CardDescription>
+              </div>
+              <Button
+                onClick={async () => {
+                  try {
+                    const result = await addMarketplaces.mutateAsync();
+                    toast.success(
+                      `Обновлено: добавлено ${result.added}, пропущено ${result.skipped}`,
+                    );
+                  } catch {
+                    toast.error("Не удалось добавить тестовые маркетплейсы");
                   }
-                  onDelete={() => {
-                    if (mp.source === "registry") {
-                      toast.error(t("admin.marketplaces.cannotDeleteBuiltin"));
-                      return;
-                    }
-                    deleteMarketplace.mutate(mp.marketplace_id);
-                  }}
-                  t={t}
-                  locale={locale}
+                }}
+                disabled={addMarketplaces.isPending}
+              >
+                {addMarketplaces.isPending ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Plus className="mr-2 size-4" />
+                )}
+                Добавить 5 тестовых маркетплейсов
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {marketplacesQuery.isLoading ? (
+                <Skeleton className="h-40 w-full" />
+              ) : (marketplacesQuery.data?.length ?? 0) === 0 ? (
+                <EmptyState
+                  title="Пул тестовых маркетплейсов пуст"
+                  description="Добавьте тестовые маркетплейсы, чтобы подготовить пайплайн к запуску."
                 />
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Маркетплейс</TableHead>
+                      <TableHead>URL</TableHead>
+                      <TableHead>Товаров в пуле</TableHead>
+                      <TableHead>Последний успешный scrape</TableHead>
+                      <TableHead>Success rate</TableHead>
+                      <TableHead>Последний запуск</TableHead>
+                      <TableHead>Статус</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {marketplacesQuery.data?.map((item) => (
+                      <TableRow key={item.url}>
+                        <TableCell className="font-medium">{item.name}</TableCell>
+                        <TableCell className="max-w-60 truncate">{item.url}</TableCell>
+                        <TableCell>{item.products_in_pool}</TableCell>
+                        <TableCell>{formatDateTime(item.last_successful_scrape)}</TableCell>
+                        <TableCell>{item.success_rate.toFixed(2)}%</TableCell>
+                        <TableCell>{formatDateTime(item.last_run)}</TableCell>
+                        <TableCell>
+                          <Badge variant={statusBadgeVariant(item.status)}>
+                            {marketplaceActivityLabel(item.status)}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Users table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("admin.users.title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Email</TableHead>
-                <TableHead>{t("common.name")}</TableHead>
-                <TableHead>{t("settings.plan")}</TableHead>
-                <TableHead>{t("admin.marketplaces.products")}</TableHead>
-                <TableHead>{t("admin.users.registration")}</TableHead>
-                <TableHead>{t("admin.users.lastLogin")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(users ?? []).map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell>{u.email}</TableCell>
-                  <TableCell>{u.name ?? u.email?.split("@")[0] ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{u.plan ?? "—"}</Badge>
-                  </TableCell>
-                  <TableCell>{u.products_count ?? 0}</TableCell>
-                  <TableCell>{formatDate(u.created_at, locale)}</TableCell>
-                  <TableCell>
-                    {u.last_login_at
-                      ? formatRelativeTime(u.last_login_at, locale)
-                      : "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+          <Card>
+            <CardHeader className="space-y-3">
+              <CardTitle>Запуск тестового пайплайна</CardTitle>
+              <CardDescription>
+                Запускает полный цикл для тестового пула и обновляет статус через polling каждые 4–5
+                секунд.
+              </CardDescription>
+              <Button
+                className="w-full md:w-auto"
+                size="lg"
+                onClick={async () => {
+                  try {
+                    const result = await runPipeline.mutateAsync();
+                    previousActiveStatus.current = "running";
+                    setActiveJobId(result.job_id);
+                    toast.success(`Запуск создан: ${result.job_id}`);
+                  } catch (error) {
+                    const message =
+                      typeof error === "object" &&
+                      error &&
+                      "response" in error &&
+                      (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+                        ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+                        : "Не удалось запустить полный тест";
+                    toast.error(message ?? "Не удалось запустить полный тест");
+                  }
+                }}
+                disabled={runPipeline.isPending || activeStatus?.status === "running"}
+              >
+                {runPipeline.isPending ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Play className="mr-2 size-4" />
+                )}
+                Запустить полный цикл тестового парсинга
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {activeJobId && activeStatus ? (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={statusBadgeVariant(activeStatus.status)}>
+                      {statusLabel(activeStatus.status)}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">Job ID: {activeStatus.job_id}</span>
+                  </div>
+                  <Progress value={progress} max={100} />
+                  <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground md:grid-cols-3">
+                    <span>Discovery: {currentStage === "discovery" ? "выполняется" : "ожидание"}</span>
+                    <span>Scrape: {currentStage === "scrape" ? "выполняется" : "ожидание"}</span>
+                    <span>Persist: {currentStage === "persist" ? "выполняется" : "ожидание"}</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+                    <span>Старт: {formatDateTime(activeStatus.started_at)}</span>
+                    <span>Завершение: {formatDateTime(activeStatus.completed_at)}</span>
+                  </div>
+                </div>
+              ) : (
+                <EmptyState
+                  title="Активный запуск отсутствует"
+                  description="Запустите полный цикл, чтобы начать мониторинг этапов в реальном времени."
+                />
+              )}
+            </CardContent>
+          </Card>
 
-function formatDate(dateStr: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(dateStr));
-}
+          <Card>
+            <CardHeader>
+              <CardTitle>История тестовых запусков</CardTitle>
+              <CardDescription>
+                Таблица оптимизирована для большого объёма записей через постраничный вывод.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {runsQuery.isLoading ? (
+                <Skeleton className="h-56 w-full" />
+              ) : sortedRuns.length === 0 ? (
+                <EmptyState
+                  title="Запусков пока нет"
+                  description="После первого запуска тестового цикла здесь появится история."
+                />
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Job ID</TableHead>
+                        <TableHead>Начало</TableHead>
+                        <TableHead>Завершение</TableHead>
+                        <TableHead>Длительность</TableHead>
+                        <TableHead>Listings</TableHead>
+                        <TableHead>Prices</TableHead>
+                        <TableHead>Errors</TableHead>
+                        <TableHead>Статус</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pagedRuns.map((run) => (
+                        <TableRow
+                          key={run.job_id}
+                          className="cursor-pointer"
+                          onClick={() => {
+                            setDetailsJobId(run.job_id);
+                            setIsDetailsOpen(true);
+                          }}
+                        >
+                          <TableCell>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 text-left text-sm text-primary hover:underline"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                navigator.clipboard.writeText(run.job_id);
+                                toast.success("Job ID скопирован");
+                              }}
+                            >
+                              <Copy className="size-3.5" />
+                              {run.job_id.slice(0, 8)}…
+                            </button>
+                          </TableCell>
+                          <TableCell>{formatDateTime(run.started_at)}</TableCell>
+                          <TableCell>{formatDateTime(run.completed_at)}</TableCell>
+                          <TableCell>{formatDuration(run.duration_seconds)}</TableCell>
+                          <TableCell>{run.listings_created}</TableCell>
+                          <TableCell>{run.prices_saved}</TableCell>
+                          <TableCell>{run.errors_count}</TableCell>
+                          <TableCell>
+                            <Badge variant={statusBadgeVariant(run.status)}>{statusLabel(run.status)}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
 
-function MarketplaceRow({
-  mp,
-  expanded,
-  onToggle,
-  onDelete,
-  t,
-  locale,
-}: {
-  mp: AdminMarketplaceType;
-  expanded: boolean;
-  onToggle: () => void;
-  onDelete: () => void;
-  t: (k: string) => string;
-  locale: string;
-}) {
-  const statusKey =
-    mp.last_scrape_status === "success"
-      ? "admin.marketplaces.status.success"
-      : mp.last_scrape_status === "error"
-        ? "admin.marketplaces.status.error"
-        : mp.last_scrape_status === "timeout"
-          ? "admin.marketplaces.status.timeout"
-          : mp.last_scrape_status === "blocked"
-            ? "admin.marketplaces.status.blocked"
-            : "admin.marketplaces.status.noData";
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Страница {historyPage} из {totalPages}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
+                        disabled={historyPage <= 1}
+                      >
+                        Назад
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setHistoryPage((prev) => Math.min(totalPages, prev + 1))}
+                        disabled={historyPage >= totalPages}
+                      >
+                        Вперёд
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
-  const statusVariant =
-    mp.last_scrape_status === "success"
-      ? "default"
-      : mp.last_scrape_status === "error" || mp.last_scrape_status === "blocked"
-        ? "destructive"
-        : mp.last_scrape_status === "timeout"
-          ? "secondary"
-          : "outline";
+      <Dialog
+        open={isDetailsOpen}
+        onOpenChange={(open) => {
+          setIsDetailsOpen(open);
+          if (!open) setDetailsJobId(null);
+        }}
+      >
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              Детали запуска {detailsStatus?.job_id ? `#${detailsStatus.job_id.slice(0, 8)}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Разбивка времени выполнения и статистика по каждому маркетплейсу.
+            </DialogDescription>
+          </DialogHeader>
 
-  const progressVariant =
-    mp.success_rate >= 95
-      ? "default"
-      : mp.success_rate >= 80
-        ? "warning"
-        : "danger";
+          {detailsStatusQuery.isLoading ? (
+            <Skeleton className="h-72 w-full" />
+          ) : detailsStatus ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Статус</p>
+                    <Badge variant={statusBadgeVariant(detailsStatus.status)}>
+                      {statusLabel(detailsStatus.status)}
+                    </Badge>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Старт</p>
+                    <p className="text-sm">{formatDateTime(detailsStatus.started_at)}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Завершение</p>
+                    <p className="text-sm">{formatDateTime(detailsStatus.completed_at)}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">Общее время</p>
+                    <p className="text-sm">{formatDuration(detailsStatus.duration_seconds)}</p>
+                  </CardContent>
+                </Card>
+              </div>
 
-  return (
-    <>
-      <TableRow className="cursor-pointer" onClick={onToggle}>
-        <TableCell className="w-8">
-          {expanded ? (
-            <ChevronDown className="size-4" />
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Breakdown времени</CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-2 text-sm md:grid-cols-4">
+                  <div className="rounded border p-2">
+                    Discovery: {detailsStatus.metadata?.timings?.discovery_ms ?? 0} ms
+                  </div>
+                  <div className="rounded border p-2">
+                    Scrape: {detailsStatus.metadata?.timings?.scrape_ms ?? 0} ms
+                  </div>
+                  <div className="rounded border p-2">
+                    Persist: {detailsStatus.metadata?.timings?.persist_ms ?? 0} ms
+                  </div>
+                  <div className="rounded border p-2">
+                    Total: {detailsStatus.metadata?.timings?.total_ms ?? 0} ms
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">По маркетплейсам</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {(detailsStatus.metadata?.per_marketplace?.length ?? 0) === 0 ? (
+                    <p className="text-sm text-muted-foreground">Детализация по маркетплейсам отсутствует.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Маркетплейс</TableHead>
+                          <TableHead>Listings</TableHead>
+                          <TableHead>Prices</TableHead>
+                          <TableHead>Errors</TableHead>
+                          <TableHead>Success rate</TableHead>
+                          <TableHead>Статус</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detailsStatus.metadata?.per_marketplace?.map((row) => {
+                          const denominator = row.prices_saved + row.errors_count;
+                          const rate = denominator > 0 ? (row.prices_saved / denominator) * 100 : 0;
+                          return (
+                            <TableRow key={`${row.marketplace_id}-${row.domain}`}>
+                              <TableCell>{row.domain}</TableCell>
+                              <TableCell>{row.listings_created}</TableCell>
+                              <TableCell>{row.prices_saved}</TableCell>
+                              <TableCell>{row.errors_count}</TableCell>
+                              <TableCell>{rate.toFixed(2)}%</TableCell>
+                              <TableCell>
+                                <Badge variant={statusBadgeVariant(row.status)}>{statusLabel(row.status)}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           ) : (
-            <ChevronRight className="size-4" />
+            <EmptyState
+              title="Данные запуска недоступны"
+              description="Не удалось загрузить детали выбранного запуска."
+            />
           )}
-        </TableCell>
-          <TableCell>
-            <div>
-              <span className="font-medium">{mp.name}</span>
-              <span className="ml-1 text-muted-foreground">({mp.domain})</span>
-            </div>
-          </TableCell>
-          <TableCell>
-            {getCountryFlag(mp.country)} {mp.country}
-          </TableCell>
-          <TableCell>
-            <Badge variant={statusVariant}>{t(statusKey)}</Badge>
-          </TableCell>
-          <TableCell>
-            <div className="w-24">
-              <Progress
-                value={mp.success_rate}
-                max={100}
-                variant={progressVariant}
-              />
-            </div>
-          </TableCell>
-          <TableCell>
-            {mp.last_scrape_at
-              ? formatRelativeTime(mp.last_scrape_at, locale)
-              : "—"}
-          </TableCell>
-          <TableCell>{mp.products_count}</TableCell>
-          <TableCell>
-            <TooltipRoot>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete();
-                  }}
-                  disabled={mp.source === "registry"}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {mp.source === "registry"
-                  ? t("admin.marketplaces.cannotDeleteBuiltin")
-                  : t("common.delete")}
-              </TooltipContent>
-            </TooltipRoot>
-          </TableCell>
-        </TableRow>
-      {expanded && (
-        <TableRow>
-          <TableCell colSpan={8} className="bg-muted/30">
-            <MarketplaceLogsPanel marketplaceId={mp.marketplace_id} />
-          </TableCell>
-        </TableRow>
-      )}
-    </>
-  );
-}
-
-function MarketplaceLogsPanel({ marketplaceId }: { marketplaceId: string }) {
-  const { data: logs, isLoading } = useMarketplaceLogs(marketplaceId);
-  const { t, i18n } = useTranslation();
-  const locale = i18n.language || "en";
-
-  if (isLoading) return <Skeleton className="h-24 w-full" />;
-  if (!logs?.length) return <p className="text-sm text-muted-foreground">{t("common.noData")}</p>;
-
-  return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>URL</TableHead>
-            <TableHead>{t("common.status")}</TableHead>
-            <TableHead>{t("common.price")}</TableHead>
-            <TableHead>ms</TableHead>
-            <TableHead>{t("common.date")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {logs.map((log) => (
-            <TableRow key={log.id}>
-              <TableCell className="max-w-48 truncate">{log.url}</TableCell>
-              <TableCell>
-                <Badge variant={log.status === "success" ? "default" : "destructive"}>
-                  {log.status}
-                </Badge>
-              </TableCell>
-              <TableCell>{log.price_found ?? "—"}</TableCell>
-              <TableCell>{log.duration_ms ?? "—"}</TableCell>
-              <TableCell>
-                {log.created_at
-                  ? formatRelativeTime(log.created_at, locale)
-                  : "—"}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
+              Закрыть
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  const result = await runPipeline.mutateAsync();
+                  previousActiveStatus.current = "running";
+                  setActiveJobId(result.job_id);
+                  setIsDetailsOpen(false);
+                  toast.success(`Повторный запуск создан: ${result.job_id}`);
+                } catch {
+                  toast.error("Не удалось запустить повторный тест");
+                }
+              }}
+              disabled={runPipeline.isPending}
+            >
+              {runPipeline.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Clock3 className="mr-2 size-4" />
+              )}
+              Повторить запуск
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

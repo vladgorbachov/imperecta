@@ -250,122 +250,124 @@ export function PoolProductsTab({ locale }: { locale: string }) {
             </Button>
           </div>
         ) : (
-          <div className="max-h-[55vh] overflow-x-auto overflow-y-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  {isSuperuser && (
-                    <TableHead className="w-12">
-                      <Checkbox
-                        checked={isAllSelected}
-                        onCheckedChange={toggleAll}
-                        aria-label="Выбрать все"
-                      />
-                    </TableHead>
-                  )}
-                  <TableHead className="w-12" />
-                  <TableHead>Название</TableHead>
-                  <TableHead>Маркетплейс</TableHead>
-                  <TableHead>Цена</TableHead>
-                  <TableHead>Изменение 24ч</TableHead>
-                  <TableHead>Изменение 7д</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => (
-                  <TableRow
-                    key={item.id}
-                    className={cn(
-                      "cursor-pointer transition-colors",
-                      isSelected(item.id)
-                        ? "border-l-2 border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15"
-                        : "hover:bg-muted/50"
-                    )}
-                    onClick={(e) => {
-                      if ((e.ctrlKey || e.metaKey) && isSuperuser) {
-                        e.preventDefault();
-                        toggleItem(item.id);
-                      } else if (item.url) {
-                        window.open(item.url, "_blank");
-                      }
-                    }}
-                  >
+          <>
+            <div className="max-h-[55vh] overflow-x-auto overflow-y-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
                     {isSuperuser && (
-                      <TableCell
-                        className="w-12"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      <TableHead className="w-12">
                         <Checkbox
-                          checked={isSelected(item.id)}
-                          onCheckedChange={() => toggleItem(item.id)}
-                          aria-label={`Выбрать ${item.title || item.id}`}
+                          checked={isAllSelected}
+                          onCheckedChange={toggleAll}
+                          aria-label="Выбрать все"
+                        />
+                      </TableHead>
+                    )}
+                    <TableHead className="w-12" />
+                    <TableHead>Название</TableHead>
+                    <TableHead>Маркетплейс</TableHead>
+                    <TableHead>Цена</TableHead>
+                    <TableHead>Изменение 24ч</TableHead>
+                    <TableHead>Изменение 7д</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((item) => (
+                    <TableRow
+                      key={item.id}
+                      className={cn(
+                        "cursor-pointer transition-colors",
+                        isSelected(item.id)
+                          ? "border-l-2 border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15"
+                          : "hover:bg-muted/50"
+                      )}
+                      onClick={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && isSuperuser) {
+                          e.preventDefault();
+                          toggleItem(item.id);
+                        } else if (item.url) {
+                          window.open(item.url, "_blank");
+                        }
+                      }}
+                    >
+                      {isSuperuser && (
+                        <TableCell
+                          className="w-12"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={isSelected(item.id)}
+                            onCheckedChange={() => toggleItem(item.id)}
+                            aria-label={`Выбрать ${item.title || item.id}`}
+                          />
+                        </TableCell>
+                      )}
+                      <TableCell className="w-12">
+                        <ProductThumbnail item={item} />
+                      </TableCell>
+                      <TableCell>
+                        <span className="line-clamp-2 font-medium">
+                          {item.title || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <MarketplaceBadge
+                          marketplace={item.marketplace_domain || item.marketplace_name || String(item.marketplace_id)}
+                          size="sm"
                         />
                       </TableCell>
-                    )}
-                    <TableCell className="w-12">
-                      <ProductThumbnail item={item} />
-                    </TableCell>
-                    <TableCell>
-                      <span className="line-clamp-2 font-medium">
-                        {item.title || "—"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <MarketplaceBadge
-                        marketplace={item.marketplace_domain || item.marketplace_name || String(item.marketplace_id)}
-                        size="sm"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {item.current_price != null
-                        ? formatPrice(item.current_price, item.currency || "USD", locale)
-                        : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {item.price_change_pct_24h != null ? (
-                        <span
-                          className={cn(
-                            "font-medium",
-                            item.price_change_pct_24h > 0 && "text-green-500",
-                            item.price_change_pct_24h < 0 && "text-red-500"
-                          )}
-                        >
-                          {item.price_change_pct_24h > 0 ? "+" : ""}
-                          {item.price_change_pct_24h.toFixed(2)}%
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {item.price_change_pct_7d != null ? (
-                        <span
-                          className={cn(
-                            "text-sm",
-                            item.price_change_pct_7d > 0 && "text-green-500",
-                            item.price_change_pct_7d < 0 && "text-red-500"
-                          )}
-                        >
-                          {item.price_change_pct_7d > 0 ? "+" : ""}
-                          {item.price_change_pct_7d.toFixed(2)}%
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          {isSuperuser && selectedCount > 0 && (
-            <SelectionActionBar
-              selectedCount={selectedCount}
-              onDelete={() => setShowDeleteDialog(true)}
-              onClear={clearSelection}
-              isDeleting={isDeleting}
-            />
-          )}
+                      <TableCell>
+                        {item.current_price != null
+                          ? formatPrice(item.current_price, item.currency || "USD", locale)
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {item.price_change_pct_24h != null ? (
+                          <span
+                            className={cn(
+                              "font-medium",
+                              item.price_change_pct_24h > 0 && "text-green-500",
+                              item.price_change_pct_24h < 0 && "text-red-500"
+                            )}
+                          >
+                            {item.price_change_pct_24h > 0 ? "+" : ""}
+                            {item.price_change_pct_24h.toFixed(2)}%
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {item.price_change_pct_7d != null ? (
+                          <span
+                            className={cn(
+                              "text-sm",
+                              item.price_change_pct_7d > 0 && "text-green-500",
+                              item.price_change_pct_7d < 0 && "text-red-500"
+                            )}
+                          >
+                            {item.price_change_pct_7d > 0 ? "+" : ""}
+                            {item.price_change_pct_7d.toFixed(2)}%
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {isSuperuser && selectedCount > 0 && (
+              <SelectionActionBar
+                selectedCount={selectedCount}
+                onDelete={() => setShowDeleteDialog(true)}
+                onClear={clearSelection}
+                isDeleting={isDeleting}
+              />
+            )}
+          </>
         )}
       </div>
 

@@ -59,7 +59,6 @@ async def get_overview(
 ) -> dict:
     if sort not in OVERVIEW_SORT:
         sort = "volatile"
-    _ = current_user
     service = ProductPoolService(db)
     items, total = await service.list_products(
         sort=sort,
@@ -67,6 +66,7 @@ async def get_overview(
         marketplace_id=marketplace_id,
         limit=limit,
         offset=offset,
+        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 

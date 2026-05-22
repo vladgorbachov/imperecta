@@ -43,6 +43,12 @@ const LOCALE_MAP = new Map<string, string>([
 ]);
 
 const FALLBACK_COUNTRY = "EUROPE";
+const BLOCKED_PUBLIC_COUNTRIES = new Set(["RU", "BY"]);
+
+function isAllowedPublicCountry(code: string): boolean {
+  if (BLOCKED_PUBLIC_COUNTRIES.has(code)) return false;
+  return code === "EUROPE" || code === "CIS" || Boolean(getCountryByCode(code));
+}
 
 /**
  * Resolve country from locale (i18n language).
@@ -65,16 +71,14 @@ export function resolveActiveCountry(
 ): string {
   if (savedCountry) {
     const upper = savedCountry.toUpperCase();
-    if (upper === "EUROPE" || upper === "CIS" || getCountryByCode(upper)) return upper;
+    if (isAllowedPublicCountry(upper)) return upper;
   }
   if (manualSelection) {
     const upper = manualSelection.toUpperCase();
-    if (upper === "EUROPE" || upper === "CIS" || getCountryByCode(upper)) return upper;
+    if (isAllowedPublicCountry(upper)) return upper;
   }
   const fromLocale = resolveCountryFromLocale(locale);
-  return fromLocale === "EUROPE" || fromLocale === "CIS" || getCountryByCode(fromLocale)
-    ? fromLocale
-    : FALLBACK_COUNTRY;
+  return isAllowedPublicCountry(fromLocale) ? fromLocale : FALLBACK_COUNTRY;
 }
 
 export { FALLBACK_COUNTRY };

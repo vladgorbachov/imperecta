@@ -1,6 +1,19 @@
 # Parsers Audit — Imperecta
 
-## 0. Актуализация (2026-04-04)
+## 0. Актуализация (2026-05-21)
+
+- **Full test pipeline admin flow added (backend):**
+  - `/api/admin/parsing/run-full-test` creates full-pipeline test job.
+  - `run_full_pipeline_test` task now tracks and persists stage-aware metadata (`current_stage`, timings, summary, per_marketplace).
+  - `/api/admin/parsing/job-status/{job_id}` supports polling and returns normalized status + metadata.
+  - `/api/admin/parsing/test-runs` returns historical runs for admin UI history table.
+- **Parser observability upgrade:**
+  - Status pipeline aligned with frontend monitoring (running/completed/failed),
+  - timings breakdown for discovery/scrape/persist exposed in job metadata.
+
+- **Git head:** `f50afca` — local dev scripts removed; production-first config.
+- **Legacy admin endpoints removed:** `trigger-scrape`, `scrape-activity`, `error-distribution`, `clear-test-data`, `marketplaces/deduplicate`.
+- **Clear-pool:** `POST /api/admin/products/clear-pool` — hard reset pool data (see `api_admin.py`).
 
 - `backend/app/modules/scraper/engine.py` отсутствует в репозитории (не используется).
 - **Alembic head:** **`009_full_v2_schema_rebuild`** — идемпотентная полная DDL v2; цепочка включает **`005`** (CHECK + **`technical_error`**), **`006`** (**`status` `VARCHAR(50)`**), **`007`** (мета Alembic, таймауты), **`008`** (ширина **`version_num`**). ORM **`ScrapeLog.status`** — согласован с **`VARCHAR(50)`** и **`errors.SCRAPE_LOG_STATUSES`**.
@@ -17,7 +30,7 @@
   - Статусы лога: **`missing_critical_data`**, **`price_not_found`**, **`technical_error`** и др.; **`technical_error`** также пишется из **`tasks._persist_technical_error_log`** при исключениях в pool Celery-задачах. **`_determine_log_status`** при вызове из `scrape_product` получает **`data=`**; для unit-тестов без `data=` сохраняется ветка с **`has_title`/`has_price`**.
 - Внутренние parser-контракты: `PoolScrapeResult` с quality-полями; `DiscoveryResult` в discovery.
 - Beat: `celery_app.conf.beat_schedule = {}`.
-- **Marketplaces:** как ранее; **POST `/deduplicate`** — заглушка.
+- **Marketplaces:** как ранее; endpoint **`POST /deduplicate`** удалён.
 - **Pool Celery tasks (`tasks.py`):** `_run_scrape_all_pool` — **синхронный** `sync_session_factory`, без `_run_async` для этого пути; discovery — async engine + `_run_async`.
 - **Тесты:** `backend/tests/test_scraper_unit/` и `backend/tests/test_scraper_integration/` + `backend/tests/fixtures/scraper_fixtures.py`. Файлы **`test_scraper_persistence.py`** / **`test_scraper_extractors.py`** в корне `tests/` удалены.
 - **Git:** не добавлять `--trailer "Made-with: Cursor"` в коммиты.

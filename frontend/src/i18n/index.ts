@@ -72,6 +72,7 @@ i18n.on("languageChanged", (lng) => {
 });
 
 i18n.on("initialized", () => {
+  enforceLanguagePolicy(false);
   const lng = i18n.language;
   const dir = SUPPORTED_LANGUAGES.find((l) => l.code === lng)?.dir ?? "ltr";
   document.documentElement.dir = dir;

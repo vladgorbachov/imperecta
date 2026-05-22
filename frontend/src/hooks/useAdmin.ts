@@ -79,3 +79,49 @@ export const useMarketsIngest = () => {
     },
   });
 };
+
+export const useParsingTestMarketplaces = () =>
+  useQuery({
+    queryKey: ["admin", "parsing", "test-marketplaces"],
+    queryFn: () => adminApi.getParsingTestMarketplaces().then((r) => r.data),
+  });
+
+export const useAddParsingTestMarketplaces = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => adminApi.addParsingTestMarketplaces().then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "parsing", "test-marketplaces"] });
+    },
+  });
+};
+
+export const useRunParsingFullTest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => adminApi.runParsingFullTest().then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "parsing", "test-runs"] });
+    },
+  });
+};
+
+export const useParsingTestRuns = (limit: number) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "test-runs", limit],
+    queryFn: () => adminApi.getParsingTestRuns(limit).then((r) => r.data),
+  });
+
+export const useParsingJobStatus = (
+  jobId: string | null,
+  options?: {
+    enabled?: boolean;
+    refetchInterval?: number | false;
+  },
+) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "job-status", jobId],
+    queryFn: () => adminApi.getParsingJobStatus(jobId as string).then((r) => r.data),
+    enabled: Boolean(jobId) && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval,
+  });

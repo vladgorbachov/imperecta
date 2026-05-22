@@ -229,3 +229,91 @@ export interface ClearUserProductsResponse {
   status: string;
   deleted_products: number;
 }
+
+export interface ParsingTestMarketplace {
+  name: string;
+  url: string;
+  products_in_pool: number;
+  last_successful_scrape: string | null;
+  success_rate: number;
+  last_run: string | null;
+  status: "running" | "completed" | "failed";
+}
+
+export interface ParsingRunCreateResponse {
+  job_id: string;
+  started_at: string;
+}
+
+export interface ParsingTestRun {
+  job_id: string;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  listings_created: number;
+  prices_saved: number;
+  errors_count: number;
+  status: "running" | "completed" | "failed";
+}
+
+export interface ParsingMarketplaceBreakdown {
+  marketplace_id: string;
+  domain: string;
+  listings_created: number;
+  prices_saved: number;
+  errors_count: number;
+  duration_ms: number;
+  status: "running" | "completed" | "failed";
+}
+
+export interface ParsingJobMetadata {
+  current_stage?: string;
+  timings?: {
+    discovery_ms: number;
+    scrape_ms: number;
+    persist_ms: number;
+    total_ms: number;
+  };
+  summary?: {
+    listings_created: number;
+    prices_saved: number;
+    errors_count: number;
+  };
+  per_marketplace?: ParsingMarketplaceBreakdown[];
+  error?: string;
+}
+
+export interface ParsingJobStatus {
+  job_id: string;
+  status: "running" | "completed" | "failed";
+  current_stage: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  metadata: ParsingJobMetadata | null;
+}
+
+export const getParsingTestMarketplaces = () =>
+  apiClient.get<ParsingTestMarketplace[]>("/admin/parsing/test-marketplaces");
+
+export const addParsingTestMarketplaces = () =>
+  apiClient.post<{
+    added: number;
+    skipped: number;
+    total_requested: number;
+    marketplaces: Array<{
+      name: string;
+      domain: string;
+      country_code: string;
+      currency_code: string;
+    }>;
+  }>("/admin/parsing/add-test-marketplaces");
+
+export const runParsingFullTest = () =>
+  apiClient.post<ParsingRunCreateResponse>("/admin/parsing/run-full-test");
+
+export const getParsingTestRuns = (limit = 50) =>
+  apiClient.get<ParsingTestRun[]>("/admin/parsing/test-runs", { params: { limit } });
+
+export const getParsingJobStatus = (jobId: string) =>
+  apiClient.get<ParsingJobStatus>(`/admin/parsing/job-status/${jobId}`);
