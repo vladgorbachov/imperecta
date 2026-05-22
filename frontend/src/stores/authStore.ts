@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import i18n from "i18next";
+import i18n, { enforceLanguagePolicy } from "@/i18n";
 import { authApi } from "@/api/auth";
 import { setAuthCookie } from "@/lib/authCookie";
 import {
@@ -129,6 +129,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       setAuthCookie(persistent);
       if (user.language) applyUserLanguage(user.language);
+      enforceLanguagePolicy(Boolean(user.is_superuser));
     }
     return {
       success: true,
@@ -211,6 +212,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!token) return null;
     try {
       const { data } = await authApi.getMe();
+      enforceLanguagePolicy(Boolean(data.is_superuser));
       set({ user: data });
       return data;
     } catch {
@@ -279,6 +281,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     const user = await get().fetchUser();
     if (user?.language) applyUserLanguage(user.language);
+    enforceLanguagePolicy(Boolean(user?.is_superuser));
     set({ isInitialized: true });
     return true;
   },
@@ -297,9 +300,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   updateLanguage: async (code: string) => {
-    applyUserLanguage(code);
+    const isAdmin = Boolean(get().user?.is_superuser);
+    const nextLanguage = !isAdmin && code === "ru" ? "en" : code;
+    applyUserLanguage(nextLanguage);
     try {
-      const { data } = await authApi.updateMe({ language: code });
+      const { data } = await authApi.updateMe({ language: nextLanguage });
+      enforceLanguagePolicy(Boolean(data?.is_superuser));
       if (data) set({ user: data });
     } catch {
       // Local language change still applied
@@ -320,6 +326,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
     const user = await get().fetchUser();
     if (user?.language) applyUserLanguage(user.language);
+    enforceLanguagePolicy(Boolean(user?.is_superuser));
     set({ isInitialized: true });
   },
 }));

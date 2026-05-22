@@ -11,10 +11,10 @@
 
 import { getCountryByCode } from "./countries";
 
-/** Locale code to country code mapping. e.g. "ru" -> "RU", "en-US" -> "US" */
+/** Locale code to country code mapping. e.g. "ru" -> "UA", "en-US" -> "EUROPE" */
 const LOCALE_MAP = new Map<string, string>([
-  ["ru", "RU"],
-  ["ru-RU", "RU"],
+  ["ru", "UA"],
+  ["ru-RU", "UA"],
   ["uk", "UA"],
   ["uk-UA", "UA"],
   ["kk", "KZ"],

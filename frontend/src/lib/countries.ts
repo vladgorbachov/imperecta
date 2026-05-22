@@ -16,12 +16,10 @@ export interface CountryInfo {
 export const COUNTRIES: CountryInfo[] = [
   { code: "AM", name: "Armenia", name_local: "Армения", flag: "🇦🇲", currency: "AMD", region: "cis" },
   { code: "AZ", name: "Azerbaijan", name_local: "Азербайджан", flag: "🇦🇿", currency: "AZN", region: "cis" },
-  { code: "BY", name: "Belarus", name_local: "Беларусь", flag: "🇧🇾", currency: "BYN", region: "cis" },
   { code: "GE", name: "Georgia", name_local: "Грузия", flag: "🇬🇪", currency: "GEL", region: "cis" },
   { code: "KZ", name: "Kazakhstan", name_local: "Казахстан", flag: "🇰🇿", currency: "KZT", region: "cis" },
   { code: "KG", name: "Kyrgyzstan", name_local: "Кыргызстан", flag: "🇰🇬", currency: "KGS", region: "cis" },
   { code: "MD", name: "Moldova", name_local: "Молдова", flag: "🇲🇩", currency: "MDL", region: "cis" },
-  { code: "RU", name: "Russia", name_local: "Россия", flag: "🇷🇺", currency: "RUB", region: "cis" },
   { code: "TJ", name: "Tajikistan", name_local: "Таджикистан", flag: "🇹🇯", currency: "TJS", region: "cis" },
   { code: "TM", name: "Turkmenistan", name_local: "Туркменистан", flag: "🇹🇲", currency: "TMT", region: "cis" },
   { code: "UA", name: "Ukraine", name_local: "Украина", flag: "🇺🇦", currency: "UAH", region: "cis" },
