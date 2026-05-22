@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import asc, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.dimensions import DimMarketplace, DimProduct
+from app.models.dimensions import DimDate, DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 
 _SORT_RECENT = "recent"
@@ -18,6 +18,8 @@ _SORT_TRENDING = "trending"
 _SORT_GAINERS = "gainers"
 _SORT_LOSERS = "losers"
 _SORT_VOLATILE = "volatile"
+BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
+SPARKLINE_POINTS_LIMIT = 14
 
 
 def _latest_price_change_subquery():
@@ -50,6 +52,7 @@ class ProductPoolService:
             select(
                 FactListing.id,
                 DimProduct.id.label("product_id"),
+                DimMarketplace.id.label("marketplace_id"),
                 DimProduct.name.label("title"),
                 DimProduct.image_url,
                 FactListing.external_url.label("url"),
@@ -119,6 +122,12 @@ class ProductPoolService:
         # recent and unknown
         return stmt.order_by(nullslast(desc(FactListing.last_checked_at)))
 
+    @staticmethod
+    def _apply_country_visibility_filter(stmt, *, include_blocked_countries: bool):
+        if include_blocked_countries:
+            return stmt
+        return stmt.where(DimMarketplace.country_code.notin_(BLOCKED_PUBLIC_COUNTRY_CODES))
+
     async def list_products(
         self,
         *,
@@ -128,10 +137,15 @@ class ProductPoolService:
         category: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        include_blocked_countries: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         latest_pc = _latest_price_change_subquery()
         stmt = self._base_listing_stmt(latest_pc)
         stmt = self._apply_filters(stmt, search=search, marketplace_id=marketplace_id, category=category)
+        stmt = self._apply_country_visibility_filter(
+            stmt,
+            include_blocked_countries=include_blocked_countries,
+        )
         stmt = self._apply_sort(stmt, sort, latest_pc)
         stmt = stmt.limit(limit).offset(offset)
 
@@ -148,14 +162,70 @@ class ProductPoolService:
             marketplace_id=marketplace_id,
             category=category,
         )
+        count_base = self._apply_country_visibility_filter(
+            count_base,
+            include_blocked_countries=include_blocked_countries,
+        )
 
         total = await self.db.scalar(count_base) or 0
         result = await self.db.execute(stmt)
         rows = result.mappings().all()
         items = [_row_to_pool_item(dict(r)) for r in rows]
+        listing_ids = [item["id"] for item in items]
+        recent_prices_by_listing = await self._get_recent_prices_map(listing_ids)
+        for item in items:
+            item["recent_prices"] = recent_prices_by_listing.get(item["id"], [])
         return items, int(total)
 
-    async def get_categories(self) -> list[dict]:
+    async def _get_recent_prices_map(
+        self,
+        listing_ids: list[UUID],
+        *,
+        points_limit: int = SPARKLINE_POINTS_LIMIT,
+    ) -> dict[UUID, list[dict[str, Any]]]:
+        """Load recent price points for listings in one query."""
+        if not listing_ids:
+            return {}
+
+        ranked = (
+            select(
+                FactPrice.listing_id.label("listing_id"),
+                DimDate.full_date.label("full_date"),
+                FactPrice.price.label("price"),
+                FactPrice.currency_code.label("currency_code"),
+                func.row_number().over(
+                    partition_by=FactPrice.listing_id,
+                    order_by=desc(FactPrice.date_id),
+                ).label("row_num"),
+            )
+            .select_from(FactPrice)
+            .join(DimDate, DimDate.date_id == FactPrice.date_id)
+            .where(FactPrice.listing_id.in_(listing_ids))
+        ).subquery()
+
+        stmt = (
+            select(
+                ranked.c.listing_id,
+                ranked.c.full_date,
+                ranked.c.price,
+                ranked.c.currency_code,
+            )
+            .where(ranked.c.row_num <= points_limit)
+            .order_by(ranked.c.listing_id, ranked.c.full_date)
+        )
+        result = await self.db.execute(stmt)
+        rows = result.all()
+
+        output: dict[UUID, list[dict[str, Any]]] = {}
+        for row in rows:
+            output.setdefault(row.listing_id, []).append({
+                "date": row.full_date.isoformat(),
+                "price": float(row.price),
+                "currency": row.currency_code,
+            })
+        return output
+
+    async def get_categories(self, *, include_blocked_countries: bool = False) -> list[dict]:
         """Distinct marketplaces that have active listings (lightweight category browse)."""
         stmt = (
             select(
@@ -176,6 +246,10 @@ class ProductPoolService:
             )
             .order_by(desc("listing_count"))
         )
+        stmt = self._apply_country_visibility_filter(
+            stmt,
+            include_blocked_countries=include_blocked_countries,
+        )
         result = await self.db.execute(stmt)
         return [
             {
@@ -188,7 +262,7 @@ class ProductPoolService:
             for r in result.all()
         ]
 
-    async def get_marketplace_stats(self) -> list[dict]:
+    async def get_marketplace_stats(self, *, include_blocked_countries: bool = False) -> list[dict]:
         """Per-marketplace listing counts and average price (EUR) when available."""
         stmt = (
             select(
@@ -209,6 +283,10 @@ class ProductPoolService:
                 DimMarketplace.country_code,
             )
             .order_by(desc("listing_count"))
+        )
+        stmt = self._apply_country_visibility_filter(
+            stmt,
+            include_blocked_countries=include_blocked_countries,
         )
         result = await self.db.execute(stmt)
         out: list[dict] = []
@@ -250,13 +328,20 @@ class ProductPoolService:
             "message": None,
         }
 
-    async def search_products(self, query: str, limit: int = 50) -> list[dict]:
+    async def search_products(
+        self,
+        query: str,
+        limit: int = 50,
+        *,
+        include_blocked_countries: bool = False,
+    ) -> list[dict]:
         """Search pool by product title."""
         items, _total = await self.list_products(
             sort=_SORT_RECENT,
             search=query,
             limit=limit,
             offset=0,
+            include_blocked_countries=include_blocked_countries,
         )
         return items
 
@@ -266,6 +351,7 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
     pct = row.get("price_change_pct")
     return {
         "id": row["id"],
+        "marketplace_id": row.get("marketplace_id"),
         "product_id": row["product_id"],
         "title": row.get("title"),
         "image_url": row.get("image_url"),
@@ -278,8 +364,16 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "currency": row.get("currency"),
         "price_eur": float(row["price_eur"]) if row.get("price_eur") is not None else None,
         "price_change_pct": float(pct) if pct is not None else None,
+        "current_price": float(row["price"]) if row.get("price") is not None else None,
+        "original_price": None,
+        "price_change_pct_24h": float(pct) if pct is not None else None,
+        "price_change_pct_7d": None,
+        "price_change_pct_30d": None,
+        "volatility_30d": None,
         "in_stock": row.get("in_stock"),
         "last_checked_at": row.get("last_checked_at"),
+        "last_scraped_at": row.get("last_checked_at"),
         "status": "active" if row.get("is_active") else "inactive",
         "is_active": row.get("is_active"),
+        "recent_prices": [],
     }

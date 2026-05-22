@@ -1,6 +1,10 @@
 """Markets API contract tests. Ingestion, read endpoints, superuser-only ingest."""
 
+from types import SimpleNamespace
+from uuid import uuid4
+
 import pytest
+
 
 @pytest.mark.asyncio
 async def test_markets_ingest_forbidden_for_regular_user(client, auth_headers):
@@ -52,6 +56,10 @@ async def test_markets_overview_returns_stored_data(client, auth_headers):
     assert "limit" in data
     assert "offset" in data
     assert isinstance(data["items"], list)
+    if data["items"]:
+        first_item = data["items"][0]
+        assert "recent_prices" in first_item
+        assert isinstance(first_item["recent_prices"], list)
 
 
 @pytest.mark.asyncio
@@ -113,3 +121,122 @@ async def test_markets_refresh_metadata_returns_items(client, auth_headers):
     data = resp.json()
     assert "items" in data
     assert isinstance(data["items"], list)
+
+
+@pytest.mark.asyncio
+async def test_markets_countries_hide_ru_by_for_regular_user(client, auth_headers, monkeypatch):
+    """Regular user must not receive RU/BY in /markets/countries."""
+    async def fake_active_country_codes(_db):
+        return {"UA", "RU", "BY"}
+
+    monkeypatch.setattr(
+        "app.modules.market_data.api._load_active_country_codes",
+        fake_active_country_codes,
+    )
+
+    resp = await client.get("/api/markets/countries", headers=auth_headers)
+    assert resp.status_code == 200
+    payload = resp.json()
+    codes = {row["code"] for row in payload if isinstance(row, dict) and "code" in row}
+    assert "UA" in codes
+    assert "RU" not in codes
+    assert "BY" not in codes
+
+
+@pytest.mark.asyncio
+async def test_markets_countries_allow_ru_by_for_superuser(client, superuser_headers, monkeypatch):
+    """Superuser can receive RU/BY in /markets/countries when active."""
+    async def fake_active_country_codes(_db):
+        return {"UA", "RU", "BY"}
+
+    monkeypatch.setattr(
+        "app.modules.market_data.api._load_active_country_codes",
+        fake_active_country_codes,
+    )
+
+    resp = await client.get("/api/markets/countries", headers=superuser_headers)
+    assert resp.status_code == 200
+    payload = resp.json()
+    codes = {row["code"] for row in payload if isinstance(row, dict) and "code" in row}
+    assert "UA" in codes
+    assert "RU" in codes
+    assert "BY" in codes
+
+
+@pytest.mark.asyncio
+async def test_markets_overview_applies_visibility_flag_by_role(client, auth_headers, superuser_headers, monkeypatch):
+    """Overview endpoint propagates public/admin visibility flag to pool service."""
+    observed: list[bool] = []
+
+    async def fake_list_products(
+        _self,
+        *,
+        sort: str = "recent",
+        search: str | None = None,
+        marketplace_id=None,
+        category: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+        include_blocked_countries: bool = False,
+    ):
+        _ = sort, search, marketplace_id, category, limit, offset
+        observed.append(include_blocked_countries)
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.modules.product_pool.service.ProductPoolService.list_products",
+        fake_list_products,
+    )
+
+    regular_resp = await client.get("/api/markets/overview", headers=auth_headers)
+    assert regular_resp.status_code == 200
+    super_resp = await client.get("/api/markets/overview", headers=superuser_headers)
+    assert super_resp.status_code == 200
+    assert observed == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_pool_categories_applies_visibility_flag_by_role(client, auth_headers, superuser_headers, monkeypatch):
+    """Pool categories endpoint propagates visibility flag by role."""
+    observed: list[bool] = []
+
+    async def fake_get_categories(_self, *, include_blocked_countries: bool = False):
+        observed.append(include_blocked_countries)
+        return []
+
+    monkeypatch.setattr(
+        "app.modules.product_pool.service.ProductPoolService.get_categories",
+        fake_get_categories,
+    )
+
+    regular_resp = await client.get("/api/pool/categories", headers=auth_headers)
+    assert regular_resp.status_code == 200
+    super_resp = await client.get("/api/pool/categories", headers=superuser_headers)
+    assert super_resp.status_code == 200
+    assert observed == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_competitor_marketplaces_hide_ru_by_for_regular_user(client, auth_headers, superuser_headers, monkeypatch):
+    """Regular user does not receive RU/BY marketplaces; superuser does."""
+    async def fake_list_marketplaces(_self):
+        return [
+            SimpleNamespace(id=uuid4(), name="UA Market", country_code="UA"),
+            SimpleNamespace(id=uuid4(), name="RU Market", country_code="RU"),
+            SimpleNamespace(id=uuid4(), name="BY Market", country_code="BY"),
+        ]
+
+    monkeypatch.setattr(
+        "app.modules.marketplaces.service.MarketplaceService.list_marketplaces",
+        fake_list_marketplaces,
+    )
+
+    regular_resp = await client.get("/api/competitors/marketplaces", headers=auth_headers)
+    assert regular_resp.status_code == 200
+    regular_names = {item["name"] for item in regular_resp.json()}
+    assert regular_names == {"UA Market"}
+
+    super_resp = await client.get("/api/competitors/marketplaces", headers=superuser_headers)
+    assert super_resp.status_code == 200
+    super_names = {item["name"] for item in super_resp.json()}
+    assert super_names == {"UA Market", "RU Market", "BY Market"}
