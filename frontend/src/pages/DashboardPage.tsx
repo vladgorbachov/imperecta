@@ -4,8 +4,7 @@
 
 import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
 import { MarketsTickerBar } from "@/components/dashboard/MarketsTickerBar";
-import { MarketsWidgetsSection } from "@/components/dashboard/MarketsWidgetsSection";
-import { MarketDataTable } from "@/components/dashboard/MarketDataTable";
+import { MarketsOverviewSection } from "@/components/dashboard/MarketsOverviewSection";
 import { MarketsAnalyticsSection } from "@/components/dashboard/MarketsAnalyticsSection";
 
 export function DashboardPage() {
@@ -18,11 +17,7 @@ export function DashboardPage() {
 
       <MarketsTickerBar />
 
-      <MarketsWidgetsSection />
-
-      <div className="w-full">
-        <MarketDataTable />
-      </div>
+      <MarketsOverviewSection />
 
       <MarketsAnalyticsSection />
     </div>

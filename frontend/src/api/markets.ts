@@ -121,8 +121,9 @@ export interface MarketsTickerResponse {
 // --- Market Overview ---
 
 export interface MarketsOverviewItem {
-  id: number;
-  marketplace_id: number;
+  id: string;
+  marketplace_id: string;
+  product_id?: string | null;
   marketplace_name?: string | null;
   marketplace_domain?: string | null;
   url: string;
@@ -138,6 +139,11 @@ export interface MarketsOverviewItem {
   volatility_30d?: number | null;
   status: string;
   last_scraped_at?: string | null;
+  recent_prices?: Array<{
+    date: string;
+    price: number;
+    currency: string;
+  }>;
 }
 
 export interface MarketsOverviewResponse {

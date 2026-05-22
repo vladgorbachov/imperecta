@@ -91,11 +91,8 @@ export function MarketsAnalyticsSection() {
               <span className="text-muted-foreground">С ценой</span>
               <span className="font-medium">{poolStats.products_with_price}</span>
             </div>
-            <div className="pt-1 text-xs text-muted-foreground">
-              Последнее обновление:{" "}
-              {poolStats.last_discovery_at
-                ? new Date(poolStats.last_discovery_at).toLocaleString("ru-RU")
-                : "—"}
+            <div className="rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground">
+              Последнее обновление: {poolStats.last_discovery_at ? new Date(poolStats.last_discovery_at).toLocaleString("ru-RU") : "—"}
             </div>
           </div>
         ) : (

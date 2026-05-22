@@ -6,6 +6,14 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+class PoolRecentPricePoint(BaseModel):
+    """Recent historical price point for sparkline rendering."""
+
+    date: str
+    price: float
+    currency: str
+
+
 class PoolProductItem(BaseModel):
     """Single row in the pool: listing + product + marketplace context."""
 
@@ -26,6 +34,7 @@ class PoolProductItem(BaseModel):
     last_checked_at: datetime | None = None
     status: str | None = None
     is_active: bool | None = None
+    recent_prices: list[PoolRecentPricePoint] = []
 
     model_config = {"from_attributes": True}
 
