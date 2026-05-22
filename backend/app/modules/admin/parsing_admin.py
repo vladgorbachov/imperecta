@@ -322,6 +322,7 @@ class ParsingAdminService:
         return {
             "job_id": str(job.id),
             "status": normalized,
+            "current_stage": self._current_stage(self._extract_metadata(job.config)),
             "started_at": self._to_iso(job.started_at),
             "completed_at": self._to_iso(job.completed_at),
             "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
@@ -374,6 +375,7 @@ class ParsingAdminService:
     @staticmethod
     def _build_initial_metadata() -> dict[str, Any]:
         return {
+            "current_stage": "queued",
             "timings": {
                 "discovery_ms": 0,
                 "scrape_ms": 0,
@@ -396,6 +398,13 @@ class ParsingAdminService:
         if isinstance(metadata, dict):
             return metadata
         return config
+
+    @staticmethod
+    def _current_stage(metadata: dict[str, Any]) -> str | None:
+        stage = metadata.get("current_stage")
+        if isinstance(stage, str) and stage.strip():
+            return stage
+        return None
 
     async def _load_country_currency_map(self) -> dict[str, tuple[str, str]]:
         requested_codes = {seed.country_code for seed in self.TEST_MARKETPLACES}

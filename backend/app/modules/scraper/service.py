@@ -143,9 +143,15 @@ class GlobalScrapeService:
     paths), applies fact_price quality gates, and resolves dim_date for snapshots.
     """
 
-    def __init__(self, db: Session, scraper_pool: ScraperPool):
+    def __init__(
+        self,
+        db: Session,
+        scraper_pool: ScraperPool,
+        scrape_job_id: UUID | None = None,
+    ):
         self.db = db
         self.pool = scraper_pool
+        self.scrape_job_id = scrape_job_id
 
     def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
         """Scrape a single listing and save to fact_price (sync Session; pool I/O is async)."""
@@ -346,6 +352,7 @@ class GlobalScrapeService:
             price_found = float(data.price)
 
         log_entry = ScrapeLog(
+            scrape_job_id=self.scrape_job_id,
             listing_id=listing.id,
             marketplace_id=listing.marketplace_id,
             status=log_status,
