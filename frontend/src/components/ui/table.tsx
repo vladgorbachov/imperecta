@@ -61,7 +61,7 @@ const TableHead = ({
 }: HTMLAttributes<HTMLTableCellElement>) => (
   <th
     className={cn(
-      "h-14 px-5 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
+      "h-[3.15rem] px-[1.125rem] text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
       className
     )}
     {...props}
@@ -76,7 +76,7 @@ const TableCell = ({
 }: HTMLAttributes<HTMLTableCellElement> & { colSpan?: number }) => (
   <td
     colSpan={colSpan}
-    className={cn("p-5 align-middle [&:has([role=checkbox])]:pr-0", className)}
+    className={cn("p-[1.125rem] align-middle [&:has([role=checkbox])]:pr-0", className)}
     {...props}
   />
 );

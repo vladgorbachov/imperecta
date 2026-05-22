@@ -40,6 +40,7 @@ PLAYWRIGHT_GOTO_TIMEOUT_MS = 35_000
 PLAYWRIGHT_WAIT_MS = 2_500
 # Cap raw HTML attached to PoolScrapeResult when Decodo is off (debug only).
 _MAX_DEBUG_RAW_HTML_CHARS = 200_000
+_NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit"}
 
 
 @dataclass
@@ -307,6 +308,8 @@ class ScraperPool:
             if html:
                 return html, None
             last_code = err or "fetch_failed"
+            if last_code in _NON_RETRIABLE_LAYER_ERRORS:
+                break
             if attempt < FETCH_ATTEMPTS_PER_LAYER - 1:
                 await asyncio.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
         mapped = self._map_layer_error(last_code, layer_name)
@@ -316,7 +319,7 @@ class ScraperPool:
         c = (code or "fetch_failed").lower()
         if c.startswith("timeout"):
             return f"timeout:{layer_name}"
-        if c in {"blocked", "captcha", "not_found"}:
+        if c in {"blocked", "captcha", "not_found", "rate_limit"}:
             return f"{c}:{layer_name}"
         return f"fetch_failed:{layer_name}"
 
@@ -364,6 +367,8 @@ class ScraperPool:
                 return None, "not_found"
             if response.status_code in (403, 401):
                 return None, "blocked"
+            if response.status_code == 429:
+                return None, "rate_limit"
             if response.status_code >= 400:
                 return None, "fetch_failed"
             data = response.json()

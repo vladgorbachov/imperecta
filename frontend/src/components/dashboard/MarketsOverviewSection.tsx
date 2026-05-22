@@ -86,7 +86,7 @@ function ProductThumb({ item }: { item: MarketsOverviewItem }) {
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border bg-[var(--glass-bg)] p-5">
+    <div className="rounded-xl border border-border bg-[var(--glass-bg)] p-[1.125rem]">
       <p className="text-sm uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </div>
@@ -319,8 +319,8 @@ export function MarketsOverviewSection() {
   }
 
   return (
-    <section className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+    <section className="space-y-[1.125rem]">
+      <div className="grid gap-[0.9rem] md:grid-cols-2 xl:grid-cols-5">
         <KpiCard label={t("market.overview.kpi.totalPool")} value={kpis.total} />
         <KpiCard label={t("market.overview.kpi.updated24h")} value={kpis.updated24h} />
         <KpiCard label={t("market.overview.kpi.changedMore5")} value={kpis.changedMore5} />
@@ -328,7 +328,7 @@ export function MarketsOverviewSection() {
         <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
       </div>
 
-      <div className="liquid-glass rounded-2xl border border-border bg-[var(--glass-bg)] p-6">
+      <div className="liquid-glass rounded-2xl border border-border bg-[var(--glass-bg)] p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <h3 className="text-base font-semibold uppercase tracking-wide">{t("dashboard.market.title")}</h3>
           <div className="flex items-center gap-1 rounded-md border border-border p-1">
@@ -343,7 +343,7 @@ export function MarketsOverviewSection() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-[1.4fr_1fr_240px]">
+        <div className="mt-[1.125rem] grid gap-[0.9rem] lg:grid-cols-[1.4fr_1fr_216px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -358,7 +358,7 @@ export function MarketsOverviewSection() {
               <button
                 key={item.marketplace_domain}
                 type="button"
-                className={cn("rounded-full border px-4 py-1.5 text-sm", selectedMarketplaces.includes(item.marketplace_domain) ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground")}
+                className={cn("rounded-full border px-[0.9rem] py-[0.35rem] text-sm", selectedMarketplaces.includes(item.marketplace_domain) ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground")}
                 onClick={() => toggleMarketplace(item.marketplace_domain)}
               >
                 {item.marketplace_name ?? item.marketplace_domain}
@@ -368,7 +368,7 @@ export function MarketsOverviewSection() {
           <select
             value={priceChangeRange}
             onChange={(event) => setPriceChangeRange(event.target.value as PriceChangeRange)}
-            className="h-11 rounded-md border border-input bg-background px-4 text-sm"
+            className="h-10 rounded-md border border-input bg-background px-[0.9rem] text-sm"
           >
             <option value="all">{t("market.overview.rangeAll")}</option>
             <option value="up5">{t("market.overview.rangeUp5")}</option>
@@ -377,24 +377,24 @@ export function MarketsOverviewSection() {
           </select>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button type="button" className={cn("rounded-full border px-4 py-1.5 text-sm", historyOnly ? "border-primary text-primary" : "border-border text-muted-foreground")} onClick={() => setHistoryOnly((value) => !value)}>
+        <div className="mt-[0.9rem] flex flex-wrap items-center gap-2">
+          <button type="button" className={cn("rounded-full border px-[0.9rem] py-[0.35rem] text-sm", historyOnly ? "border-primary text-foreground" : "border-border text-muted-foreground")} onClick={() => setHistoryOnly((value) => !value)}>
             {t("market.overview.historyOnly")}
           </button>
-            <button type="button" className="rounded-full border border-border px-4 py-1.5 text-sm text-muted-foreground" onClick={() => setPriceChangeRange("up5")}>
+            <button type="button" className="rounded-full border border-border px-[0.9rem] py-[0.35rem] text-sm text-muted-foreground" onClick={() => setPriceChangeRange("up5")}>
             {t("market.overview.quickFilterGt5")}
           </button>
-          <button type="button" className="rounded-full border border-border px-4 py-1.5 text-sm text-muted-foreground" onClick={() => { setSelectedMarketplaces([]); setPriceChangeRange("all"); setHistoryOnly(false); setSearchRaw(""); }}>
+          <button type="button" className="rounded-full border border-border px-[0.9rem] py-[0.35rem] text-sm text-muted-foreground" onClick={() => { setSelectedMarketplaces([]); setPriceChangeRange("all"); setHistoryOnly(false); setSearchRaw(""); }}>
             {t("products.clearFilters")}
           </button>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2 border-b border-border pb-3">
+        <div className="mt-[1.125rem] flex flex-wrap gap-2 border-b border-border pb-[0.675rem]">
           {TABS.map((tab) => (
             <button
               key={tab.key}
               type="button"
-              className={cn("rounded-md px-4 py-2 text-sm", activeTab === tab.key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground")}
+              className={cn("rounded-md px-[0.9rem] py-[0.45rem] text-sm", activeTab === tab.key ? "bg-primary/12 font-semibold text-foreground" : "text-muted-foreground hover:text-foreground")}
               onClick={() => setActiveTab(tab.key)}
             >
               {t(tab.labelKey)}
