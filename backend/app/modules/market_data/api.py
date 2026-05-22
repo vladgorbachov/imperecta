@@ -3,8 +3,10 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import select
 
 from app.common.deps import CurrentSuperuser, CurrentUser, DbSession
+from app.models.dimensions import DimCountry
 from app.modules.market_data.schemas import (
     MarketsCommoditiesResponse,
     MarketsCryptoResponse,
@@ -29,12 +31,10 @@ router = APIRouter(prefix="/markets", tags=["markets"])
 COUNTRIES = [
     {"code": "AM", "name": "Armenia", "name_local": "Армения", "flag": "🇦🇲", "region": "cis"},
     {"code": "AZ", "name": "Azerbaijan", "name_local": "Азербайджан", "flag": "🇦🇿", "region": "cis"},
-    {"code": "BY", "name": "Belarus", "name_local": "Беларусь", "flag": "🇧🇾", "region": "cis"},
     {"code": "GE", "name": "Georgia", "name_local": "Грузия", "flag": "🇬🇪", "region": "cis"},
     {"code": "KZ", "name": "Kazakhstan", "name_local": "Казахстан", "flag": "🇰🇿", "region": "cis"},
     {"code": "KG", "name": "Kyrgyzstan", "name_local": "Кыргызстан", "flag": "🇰🇬", "region": "cis"},
     {"code": "MD", "name": "Moldova", "name_local": "Молдова", "flag": "🇲🇩", "region": "cis"},
-    {"code": "RU", "name": "Russia", "name_local": "Россия", "flag": "🇷🇺", "region": "cis"},
     {"code": "TJ", "name": "Tajikistan", "name_local": "Таджикистан", "flag": "🇹🇯", "region": "cis"},
     {"code": "TM", "name": "Turkmenistan", "name_local": "Туркменистан", "flag": "🇹🇲", "region": "cis"},
     {"code": "UA", "name": "Ukraine", "name_local": "Украина", "flag": "🇺🇦", "region": "cis"},
@@ -47,14 +47,20 @@ def _now() -> datetime:
 
 
 @router.get("/countries")
-async def get_countries(current_user: CurrentUser) -> list[dict]:
+async def get_countries(current_user: CurrentUser, db: DbSession) -> list[dict]:
     _ = current_user
     meta = [
         {"code": "EUROPE", "name": "Europe", "name_local": "Европа", "flag": "🇪🇺", "region": "meta", "is_region": True},
         {"code": "CIS", "name": "CIS", "name_local": "СНГ", "flag": "🌍", "region": "meta", "is_region": True},
         {"separator": True},
     ]
-    return meta + COUNTRIES
+    result = await db.execute(
+        select(DimCountry.country_code)
+        .where(DimCountry.is_active.is_(True))
+    )
+    active_codes = set(result.scalars().all())
+    countries = [country for country in COUNTRIES if country["code"] in active_codes]
+    return meta + countries
 
 
 @router.get("/preferences", response_model=MarketsPreferencesResponse)

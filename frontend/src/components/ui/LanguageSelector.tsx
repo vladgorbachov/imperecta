@@ -7,7 +7,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  SUPPORTED_LANGUAGES,
+  getAvailableLanguages,
   SUPPORTED_LANGUAGE_CODES,
   type LanguageCode,
 } from "@/i18n";
@@ -20,6 +20,8 @@ interface LanguageSelectorProps {
   showFlags?: boolean;
   /** Compact: flag + code only (e.g. "🇬🇧 en") */
   compact?: boolean;
+  /** Show Russian only for admin users. */
+  isAdmin?: boolean;
 }
 
 export function LanguageSelector({
@@ -27,15 +29,19 @@ export function LanguageSelector({
   onChange,
   showFlags = true,
   compact = false,
+  isAdmin = false,
 }: LanguageSelectorProps) {
   const { i18n } = useTranslation();
+  const availableLanguages = getAvailableLanguages(isAdmin);
 
   const rawLang = value ?? i18n.language ?? "en";
   const resolved = rawLang.includes("-") ? rawLang.split("-")[0] : rawLang;
-  const currentCode = (SUPPORTED_LANGUAGE_CODES.includes(resolved as LanguageCode)
+  const allowedCodes = availableLanguages.map((language) => language.code);
+  const currentCode = ((allowedCodes.includes(resolved as LanguageCode) &&
+    SUPPORTED_LANGUAGE_CODES.includes(resolved as LanguageCode))
     ? resolved
     : "en") as LanguageCode;
-  const lang = SUPPORTED_LANGUAGES.find((l) => l.code === currentCode);
+  const lang = availableLanguages.find((l) => l.code === currentCode);
   const displayValue = compact
     ? `${lang?.flag ?? ""} ${currentCode}`
     : showFlags
@@ -55,7 +61,7 @@ export function LanguageSelector({
         <SelectValue>{displayValue}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {SUPPORTED_LANGUAGES.map((l) => (
+        {availableLanguages.map((l) => (
           <SelectItem key={l.code} value={l.code}>
             {compact ? `${l.flag} ${l.code}` : showFlags ? `${l.flag} ${l.name}` : l.name}
           </SelectItem>

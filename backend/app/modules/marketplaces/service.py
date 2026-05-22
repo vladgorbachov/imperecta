@@ -90,9 +90,7 @@ class MarketplacePoolService:
 
 # TLD → ISO country code hints (geography only, not marketplace names).
 _TLD_TO_COUNTRY: dict[str, str] = {
-    "ru": "RU",
     "ua": "UA",
-    "by": "BY",
     "kz": "KZ",
     "uz": "UZ",
     "md": "MD",
