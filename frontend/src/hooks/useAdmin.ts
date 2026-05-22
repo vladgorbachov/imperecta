@@ -8,48 +8,10 @@ export const useAdminStats = () =>
     queryFn: () => adminApi.getAdminStats().then((r) => r.data),
   });
 
-export const useAdminMarketplaces = () =>
-  useQuery({
-    queryKey: ["admin", "marketplaces"],
-    queryFn: () => adminApi.getAdminMarketplaces().then((r) => r.data),
-  });
-
-export const useMarketplaceLogs = (id: string) =>
-  useQuery({
-    queryKey: ["admin", "marketplace-logs", id],
-    queryFn: () => adminApi.getMarketplaceLogs(id).then((r) => r.data),
-    enabled: !!id,
-  });
-
-export const useScrapeActivity = () =>
-  useQuery({
-    queryKey: ["admin", "scrape-activity"],
-    queryFn: () => adminApi.getScrapeActivity().then((r) => r.data),
-  });
-
-export const useErrorDistribution = () =>
-  useQuery({
-    queryKey: ["admin", "error-distribution"],
-    queryFn: () => adminApi.getErrorDistribution().then((r) => r.data),
-  });
-
-export const useAdminUsers = () =>
-  useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: () => adminApi.getAdminUsers().then((r) => r.data),
-  });
-
 export const useClaudeStatus = () =>
   useQuery({
     queryKey: ["admin", "claude-status"],
     queryFn: () => adminApi.getClaudeStatus().then((r) => r.data),
-    refetchInterval: 60_000,
-  });
-
-export const useApiHealth = () =>
-  useQuery({
-    queryKey: ["admin", "api-health"],
-    queryFn: () => adminApi.getApiHealth().then((r) => r.data),
     refetchInterval: 60_000,
   });
 
@@ -85,16 +47,6 @@ export const useParsingTestMarketplaces = () =>
     queryKey: ["admin", "parsing", "test-marketplaces"],
     queryFn: () => adminApi.getParsingTestMarketplaces().then((r) => r.data),
   });
-
-export const useAddParsingTestMarketplaces = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => adminApi.addParsingTestMarketplaces().then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin", "parsing", "test-marketplaces"] });
-    },
-  });
-};
 
 export const useRunParsingFullTest = () => {
   const qc = useQueryClient();

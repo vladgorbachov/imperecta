@@ -6,31 +6,9 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
-from sqlalchemy import delete
-
 from app.database import async_session_maker
 from app.models.app_tables import ScrapeJob
-from app.models.dimensions import DimMarketplace
 from app.modules.admin.parsing_admin import ParsingAdminService
-
-
-@pytest.mark.asyncio
-async def test_add_test_marketplaces_is_idempotent():
-    """Service creates configured marketplaces once and skips duplicates on rerun."""
-    async with async_session_maker() as session:
-        service = ParsingAdminService(session)
-        domains = [seed.domain for seed in service.TEST_MARKETPLACES]
-
-        await session.execute(delete(DimMarketplace).where(DimMarketplace.domain.in_(domains)))
-        await session.commit()
-
-        first = await service.add_test_marketplaces()
-        second = await service.add_test_marketplaces()
-
-        assert first["total_requested"] == len(service.TEST_MARKETPLACES)
-        assert first["added"] + first["skipped"] == len(service.TEST_MARKETPLACES)
-        assert second["added"] == 0
-        assert second["skipped"] == len(service.TEST_MARKETPLACES)
 
 
 @pytest.mark.asyncio
@@ -38,11 +16,9 @@ async def test_get_test_marketplaces_contract_shape():
     """Marketplace list response contains strict frontend keys."""
     async with async_session_maker() as session:
         service = ParsingAdminService(session)
-        await service.add_test_marketplaces()
 
         rows = await service.get_test_marketplaces()
         assert isinstance(rows, list)
-        assert rows, "Expected at least one test marketplace"
         expected_keys = {
             "name",
             "url",
@@ -59,16 +35,17 @@ async def test_get_test_marketplaces_contract_shape():
 
 
 @pytest.mark.asyncio
-async def test_trigger_full_pipeline_test_returns_constraint_sql_hint():
-    """Service returns actionable SQL guidance when job_type constraint blocks full pipeline value."""
+async def test_trigger_full_pipeline_test_auto_repairs_constraint():
+    """Service creates job and auto-repairs stale job_type constraint when needed."""
     async with async_session_maker() as session:
         service = ParsingAdminService(session)
-        with pytest.raises(ValueError) as exc:
-            await service.trigger_full_pipeline_test()
-        message = str(exc.value)
-        assert "Supabase SQL Editor" in message
-        assert "full_pipeline_test" in message
-        assert "ALTER TABLE scrape_jobs" in message
+        created = await service.trigger_full_pipeline_test()
+        job_id = UUID(created["job_id"])
+        assert created["started_at"] is not None
+        job = await session.get(ScrapeJob, job_id)
+        if job is not None:
+            await session.delete(job)
+            await session.commit()
 
 
 @pytest.mark.asyncio
@@ -126,7 +103,7 @@ async def test_trigger_status_and_runs_with_supported_job_type(monkeypatch):
         assert latest["prices_saved"] == 9
         assert latest["errors_count"] == 2
 
-        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == job_id))
+        await session.delete(job)
         await session.commit()
 
 
@@ -144,7 +121,9 @@ async def test_get_test_runs_limit_is_clamped(monkeypatch):
         assert runs
         assert runs[0]["job_id"] == str(job_id)
 
-        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == job_id))
+        job = await session.get(ScrapeJob, job_id)
+        if job is not None:
+            await session.delete(job)
         await session.commit()
 
 
@@ -188,7 +167,7 @@ async def test_get_job_status_failed_contains_metadata(monkeypatch):
         assert payload["metadata"]["timings"]["total_ms"] == 5100
         assert payload["metadata"]["summary"]["errors_count"] == 2
 
-        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == job_id))
+        await session.delete(job)
         await session.commit()
 
 
@@ -230,6 +209,6 @@ async def test_get_test_runs_falls_back_to_job_counters(monkeypatch):
         assert target["errors_count"] == 3
         assert target["duration_seconds"] == 1.3
 
-        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == job_id))
+        await session.delete(job)
         await session.commit()
 

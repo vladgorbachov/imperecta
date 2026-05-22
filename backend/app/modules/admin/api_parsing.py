@@ -27,16 +27,6 @@ async def get_test_marketplaces(
     return await service.get_test_marketplaces()
 
 
-@router.post("/add-test-marketplaces")
-async def add_test_marketplaces(
-    _current_user: CurrentSuperuser,
-    db: DbSession,
-) -> dict:
-    """Frontend action: seed deterministic parsing test marketplaces."""
-    service = ParsingAdminService(db)
-    return await service.add_test_marketplaces()
-
-
 @router.post("/run-full-test")
 async def run_full_test(
     _current_user: CurrentSuperuser,

@@ -5,28 +5,16 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_tables import ScrapeJob, ScrapeLog
-from app.models.dimensions import DimCountry, DimMarketplace
-
-
-@dataclass(frozen=True)
-class TestMarketplaceSeed:
-    """Static marketplace seed definition for scraper administration checks."""
-
-    name: str
-    domain: str
-    country_code: str
+from app.models.dimensions import DimMarketplace
 
 
 class ParsingAdminService:
@@ -66,13 +54,6 @@ class ParsingAdminService:
     """
 
     TEST_PIPELINE_JOB_TYPE = "full_pipeline_test"
-    TEST_MARKETPLACES: tuple[TestMarketplaceSeed, ...] = (
-        TestMarketplaceSeed(name="Rozetka", domain="rozetka.com.ua", country_code="UA"),
-        TestMarketplaceSeed(name="Bomba", domain="bomba.md", country_code="MD"),
-        TestMarketplaceSeed(name="Pandashop", domain="pandashop.md", country_code="MD"),
-        TestMarketplaceSeed(name="Musicshop", domain="musicshop.md", country_code="MD"),
-        TestMarketplaceSeed(name="Comfy", domain="comfy.ua", country_code="UA"),
-    )
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -90,7 +71,6 @@ class ParsingAdminService:
         - last_run
         - status
         """
-        domains = [seed.domain for seed in self.TEST_MARKETPLACES]
         log_stats_sq = (
             select(
                 ScrapeLog.marketplace_id.label("marketplace_id"),
@@ -143,7 +123,7 @@ class ParsingAdminService:
                 log_stats_sq.c.last_successful_scrape,
                 latest_job_sq.c.job_status,
             )
-            .where(DimMarketplace.domain.in_(domains))
+            .where(DimMarketplace.is_active.is_(True))
             .outerjoin(log_stats_sq, log_stats_sq.c.marketplace_id == DimMarketplace.id)
             .outerjoin(latest_job_sq, latest_job_sq.c.marketplace_id == DimMarketplace.id)
             .order_by(DimMarketplace.name.asc())
@@ -172,63 +152,6 @@ class ParsingAdminService:
             )
         return out
 
-    async def add_test_marketplaces(self) -> dict[str, Any]:
-        """Ensure five predefined test marketplaces exist without duplicates."""
-        domains = [seed.domain for seed in self.TEST_MARKETPLACES]
-        existing_rows = await self.db.execute(
-            select(DimMarketplace.domain).where(DimMarketplace.domain.in_(domains))
-        )
-        existing_domains = {domain for domain in existing_rows.scalars().all()}
-
-        country_map = await self._load_country_currency_map()
-        fallback_country_code, fallback_currency_code = await self._load_fallback_country_currency()
-
-        added = 0
-        skipped = 0
-        created: list[dict[str, Any]] = []
-        for seed in self.TEST_MARKETPLACES:
-            if seed.domain in existing_domains:
-                skipped += 1
-                continue
-
-            country_code, currency_code = country_map.get(
-                seed.country_code,
-                (fallback_country_code, fallback_currency_code),
-            )
-            code = self._make_marketplace_code(seed.domain)
-            marketplace = DimMarketplace(
-                marketplace_code=code,
-                name=seed.name,
-                source_type="marketplace",
-                country_code=country_code,
-                operates_in=[country_code],
-                domain=seed.domain,
-                base_url=f"https://{seed.domain}",
-                api_available=False,
-                currency_code=currency_code,
-                scraper_type="web_api",
-                is_active=True,
-            )
-            self.db.add(marketplace)
-            added += 1
-            created.append(
-                {
-                    "name": seed.name,
-                    "domain": seed.domain,
-                    "country_code": country_code,
-                    "currency_code": currency_code,
-                }
-            )
-            existing_domains.add(seed.domain)
-
-        await self.db.commit()
-        return {
-            "added": added,
-            "skipped": skipped,
-            "total_requested": len(self.TEST_MARKETPLACES),
-            "marketplaces": created,
-        }
-
     async def trigger_full_pipeline_test(self) -> dict[str, Any]:
         """
         Create a parent scrape job for full pipeline checks.
@@ -252,13 +175,14 @@ class ParsingAdminService:
             await self.db.commit()
         except IntegrityError as exc:
             await self.db.rollback()
-            raise ValueError(
-                "scrape_jobs.job_type does not allow 'full_pipeline_test'. "
-                "Run this SQL in Supabase SQL Editor first:\n"
-                "ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_job_type;\n"
-                "ALTER TABLE scrape_jobs ADD CONSTRAINT ck_scrape_jobs_job_type "
-                "CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test'));"
-            ) from exc
+            if await self._repair_scrape_job_type_constraint():
+                self.db.add(job)
+                await self.db.commit()
+            else:
+                raise ValueError(
+                    "scrape_jobs.job_type does not allow 'full_pipeline_test' "
+                    "and automatic constraint repair failed."
+                ) from exc
         await self.db.refresh(job)
         return {
             "job_id": str(job.id),
@@ -411,32 +335,22 @@ class ParsingAdminService:
             return stage
         return None
 
-    async def _load_country_currency_map(self) -> dict[str, tuple[str, str]]:
-        requested_codes = {seed.country_code for seed in self.TEST_MARKETPLACES}
-        result = await self.db.execute(
-            select(DimCountry.country_code, DimCountry.currency_code).where(
-                DimCountry.country_code.in_(requested_codes)
+    async def _repair_scrape_job_type_constraint(self) -> bool:
+        """Allow full_pipeline_test in scrape_jobs.job_type CHECK constraint."""
+        try:
+            await self.db.execute(
+                text("ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_job_type")
             )
-        )
-        return {row.country_code: (row.country_code, row.currency_code) for row in result}
+            await self.db.execute(
+                text(
+                    "ALTER TABLE scrape_jobs "
+                    "ADD CONSTRAINT ck_scrape_jobs_job_type "
+                    "CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test'))"
+                )
+            )
+            await self.db.commit()
+            return True
+        except Exception:
+            await self.db.rollback()
+            return False
 
-    async def _load_fallback_country_currency(self) -> tuple[str, str]:
-        fallback = await self.db.execute(
-            select(DimCountry.country_code, DimCountry.currency_code)
-            .where(DimCountry.is_active.is_(True))
-            .order_by(DimCountry.country_code.asc())
-            .limit(1)
-        )
-        row = fallback.first()
-        if row is None:
-            raise ValueError("dim_country has no active rows; cannot seed test marketplaces")
-        return row.country_code, row.currency_code
-
-    @staticmethod
-    def _make_marketplace_code(domain: str) -> str:
-        normalized = re.sub(r"[^a-z0-9_]+", "_", domain.lower())
-        code = normalized.replace(".", "_")
-        if len(code) <= 50:
-            return code
-        digest = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:10]
-        return f"{code[:39]}_{digest}"[:50]

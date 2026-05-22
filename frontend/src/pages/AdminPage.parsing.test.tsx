@@ -9,14 +9,12 @@ import { AdminPage } from "./AdminPage";
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 
-const addMarketplacesMutateAsync = vi.fn();
 const runPipelineMutateAsync = vi.fn();
 
 const mockUseAuthStore = vi.fn();
 const mockUseAdminStats = vi.fn();
 const mockUseParsingTestMarketplaces = vi.fn();
 const mockUseParsingTestRuns = vi.fn();
-const mockUseAddParsingTestMarketplaces = vi.fn();
 const mockUseRunParsingFullTest = vi.fn();
 const mockUseParsingJobStatus = vi.fn();
 
@@ -49,7 +47,6 @@ vi.mock("@/hooks/useAdmin", () => ({
   useAdminStats: () => mockUseAdminStats(),
   useParsingTestMarketplaces: () => mockUseParsingTestMarketplaces(),
   useParsingTestRuns: () => mockUseParsingTestRuns(),
-  useAddParsingTestMarketplaces: () => mockUseAddParsingTestMarketplaces(),
   useRunParsingFullTest: () => mockUseRunParsingFullTest(),
   useParsingJobStatus: (jobId: string | null) => mockUseParsingJobStatus(jobId),
 }));
@@ -106,10 +103,6 @@ describe("AdminPage parsing section", () => {
         },
       ],
     });
-    mockUseAddParsingTestMarketplaces.mockReturnValue({
-      isPending: false,
-      mutateAsync: addMarketplacesMutateAsync.mockResolvedValue({ added: 5, skipped: 0 }),
-    });
     mockUseRunParsingFullTest.mockReturnValue({
       isPending: false,
       mutateAsync: runPipelineMutateAsync.mockResolvedValue({
@@ -163,18 +156,6 @@ describe("AdminPage parsing section", () => {
     expect(screen.getByText("Test Market")).toBeInTheDocument();
     expect(screen.getByText("admin.pool.discoveryLogs")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /job-1-uu/i })).toBeInTheDocument();
-  });
-
-  it("calls add test marketplaces mutation", async () => {
-    renderPage();
-
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "common.add" })[0],
-    );
-
-    await waitFor(() => {
-      expect(addMarketplacesMutateAsync).toHaveBeenCalledTimes(1);
-    });
   });
 
   it("calls run full pipeline mutation", async () => {

@@ -26,7 +26,6 @@ from app.modules.digests.api import router as digests_router
 from app.modules.market_data.api import router as market_data_router
 from app.modules.marketplaces.api import router as marketplaces_router
 from app.modules.product_pool.api import router as pool_router
-from app.modules.scraper.api import router as scraper_admin_router
 from app.modules.user_products.api_competitors import router as competitors_router
 from app.modules.user_products.api_import import router as import_router
 from app.modules.user_products.api_products import router as products_router
@@ -152,7 +151,6 @@ for router in [
     auth_router,
     telegram_router,
     marketplaces_router,
-    scraper_admin_router,
     pool_router,
     market_data_router,
     dashboard_router,

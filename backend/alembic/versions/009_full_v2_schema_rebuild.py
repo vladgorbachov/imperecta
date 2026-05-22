@@ -492,7 +492,7 @@ def _upgrade_body(run: Callable[[str], None]) -> None:
         CREATE TABLE IF NOT EXISTS scrape_jobs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             job_type VARCHAR(30) NOT NULL
-                CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery')),
+                CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test')),
             marketplace_id UUID REFERENCES dim_marketplace(id),
             status VARCHAR(20) DEFAULT 'pending'
                 CHECK (status IN ('pending','running','completed','failed','cancelled')),
@@ -1216,6 +1216,7 @@ def _upgrade_body(run: Callable[[str], None]) -> None:
     )
 
     _repair_scrape_logs_constraint(run)
+    _repair_scrape_job_types_constraint(run)
 
 
 def _repair_drift_columns(run: Callable[[str], None]) -> None:
@@ -1298,6 +1299,29 @@ def _repair_scrape_logs_constraint(run: Callable[[str], None]) -> None:
             RETURN;
           END IF;
           ALTER TABLE public.scrape_logs ALTER COLUMN status TYPE VARCHAR(50);
+        END
+        $body$ LANGUAGE plpgsql;
+        """
+    )
+
+
+def _repair_scrape_job_types_constraint(run: Callable[[str], None]) -> None:
+    """Align scrape_jobs job_type CHECK with full-pipeline admin task."""
+    run(
+        """
+        DO $body$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'scrape_jobs'
+          ) THEN
+            ALTER TABLE public.scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_job_type;
+            ALTER TABLE public.scrape_jobs ADD CONSTRAINT ck_scrape_jobs_job_type CHECK (
+              job_type IN (
+                'scheduled','manual','retry','backfill','discovery','full_pipeline_test'
+              )
+            );
+          END IF;
         END
         $body$ LANGUAGE plpgsql;
         """

@@ -267,10 +267,9 @@ def _extract_pipeline_metadata(config: Any) -> dict[str, Any]:
 async def _discover_for_full_pipeline(
     db: AsyncSession,
 ) -> tuple[int, dict[UUID, dict[str, Any]], list[str]]:
-    domains = [seed.domain for seed in ParsingAdminService.TEST_MARKETPLACES]
     result = await db.execute(
         select(DimMarketplace)
-        .where(DimMarketplace.is_active.is_(True), DimMarketplace.domain.in_(domains))
+        .where(DimMarketplace.is_active.is_(True))
         .order_by(DimMarketplace.marketplace_code.asc())
     )
     marketplaces = list(result.scalars().all())
