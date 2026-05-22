@@ -6,7 +6,6 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  useAddParsingTestMarketplaces,
   useParsingJobStatus,
   useParsingTestMarketplaces,
   useParsingTestRuns,
@@ -16,7 +15,6 @@ import * as adminApi from "@/api/admin";
 
 vi.mock("@/api/admin", () => ({
   getParsingTestMarketplaces: vi.fn(),
-  addParsingTestMarketplaces: vi.fn(),
   runParsingFullTest: vi.fn(),
   getParsingTestRuns: vi.fn(),
   getParsingJobStatus: vi.fn(),
@@ -59,27 +57,6 @@ describe("useAdmin parsing hooks", () => {
       expect(result.current.data).toEqual([{ name: "Test", url: "https://example.com" }]);
     });
     expect(adminApi.getParsingTestMarketplaces).toHaveBeenCalledTimes(1);
-  });
-
-  it("invalidates marketplace query after add mutation", async () => {
-    vi.mocked(adminApi.addParsingTestMarketplaces).mockResolvedValue({
-      data: { added: 5, skipped: 0 },
-    } as never);
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-
-    const { result } = renderHook(() => useAddParsingTestMarketplaces(), {
-      wrapper: createWrapper(queryClient),
-    });
-
-    await result.current.mutateAsync();
-
-    expect(adminApi.addParsingTestMarketplaces).toHaveBeenCalledTimes(1);
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["admin", "parsing", "test-marketplaces"],
-    });
   });
 
   it("loads test runs with limit", async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Clock3, Copy, Loader2, Play, Plus } from "lucide-react";
+import { Clock3, Copy, Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
@@ -29,7 +29,6 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { useAuthStore } from "@/stores/authStore";
 import {
-  useAddParsingTestMarketplaces,
   useAdminStats,
   useParsingJobStatus,
   useParsingTestMarketplaces,
@@ -104,7 +103,6 @@ export function AdminPage() {
   const { data: stats } = useAdminStats();
   const marketplacesQuery = useParsingTestMarketplaces();
   const runsQuery = useParsingTestRuns(RUNS_LIMIT);
-  const addMarketplaces = useAddParsingTestMarketplaces();
   const runPipeline = useRunParsingFullTest();
 
   const activeStatusQuery = useParsingJobStatus(activeJobId, {
@@ -227,26 +225,6 @@ export function AdminPage() {
                 <CardTitle>{t("admin.pool.marketplaces")}</CardTitle>
                 <CardDescription>{t("admin.marketplaces.successRate")}</CardDescription>
               </div>
-              <Button
-                onClick={async () => {
-                  try {
-                    const result = await addMarketplaces.mutateAsync();
-                    toast.success(
-                      `${t("common.save")}: +${result.added}, ${t("common.next")}: ${result.skipped}`,
-                    );
-                  } catch {
-                    toast.error(t("admin.markets.refreshError"));
-                  }
-                }}
-                disabled={addMarketplaces.isPending}
-              >
-                {addMarketplaces.isPending ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 size-4" />
-                )}
-                {t("common.add")}
-              </Button>
             </CardHeader>
             <CardContent>
               {marketplacesQuery.isLoading ? (

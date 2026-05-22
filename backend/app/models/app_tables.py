@@ -379,7 +379,7 @@ class ScrapeJob(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "job_type IN ('scheduled','manual','retry','backfill','discovery')",
+            "job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test')",
             name="ck_scrape_jobs_job_type",
         ),
         CheckConstraint(

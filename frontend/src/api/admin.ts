@@ -75,11 +75,6 @@ export const addMarketplace = (url: string) =>
   apiClient.post<AdminMarketplace>("/admin/marketplaces", { url });
 export const deleteMarketplace = (id: string) =>
   apiClient.delete(`/admin/marketplaces/${id}`);
-export const getScrapeActivity = () =>
-  apiClient.get<ScrapeActivity>("/admin/scrape-activity");
-export const getErrorDistribution = () =>
-  apiClient.get<ErrorDistribution>("/admin/error-distribution");
-export const getAdminUsers = () => apiClient.get<AdminUser[]>("/admin/users");
 
 export interface ClaudeHealth {
   status:
@@ -116,78 +111,12 @@ export interface ClaudeStatus {
 export const getClaudeStatus = () =>
   apiClient.get<ClaudeStatus>("/admin/claude-status");
 
-export interface ApiHealthProvider {
-  type: string;
-  status: string;
-  last_refresh: string | null;
-  completed_at?: string | null;
-  error?: string | null;
-  provider?: string | null;
-  items_count?: number;
-}
-
-export interface ApiHealthResponse {
-  providers: Record<string, ApiHealthProvider>;
-  api_keys: Record<
-    string,
-    { configured: boolean; name: string }
-  >;
-}
-
-export const getApiHealth = () =>
-  apiClient.get<ApiHealthResponse>("/admin/api-health");
-
-export const runPoolDiagnostics = () =>
-  apiClient.get<PoolDiagnostics>("/admin/diagnostics/pool");
 export const recalculateQuotas = () =>
   apiClient.post<RecalculateQuotasResponse>("/admin/marketplaces/recalculate-quotas");
-export const triggerDiscoveryAll = () =>
-  apiClient.post<{ status: string }>("/admin/discovery/trigger-all");
-export const triggerPoolScrape = () =>
-  apiClient.post<{ status: string }>("/admin/pool/trigger-scrape");
-export const clearUserProducts = () =>
-  apiClient.post<ClearUserProductsResponse>("/admin/products/clear-user-data");
-
-export interface CleanupInvalidResponse {
-  deleted_long_urls: number;
-  deleted_invalid_urls: number;
-  deleted_category_pages?: number;
-}
-
-export const cleanupInvalidProducts = () =>
-  apiClient.post<CleanupInvalidResponse>("/admin/products/cleanup-invalid");
 
 export const clearPool = () =>
   apiClient.post<{ deleted: number; message: string }>("/admin/products/clear-pool");
 
-export const getSampleProducts = () =>
-  apiClient.get<
-    Array<{
-      id: number;
-      url: string;
-      url_length: number;
-      title: string | null;
-      current_price: number | null;
-      image_url: string | null;
-      status: string;
-      marketplace_id: number;
-      last_scraped_at: string | null;
-      scrape_error_count: number;
-      last_scraper_layer: string | null;
-    }>
-  >("/admin/diagnostics/sample-products");
-
-export interface DeduplicateMarketplacesResponse {
-  merged: number;
-  deleted: number;
-}
-
-export const deduplicateMarketplaces = () =>
-  apiClient.post<DeduplicateMarketplacesResponse>("/admin/marketplaces/deduplicate");
-export const triggerDiscoveryOne = (id: number) =>
-  apiClient.post<{ status: string; marketplace_id: number }>(
-    `/admin/discovery/trigger/${id}`
-  );
 
 export interface PoolDiagnostics {
   marketplaces: { total: number; active: number; zero_quota: number };
@@ -223,11 +152,6 @@ export interface RecalculateQuotasResponse {
   active_marketplaces: number;
   quota_per_marketplace: number;
   total_pool_capacity: number;
-}
-
-export interface ClearUserProductsResponse {
-  status: string;
-  deleted_products: number;
 }
 
 export interface ParsingTestMarketplace {
@@ -295,19 +219,6 @@ export interface ParsingJobStatus {
 
 export const getParsingTestMarketplaces = () =>
   apiClient.get<ParsingTestMarketplace[]>("/admin/parsing/test-marketplaces");
-
-export const addParsingTestMarketplaces = () =>
-  apiClient.post<{
-    added: number;
-    skipped: number;
-    total_requested: number;
-    marketplaces: Array<{
-      name: string;
-      domain: string;
-      country_code: string;
-      currency_code: string;
-    }>;
-  }>("/admin/parsing/add-test-marketplaces");
 
 export const runParsingFullTest = () =>
   apiClient.post<ParsingRunCreateResponse>("/admin/parsing/run-full-test");

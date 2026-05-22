@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from starlette.testclient import TestClient
@@ -30,23 +30,6 @@ def admin_client():
     app.dependency_overrides.clear()
 
 
-def test_pool_and_discovery_triggers(admin_client):
-    mock_task = MagicMock()
-    mock_task.id = "q1"
-    with (
-        patch("app.modules.scraper.api.scrape_all_pool_products") as p1,
-        patch("app.modules.scraper.api.discover_all_marketplaces") as p2,
-        patch("app.modules.scraper.api.discover_single_marketplace") as p3,
-    ):
-        p1.delay.return_value = mock_task
-        p2.delay.return_value = mock_task
-        p3.delay.return_value = mock_task
-        mp_id = "00000000-0000-0000-0000-000000000001"
-        assert admin_client.post("/api/admin/pool/trigger-scrape").status_code == 200
-        assert admin_client.post("/api/admin/discovery/trigger-all").status_code == 200
-        assert admin_client.post(f"/api/admin/discovery/trigger/{mp_id}").status_code == 200
-
-
 def test_removed_legacy_endpoints_not_found(admin_client):
     assert admin_client.post("/api/admin/trigger-scrape").status_code == 404
     assert admin_client.get("/api/admin/scrape-activity").status_code == 404
@@ -62,9 +45,21 @@ def test_removed_legacy_endpoints_not_found(admin_client):
     assert admin_client.delete("/api/admin/products/clear-test-data").status_code == 404
     assert admin_client.post("/api/admin/marketplaces/deduplicate").status_code in (404, 405)
     assert admin_client.delete("/api/auth/avatar").status_code == 404
+    assert admin_client.post("/api/admin/pool/trigger-scrape").status_code == 404
+    assert admin_client.post("/api/admin/discovery/trigger-all").status_code == 404
+    assert (
+        admin_client.post("/api/admin/discovery/trigger/00000000-0000-0000-0000-000000000001").status_code
+        == 404
+    )
+    assert admin_client.post("/api/admin/db-diagnostics").status_code == 404
+    assert admin_client.get("/api/admin/scrape-diagnostics").status_code == 404
+    assert (
+        admin_client.post("/api/admin/scrape/test-single/00000000-0000-0000-0000-000000000001").status_code
+        == 404
+    )
 
 
-def test_scrape_diagnostics_and_test_single_in_openapi_schema(admin_client):
+def test_removed_scraper_admin_endpoints_not_in_openapi_schema(admin_client):
     schema = admin_client.app.openapi()
     paths = schema.get("paths", {})
     assert "/api/admin/trigger-scrape" not in paths
@@ -74,22 +69,11 @@ def test_scrape_diagnostics_and_test_single_in_openapi_schema(admin_client):
     assert "/api/admin/products/clear-test-data" not in paths
     assert "/api/admin/marketplaces/deduplicate" not in paths
     assert "/api/auth/avatar" not in paths
-    assert "/api/admin/scrape-diagnostics" in paths
-    assert "get" in paths["/api/admin/scrape-diagnostics"]
-    assert "/api/admin/db-diagnostics" in paths
-    assert "post" in paths["/api/admin/db-diagnostics"]
-    assert "/api/admin/scrape/test-single/{listing_id}" in paths
-    assert "post" in paths["/api/admin/scrape/test-single/{listing_id}"]
-
-
-def test_db_diagnostics_post(admin_client, monkeypatch):
-    def fake_collect(_engine):
-        return {"alembic_version": "test", "counts": {}, "errors": []}
-
-    monkeypatch.setattr("app.modules.scraper.api.collect_db_diagnostics", fake_collect)
-    resp = admin_client.post("/api/admin/db-diagnostics")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body.get("alembic_version") == "test"
+    assert "/api/admin/pool/trigger-scrape" not in paths
+    assert "/api/admin/discovery/trigger-all" not in paths
+    assert "/api/admin/discovery/trigger/{marketplace_id}" not in paths
+    assert "/api/admin/db-diagnostics" not in paths
+    assert "/api/admin/scrape-diagnostics" not in paths
+    assert "/api/admin/scrape/test-single/{listing_id}" not in paths
 
 

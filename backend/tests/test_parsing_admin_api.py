@@ -17,7 +17,6 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
     """Non-superuser cannot access parsing admin endpoints."""
     paths = [
         ("GET", "/api/admin/parsing/test-marketplaces"),
-        ("POST", "/api/admin/parsing/add-test-marketplaces"),
         ("POST", "/api/admin/parsing/run-full-test"),
         ("GET", "/api/admin/parsing/test-runs"),
         ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
@@ -31,14 +30,8 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
 
 
 @pytest.mark.asyncio
-async def test_parsing_admin_add_and_get_marketplaces(client, superuser_headers):
-    """Superuser can seed test marketplaces and read frontend contract shape."""
-    add_resp = await client.post("/api/admin/parsing/add-test-marketplaces", headers=superuser_headers)
-    assert add_resp.status_code == 200
-    add_payload = add_resp.json()
-    assert add_payload["total_requested"] == 5
-    assert add_payload["added"] + add_payload["skipped"] == 5
-
+async def test_parsing_admin_get_marketplaces_contract(client, superuser_headers):
+    """Superuser can fetch parsing marketplaces in frontend contract shape."""
     list_resp = await client.get("/api/admin/parsing/test-marketplaces", headers=superuser_headers)
     assert list_resp.status_code == 200
     rows = list_resp.json()
@@ -92,13 +85,13 @@ async def test_parsing_admin_run_full_test_and_poll_status(client, superuser_hea
 
 
 @pytest.mark.asyncio
-async def test_parsing_admin_run_full_test_constraint_error(client, superuser_headers):
-    """run-full-test returns 400 with SQL guidance when job_type constraint rejects value."""
+async def test_parsing_admin_run_full_test_auto_repairs_constraint(client, superuser_headers):
+    """run-full-test creates a job even when DB initially has stale job_type constraint."""
     resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
-    assert resp.status_code == 400
-    detail = resp.json().get("detail", "")
-    assert "Supabase SQL Editor" in detail
-    assert "ALTER TABLE scrape_jobs" in detail
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload.get("job_id")
+    assert payload.get("started_at")
 
 
 @pytest.mark.asyncio

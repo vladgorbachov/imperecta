@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
@@ -13,10 +13,7 @@ from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimCountry, DimMarketplace
 from app.modules.marketplaces.schemas import (
     AdminMarketplaceListItem,
-    ImportTextBody,
     MarketplaceCreateByUrl,
-    MarketplaceResponse,
-    SetRequiresJsBody,
 )
 from app.modules.marketplaces.service import MarketplaceService
 
@@ -106,45 +103,6 @@ async def add_marketplace_root(
     return _to_admin_row(mp, regions.get(mp.country_code, ""))
 
 
-@router.post("/add-by-url", response_model=MarketplaceResponse)
-async def add_marketplace_by_url(
-    body: MarketplaceCreateByUrl,
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-) -> MarketplaceResponse:
-    url = (body.url or "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="URL is required")
-    svc = MarketplaceService(db)
-    try:
-        mp, _is_new = await svc.add_by_url(url)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    return MarketplaceResponse.model_validate(mp)
-
-
-@router.post("/import-file")
-async def import_marketplaces_file(
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-    file: UploadFile = File(...),
-) -> dict:
-    raw = await file.read()
-    content = raw.decode("utf-8", errors="ignore")
-    svc = MarketplaceService(db)
-    return await svc.import_from_text(content)
-
-
-@router.post("/import-text")
-async def import_marketplaces_text(
-    body: ImportTextBody,
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-) -> dict:
-    svc = MarketplaceService(db)
-    return await svc.import_from_text(body.content)
-
-
 @router.delete("/{marketplace_id}")
 async def delete_marketplace(
     marketplace_id: UUID,
@@ -165,19 +123,6 @@ async def recalculate_quotas(
 ) -> dict:
     svc = MarketplaceService(db)
     return await svc.recalculate_quotas()
-
-
-@router.post("/set-requires-js", response_model=MarketplaceResponse)
-async def set_requires_js(
-    body: SetRequiresJsBody,
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-) -> MarketplaceResponse:
-    svc = MarketplaceService(db)
-    mp = await svc.update_marketplace(body.marketplace_id, {"requires_js": body.requires_js})
-    if not mp:
-        raise HTTPException(status_code=404, detail="Marketplace not found")
-    return MarketplaceResponse.model_validate(mp)
 
 
 @router.get("/{marketplace_id}/logs")
