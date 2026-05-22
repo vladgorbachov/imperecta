@@ -10,12 +10,15 @@ from app.modules.marketplaces.service import MarketplaceService
 router = APIRouter(prefix="/competitors", tags=["competitors"])
 
 _MIG = "Endpoint pending migration to v2 schema"
+BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
 
 
 @router.get("/marketplaces")
 async def list_marketplaces(current_user: CurrentUser, db: DbSession) -> list[dict]:
-    _ = current_user
+    is_superuser = bool(getattr(current_user, "is_superuser", False))
     rows = await MarketplaceService(db).list_marketplaces()
+    if not is_superuser:
+        rows = [row for row in rows if row.country_code not in BLOCKED_PUBLIC_COUNTRY_CODES]
     return [{"marketplace_id": str(r.id), "name": r.name} for r in rows]
 
 

@@ -1,7 +1,23 @@
 # Imperecta — Описание проекта для Cursor IDE
 
-## Актуализация (текущее состояние, 2026-04-04)
+## Актуализация (текущее состояние, 2026-05-21)
 
+- **Parsing Administration (backend):** реализован отдельный контур `/api/admin/parsing/*` (superuser-only): `GET /test-marketplaces`, `POST /add-test-marketplaces`, `POST /run-full-test`, `GET /test-runs`, `GET /job-status/{job_id}`. Добавлены `ParsingAdminService`, роутер `modules/admin/api_parsing.py`, интеграция в `main.py`, Celery task `run_full_pipeline_test` (стадии discovery → scrape → persist, metadata/timings/summary/per_marketplace).
+- **Parsing Administration (frontend):** в `frontend/src/pages/AdminPage.tsx` добавлена вкладка **«Тестовый парсинг»** с блоками:
+  - «Тестовые маркетплейсы» (добавление + таблица),
+  - «Запуск тестового пайплайна» (кнопка запуска + polling статуса каждые ~4.5s),
+  - «История тестовых запусков» (сортировка по началу, пагинация, копирование Job ID),
+  - модалка «Детали запуска» (общая статистика, timings breakdown, per-marketplace таблица, repeat run).
+- **Frontend data layer:** расширены `frontend/src/api/admin.ts` и `frontend/src/hooks/useAdmin.ts` типами/хуками parsing-admin (React Query `useQuery`/`useMutation`, invalidate ключей истории/маркетплейсов).
+- **Frontend tests:** добавлены и проходят:
+  - `frontend/src/pages/AdminPage.parsing.test.tsx`,
+  - `frontend/src/hooks/useAdmin.parsing.test.tsx`.
+- **Verification:** `npm test` и `npm run build` для frontend — успешны; browser-проверка раздела parsing требует авторизации superuser (на неавторизованном состоянии идёт редирект на `/login`).
+
+- **Git head:** `f50afca` — *Remove local dev code*: production-first `config.py` (обязательные `DATABASE_URL`, `REDIS_URL`; `app_env=production`; CORS → Cloudflare Pages). Удалены из репо: `dev-start.sh`, `stop-dev.sh`, `db-clean.sh`, `db-export.sh`, `db-import.sh`, `docker-compose.override.yml`, `docker-compose.prod.yml`, `backend/scripts/debug_local_db.py`. Локально — только `docker-compose.yml`.
+- **Legacy cleanup (v2-only):** удалены `app/api/*`, `app/services/*`, Celery tasks `scrape_single`/`scrape_user_products`/`scrape_all`; admin endpoints `POST /api/admin/trigger-scrape`, `GET /api/admin/scrape-activity`, `GET /api/admin/error-distribution`, `DELETE /api/admin/products/clear-test-data`, `POST /api/admin/marketplaces/deduplicate`, `DELETE /api/pool/products/bulk` → **404**.
+- **Admin clear-pool:** `POST /api/admin/products/clear-pool` — TRUNCATE pool tables (`dim_marketplace`, `dim_product`, `fact_listing`, `fact_price` + related facts, `scrape_logs`, `scrape_jobs`), DELETE `user_products`, preserve users/dim_date/dim_currency/dim_country/alerts/digests. Response: `pool_cleared` + counts + `time_ms`.
+- **DB dump for migration:** `db/backups/imperecta_20260414_2040.sql.gz` (committed); restore via `pg_restore` into postgres container.
 - **Git / коммиты:** запрещено добавлять в коммиты трейлеры вида `--trailer "Made-with: Cursor"` и любые аналогичные метки «сделано ассистентом»; сообщения коммитов — обычные, без таких трейлеров.
 - **Alembic head:** `009_full_v2_schema_rebuild` — идемпотентная полная DDL v2 (**31** таблица в `public`, партиции **`fact_price`**, MV, сиды **`dim_date` / `dim_currency` / `dim_country`**). Цепочка **`001`–`008`** сохранена; **`008`** — ширина **`alembic_meta.alembic_version.version_num`** (VARCHAR(255)); **`007`** — repair meta, таймауты, опциональный сброс пустого **`public`**; **`005`–`006`** — **`scrape_logs`**. **`alembic/env.py`:** после **`run_sync(do_run_migrations)`** — **`await connection.commit()`** (фикс отката DDL в async). Drift stamp: **`009_full_v2_schema_rebuild`**. **`app/main.py`:** при старте — **`alembic upgrade head`**, затем **`ensure_superuser`**, **`create_all`** (ошибки не валят процесс). ORM `ScrapeLog.status` — **`String(50)`**; канонические строки статусов — **`errors.SCRAPE_LOG_STATUSES`**.
 - **Celery pool tasks:** при необработанных исключениях в worker вызывается **`_persist_technical_error_log`** (`tasks.py`) — запись в `scrape_logs` со статусом `technical_error` и трассой (если листинг существует).
@@ -46,7 +62,7 @@
 - **Admin Page:** секция «Состояние API» (GET `/api/admin/api-health`), кнопки «Очистить невалидные товары», «Очистить пул полностью», «Дедупликация маркетплейсов». Управление пулом: диагностика, пересчёт квот, Discovery, Scraping, clear user products. Toast cleanup-invalid показывает deleted_category_pages.
 - **Products:** страница с двумя вкладками — «Все товары» (GET `/api/pool/products`) и «Мои товары» (GET `/api/products`). Компоненты: `PoolProductsTab`, `MyProductsTab`, хук `usePoolProducts`.
 - **Import:** поддерживает .csv, .tsv, .xls, .xlsx, .xlsm. Preview и upload через `/api/import/products/preview` и `/api/import/products/csv`.
-- **Admin pool:** GET `/api/admin/diagnostics/pool`, GET `/api/admin/diagnostics/sample-products`, GET `/api/admin/api-health`, POST `/api/admin/marketplaces/recalculate-quotas`, POST `/api/admin/marketplaces/deduplicate`, POST `/api/admin/marketplaces/set-requires-js`, POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/products/clear-pool`, POST `/api/admin/products/clear-user-data`. Discovery/scrape: POST `/api/admin/discovery/trigger-all`, POST `/api/admin/pool/trigger-scrape`.
+- **Admin pool:** GET `/api/admin/diagnostics/pool`, GET `/api/admin/diagnostics/sample-products`, GET `/api/admin/api-health`, POST `/api/admin/marketplaces/recalculate-quotas`, POST `/api/admin/marketplaces/set-requires-js`, POST `/api/admin/products/cleanup-invalid`, POST `/api/admin/products/clear-pool`, POST `/api/admin/products/clear-user-data`. Discovery/scrape: POST `/api/admin/discovery/trigger-all`, POST `/api/admin/pool/trigger-scrape`, POST `/api/admin/db-diagnostics`, GET `/api/admin/scrape-diagnostics`, POST `/api/admin/scrape/test-single/{listing_id}`.
 - Pipeline: marketplaces → discovery → scraping → виджеты; админ: add-by-url, discovery/trigger-all, pool/trigger-scrape, diagnostics, recalculate-quotas.
 - Модули: core, marketplaces, scraper, product_pool, market_data, dashboard, user_products, analytics, alerts, digests, ai_analyst.
 - Ниже — исторический снимок; ориентир — разделы про модульную архитектуру и актуальные домены.
@@ -152,23 +168,21 @@ Imperecta — SaaS-платформа конкурентной разведки 
 | **admin** | GET | /api/admin/api-health | Статус внешних API (forex, crypto, commodities, decodo, claude и др.) |
 | **admin** | GET | /api/admin/diagnostics/pool | Диагностика пула (marketplaces, products, discovery_logs) |
 | **admin** | GET | /api/admin/diagnostics/sample-products | 10 сэмплов global_products для отладки |
-| **admin** | POST | /api/admin/products/cleanup-invalid | Удаление global_products (длинные URL, невалидные, страницы категорий) |
-| **admin** | POST | /api/admin/products/clear-pool | Полная очистка пула (global_products + snapshots) |
-| **admin** | POST | /api/admin/products/clear-user-data | Удаление всех пользовательских товаров |
-| **admin** | DELETE | /api/admin/products/clear-test-data | Удаление тестовых товаров |
+| **admin** | POST | /api/admin/products/cleanup-invalid | Удаление listings с NULL или невалидными URL |
+| **admin** | POST | /api/admin/products/clear-pool | Полная очистка pool (marketplaces, products, listings, prices, scrape logs/jobs); сохраняет users и dim seeds |
+| **admin** | POST | /api/admin/products/clear-user-data | Placeholder (v2 migration message) |
 | **admin** | GET | /api/admin/marketplaces | Список маркетплейсов |
 | **admin** | GET | /api/admin/marketplaces/{marketplace_id}/logs | Логи маркетплейса |
 | **admin** | POST | /api/admin/marketplaces | Добавление маркетплейса |
-| **admin** | POST | /api/admin/marketplaces/deduplicate | Дедупликация маркетплейсов (rozetka.ua ↔ rozetka.com.ua) |
 | **admin** | POST | /api/admin/marketplaces/recalculate-quotas | Пересчёт квот пула |
 | **admin** | POST | /api/admin/marketplaces/set-requires-js | Установка requires_js для маркетплейсов |
 | **admin** | DELETE | /api/admin/marketplaces/{marketplace_id} | Удаление маркетплейса |
 | **admin** | POST | /api/admin/discovery/trigger/{marketplace_id} | Запуск discovery для одного маркетплейса |
 | **admin** | POST | /api/admin/discovery/trigger-all | Запуск discovery для всех |
 | **admin** | POST | /api/admin/pool/trigger-scrape | Запуск scraping пула товаров |
-| **admin** | POST | /api/admin/trigger-scrape | Ручной запуск парсинга competitor_products |
-| **admin** | GET | /api/admin/scrape-activity | Активность парсинга |
-| **admin** | GET | /api/admin/error-distribution | Распределение ошибок |
+| **admin** | POST | /api/admin/db-diagnostics | DB diagnostics (superuser) |
+| **admin** | GET | /api/admin/scrape-diagnostics | Scrape pipeline diagnostics |
+| **admin** | POST | /api/admin/scrape/test-single/{listing_id} | Test scrape одного listing |
 
 ### Frontend (React Router)
 

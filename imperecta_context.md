@@ -1,12 +1,25 @@
 # Imperecta Context (Current State)
 
-## 0) Snapshot (2026-04-04)
+## 0) Snapshot (2026-05-21)
 
-- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file (Alembic head **009**, `scrape_logs.status` **VARCHAR(50)**).
+- **Parsing Administration (new complete track):**
+  - Backend: `/api/admin/parsing/*` endpoints, `ParsingAdminService`, Celery `run_full_pipeline_test`, metadata contract (`timings`, `summary`, `per_marketplace`, `current_stage`).
+  - Frontend: `AdminPage` now includes parsing tab with marketplaces table, run pipeline card (polling), runs history (sorted + paginated), and run details dialog.
+  - Frontend data/hooks: parsing contracts in `src/api/admin.ts`; parsing queries/mutations in `src/hooks/useAdmin.ts`.
+  - Frontend tests added: `src/pages/AdminPage.parsing.test.tsx`, `src/hooks/useAdmin.parsing.test.tsx`.
+  - Validation: `npm test` + `npm run build` passed.
+
+- **Git head:** `f50afca` — *Remove local dev code* (production-first config; локальные shell-скрипты и override compose удалены из репозитория).
+- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `Imperecta_Full_Development_Context.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file (Alembic head **009**, `scrape_logs.status` **VARCHAR(50)**).
+- **Deploy target:** Railway (backend + celery-worker + celery-beat), Cloudflare Pages (frontend), Supabase (PostgreSQL), Upstash (Redis). Локальная разработка — только `docker compose up` + корневой `.env` (gitignored).
+- **Config (`backend/app/config.py`):** `DATABASE_URL` и `REDIS_URL` обязательны; `app_env=production`, `allowed_origins=https://imperecta.pages.dev`; Supabase URL `postgresql://` автоматически нормализуется в `postgresql+asyncpg://`.
+- **Legacy cleanup (v2-only):** удалены runtime `app/api/*`, `app/services/*`, legacy Celery tasks (`scrape_single`, `scrape_user_products`, `scrape_all`), admin endpoints `trigger-scrape`, `scrape-activity`, `error-distribution`, `clear-test-data`, `marketplaces/deduplicate`, `DELETE /api/pool/products/bulk`.
+- **Admin clear-pool:** `POST /api/admin/products/clear-pool` — транзакционный hard reset pool-данных: TRUNCATE `fact_price`, `fact_review`, `fact_stock`, `fact_promo`, `fact_listing`, `scrape_logs`, `scrape_jobs`, `dim_product`, `dim_marketplace`; DELETE `user_products`; nullify alert FKs; сохраняются `dim_date`, `dim_currency`, `dim_country`, `users`, subscriptions, alerts, digests и прочие системные таблицы. Ответ: `{"status":"pool_cleared","deleted_marketplaces":N,"deleted_listings":N,"deleted_prices":N,"time_ms":N}`.
+- **DB dumps in repo:** `db/backups/imperecta_20260414_2040.sql.gz` (latest, for Windows/dev restore via `pg_restore`); новые дампы gitignored except `.gitkeep`.
 - **Alembic head:** `009_full_v2_schema_rebuild` — идемпотентная полная DDL v2 (расширения, **`alembic_meta`**, **31** таблица в `public`, партиции **`fact_price`**, MV, сиды `dim_*`). Предшествуют **`008_fix_alembic_version_length`** (ширина **`version_num`**), **`007`** (repair **`alembic_meta`**, таймауты, опциональный reset пустого **`public`**), **`005`**/**`006`** — **`scrape_logs`**. **`alembic/env.py`:** после `run_sync(do_run_migrations)` — **`await connection.commit()`** (иначе DDL мог откатываться при выходе из async-контекста). Drift stamp в **`env.py`**: **`009_full_v2_schema_rebuild`**. ORM **`ScrapeLog.status`** = **`String(50)`**; см. **`errors.SCRAPE_LOG_STATUSES`**.
 - **`app/main.py` lifespan:** `alembic upgrade head` (subprocess) → **`ensure_superuser`** → **`Base.metadata.create_all`** (ошибки логируются, процесс не падает); webhook Telegram — в фоне.
 - Parser runtime: no `engine.py` under `modules/scraper`; path remains `tasks → discovery/service → scraper_pool → extractors`.
-- **Marketplaces:** `MarketplaceService` + `modules/marketplaces/api.py` persist rows in `dim_marketplace` (add-by-url, import, delete, quotas, `requires_js`, logs). **POST `/api/admin/marketplaces/deduplicate`** is still a no-op merge (returns a message). Pool/diagnostics/cleanup: `core/api_admin` + `scraper/api`.
+- **Marketplaces:** `MarketplaceService` + `modules/marketplaces/api.py` persist rows in `dim_marketplace` (add-by-url, import, delete, quotas, `requires_js`, logs). Endpoint **`POST /api/admin/marketplaces/deduplicate`** removed. Pool/diagnostics/cleanup: `core/api_admin` + `scraper/api`.
 - Celery Beat: `scheduler.py` sets `celery_app.conf.beat_schedule = {}` (no periodic enqueue).
 - **Pool scraping in workers:** `GlobalScrapeService` uses **sync `Session`** (`sync_session_factory` from `database.py`). Only `ScraperPool.scrape_product` runs async inside `_run_coro_in_worker(...)` to avoid `MissingGreenlet` in prefork workers. Discovery tasks still use a dedicated async engine + `_run_async`.
 - **`GlobalScrapeService.scrape_product` (persistence layer, `modules/scraper/service.py`):**
@@ -176,10 +189,15 @@ Key runtime expectation:
 
 - Project overview:
   - `Imperecta_Cursor_Project_Description.md`
+- Full development context (AI agent):
+  - `Imperecta_Full_Development_Context.md`
 - Backend audit:
   - `backend_full_audit_report.md`
 - Parser/scraper audit:
   - `parsers_audit.md`
+- Local DB restore (Windows / new machine):
+  - `db/backups/imperecta_20260414_2040.sql.gz` — latest committed dump
+  - `docker-compose.yml` — postgres + redis + backend + celery + frontend
 - Migrations:
   - `backend/alembic/env.py`
   - `backend/alembic/versions/001_v2_schema.py` … `009_full_v2_schema_rebuild.py` (see chain in §5)

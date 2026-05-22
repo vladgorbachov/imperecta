@@ -299,102 +299,104 @@ export function MyProductsTab({ locale }: { locale: string }) {
             </Button>
           </div>
         ) : (
-          <div className="max-h-[55vh] overflow-x-auto overflow-y-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={isAllSelected}
-                      onCheckedChange={toggleAll}
-                      aria-label="Выбрать все"
-                    />
-                  </TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Название</TableHead>
-                  <TableHead>Моя цена</TableHead>
-                  <TableHead>Мин. цена конкурентов</TableHead>
-                  <TableHead className="w-10" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((p) => (
-                  <TableRow
-                    key={p.id}
-                    className={cn(
-                      "cursor-pointer transition-colors",
-                      isSelected(p.id)
-                        ? "border-l-2 border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15"
-                        : "hover:bg-muted/50"
-                    )}
-                    onClick={(e) => {
-                      if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        toggleItem(p.id);
-                      } else {
-                        navigate(`/products/${p.id}`);
-                      }
-                    }}
-                  >
-                    <TableCell
-                      className="w-12"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+          <>
+            <div className="max-h-[55vh] overflow-x-auto overflow-y-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-12">
                       <Checkbox
-                        checked={isSelected(p.id)}
-                        onCheckedChange={() => toggleItem(p.id)}
-                        aria-label={`Выбрать ${p.name}`}
+                        checked={isAllSelected}
+                        onCheckedChange={toggleAll}
+                        aria-label="Выбрать все"
                       />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {p.sku ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <span className="font-medium">{p.name}</span>
-                    </TableCell>
-                    <TableCell>
-                      {formatPrice(p.current_price, p.currency, locale)}
-                    </TableCell>
-                    <TableCell>
-                      {p.min_competitor_price != null
-                        ? formatPrice(p.min_competitor_price, p.currency, locale)
-                        : "—"}
-                    </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="size-8">
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => navigate(`/products/${p.id}`)}>
-                            <Pencil className="mr-2 size-4" />
-                            Редактировать
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={(e) => handleDelete(p.id, e as unknown as React.MouseEvent)}
-                          >
-                            <Trash2 className="mr-2 size-4" />
-                            Удалить
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+                    </TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Название</TableHead>
+                    <TableHead>Моя цена</TableHead>
+                    <TableHead>Мин. цена конкурентов</TableHead>
+                    <TableHead className="w-10" />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          {selectedCount > 0 && (
-            <SelectionActionBar
-              selectedCount={selectedCount}
-              onDelete={() => setShowDeleteDialog(true)}
-              onClear={clearSelection}
-              isDeleting={isDeleting}
-            />
-          )}
+                </TableHeader>
+                <TableBody>
+                  {products.map((p) => (
+                    <TableRow
+                      key={p.id}
+                      className={cn(
+                        "cursor-pointer transition-colors",
+                        isSelected(p.id)
+                          ? "border-l-2 border-l-blue-500 bg-blue-500/10 hover:bg-blue-500/15"
+                          : "hover:bg-muted/50"
+                      )}
+                      onClick={(e) => {
+                        if (e.ctrlKey || e.metaKey) {
+                          e.preventDefault();
+                          toggleItem(p.id);
+                        } else {
+                          navigate(`/products/${p.id}`);
+                        }
+                      }}
+                    >
+                      <TableCell
+                        className="w-12"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={isSelected(p.id)}
+                          onCheckedChange={() => toggleItem(p.id)}
+                          aria-label={`Выбрать ${p.name}`}
+                        />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {p.sku ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-medium">{p.name}</span>
+                      </TableCell>
+                      <TableCell>
+                        {formatPrice(p.current_price, p.currency, locale)}
+                      </TableCell>
+                      <TableCell>
+                        {p.min_competitor_price != null
+                          ? formatPrice(p.min_competitor_price, p.currency, locale)
+                          : "—"}
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="size-8">
+                              <MoreHorizontal className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => navigate(`/products/${p.id}`)}>
+                              <Pencil className="mr-2 size-4" />
+                              Редактировать
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={(e) => handleDelete(p.id, e as unknown as React.MouseEvent)}
+                            >
+                              <Trash2 className="mr-2 size-4" />
+                              Удалить
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {selectedCount > 0 && (
+              <SelectionActionBar
+                selectedCount={selectedCount}
+                onDelete={() => setShowDeleteDialog(true)}
+                onClear={clearSelection}
+                isDeleting={isDeleting}
+              />
+            )}
+          </>
         )}
       </div>
 

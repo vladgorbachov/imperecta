@@ -14,26 +14,26 @@ const mockCommodities: MarketsCommodityItem[] = [
 
 describe("buildTickerBarItems", () => {
   it("returns fuel items for country when commodities include fuel symbols", () => {
-    const items = buildTickerBarItems(mockForex, mockCommodities, "RU");
+    const items = buildTickerBarItems(mockForex, mockCommodities, "UA");
     const fuelItems = items.filter((i) => i.type === "fuel");
     expect(fuelItems.length).toBeGreaterThan(0);
     expect(fuelItems[0].symbol).toBe("gasoline");
   });
 
   it("returns forex items when forex data exists", () => {
-    const items = buildTickerBarItems(mockForex, mockCommodities, "RU");
+    const items = buildTickerBarItems(mockForex, mockCommodities, "UA");
     const forexItems = items.filter((i) => i.type === "forex");
     expect(forexItems.length).toBeGreaterThan(0);
   });
 
   it("returns empty array when both forex and commodities are empty", () => {
-    const items = buildTickerBarItems([], [], "RU");
+    const items = buildTickerBarItems([], [], "UA");
     expect(items).toEqual([]);
   });
 
   it("prioritizes USD/local and EUR/local pairs for non-USD country", () => {
-    const items = buildTickerBarItems(mockForex, [], "RU");
+    const items = buildTickerBarItems(mockForex, [], "UA");
     const symbols = items.map((i) => i.symbol);
-    expect(symbols).toContain("EUR/RUB");
+    expect(symbols).toContain("EUR/RUB"); // Data fixture intentionally contains this pair.
   });
 });

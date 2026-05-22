@@ -1,7 +1,20 @@
 # Полный аудит backend (read-only)
 
-## Актуализация (текущее состояние, 2026-04-04)
+## Актуализация (текущее состояние, 2026-05-21)
 
+- **New admin parsing module (backend):**
+  - `backend/app/modules/admin/parsing_admin.py` — service contracts for test marketplaces / test runs / job status.
+  - `backend/app/modules/admin/api_parsing.py` — router `/api/admin/parsing/*` (superuser-only).
+  - `backend/app/modules/scraper/tasks.py` — `run_full_pipeline_test` (discovery → scrape → persist) with metadata enrichment.
+  - `backend/app/main.py` includes parsing-admin router.
+- **New backend test coverage:**
+  - `backend/tests/test_parsing_admin_service.py`,
+  - `backend/tests/test_parsing_admin_api.py`,
+  - `backend/tests/test_scraper_unit/test_full_pipeline_task.py`.
+
+- **Git head:** `f50afca` — production-first config; local dev shell scripts removed.
+- **Legacy removed:** admin `trigger-scrape`, `scrape-activity`, `error-distribution`, `clear-test-data`, `marketplaces/deduplicate`; Celery `scrape_single`, `scrape_user_products`, `scrape_all`.
+- **Admin clear-pool:** `POST /api/admin/products/clear-pool` — full pool TRUNCATE + preserve users/dim seeds.
 - **Git:** не добавлять в коммиты трейлеры `--trailer "Made-with: Cursor"` и аналоги.
 - **Alembic head:** **`009_full_v2_schema_rebuild`** — идемпотентная полная DDL v2; предшествуют **`008`** (ширина **`alembic_meta.alembic_version.version_num`**), **`007`** (repair **`alembic_meta`**, таймауты, условный сброс пустого **`public`**), **`005`–`006`** (**`scrape_logs`**). **`alembic/env.py`:** **`await connection.commit()`** после **`run_sync`**. ORM: **`ScrapeLog.status` — `String(50)`**; каноника статусов — **`errors.SCRAPE_LOG_STATUSES`**.
 - **Celery pool scrape:** `modules/scraper/tasks.py` — `_run_scrape_all_pool`, `scrape_pool_product`, `check_pool_completeness` используют **`sync_session_factory`**; **`GlobalScrapeService.scrape_product`** — синхронный `Session`; async только **`ScraperPool.scrape_product`** через **`_run_coro_in_worker`** в `service.py` (устранение `MissingGreenlet` в fork workers). При падении worker — **`_persist_technical_error_log`** пишет **`scrape_logs`** со статусом **`technical_error`** (если листинг найден).
@@ -31,12 +44,13 @@
 - API и домены: только `backend/app/modules/*` (нет runtime `app/api/*`, `app/services/*`, `app/scrapers/*`).
 - Парсинг: `modules/scraper/` — `discovery.py`, `scraper_pool.py`, `extractors.py`, `service.py`, `tasks.py`, `api.py`; файла `engine.py` в модуле нет.
 - Admin pool/diagnostics: `modules/core/api_admin.py`. Scraper admin: `modules/scraper/api.py`.
-- **Marketplaces admin:** `modules/marketplaces/service.py` (`MarketplaceService`) + `modules/marketplaces/api.py` — CRUD для `dim_marketplace` (список, add-by-url, импорт, удаление, квоты, `requires_js`, логи из `scrape_logs`). Исключение: **POST `/deduplicate`** пока без реализации merge дубликатов.
+- **Marketplaces admin:** `modules/marketplaces/service.py` (`MarketplaceService`) + `modules/marketplaces/api.py` — CRUD для `dim_marketplace` (список, add-by-url, импорт, удаление, квоты, `requires_js`, логи из `scrape_logs`). Endpoint **`POST /deduplicate`** удалён.
+- **Admin clear-pool:** `modules/core/api_admin.py` — `POST /products/clear-pool` (TRUNCATE pool tables, DELETE user_products, nullify alert FKs, preserve system dims/users).
 
 ### Исторический блок ниже
 - Разделы **2–16** содержат снимок аудита с путями вида `app/api/*`, `app/scrapers/engine.py`, `workers/scrape_tasks.py` — эта структура **удалена** или переименована. Для текущей архитектуры ориентируйтесь на этот раздел актуализации и на `Imperecta_Cursor_Project_Description.md`.
 
-Дата актуализации верхнего блока: 2026-04-04
+Дата актуализации верхнего блока: 2026-05-21
 
 ### Hotfix forced migration (2026-03-21) + meta repair (2026-04)
 - В `backend/alembic/env.py` перед `run_migrations()`:
