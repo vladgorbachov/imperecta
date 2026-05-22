@@ -264,17 +264,6 @@ def _extract_pipeline_metadata(config: Any) -> dict[str, Any]:
     return ParsingAdminService._build_initial_metadata()
 
 
-async def _set_pipeline_stage(
-    db: AsyncSession,
-    job: ScrapeJob,
-    stage: str,
-) -> None:
-    metadata = _extract_pipeline_metadata(job.config)
-    metadata["current_stage"] = stage
-    job.config = {"metadata": metadata}
-    await db.commit()
-
-
 async def _discover_for_full_pipeline(
     db: AsyncSession,
 ) -> tuple[int, dict[UUID, dict[str, Any]], list[str]]:

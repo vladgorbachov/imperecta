@@ -11,7 +11,7 @@ from app.database import async_session_maker
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
-from app.modules.scraper.tasks import _finalize_full_pipeline_job
+from app.modules.scraper.tasks import _extract_pipeline_metadata, _finalize_full_pipeline_job
 
 
 @pytest.mark.asyncio
@@ -107,3 +107,47 @@ async def test_finalize_full_pipeline_job_updates_metadata_and_duration():
         assert refreshed.status == "completed"
         assert refreshed.duration_ms == 5000
         assert refreshed.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_finalize_full_pipeline_job_failed_sets_error_payload():
+    """Finalizer marks failed jobs and stores error details for polling diagnostics."""
+    async with async_session_maker() as session:
+        job = ScrapeJob(
+            job_type="manual",
+            status="running",
+            started_at=datetime.now(UTC),
+            config={"metadata": {"current_stage": "scrape"}},
+        )
+        session.add(job)
+        await session.commit()
+
+        metadata = await _finalize_full_pipeline_job(
+            session,
+            job,
+            discovery_ms=100,
+            scrape_ms=200,
+            persist_ms=50,
+            per_marketplace_seed={},
+            hard_error="pipeline failed",
+        )
+        assert metadata["current_stage"] == "failed"
+        assert metadata["error"] == "pipeline failed"
+        assert metadata["timings"]["total_ms"] == 350
+
+        refreshed = await session.get(ScrapeJob, job.id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        assert refreshed.failed == 0
+
+
+def test_extract_pipeline_metadata_handles_invalid_shapes():
+    """Metadata extractor always returns compatible defaults for malformed config."""
+    default_meta = _extract_pipeline_metadata(None)
+    assert default_meta["current_stage"] == "queued"
+    assert "timings" in default_meta
+    assert "summary" in default_meta
+    assert "per_marketplace" in default_meta
+
+    from_nested = _extract_pipeline_metadata({"metadata": {"current_stage": "scrape"}})
+    assert from_nested["current_stage"] == "scrape"

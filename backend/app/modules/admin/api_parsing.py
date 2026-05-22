@@ -22,6 +22,7 @@ async def get_test_marketplaces(
     _current_user: CurrentSuperuser,
     db: DbSession,
 ) -> list[dict]:
+    """Frontend table source for parsing admin marketplace cards."""
     service = ParsingAdminService(db)
     return await service.get_test_marketplaces()
 
@@ -31,6 +32,7 @@ async def add_test_marketplaces(
     _current_user: CurrentSuperuser,
     db: DbSession,
 ) -> dict:
+    """Frontend action: seed deterministic parsing test marketplaces."""
     service = ParsingAdminService(db)
     return await service.add_test_marketplaces()
 
@@ -40,6 +42,7 @@ async def run_full_test(
     _current_user: CurrentSuperuser,
     db: DbSession,
 ) -> dict:
+    """Frontend action: create parent job and enqueue full pipeline task."""
     service = ParsingAdminService(db)
     try:
         created = await service.trigger_full_pipeline_test()
@@ -56,6 +59,7 @@ async def get_test_runs(
     db: DbSession,
     limit: int = Query(50, ge=1, le=200),
 ) -> list[dict]:
+    """Frontend run history list used below run button."""
     service = ParsingAdminService(db)
     return await service.get_test_runs(limit=limit)
 
@@ -66,6 +70,7 @@ async def get_job_status(
     _current_user: CurrentSuperuser,
     db: DbSession,
 ) -> dict:
+    """Frontend polling endpoint (4-5s interval) for in-flight run state."""
     service = ParsingAdminService(db)
     try:
         return await service.get_job_status(job_id)

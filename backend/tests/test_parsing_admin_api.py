@@ -20,6 +20,7 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("POST", "/api/admin/parsing/add-test-marketplaces"),
         ("POST", "/api/admin/parsing/run-full-test"),
         ("GET", "/api/admin/parsing/test-runs"),
+        ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
     ]
     for method, path in paths:
         if method == "GET":
@@ -88,6 +89,76 @@ async def test_parsing_admin_run_full_test_and_poll_status(client, superuser_hea
     async with async_session_maker() as session:
         await session.execute(delete(ScrapeJob).where(ScrapeJob.id == UUID(job_id)))
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_parsing_admin_run_full_test_constraint_error(client, superuser_headers):
+    """run-full-test returns 400 with SQL guidance when job_type constraint rejects value."""
+    resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
+    assert resp.status_code == 400
+    detail = resp.json().get("detail", "")
+    assert "Supabase SQL Editor" in detail
+    assert "ALTER TABLE scrape_jobs" in detail
+
+
+@pytest.mark.asyncio
+async def test_parsing_admin_test_runs_with_limit_and_contract(client, superuser_headers, monkeypatch):
+    """History endpoint returns expected fields and obeys limit query."""
+    class DummyAsyncResult:
+        id = "celery-test-id"
+
+    monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
+        lambda _job_id: DummyAsyncResult(),
+    )
+    run_resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
+    assert run_resp.status_code == 200
+    job_id = run_resp.json()["job_id"]
+
+    list_resp = await client.get(
+        "/api/admin/parsing/test-runs",
+        headers=superuser_headers,
+        params={"limit": 1},
+    )
+    assert list_resp.status_code == 200
+    payload = list_resp.json()
+    assert isinstance(payload, list)
+    assert len(payload) <= 1
+    if payload:
+        expected_keys = {
+            "job_id",
+            "started_at",
+            "completed_at",
+            "duration_seconds",
+            "listings_created",
+            "prices_saved",
+            "errors_count",
+            "status",
+        }
+        assert set(payload[0].keys()) == expected_keys
+
+    async with async_session_maker() as session:
+        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == UUID(job_id)))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_parsing_admin_job_status_validation(client, superuser_headers):
+    """Job status endpoint validates UUID path parameters."""
+    resp = await client.get("/api/admin/parsing/job-status/not-a-uuid", headers=superuser_headers)
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_parsing_admin_test_runs_limit_validation(client, superuser_headers):
+    """History endpoint validates limit bounds."""
+    resp = await client.get(
+        "/api/admin/parsing/test-runs",
+        headers=superuser_headers,
+        params={"limit": 0},
+    )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
