@@ -357,13 +357,13 @@ export function AlertsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <PageHeader title="nav.alerts" />
 
-      <div className="flex flex-col gap-6 lg:flex-row">
+      <div className="flex flex-col gap-7 lg:flex-row">
         {/* Left: Timeline feed (70%) */}
         <div className="min-w-0 flex-1 lg:max-w-[70%]">
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap">
             <Select value={typeFilter} onValueChange={setTypeFilter}>
               <SelectTrigger className="w-full min-w-0 sm:w-36">
                 <SelectValue placeholder={t("alerts.filterType")} />
@@ -399,9 +399,9 @@ export function AlertsPage() {
           </div>
 
           {eventsLoading ? (
-            <div className="space-y-4">
+            <div className="space-y-5">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-40 animate-pulse rounded-lg border bg-muted" />
+                <div key={i} className="glass-card h-44 animate-pulse rounded-xl" />
               ))}
             </div>
           ) : filteredEvents.length === 0 ? (
@@ -411,7 +411,7 @@ export function AlertsPage() {
               icon={PackageX}
             />
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-5">
               {filteredEvents.map((ev) => (
                 <TimelineCard
                   key={ev.id}
@@ -430,11 +430,11 @@ export function AlertsPage() {
         </div>
 
         {/* Right: Sidebar (30%) */}
-        <aside className="w-full space-y-6 lg:w-[30%] lg:min-w-[280px]">
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border">
-            <h3 className="mb-3 text-sm font-semibold">{t("alerts.alertsToday")}</h3>
+        <aside className="w-full space-y-6 lg:w-[30%] lg:min-w-[300px]">
+          <div className="glass-card rounded-2xl p-5">
+            <h3 className="mb-3 text-base font-semibold">{t("alerts.alertsToday")}</h3>
             <p className="mb-4 text-3xl font-bold">{alertsTodayCount}</p>
-            <div className="h-24">
+            <div className="h-28">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={alertsByDayData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                   <XAxis dataKey="day" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
@@ -444,7 +444,7 @@ export function AlertsPage() {
                       if (!active || !payload?.length) return null;
                       const p = payload[0]?.payload;
                       return (
-                        <div className="rounded-md border border-border bg-card px-2 py-1 text-xs">
+                          <div className="glass-card rounded-md px-2 py-1 text-xs">
                           {p?.day}: {p?.count} {t("alerts.alerts")}
                         </div>
                       );
@@ -456,9 +456,9 @@ export function AlertsPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border">
+          <div className="glass-card rounded-2xl p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">{t("alerts.activeRules")}</h3>
+              <h3 className="text-base font-semibold">{t("alerts.activeRules")}</h3>
               <Button size="sm" onClick={() => { setEditAlert(null); setForm({ product_id: "", type: "price_drop", threshold_percent: "", channel: "email" }); setCreateOpen(true); }}>
                 <Plus className="mr-2 size-4" />
                 {t("alerts.createRule")}
@@ -646,12 +646,12 @@ function TimelineCard({
   return (
     <div
       className={cn(
-        "flex overflow-hidden rounded-lg border border-border bg-card shadow-sm dark:border-border dark:bg-card",
+        "glass-card flex overflow-hidden rounded-xl border border-border bg-card shadow-sm dark:border-border dark:bg-card",
         "border-l-4",
         stripeClass
       )}
     >
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-3 p-5">
         <div className="flex items-start gap-3">
           <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -703,7 +703,7 @@ function AlertRuleCompact({
   if (alert.channel === "telegram" || alert.channel === "both") channelIcons.push(MessageCircle);
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background/50 px-3 py-2 dark:border-border dark:bg-background/30">
+    <div className="glass-card flex items-center justify-between gap-2 rounded-lg border border-border bg-background/50 px-4 py-3 dark:border-border dark:bg-background/30">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">
           {t(getAlertTypeKey(type) ?? alert.type)}

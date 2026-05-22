@@ -16,19 +16,19 @@ export function ProductsPage() {
   const locale = i18n.language;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col pb-2">
       <PageHeader title="nav.products" />
 
       <Tabs
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as "pool" | "my")}
-        className="mt-4 flex flex-1 flex-col"
+        className="mt-5 flex flex-1 flex-col"
       >
-        <TabsList className="glass-card mb-4 w-fit rounded-xl p-1">
-          <TabsTrigger value="pool" className="rounded-lg px-4">
+        <TabsList className="glass-card mb-5 w-fit rounded-2xl p-1.5">
+          <TabsTrigger value="pool" className="rounded-xl px-5">
             {t("products.tabs.all")}
           </TabsTrigger>
-          <TabsTrigger value="my" className="rounded-lg px-4">
+          <TabsTrigger value="my" className="rounded-xl px-5">
             {t("products.tabs.mine")}
           </TabsTrigger>
         </TabsList>

@@ -62,8 +62,8 @@ table {
 thead th {
   background: rgba(255, 255, 255, 0.03);
   color: var(--foreground-muted);
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.82rem;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border-bottom: 1px solid var(--border);
@@ -79,7 +79,7 @@ tbody tr:hover {
 /* Badge */
 .badge {
   border-radius: var(--radius-sm) !important;
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 2px 8px !important;

@@ -10,7 +10,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, BellPlus, Grid3X3, List, Plus, Search } from "lucide-react";
+import { AlertTriangle, BellPlus, Grid3X3, List, MoreHorizontal, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { alertsApi } from "@/api/alerts";
 import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
@@ -22,6 +22,7 @@ import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 
@@ -85,9 +86,9 @@ function ProductThumb({ item }: { item: MarketsOverviewItem }) {
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border bg-[var(--glass-bg)] p-4">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-2 text-xl font-semibold">{value}</p>
+    <div className="rounded-xl border border-border bg-[var(--glass-bg)] p-5">
+      <p className="text-sm uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
     </div>
   );
 }
@@ -259,18 +260,30 @@ export function MarketsOverviewSection() {
         id: "actions",
         header: t("common.actions"),
         cell: ({ row }) => (
-          <div className="flex flex-wrap gap-1">
-            <Button size="sm" variant="outline" onClick={() => createAlertMutation.mutate(row.original.product_id)}>
-              <BellPlus className="mr-1 size-3.5" />
-              {t("alerts.createAlert")}
-            </Button>
-            <Button size="sm" variant="outline" disabled={row.original.current_price == null || !row.original.currency} onClick={() => addProductMutation.mutate(row.original)}>
-              <Plus className="mr-1 size-3.5" />
-              {t("market.overview.addToMy")}
-            </Button>
+          <div className="flex items-center gap-2">
             <Button size="sm" asChild>
               <Link to={`/products/${row.original.product_id ?? row.original.id}`}>{t("market.overview.history")}</Link>
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" aria-label={t("common.actions")}>
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => createAlertMutation.mutate(row.original.product_id)}>
+                  <BellPlus className="size-4" />
+                  {t("alerts.createAlert")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={row.original.current_price == null || !row.original.currency}
+                  onClick={() => addProductMutation.mutate(row.original)}
+                >
+                  <Plus className="size-4" />
+                  {t("market.overview.addToMy")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         ),
       }),
@@ -306,8 +319,8 @@ export function MarketsOverviewSection() {
   }
 
   return (
-    <section className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+    <section className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard label={t("market.overview.kpi.totalPool")} value={kpis.total} />
         <KpiCard label={t("market.overview.kpi.updated24h")} value={kpis.updated24h} />
         <KpiCard label={t("market.overview.kpi.changedMore5")} value={kpis.changedMore5} />
@@ -315,9 +328,9 @@ export function MarketsOverviewSection() {
         <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
       </div>
 
-      <div className="rounded-xl border border-border bg-[var(--glass-bg)] p-4">
+      <div className="liquid-glass rounded-2xl border border-border bg-[var(--glass-bg)] p-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wide">{t("dashboard.market.title")}</h3>
+          <h3 className="text-base font-semibold uppercase tracking-wide">{t("dashboard.market.title")}</h3>
           <div className="flex items-center gap-1 rounded-md border border-border p-1">
             <Button size="sm" variant={viewMode === "table" ? "secondary" : "ghost"} onClick={() => setViewMode("table")}>
               <List className="mr-1 size-4" />
@@ -330,7 +343,7 @@ export function MarketsOverviewSection() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_220px]">
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.4fr_1fr_240px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -345,7 +358,7 @@ export function MarketsOverviewSection() {
               <button
                 key={item.marketplace_domain}
                 type="button"
-                className={cn("rounded-full border px-3 py-1 text-xs", selectedMarketplaces.includes(item.marketplace_domain) ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground")}
+                className={cn("rounded-full border px-4 py-1.5 text-sm", selectedMarketplaces.includes(item.marketplace_domain) ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground")}
                 onClick={() => toggleMarketplace(item.marketplace_domain)}
               >
                 {item.marketplace_name ?? item.marketplace_domain}
@@ -355,7 +368,7 @@ export function MarketsOverviewSection() {
           <select
             value={priceChangeRange}
             onChange={(event) => setPriceChangeRange(event.target.value as PriceChangeRange)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-11 rounded-md border border-input bg-background px-4 text-sm"
           >
             <option value="all">{t("market.overview.rangeAll")}</option>
             <option value="up5">{t("market.overview.rangeUp5")}</option>
@@ -364,24 +377,24 @@ export function MarketsOverviewSection() {
           </select>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button type="button" className={cn("rounded-full border px-3 py-1 text-xs", historyOnly ? "border-primary text-primary" : "border-border text-muted-foreground")} onClick={() => setHistoryOnly((value) => !value)}>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" className={cn("rounded-full border px-4 py-1.5 text-sm", historyOnly ? "border-primary text-primary" : "border-border text-muted-foreground")} onClick={() => setHistoryOnly((value) => !value)}>
             {t("market.overview.historyOnly")}
           </button>
-            <button type="button" className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground" onClick={() => setPriceChangeRange("up5")}>
+            <button type="button" className="rounded-full border border-border px-4 py-1.5 text-sm text-muted-foreground" onClick={() => setPriceChangeRange("up5")}>
             {t("market.overview.quickFilterGt5")}
           </button>
-          <button type="button" className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground" onClick={() => { setSelectedMarketplaces([]); setPriceChangeRange("all"); setHistoryOnly(false); setSearchRaw(""); }}>
+          <button type="button" className="rounded-full border border-border px-4 py-1.5 text-sm text-muted-foreground" onClick={() => { setSelectedMarketplaces([]); setPriceChangeRange("all"); setHistoryOnly(false); setSearchRaw(""); }}>
             {t("products.clearFilters")}
           </button>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-1 border-b border-border pb-2">
+        <div className="mt-5 flex flex-wrap gap-2 border-b border-border pb-3">
           {TABS.map((tab) => (
             <button
               key={tab.key}
               type="button"
-              className={cn("rounded-md px-3 py-1.5 text-sm", activeTab === tab.key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground")}
+              className={cn("rounded-md px-4 py-2 text-sm", activeTab === tab.key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground")}
               onClick={() => setActiveTab(tab.key)}
             >
               {t(tab.labelKey)}
@@ -431,7 +444,7 @@ export function MarketsOverviewSection() {
             </Table>
           </div>
         ) : (
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredItems.map((item) => (
               <article key={item.id} className="rounded-xl border border-border bg-background p-4">
                 <div className="flex items-start gap-3">
@@ -448,16 +461,18 @@ export function MarketsOverviewSection() {
                   </div>
                 </div>
                 <Sparkline className="mt-3" points={(item.recent_prices ?? []).map((point) => ({ date: point.date, price: point.price }))} />
-                <div className="mt-3 flex flex-wrap gap-1">
-                  <Button size="sm" variant="outline" onClick={() => createAlertMutation.mutate(item.product_id)}>
-                    {t("alerts.createAlert")}
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={item.current_price == null || !item.currency} onClick={() => addProductMutation.mutate(item)}>
-                    {t("market.overview.addToMyProducts")}
-                  </Button>
+                <div className="mt-4 flex items-center justify-between gap-2">
                   <Button size="sm" asChild>
                     <Link to={`/products/${item.product_id ?? item.id}`}>{t("market.overview.details")}</Link>
                   </Button>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => createAlertMutation.mutate(item.product_id)}>
+                      {t("alerts.createAlert")}
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={item.current_price == null || !item.currency} onClick={() => addProductMutation.mutate(item)}>
+                      {t("market.overview.addToMyProducts")}
+                    </Button>
+                  </div>
                 </div>
               </article>
             ))}

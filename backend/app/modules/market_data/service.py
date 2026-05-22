@@ -142,7 +142,6 @@ class MarketDataService:
         """User preferences from users.preferences JSONB."""
         prefs = user.preferences or {}
         return {
-            "preferred_country_code": prefs.get("preferred_country_code", "DE"),
             "dashboard_widgets": prefs.get(
                 "dashboard_widgets",
                 ["forex", "crypto", "commodities", "fuel"],
@@ -878,7 +877,6 @@ class MarketsService:
     """Markets domain: user preferences (JSONB), commodities from v2 facts, refresh metadata."""
 
     _PREF_KEYS = frozenset({
-        "preferred_country_code",
         "dashboard_widgets",
         "forex_favorites",
         "crypto_favorites",

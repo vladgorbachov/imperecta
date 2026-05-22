@@ -3,6 +3,7 @@
 
 :root {
   color-scheme: dark;
+  font-size: 150%;
 
   /* === Backgrounds === */
   --background: #0a0e1a;
@@ -123,22 +124,22 @@
   --color-marketplace-custom: #64748b;
 
   /* Type scale */
-  --text-xs: 0.75rem;
-  --text-xs--line-height: 1rem;
-  --text-sm: 0.875rem;
-  --text-sm--line-height: 1.25rem;
-  --text-base: 1rem;
-  --text-base--line-height: 1.5rem;
-  --text-lg: 1.125rem;
-  --text-lg--line-height: 1.75rem;
-  --text-xl: 1.25rem;
-  --text-xl--line-height: 1.75rem;
-  --text-2xl: 1.5rem;
-  --text-2xl--line-height: 2rem;
-  --text-3xl: 1.875rem;
-  --text-3xl--line-height: 2.25rem;
-  --text-4xl: 2.25rem;
-  --text-4xl--line-height: 2.5rem;
+  --text-xs: 0.8rem;
+  --text-xs--line-height: 1.2rem;
+  --text-sm: 0.95rem;
+  --text-sm--line-height: 1.4rem;
+  --text-base: 1.05rem;
+  --text-base--line-height: 1.6rem;
+  --text-lg: 1.2rem;
+  --text-lg--line-height: 1.85rem;
+  --text-xl: 1.35rem;
+  --text-xl--line-height: 1.95rem;
+  --text-2xl: 1.65rem;
+  --text-2xl--line-height: 2.2rem;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-4xl: 2.4rem;
+  --text-4xl--line-height: 2.9rem;
 }
 
 .light {
@@ -284,6 +285,8 @@
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-body);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
     -webkit-font-smoothing: antialiased;
     @apply bg-background text-foreground;
   }
