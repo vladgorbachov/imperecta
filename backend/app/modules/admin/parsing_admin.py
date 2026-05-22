@@ -58,6 +58,11 @@ class ParsingAdminService:
         }
       ]
     }
+
+    Breakdown extension guideline:
+    - Keep "timings", "summary", "per_marketplace" backward-compatible for frontend polling.
+    - Add new fields under nested keys (for example per_marketplace[].extra) instead of
+      replacing existing keys used by current UI cards.
     """
 
     TEST_PIPELINE_JOB_TYPE = "full_pipeline_test"
