@@ -124,46 +124,6 @@ async def test_markets_refresh_metadata_returns_items(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_markets_countries_hide_ru_by_for_regular_user(client, auth_headers, monkeypatch):
-    """Regular user must not receive RU/BY in /markets/countries."""
-    async def fake_active_country_codes(_db):
-        return {"UA", "RU", "BY"}
-
-    monkeypatch.setattr(
-        "app.modules.market_data.api._load_active_country_codes",
-        fake_active_country_codes,
-    )
-
-    resp = await client.get("/api/markets/countries", headers=auth_headers)
-    assert resp.status_code == 200
-    payload = resp.json()
-    codes = {row["code"] for row in payload if isinstance(row, dict) and "code" in row}
-    assert "UA" in codes
-    assert "RU" not in codes
-    assert "BY" not in codes
-
-
-@pytest.mark.asyncio
-async def test_markets_countries_allow_ru_by_for_superuser(client, superuser_headers, monkeypatch):
-    """Superuser can receive RU/BY in /markets/countries when active."""
-    async def fake_active_country_codes(_db):
-        return {"UA", "RU", "BY"}
-
-    monkeypatch.setattr(
-        "app.modules.market_data.api._load_active_country_codes",
-        fake_active_country_codes,
-    )
-
-    resp = await client.get("/api/markets/countries", headers=superuser_headers)
-    assert resp.status_code == 200
-    payload = resp.json()
-    codes = {row["code"] for row in payload if isinstance(row, dict) and "code" in row}
-    assert "UA" in codes
-    assert "RU" in codes
-    assert "BY" in codes
-
-
-@pytest.mark.asyncio
 async def test_markets_overview_applies_visibility_flag_by_role(client, auth_headers, superuser_headers, monkeypatch):
     """Overview endpoint propagates public/admin visibility flag to pool service."""
     observed: list[bool] = []

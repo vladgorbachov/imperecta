@@ -3,10 +3,8 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
 
 from app.common.deps import CurrentSuperuser, CurrentUser, DbSession
-from app.models.dimensions import DimCountry
 from app.modules.market_data.schemas import (
     MarketsInstrumentsResponse,
     MarketsCommoditiesResponse,
@@ -28,33 +26,11 @@ from app.modules.market_data.service import (
 )
 
 router = APIRouter(prefix="/markets", tags=["markets"])
-
-BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
+DEFAULT_TICKER_COUNTRY = "DE"
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-@router.get("/countries")
-async def get_countries(current_user: CurrentUser, db: DbSession) -> list[dict]:
-    is_superuser = bool(getattr(current_user, "is_superuser", False))
-    result = await db.execute(
-        select(DimCountry)
-        .where(DimCountry.is_active.is_(True))
-        .order_by(DimCountry.name),
-    )
-    rows = result.scalars().all()
-    return [
-        {
-            "code": row.country_code,
-            "name": row.name,
-            "name_local": row.name_local,
-            "region": row.region.lower(),
-        }
-        for row in rows
-        if is_superuser or row.country_code not in BLOCKED_PUBLIC_COUNTRY_CODES
-    ]
 
 
 @router.get("/preferences", response_model=MarketsPreferencesResponse)
@@ -207,12 +183,12 @@ async def get_fuel(
 async def get_ticker(
     current_user: CurrentUser,
     db: DbSession,
-    country: str = Query(..., description="Country code for fuel data"),
 ) -> MarketsTickerResponse:
     service = MarketsService(db, current_user.id)
     preferences = await service.get_preferences()
+    country_code = DEFAULT_TICKER_COUNTRY
     raw = await get_ticker_data(
-        country,
+        country_code,
         db=db,
         forex_favorites=preferences.get("forex_favorites"),
         crypto_favorites=preferences.get("crypto_favorites"),

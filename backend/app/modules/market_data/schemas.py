@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 
 class UserPreferencesResponse(BaseModel):
-    preferred_country_code: str | None = None
     dashboard_widgets: list[str] = Field(default_factory=list)
     forex_favorites: list[str] = Field(default_factory=list)
     crypto_favorites: list[str] = Field(default_factory=list)
@@ -23,7 +22,6 @@ class UserPreferencesResponse(BaseModel):
 
 
 class UserPreferencesUpdate(BaseModel):
-    preferred_country_code: str | None = None
     dashboard_widgets: list[str] | None = None
     forex_favorites: list[str] | None = None
     crypto_favorites: list[str] | None = None

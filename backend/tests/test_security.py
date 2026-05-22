@@ -215,14 +215,14 @@ async def test_user_a_cannot_overwrite_user_b_preferences(client, auth_headers, 
     resp_a = await client.put(
         "/api/markets/preferences",
         headers=auth_headers,
-        json={"preferred_country_code": "RU"},
+        json={"forex_favorites": ["EUR/USD"]},
     )
     assert resp_a.status_code == 200
 
     resp_b = await client.get("/api/markets/preferences", headers=auth_headers_b)
     assert resp_b.status_code == 200
     prefs_b = resp_b.json()
-    assert prefs_b.get("preferred_country_code") != "RU"
+    assert prefs_b.get("forex_favorites") != ["EUR/USD"]
 
 
 # --- MASS ASSIGNMENT / OVER-POSTING ---

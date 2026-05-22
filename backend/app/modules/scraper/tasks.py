@@ -3,12 +3,13 @@
 import asyncio
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -24,20 +25,64 @@ from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
 
 slog = structlog.get_logger(__name__)
+_SCRAPE_LOG_STATUSES = (
+    "success",
+    "error",
+    "timeout",
+    "blocked",
+    "captcha",
+    "not_found",
+    "price_not_found",
+    "parse_error",
+    "missing_critical_data",
+    "technical_error",
+)
 
 
 def _run_async(coro):
-    """Run async coroutine from sync Celery task."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Run async coroutine from sync Celery task safely."""
     try:
-        return loop.run_until_complete(coro)
-    finally:
-        try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-        except Exception:
-            pass
-        loop.close()
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="tasks-async-bridge") as executor:
+        future = executor.submit(asyncio.run, coro)
+        return future.result()
+
+
+def _needs_scrape_logs_constraint_repair(exc: Exception) -> bool:
+    """Detect old scrape_logs CHECK that rejects technical_error."""
+    message = str(exc).lower()
+    if "scrape_logs" not in message:
+        return False
+    if "technical_error" not in message:
+        return False
+    return (
+        "scrape_logs_status_check" in message
+        or "ck_scrape_logs_status" in message
+        or "check constraint" in message
+    )
+
+
+def _repair_scrape_logs_status_constraint(db) -> bool:
+    """Repair scrape_logs status CHECK to include technical_error."""
+    allowed = ",".join(f"'{status}'" for status in _SCRAPE_LOG_STATUSES)
+    try:
+        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS ck_scrape_logs_status"))
+        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS scrape_logs_status_check"))
+        db.execute(
+            text(
+                "ALTER TABLE scrape_logs "
+                "ADD CONSTRAINT ck_scrape_logs_status "
+                f"CHECK (status IN ({allowed}))"
+            )
+        )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
 
 
 def _make_session_factory() -> tuple:
@@ -66,6 +111,7 @@ def _persist_technical_error_log(
 ) -> None:
     """Write scrape_logs row for unhandled task failure (separate sync session)."""
     db = sync_session_factory()
+    entry: ScrapeLog | None = None
     try:
         listing = db.get(FactListing, listing_id)
         if not listing:
@@ -84,12 +130,28 @@ def _persist_technical_error_log(
         db.add(entry)
         db.commit()
         slog.info("technical_error_logged", listing_id=str(listing_id))
-    except Exception:
-        slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
-        try:
+    except Exception as exc:
+        needs_repair = entry is not None and _needs_scrape_logs_constraint_repair(exc)
+        if needs_repair:
             db.rollback()
-        except Exception:
-            pass
+        if needs_repair and _repair_scrape_logs_status_constraint(db):
+            try:
+                db.add(entry)
+                db.commit()
+                slog.info("technical_error_logged", listing_id=str(listing_id))
+                return
+            except Exception:
+                slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+        else:
+            slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
+            try:
+                db.rollback()
+            except Exception:
+                pass
     finally:
         db.close()
 

@@ -123,11 +123,11 @@ export function AnalyticsPage() {
     : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <PageHeader title="nav.analytics" />
 
       <Tabs defaultValue="trends">
-        <TabsList className="w-full flex-wrap sm:w-auto">
+        <TabsList className="glass-card w-full flex-wrap rounded-2xl p-1.5 sm:w-auto">
           <TabsTrigger value="trends">{t("analytics.tabTrends")}</TabsTrigger>
           <TabsTrigger value="forecasts">
             {t("analytics.tabForecasts")} <Sparkles className="ml-1 size-3" />
@@ -188,8 +188,8 @@ export function AnalyticsPage() {
             competitors={competitorList}
           />
 
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border dark:bg-card">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+          <div className="glass-card rounded-2xl p-5">
+            <h3 className="mb-3 flex items-center gap-2 text-base font-semibold">
               <Sparkles className="size-4" />
               {t("analytics.aiSummary")}
             </h3>
@@ -202,8 +202,8 @@ export function AnalyticsPage() {
         <TabsContent value="forecasts" className="mt-6 space-y-6">
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold">{t("analytics.priceForecast14d")}</h3>
-              <div className="h-64 rounded-lg border border-border bg-card p-4 dark:border-border dark:bg-card">
+              <h3 className="text-base font-semibold">{t("analytics.priceForecast14d")}</h3>
+              <div className="glass-card h-72 rounded-2xl p-5">
                 {forecastData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -252,8 +252,8 @@ export function AnalyticsPage() {
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold">{t("analytics.marketForecastQuestion")}</h3>
-              <div className="rounded-xl border border-border bg-card p-4 shadow-sm dark:border-border dark:bg-card">
+              <h3 className="text-base font-semibold">{t("analytics.marketForecastQuestion")}</h3>
+              <div className="glass-card rounded-2xl p-5">
                 {marketText ? (
                   <>
                     <p className="mb-4 text-sm text-muted-foreground">
@@ -280,7 +280,7 @@ export function AnalyticsPage() {
         </TabsContent>
 
         <TabsContent value="comparison" className="mt-6">
-          <div className="rounded-xl border border-border bg-card p-6 shadow-sm dark:border-border dark:bg-card">
+          <div className="glass-card rounded-2xl p-6">
             <MarketComparisonSection products={productList} competitors={competitorList} />
           </div>
         </TabsContent>

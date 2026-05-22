@@ -3,12 +3,14 @@
 import asyncio
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Awaitable, TypeVar
 from uuid import UUID
 
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -19,20 +21,68 @@ from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
+_CORO_RESULT = TypeVar("_CORO_RESULT")
+
+_SCRAPE_LOG_STATUSES = (
+    "success",
+    "error",
+    "timeout",
+    "blocked",
+    "captcha",
+    "not_found",
+    "price_not_found",
+    "parse_error",
+    "missing_critical_data",
+    "technical_error",
+)
 
 
-def _run_coro_in_worker(coro):
-    """Fresh event loop for async pool I/O only (Celery fork + sync DB session)."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+def _run_coro_in_worker(coro: Awaitable[_CORO_RESULT]) -> _CORO_RESULT:
+    """Run async pool I/O from sync Celery code, even with an active loop."""
     try:
-        return loop.run_until_complete(coro)
-    finally:
-        try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-        except Exception:
-            pass
-        loop.close()
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # Celery worker may already have a running loop in this thread.
+    # Execute coroutine in a dedicated thread to avoid nested-loop RuntimeError.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="scraper-async-bridge") as executor:
+        future = executor.submit(asyncio.run, coro)
+        return future.result()
+
+
+def _needs_scrape_logs_constraint_repair(exc: Exception) -> bool:
+    """Detect legacy DB constraint that does not allow technical_error status."""
+    message = str(exc).lower()
+    if "scrape_logs" not in message:
+        return False
+    if "technical_error" not in message:
+        return False
+    return (
+        "scrape_logs_status_check" in message
+        or "ck_scrape_logs_status" in message
+        or "check constraint" in message
+    )
+
+
+def _repair_scrape_logs_status_constraint(db: Session) -> bool:
+    """Repair scrape_logs.status CHECK to allow all supported statuses."""
+    allowed = ",".join(f"'{status}'" for status in _SCRAPE_LOG_STATUSES)
+    try:
+        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS ck_scrape_logs_status"))
+        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS scrape_logs_status_check"))
+        db.execute(
+            text(
+                "ALTER TABLE scrape_logs "
+                "ADD CONSTRAINT ck_scrape_logs_status "
+                f"CHECK (status IN ({allowed}))"
+            )
+        )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
 
 
 def _optional_in_stock(extracted: object | None) -> bool | None:
@@ -395,19 +445,45 @@ class GlobalScrapeService:
             self.db.flush()
             self.db.commit()
         except Exception as exc:
-            logger.error(
-                "scrape persist rollback listing_id=%s err=%s",
-                listing_id,
-                exc,
-                exc_info=True,
+            needs_repair = (
+                log_status == "technical_error"
+                and _needs_scrape_logs_constraint_repair(exc)
             )
-            self.db.rollback()
-            return PoolScrapeResult(
-                success=False,
-                url=listing.external_url,
-                data=data,
-                error="persist_failed",
-            )
+            if needs_repair:
+                self.db.rollback()
+            if needs_repair and _repair_scrape_logs_status_constraint(self.db):
+                try:
+                    self.db.add(log_entry)
+                    self.db.flush()
+                    self.db.commit()
+                except Exception as retry_exc:
+                    logger.error(
+                        "scrape persist rollback listing_id=%s err=%s",
+                        listing_id,
+                        retry_exc,
+                        exc_info=True,
+                    )
+                    self.db.rollback()
+                    return PoolScrapeResult(
+                        success=False,
+                        url=listing.external_url,
+                        data=data,
+                        error="persist_failed",
+                    )
+            else:
+                logger.error(
+                    "scrape persist rollback listing_id=%s err=%s",
+                    listing_id,
+                    exc,
+                    exc_info=True,
+                )
+                self.db.rollback()
+                return PoolScrapeResult(
+                    success=False,
+                    url=listing.external_url,
+                    data=data,
+                    error="persist_failed",
+                )
 
         slog.info(
             "SCRAPE_COMPLETE",

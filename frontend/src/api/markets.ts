@@ -7,7 +7,6 @@ import { apiClient } from "./client";
 // --- Preferences ---
 
 export interface MarketsPreferences {
-  preferred_country_code: string | null;
   dashboard_widgets?: string[];
   favorite_instrument_ids: string[];
   forex_favorites?: string[];
@@ -16,7 +15,6 @@ export interface MarketsPreferences {
 }
 
 export interface MarketsPreferencesUpdate {
-  preferred_country_code?: string | null;
   dashboard_widgets?: string[];
   favorite_instrument_ids?: string[];
   forex_favorites?: string[];
@@ -107,16 +105,6 @@ export interface MarketsCommoditiesResponse {
 }
 
 // --- Fuel ---
-
-export interface FuelResponse {
-  country?: string;
-  gasoline_95: number;
-  diesel: number;
-  lpg: number;
-  currency: string;
-  unit: string;
-  updated?: string;
-}
 
 // --- Ticker ---
 
@@ -230,20 +218,7 @@ export interface MarketsOpportunitiesResponse {
 
 // --- API ---
 
-export interface CountryItem {
-  code: string;
-  name: string;
-  name_local?: string;
-  flag?: string;
-  region?: string;
-  is_region?: boolean;
-  separator?: boolean;
-}
-
 export const marketsApi = {
-  getCountries: () =>
-    apiClient.get<CountryItem[]>("/markets/countries"),
-
   getPreferences: () =>
     apiClient.get<MarketsPreferences>("/markets/preferences"),
 
@@ -265,13 +240,8 @@ export const marketsApi = {
   getCommodities: () =>
     apiClient.get<MarketsCommoditiesResponse>("/markets/commodities"),
 
-  getTicker: (country?: string) =>
-    apiClient.get<MarketsTickerResponse>("/markets/ticker", {
-      params: country ? { country } : undefined,
-    }),
-
-  getFuel: (country: string) =>
-    apiClient.get<FuelResponse>(`/markets/fuel?country=${encodeURIComponent(country)}`),
+  getTicker: () =>
+    apiClient.get<MarketsTickerResponse>("/markets/ticker"),
 
   getOverview: (params?: {
     sort?: string;
@@ -314,17 +284,13 @@ export const marketsApi = {
 
 export const marketsQueryKeys = {
   all: ["markets"] as const,
-  countries: () => [...marketsQueryKeys.all, "countries"] as const,
   preferences: () => [...marketsQueryKeys.all, "preferences"] as const,
   instruments: () => [...marketsQueryKeys.all, "instruments"] as const,
   refreshMetadata: () => [...marketsQueryKeys.all, "refresh-metadata"] as const,
   forex: () => [...marketsQueryKeys.all, "forex"] as const,
   crypto: () => [...marketsQueryKeys.all, "crypto"] as const,
   commodities: () => [...marketsQueryKeys.all, "commodities"] as const,
-  ticker: (country?: string) =>
-    [...marketsQueryKeys.all, "ticker", country ?? ""] as const,
-  fuel: (country: string) =>
-    [...marketsQueryKeys.all, "fuel", country] as const,
+  ticker: () => [...marketsQueryKeys.all, "ticker"] as const,
   overview: (params?: {
     sort?: string;
     search?: string;
