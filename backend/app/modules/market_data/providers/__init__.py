@@ -13,16 +13,19 @@ from app.modules.market_data.providers.commodities_goldapi_alphavantage import (
 from app.modules.market_data.providers.crypto_adapter import (
     CryptoCoingeckoAdapter,
     CryptoCompositeAdapter,
+    CryptoUnifiedAdapter,
 )
-from app.modules.market_data.providers.forex_adapter import ForexFrankfurterAdapter
+from app.modules.market_data.providers.forex_adapter import ForexFrankfurterAdapter, ForexUnifiedAdapter
 
 __all__ = [
     "ForexProviderAdapter",
     "CryptoProviderAdapter",
     "CommoditiesProviderAdapter",
     "ForexFrankfurterAdapter",
+    "ForexUnifiedAdapter",
     "CryptoCoingeckoAdapter",
     "CryptoCompositeAdapter",
+    "CryptoUnifiedAdapter",
     "BinanceCryptoAdapter",
     "CommoditiesHttpAdapter",
     "CommoditiesGoldAPIAlphaVantageAdapter",

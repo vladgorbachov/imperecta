@@ -25,7 +25,7 @@ interface CountrySelectorProps {
   disabled?: boolean;
 }
 
-function getDisplayName(item: CountryItem, t: (key: string) => string, locale: string): string {
+function getDisplayName(item: CountryItem, t: (key: string) => string): string {
   if (item.is_region) {
     return item.code === "EUROPE"
       ? t("countries.region.europe")
@@ -96,7 +96,7 @@ export function CountrySelector({
     ? countriesData.find((c) => c.code === pendingCode)
     : null;
   const pendingDisplay = pendingItem
-    ? getDisplayName(pendingItem, t, locale)
+    ? getDisplayName(pendingItem, t)
     : null;
 
   useEffect(() => {
@@ -178,7 +178,7 @@ export function CountrySelector({
                     )}
                   >
                     <span>{item.flag}</span>
-                    <span>{getDisplayName(item, t, locale)}</span>
+                    <span>{getDisplayName(item, t)}</span>
                   </button>
                 ))}
               </div>
@@ -198,7 +198,7 @@ export function CountrySelector({
                   <CountryOption
                     key={c.code}
                     item={c}
-                    displayName={getDisplayName(c, t, locale)}
+                    displayName={getDisplayName(c, t)}
                     selected={pendingCode === c.code}
                     onSelect={() => {
                       setPendingCode(c.code);

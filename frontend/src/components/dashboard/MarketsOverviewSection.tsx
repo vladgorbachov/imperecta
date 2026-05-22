@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
   createColumnHelper,
@@ -30,19 +31,19 @@ type PriceChangeRange = "all" | "up5" | "down5" | "flat";
 
 const PAGE_LIMIT = 200;
 
-const TABS: Array<{ key: MarketsTab; label: string }> = [
-  { key: "volatile", label: "Волатильные" },
-  { key: "trending", label: "Трендовые" },
-  { key: "gainers", label: "Растут" },
-  { key: "losers", label: "Падают" },
-  { key: "recent", label: "Недавние" },
+const TABS: Array<{ key: MarketsTab; labelKey: string }> = [
+  { key: "volatile", labelKey: "dashboard.market.mostVolatile" },
+  { key: "trending", labelKey: "dashboard.market.trendingNow" },
+  { key: "gainers", labelKey: "dashboard.market.topGainers" },
+  { key: "losers", labelKey: "dashboard.market.topLosers" },
+  { key: "recent", labelKey: "dashboard.market.recentlyUpdated" },
 ];
 
-function formatPrice(value?: number | null, currency?: string | null): string {
+function formatPrice(value: number | null | undefined, currency: string | null | undefined, locale: string): string {
   if (value == null) {
     return "—";
   }
-  const formatted = new Intl.NumberFormat("ru-RU", {
+  const formatted = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(value);
@@ -66,7 +67,14 @@ function parseDateValue(value?: string | null): number {
 
 function ProductThumb({ item }: { item: MarketsOverviewItem }) {
   if (item.image_url) {
-    return <img src={item.image_url} alt={item.title ?? "Товар"} className="size-10 rounded-md object-cover" loading="lazy" />;
+    return (
+      <img
+        src={item.image_url}
+        alt={item.title ?? "Product"}
+        className="size-10 rounded-md object-cover"
+        loading="lazy"
+      />
+    );
   }
   return (
     <div className="flex size-10 items-center justify-center rounded-md border border-border text-xs text-muted-foreground">
@@ -85,6 +93,8 @@ function KpiCard({ label, value }: { label: string; value: string }) {
 }
 
 export function MarketsOverviewSection() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language || "en";
   const [activeTab, setActiveTab] = useState<MarketsTab>("volatile");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchRaw, setSearchRaw] = useState("");
@@ -123,8 +133,8 @@ export function MarketsOverviewSection() {
 
   const createAlertMutation = useMutation({
     mutationFn: (productId?: string | null) => alertsApi.create({ product_id: productId ?? undefined, type: "price_drop", threshold_percent: 5, channel: "email" }),
-    onSuccess: () => toast.success("Алерт создан"),
-    onError: () => toast.error("Не удалось создать алерт"),
+    onSuccess: () => toast.success(t("alerts.createSuccess")),
+    onError: () => toast.error(t("alerts.createError")),
   });
   const addProductMutation = useMutation({
     mutationFn: (item: MarketsOverviewItem) => {
@@ -132,14 +142,14 @@ export function MarketsOverviewSection() {
         throw new Error("Missing price data");
       }
       return productsApi.create({
-        name: item.title ?? "Товар из рынка",
+        name: item.title ?? t("market.overview.productFallback"),
         current_price: item.current_price,
         currency: item.currency,
         url: item.url,
       });
     },
-    onSuccess: () => toast.success("Товар добавлен в Мои товары"),
-    onError: () => toast.error("Не удалось добавить товар"),
+    onSuccess: () => toast.success(t("market.overview.addedToMyProducts")),
+    onError: () => toast.error(t("market.overview.addToMyProductsFailed")),
   });
 
   const rawItems = data?.items ?? [];
@@ -181,36 +191,36 @@ export function MarketsOverviewSection() {
       updated24h: String(updated24h),
       changedMore5: String(changedMore5),
       avgVolatility: `${averageVolatility.toFixed(2)}%`,
-      lastUpdate: lastUpdate ? new Date(lastUpdate).toLocaleString("ru-RU") : "—",
+      lastUpdate: lastUpdate ? new Date(lastUpdate).toLocaleString(locale) : t("common.dash"),
     };
-  }, [data?.total, filteredItems, poolStats?.total_products]);
+  }, [data?.total, filteredItems, locale, poolStats?.total_products, t]);
 
   const columnHelper = createColumnHelper<MarketsOverviewItem>();
   const columns = useMemo(
     () => [
       columnHelper.display({
         id: "image",
-        header: "Изображение",
+        header: t("market.overview.image"),
         cell: ({ row }) => <ProductThumb item={row.original} />,
       }),
       columnHelper.accessor((row) => row.title ?? "", {
         id: "title",
-        header: "Название товара",
-        cell: ({ row }) => <span className="line-clamp-2 font-medium">{row.original.title ?? "Без названия"}</span>,
+        header: t("dashboard.market.product"),
+        cell: ({ row }) => <span className="line-clamp-2 font-medium">{row.original.title ?? t("market.overview.untitled")}</span>,
       }),
-      columnHelper.accessor((row) => row.marketplace_name ?? row.marketplace_domain ?? "Маркетплейс", {
+      columnHelper.accessor((row) => row.marketplace_name ?? row.marketplace_domain ?? t("dashboard.market.marketplace"), {
         id: "marketplace",
-        header: "Маркетплейс",
+        header: t("dashboard.market.marketplace"),
         cell: ({ getValue }) => <Badge variant="outline">{getValue()}</Badge>,
       }),
       columnHelper.accessor((row) => row.current_price ?? null, {
         id: "current_price",
-        header: "Текущая цена",
-        cell: ({ row }) => <span className="font-mono">{formatPrice(row.original.current_price, row.original.currency)}</span>,
+        header: t("dashboard.market.price"),
+        cell: ({ row }) => <span className="font-mono">{formatPrice(row.original.current_price, row.original.currency, locale)}</span>,
       }),
       columnHelper.accessor((row) => row.price_change_pct_24h ?? null, {
         id: "price_change_pct_24h",
-        header: "Изменение (24ч)",
+        header: t("market.overview.change24h"),
         cell: ({ row }) => (
           <span className={cn("font-mono", (row.original.price_change_pct_24h ?? 0) > 0 && "text-[var(--color-price-down)]", (row.original.price_change_pct_24h ?? 0) < 0 && "text-[var(--color-price-up)]")}>
             {formatPercent(row.original.price_change_pct_24h)}
@@ -219,7 +229,7 @@ export function MarketsOverviewSection() {
       }),
       columnHelper.display({
         id: "sparkline",
-        header: "Sparkline (7д)",
+        header: t("market.overview.sparkline7d"),
         cell: ({ row }) => (
           <Sparkline
             className="w-36"
@@ -229,43 +239,43 @@ export function MarketsOverviewSection() {
       }),
       columnHelper.accessor((row) => row.last_scraped_at ?? "", {
         id: "last_scraped_at",
-        header: "Последнее обновление",
+        header: t("market.overview.lastUpdated"),
         cell: ({ row }) => (
           <span className="text-xs text-muted-foreground">
-            {row.original.last_scraped_at ? new Date(row.original.last_scraped_at).toLocaleString("ru-RU") : "—"}
+            {row.original.last_scraped_at ? new Date(row.original.last_scraped_at).toLocaleString(locale) : t("common.dash")}
           </span>
         ),
       }),
       columnHelper.accessor((row) => row.status, {
         id: "status",
-        header: "Статус",
+        header: t("common.status"),
         cell: ({ getValue }) => (
           <Badge variant={getValue() === "active" ? "default" : "secondary"}>
-            {getValue() === "active" ? "Активен" : "Неактивен"}
+            {getValue() === "active" ? t("market.overview.statusActive") : t("market.overview.statusInactive")}
           </Badge>
         ),
       }),
       columnHelper.display({
         id: "actions",
-        header: "Действия",
+        header: t("common.actions"),
         cell: ({ row }) => (
           <div className="flex flex-wrap gap-1">
             <Button size="sm" variant="outline" onClick={() => createAlertMutation.mutate(row.original.product_id)}>
               <BellPlus className="mr-1 size-3.5" />
-              Алерт
+              {t("alerts.createAlert")}
             </Button>
             <Button size="sm" variant="outline" disabled={row.original.current_price == null || !row.original.currency} onClick={() => addProductMutation.mutate(row.original)}>
               <Plus className="mr-1 size-3.5" />
-              В мои
+              {t("market.overview.addToMy")}
             </Button>
             <Button size="sm" asChild>
-              <Link to={`/products/${row.original.product_id ?? row.original.id}`}>История</Link>
+              <Link to={`/products/${row.original.product_id ?? row.original.id}`}>{t("market.overview.history")}</Link>
             </Button>
           </div>
         ),
       }),
     ],
-    [addProductMutation, columnHelper, createAlertMutation],
+    [addProductMutation, columnHelper, createAlertMutation, locale, t],
   );
 
   const table = useReactTable({
@@ -288,9 +298,9 @@ export function MarketsOverviewSection() {
       <div className="rounded-xl border border-[var(--color-price-up-border)] bg-[var(--color-price-up-bg)] p-4">
         <div className="mb-3 flex items-center gap-2 text-[var(--color-price-up)]">
           <AlertTriangle className="size-4" />
-          Не удалось загрузить обзор рынка
+          {t("market.overview.loadFailed")}
         </div>
-        <Button onClick={() => refetch()}>Повторить</Button>
+        <Button onClick={() => refetch()}>{t("common.refresh")}</Button>
       </div>
     );
   }
@@ -298,24 +308,24 @@ export function MarketsOverviewSection() {
   return (
     <section className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <KpiCard label="Всего товаров в пуле" value={kpis.total} />
-        <KpiCard label="Обновлено за 24ч" value={kpis.updated24h} />
-        <KpiCard label="Товаров с изменением >5%" value={kpis.changedMore5} />
-        <KpiCard label="Средняя волатильность пула" value={kpis.avgVolatility} />
-        <KpiCard label="Последнее обновление" value={kpis.lastUpdate} />
+        <KpiCard label={t("market.overview.kpi.totalPool")} value={kpis.total} />
+        <KpiCard label={t("market.overview.kpi.updated24h")} value={kpis.updated24h} />
+        <KpiCard label={t("market.overview.kpi.changedMore5")} value={kpis.changedMore5} />
+        <KpiCard label={t("market.overview.kpi.avgVolatility")} value={kpis.avgVolatility} />
+        <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
       </div>
 
       <div className="rounded-xl border border-border bg-[var(--glass-bg)] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wide">Обзор рынка</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wide">{t("dashboard.market.title")}</h3>
           <div className="flex items-center gap-1 rounded-md border border-border p-1">
             <Button size="sm" variant={viewMode === "table" ? "secondary" : "ghost"} onClick={() => setViewMode("table")}>
               <List className="mr-1 size-4" />
-              Таблица
+              {t("market.overview.viewTable")}
             </Button>
             <Button size="sm" variant={viewMode === "cards" ? "secondary" : "ghost"} onClick={() => setViewMode("cards")}>
               <Grid3X3 className="mr-1 size-4" />
-              Карточки
+              {t("market.overview.viewCards")}
             </Button>
           </div>
         </div>
@@ -323,7 +333,12 @@ export function MarketsOverviewSection() {
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_220px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={searchRaw} onChange={(event) => setSearchRaw(event.target.value)} placeholder="Улучшенный поиск по товарам" className="pl-9" />
+            <Input
+              value={searchRaw}
+              onChange={(event) => setSearchRaw(event.target.value)}
+              placeholder={t("market.overview.searchPlaceholder")}
+              className="pl-9"
+            />
           </div>
           <div className="flex flex-wrap gap-2">
             {marketplaceStats.slice(0, 8).map((item) => (
@@ -342,22 +357,22 @@ export function MarketsOverviewSection() {
             onChange={(event) => setPriceChangeRange(event.target.value as PriceChangeRange)}
             className="h-10 rounded-md border border-input bg-background px-3 text-sm"
           >
-            <option value="all">Диапазон изменения: Все</option>
-            <option value="up5">Рост больше 5%</option>
-            <option value="down5">Падение больше 5%</option>
-            <option value="flat">Флэт (-5%..5%)</option>
+            <option value="all">{t("market.overview.rangeAll")}</option>
+            <option value="up5">{t("market.overview.rangeUp5")}</option>
+            <option value="down5">{t("market.overview.rangeDown5")}</option>
+            <option value="flat">{t("market.overview.rangeFlat")}</option>
           </select>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" className={cn("rounded-full border px-3 py-1 text-xs", historyOnly ? "border-primary text-primary" : "border-border text-muted-foreground")} onClick={() => setHistoryOnly((value) => !value)}>
-            Только с историей цен
+            {t("market.overview.historyOnly")}
           </button>
             <button type="button" className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground" onClick={() => setPriceChangeRange("up5")}>
-            Быстрый фильтр: {" > "}5%
+            {t("market.overview.quickFilterGt5")}
           </button>
           <button type="button" className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground" onClick={() => { setSelectedMarketplaces([]); setPriceChangeRange("all"); setHistoryOnly(false); setSearchRaw(""); }}>
-            Сбросить фильтры
+            {t("products.clearFilters")}
           </button>
         </div>
 
@@ -369,7 +384,7 @@ export function MarketsOverviewSection() {
               className={cn("rounded-md px-3 py-1.5 text-sm", activeTab === tab.key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground")}
               onClick={() => setActiveTab(tab.key)}
             >
-              {tab.label}
+              {t(tab.labelKey)}
             </button>
           ))}
         </div>
@@ -424,22 +439,24 @@ export function MarketsOverviewSection() {
                     <ProductThumb item={item} />
                   </div>
                   <div className="min-w-0">
-                    <p className="line-clamp-2 text-sm font-semibold">{item.title ?? "Без названия"}</p>
-                    <p className="text-xs text-muted-foreground">{item.marketplace_name ?? item.marketplace_domain ?? "Маркетплейс"}</p>
-                    <p className="mt-2 font-mono">{formatPrice(item.current_price, item.currency)}</p>
+                    <p className="line-clamp-2 text-sm font-semibold">{item.title ?? t("market.overview.untitled")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {item.marketplace_name ?? item.marketplace_domain ?? t("dashboard.market.marketplace")}
+                    </p>
+                    <p className="mt-2 font-mono">{formatPrice(item.current_price, item.currency, locale)}</p>
                     <p className={cn("text-xs", (item.price_change_pct_24h ?? 0) >= 0 ? "text-[var(--color-price-down)]" : "text-[var(--color-price-up)]")}>{formatPercent(item.price_change_pct_24h)}</p>
                   </div>
                 </div>
                 <Sparkline className="mt-3" points={(item.recent_prices ?? []).map((point) => ({ date: point.date, price: point.price }))} />
                 <div className="mt-3 flex flex-wrap gap-1">
                   <Button size="sm" variant="outline" onClick={() => createAlertMutation.mutate(item.product_id)}>
-                    Алерт
+                    {t("alerts.createAlert")}
                   </Button>
                   <Button size="sm" variant="outline" disabled={item.current_price == null || !item.currency} onClick={() => addProductMutation.mutate(item)}>
-                    В мои товары
+                    {t("market.overview.addToMyProducts")}
                   </Button>
                   <Button size="sm" asChild>
-                    <Link to={`/products/${item.product_id ?? item.id}`}>Детали</Link>
+                    <Link to={`/products/${item.product_id ?? item.id}`}>{t("market.overview.details")}</Link>
                   </Button>
                 </div>
               </article>

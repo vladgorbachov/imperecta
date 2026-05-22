@@ -242,7 +242,7 @@ class IngestionService:
                             currency_code=cur,
                             rate_to_eur=rate_to_eur,
                             rate_to_usd=rate_to_usd,
-                            source="openexchangerates",
+                            source="forex_unified",
                         ),
                     )
                 out["forex"] = await self.persist_forex(items)
@@ -262,10 +262,10 @@ class IngestionService:
                         market_cap_usd=float(c["market_cap"]) if c.get("market_cap") else None,
                         volume_24h_usd=None,
                         change_24h_pct=float(c["change_24h"]) if c.get("change_24h") is not None else None,
-                        source="coingecko",
-                        rank=None,
+                        source="crypto_unified",
+                        rank=index + 1,
                     )
-                    for c in raw_c
+                    for index, c in enumerate(raw_c)
                 ]
                 out["crypto"] = await self.persist_crypto(crypto_items)
         except Exception as exc:

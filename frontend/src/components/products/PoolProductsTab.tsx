@@ -4,13 +4,14 @@
  * Features:
  * - Search by title (debounced 500ms)
  * - Filter by marketplace (dropdown from /api/pool/categories)
- * - Sort: По дате, По алфавиту, По цене, По тренду
+ * - Sort by date, alphabet, price, trend, volatility
  * - Pagination with configurable page size (20/50/100)
  * - Each product row: image, title (clickable), marketplace badge, price, price change
  * - Bulk delete (superuser only): checkboxes, Ctrl+A, Delete key, SelectionActionBar
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
 import { formatPrice } from "@/lib/formatters";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -49,15 +50,15 @@ import type { PoolProductItem } from "@/api/products";
 
 const PAGE_SIZES = [20, 50, 100] as const;
 const SORT_OPTIONS = [
-  { value: "recent", label: "По дате" },
-  { value: "name_asc", label: "По алфавиту ↑" },
-  { value: "name_desc", label: "По алфавиту ↓" },
-  { value: "price_asc", label: "По цене ↑" },
-  { value: "price_desc", label: "По цене ↓" },
-  { value: "trending", label: "По тренду" },
-  { value: "gainers", label: "Рост" },
-  { value: "losers", label: "Падение" },
-  { value: "volatile", label: "Волатильность" },
+  { value: "recent", labelKey: "products.sort.recent" },
+  { value: "name_asc", labelKey: "products.sort.nameAsc" },
+  { value: "name_desc", labelKey: "products.sort.nameDesc" },
+  { value: "price_asc", labelKey: "products.sort.priceAsc" },
+  { value: "price_desc", labelKey: "products.sort.priceDesc" },
+  { value: "trending", labelKey: "products.sort.trending" },
+  { value: "gainers", labelKey: "products.sort.gainers" },
+  { value: "losers", labelKey: "products.sort.losers" },
+  { value: "volatile", labelKey: "products.sort.volatile" },
 ] as const;
 
 function ProductThumbnail({ item }: { item: PoolProductItem }) {
@@ -86,6 +87,7 @@ function ProductThumbnail({ item }: { item: PoolProductItem }) {
 }
 
 export function PoolProductsTab({ locale }: { locale: string }) {
+  const { t } = useTranslation();
   const isSuperuser = useAuthStore((s) => s.user?.is_superuser);
   const queryClient = useQueryClient();
 
@@ -153,16 +155,16 @@ export function PoolProductsTab({ locale }: { locale: string }) {
     setIsDeleting(true);
     try {
       const { data: res } = await productsApi.bulkDeletePool(ids);
-      toast.success(`Удалено ${res.deleted} товаров`);
+      toast.success(t("products.bulkDeleted", { count: res.deleted }));
       clearSelection();
       setShowDeleteDialog(false);
       queryClient.invalidateQueries({ queryKey: ["pool-products"] });
     } catch {
-      toast.error("Ошибка при удалении");
+      toast.error(t("products.bulkDeleteFailed"));
     } finally {
       setIsDeleting(false);
     }
-  }, [selectedIds, clearSelection, queryClient]);
+  }, [selectedIds, clearSelection, queryClient, t]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -171,7 +173,7 @@ export function PoolProductsTab({ locale }: { locale: string }) {
         <div className="relative flex-1 lg:max-w-72">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Поиск по названию"
+            placeholder={t("products.searchByName")}
             value={searchRaw}
             onChange={(e) => {
               setSearchRaw(e.target.value);
@@ -188,10 +190,10 @@ export function PoolProductsTab({ locale }: { locale: string }) {
           }}
         >
           <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="Маркетплейс" />
+            <SelectValue placeholder={t("products.marketplace")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Все маркетплейсы</SelectItem>
+            <SelectItem value="all">{t("products.allMarketplaces")}</SelectItem>
             {categories.map((c) => (
               <SelectItem key={c.id} value={String(c.id)}>
                 {c.name || c.domain} ({c.product_count})
@@ -207,12 +209,12 @@ export function PoolProductsTab({ locale }: { locale: string }) {
           }}
         >
           <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="Сортировка" />
+            <SelectValue placeholder={t("products.sorting")} />
           </SelectTrigger>
           <SelectContent>
             {SORT_OPTIONS.map((o) => (
               <SelectItem key={o.value} value={o.value}>
-                {o.label}
+                {t(o.labelKey)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -237,7 +239,7 @@ export function PoolProductsTab({ locale }: { locale: string }) {
           />
         ) : isEmpty && hasFilters ? (
           <div className="flex flex-col items-center justify-center gap-4 px-4 py-12">
-            <p className="text-sm text-muted-foreground">Нет результатов</p>
+            <p className="text-sm text-muted-foreground">{t("products.noResults")}</p>
             <Button
               variant="outline"
               onClick={() => {
@@ -246,7 +248,7 @@ export function PoolProductsTab({ locale }: { locale: string }) {
                 setPage(1);
               }}
             >
-              Сбросить фильтры
+              {t("products.clearFilters")}
             </Button>
           </div>
         ) : (
@@ -260,16 +262,16 @@ export function PoolProductsTab({ locale }: { locale: string }) {
                         <Checkbox
                           checked={isAllSelected}
                           onCheckedChange={toggleAll}
-                          aria-label="Выбрать все"
+                          aria-label={t("products.selectAll")}
                         />
                       </TableHead>
                     )}
                     <TableHead className="w-12" />
-                    <TableHead>Название</TableHead>
-                    <TableHead>Маркетплейс</TableHead>
-                    <TableHead>Цена</TableHead>
-                    <TableHead>Изменение 24ч</TableHead>
-                    <TableHead>Изменение 7д</TableHead>
+                    <TableHead>{t("products.name")}</TableHead>
+                    <TableHead>{t("products.marketplace")}</TableHead>
+                    <TableHead>{t("products.price")}</TableHead>
+                    <TableHead>{t("products.change24h")}</TableHead>
+                    <TableHead>{t("products.change7d")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -299,7 +301,7 @@ export function PoolProductsTab({ locale }: { locale: string }) {
                           <Checkbox
                             checked={isSelected(item.id)}
                             onCheckedChange={() => toggleItem(item.id)}
-                            aria-label={`Выбрать ${item.title || item.id}`}
+                            aria-label={t("products.selectProduct", { name: item.title || item.id })}
                           />
                         </TableCell>
                       )}
@@ -318,9 +320,9 @@ export function PoolProductsTab({ locale }: { locale: string }) {
                         />
                       </TableCell>
                       <TableCell>
-                        {item.current_price != null
-                          ? formatPrice(item.current_price, item.currency || "USD", locale)
-                          : "—"}
+                        {item.current_price != null && item.currency
+                          ? formatPrice(item.current_price, item.currency, locale)
+                          : t("common.dash")}
                       </TableCell>
                       <TableCell>
                         {item.price_change_pct_24h != null ? (
@@ -385,7 +387,11 @@ export function PoolProductsTab({ locale }: { locale: string }) {
       {!isEmpty && !isLoading && total > 0 && (
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
-            Показано {start + 1}–{Math.min(start + pageSize, total)} из {total}
+            {t("products.paginationShown", {
+              from: start + 1,
+              to: Math.min(start + pageSize, total),
+              total,
+            })}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -394,7 +400,7 @@ export function PoolProductsTab({ locale }: { locale: string }) {
               disabled={clampedPage <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
-              Назад
+              {t("common.back")}
             </Button>
             <span className="px-2 text-sm">
               {clampedPage} / {totalPages}
@@ -405,7 +411,7 @@ export function PoolProductsTab({ locale }: { locale: string }) {
               disabled={clampedPage >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
-              Вперёд
+              {t("common.next")}
             </Button>
             <Select
               value={String(pageSize)}

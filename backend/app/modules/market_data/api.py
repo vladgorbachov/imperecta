@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.common.deps import CurrentSuperuser, CurrentUser, DbSession
 from app.models.dimensions import DimCountry
 from app.modules.market_data.schemas import (
+    MarketsInstrumentsResponse,
     MarketsCommoditiesResponse,
     MarketsCryptoResponse,
     MarketsForexResponse,
@@ -30,50 +31,30 @@ router = APIRouter(prefix="/markets", tags=["markets"])
 
 BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
 
-COUNTRIES = [
-    {"code": "AM", "name": "Armenia", "name_local": "Армения", "flag": "🇦🇲", "region": "cis"},
-    {"code": "AZ", "name": "Azerbaijan", "name_local": "Азербайджан", "flag": "🇦🇿", "region": "cis"},
-    {"code": "GE", "name": "Georgia", "name_local": "Грузия", "flag": "🇬🇪", "region": "cis"},
-    {"code": "KZ", "name": "Kazakhstan", "name_local": "Казахстан", "flag": "🇰🇿", "region": "cis"},
-    {"code": "KG", "name": "Kyrgyzstan", "name_local": "Кыргызстан", "flag": "🇰🇬", "region": "cis"},
-    {"code": "MD", "name": "Moldova", "name_local": "Молдова", "flag": "🇲🇩", "region": "cis"},
-    {"code": "BY", "name": "Belarus", "name_local": "Беларусь", "flag": "🇧🇾", "region": "cis"},
-    {"code": "RU", "name": "Russia", "name_local": "Россия", "flag": "🇷🇺", "region": "cis"},
-    {"code": "TJ", "name": "Tajikistan", "name_local": "Таджикистан", "flag": "🇹🇯", "region": "cis"},
-    {"code": "TM", "name": "Turkmenistan", "name_local": "Туркменистан", "flag": "🇹🇲", "region": "cis"},
-    {"code": "UA", "name": "Ukraine", "name_local": "Украина", "flag": "🇺🇦", "region": "cis"},
-    {"code": "UZ", "name": "Uzbekistan", "name_local": "Узбекистан", "flag": "🇺🇿", "region": "cis"},
-]
-
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _load_active_country_codes(db: DbSession) -> set[str]:
-    result = await db.execute(
-        select(DimCountry.country_code)
-        .where(DimCountry.is_active.is_(True))
-    )
-    return set(result.scalars().all())
-
-
 @router.get("/countries")
 async def get_countries(current_user: CurrentUser, db: DbSession) -> list[dict]:
-    meta = [
-        {"code": "EUROPE", "name": "Europe", "name_local": "Европа", "flag": "🇪🇺", "region": "meta", "is_region": True},
-        {"code": "CIS", "name": "CIS", "name_local": "СНГ", "flag": "🌍", "region": "meta", "is_region": True},
-        {"separator": True},
-    ]
-    active_codes = await _load_active_country_codes(db)
     is_superuser = bool(getattr(current_user, "is_superuser", False))
-    countries = [
-        country
-        for country in COUNTRIES
-        if country["code"] in active_codes
-        and (is_superuser or country["code"] not in BLOCKED_PUBLIC_COUNTRY_CODES)
+    result = await db.execute(
+        select(DimCountry)
+        .where(DimCountry.is_active.is_(True))
+        .order_by(DimCountry.name),
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "code": row.country_code,
+            "name": row.name,
+            "name_local": row.name_local,
+            "region": row.region.lower(),
+        }
+        for row in rows
+        if is_superuser or row.country_code not in BLOCKED_PUBLIC_COUNTRY_CODES
     ]
-    return meta + countries
 
 
 @router.get("/preferences", response_model=MarketsPreferencesResponse)
@@ -92,6 +73,13 @@ async def update_preferences(
     service = MarketsService(db, current_user.id)
     data = await service.update_preferences(**body.model_dump(exclude_unset=True))
     return MarketsPreferencesResponse(**data)
+
+
+@router.get("/instruments", response_model=MarketsInstrumentsResponse)
+async def get_available_instruments(current_user: CurrentUser, db: DbSession) -> MarketsInstrumentsResponse:
+    service = MarketsService(db, current_user.id)
+    data = await service.get_available_instruments()
+    return MarketsInstrumentsResponse(**data)
 
 
 @router.get("/refresh-metadata", response_model=MarketsRefreshMetadataResponse)
@@ -206,7 +194,7 @@ async def get_commodities(current_user: CurrentUser, db: DbSession) -> MarketsCo
 async def get_fuel(
     current_user: CurrentUser,
     db: DbSession,
-    country: str = Query("UA", description="Country code or EUROPE/CIS"),
+    country: str = Query(..., description="Country code"),
 ) -> dict:
     _ = current_user
     data = await get_fuel_prices(country, db=db)
@@ -219,14 +207,21 @@ async def get_fuel(
 async def get_ticker(
     current_user: CurrentUser,
     db: DbSession,
-    country: str = Query("UA", description="Country code for fuel data"),
+    country: str = Query(..., description="Country code for fuel data"),
 ) -> MarketsTickerResponse:
-    _ = current_user
-    raw = await get_ticker_data(country, db=db)
+    service = MarketsService(db, current_user.id)
+    preferences = await service.get_preferences()
+    raw = await get_ticker_data(
+        country,
+        db=db,
+        forex_favorites=preferences.get("forex_favorites"),
+        crypto_favorites=preferences.get("crypto_favorites"),
+        commodity_favorites=preferences.get("commodity_favorites"),
+    )
     now = _now()
     items = []
     for row in raw:
-        currency = "USD"
+        currency: str | None = None
         suffix = row.get("suffix") or ""
         if suffix and " " in str(suffix):
             parts = str(suffix).strip().split()

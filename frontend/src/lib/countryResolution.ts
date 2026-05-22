@@ -1,53 +1,15 @@
 /**
- * Country resolution for Markets page. Priority order:
- * 1. Saved country (user preferences)
- * 2. Manual selection (in-session)
- * 3. Locale/timezone (i18n language)
- * 4. IP (not implemented - requires backend)
- * 5. Geolocation (optional, not required for normal use)
- *
- * Fallback: US when resolution fails.
+ * Country resolution for Markets page.
+ * Uses explicit values only (saved user preference or manual selection).
  */
 
 import { getCountryByCode } from "./countries";
 
-/** Locale code to country code mapping. e.g. "ru" -> "UA", "en-US" -> "EUROPE" */
-const LOCALE_MAP = new Map<string, string>([
-  ["ru", "UA"],
-  ["ru-RU", "UA"],
-  ["uk", "UA"],
-  ["uk-UA", "UA"],
-  ["kk", "KZ"],
-  ["kk-KZ", "KZ"],
-  ["de", "DE"],
-  ["de-DE", "DE"],
-  ["pl", "PL"],
-  ["pl-PL", "PL"],
-  ["en", "EUROPE"],
-  ["en-US", "EUROPE"],
-  ["en-GB", "GB"],
-  ["fr", "FR"],
-  ["fr-FR", "FR"],
-  ["es", "ES"],
-  ["es-ES", "ES"],
-  ["it", "IT"],
-  ["it-IT", "IT"],
-  ["pt", "PT"],
-  ["pt-PT", "PT"],
-  ["zh", "EUROPE"],
-  ["zh-CN", "EUROPE"],
-  ["ar", "EUROPE"],
-  ["ar-AE", "EUROPE"],
-  ["ro", "RO"],
-  ["ro-RO", "RO"],
-]);
-
-const FALLBACK_COUNTRY = "EUROPE";
 const BLOCKED_PUBLIC_COUNTRIES = new Set(["RU", "BY"]);
 
 function isAllowedPublicCountry(code: string): boolean {
   if (BLOCKED_PUBLIC_COUNTRIES.has(code)) return false;
-  return code === "EUROPE" || code === "CIS" || Boolean(getCountryByCode(code));
+  return Boolean(getCountryByCode(code));
 }
 
 /**
@@ -55,9 +17,8 @@ function isAllowedPublicCountry(code: string): boolean {
  * Does not use cookies, IP, or geolocation.
  */
 export function resolveCountryFromLocale(locale: string): string {
-  const normalized = locale.split("-")[0].toLowerCase();
-  const full = locale.replace("_", "-");
-  return LOCALE_MAP.get(full) ?? LOCALE_MAP.get(normalized) ?? FALLBACK_COUNTRY;
+  void locale;
+  return "";
 }
 
 /**
@@ -78,7 +39,5 @@ export function resolveActiveCountry(
     if (isAllowedPublicCountry(upper)) return upper;
   }
   const fromLocale = resolveCountryFromLocale(locale);
-  return isAllowedPublicCountry(fromLocale) ? fromLocale : FALLBACK_COUNTRY;
+  return isAllowedPublicCountry(fromLocale) ? fromLocale : "";
 }
-
-export { FALLBACK_COUNTRY };

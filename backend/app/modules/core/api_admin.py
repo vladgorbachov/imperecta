@@ -10,6 +10,7 @@ from app.config import Settings
 from app.models.core import User
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
+from app.modules.ai_analyst.claude_client import resolve_claude_model
 
 router = APIRouter(
     prefix="/admin",
@@ -42,9 +43,16 @@ async def admin_stats(_current_user: CurrentSuperuser, db: DbSession) -> dict:
 async def admin_claude_status(_current_user: CurrentSuperuser) -> dict:
     """Claude API status."""
     settings = Settings()
+    resolved_model: str | None = None
+    if settings.claude_api_key:
+        try:
+            resolved_model = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
+        except Exception:
+            resolved_model = None
     return {
         "configured": bool(settings.claude_api_key),
-        "model": settings.claude_model,
+        "model": resolved_model or settings.claude_model,
+        "model_config": settings.claude_model,
     }
 
 

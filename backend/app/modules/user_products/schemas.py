@@ -11,7 +11,7 @@ class ProductCreate(BaseModel):
     name: str = Field(..., max_length=500)
     sku: str | None = Field(None, max_length=100)
     current_price: Decimal = Field(..., ge=0)
-    currency: str = Field(default="RUB", max_length=10)
+    currency: str = Field(..., max_length=10)
     url: str | None = None
     category: str | None = Field(None, max_length=200)
 
@@ -125,7 +125,7 @@ class CompetitorProductCreate(BaseModel):
     competitor_id: UUID
     url: str
     name: str | None = Field(None, max_length=500)
-    scraper_type: str = Field(default="auto", max_length=20)
+    scraper_type: str = Field(..., max_length=20)
     css_selector_price: str | None = Field(None, max_length=500)
 
 

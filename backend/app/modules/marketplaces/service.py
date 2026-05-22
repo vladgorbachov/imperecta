@@ -88,56 +88,6 @@ class MarketplacePoolService:
         return f"https://{host}"
 
 
-# TLD → ISO country code hints (geography only, not marketplace names).
-_TLD_TO_COUNTRY: dict[str, str] = {
-    "ua": "UA",
-    "kz": "KZ",
-    "uz": "UZ",
-    "md": "MD",
-    "ge": "GE",
-    "am": "AM",
-    "az": "AZ",
-    "kg": "KG",
-    "tj": "TJ",
-    "de": "DE",
-    "pl": "PL",
-    "fr": "FR",
-    "nl": "NL",
-    "cz": "CZ",
-    "sk": "SK",
-    "at": "AT",
-    "lv": "LV",
-    "lt": "LT",
-    "ee": "EE",
-    "ro": "RO",
-    "hu": "HU",
-    "bg": "BG",
-    "hr": "HR",
-    "si": "SI",
-    "gr": "GR",
-    "it": "IT",
-    "es": "ES",
-    "pt": "PT",
-    "rs": "RS",
-    "ba": "BA",
-    "mk": "MK",
-    "me": "ME",
-    "al": "AL",
-    "tr": "TR",
-    "fi": "FI",
-    "se": "SE",
-    "dk": "DK",
-    "no": "NO",
-    "uk": "UK",
-    "ch": "CH",
-    "be": "BE",
-    "ie": "IE",
-    "com": "US",
-    "net": "US",
-    "org": "US",
-}
-
-
 class MarketplaceService:
     """CRUD and helpers for dim_marketplace (admin)."""
 
@@ -170,7 +120,7 @@ class MarketplaceService:
 
     @staticmethod
     def _tld_to_country(tld: str) -> str:
-        return _TLD_TO_COUNTRY.get(tld.lower(), "DE")
+        return tld.upper()
 
     @staticmethod
     def _make_marketplace_code(domain: str) -> str:
@@ -189,13 +139,10 @@ class MarketplaceService:
         return bool(q)
 
     async def _fallback_country_code(self) -> str:
-        row = await self.db.scalar(
-            select(DimCountry.country_code).where(DimCountry.country_code == "DE"),
-        )
-        if row:
-            return "DE"
         any_code = await self.db.scalar(select(DimCountry.country_code).limit(1))
-        return any_code or "DE"
+        if not any_code:
+            raise ValueError("No active countries configured in dim_country")
+        return any_code
 
     async def _resolve_country_and_currency(self, domain: str) -> tuple[str, str]:
         parts = domain.lower().split(".")
@@ -214,7 +161,7 @@ class MarketplaceService:
         )
         cur = cc_row.scalar_one()
         if not await self._currency_exists(cur):
-            cur = "EUR"
+            raise ValueError(f"Currency {cur} is not configured in dim_currency")
         return fb, cur
 
     async def _currency_exists(self, code: str) -> bool:

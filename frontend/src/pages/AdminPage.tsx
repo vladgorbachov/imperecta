@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock3, Copy, Loader2, Play, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -39,11 +40,11 @@ import {
 const RUNS_PAGE_SIZE = 20;
 const RUNS_LIMIT = 500;
 
-function formatDateTime(value: string | null): string {
-  if (!value) return "—";
+function formatDateTime(value: string | null, locale: string, fallback: string): string {
+  if (!value) return fallback;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("ru-RU", {
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -53,8 +54,8 @@ function formatDateTime(value: string | null): string {
   }).format(date);
 }
 
-function formatDuration(seconds: number | null): string {
-  if (seconds == null || Number.isNaN(seconds)) return "—";
+function formatDuration(seconds: number | null, fallback: string): string {
+  if (seconds == null || Number.isNaN(seconds)) return fallback;
   const total = Math.max(0, Math.floor(seconds));
   const mm = Math.floor(total / 60)
     .toString()
@@ -69,14 +70,14 @@ function statusBadgeVariant(status: "running" | "completed" | "failed") {
   return "secondary";
 }
 
-function statusLabel(status: "running" | "completed" | "failed"): string {
-  if (status === "completed") return "Успешно";
-  if (status === "failed") return "С ошибками";
-  return "В процессе";
+function statusLabelKey(status: "running" | "completed" | "failed"): string {
+  if (status === "completed") return "admin.marketplaces.status.success";
+  if (status === "failed") return "admin.marketplaces.status.error";
+  return "common.loading";
 }
 
-function marketplaceActivityLabel(status: "running" | "completed" | "failed"): string {
-  return status === "running" ? "Активен" : "Неактивен";
+function marketplaceActivityLabelKey(status: "running" | "completed" | "failed"): string {
+  return status === "running" ? "admin.claude.online" : "admin.marketplaces.status.noData";
 }
 
 function stageToProgress(stage: string | null, status: "running" | "completed" | "failed"): number {
@@ -91,6 +92,7 @@ function stageToProgress(stage: string | null, status: "running" | "completed" |
 }
 
 export function AdminPage() {
+  const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -142,12 +144,10 @@ export function AdminPage() {
       const summary = activeStatusQuery.data?.metadata?.summary;
       if (status === "completed") {
         toast.success(
-          `Тест завершён: listings ${summary?.listings_created ?? 0}, prices ${summary?.prices_saved ?? 0}, errors ${summary?.errors_count ?? 0}`,
+          `${t("admin.marketplaces.products")}: ${summary?.listings_created ?? 0}, ${t("common.price")}: ${summary?.prices_saved ?? 0}, ${t("admin.stats.errors")}: ${summary?.errors_count ?? 0}`,
         );
       } else {
-        toast.error(
-          `Тест завершился с ошибками: listings ${summary?.listings_created ?? 0}, prices ${summary?.prices_saved ?? 0}, errors ${summary?.errors_count ?? 0}`,
-        );
+        toast.error(t("admin.markets.refreshError"));
       }
       setActiveJobId(null);
       queryClient.invalidateQueries({ queryKey: ["admin", "parsing", "test-runs"] });
@@ -155,7 +155,7 @@ export function AdminPage() {
     }
 
     previousActiveStatus.current = status;
-  }, [activeStatusQuery.data, queryClient]);
+  }, [activeStatusQuery.data, queryClient, t]);
 
   if (!user?.is_superuser) {
     return (
@@ -164,8 +164,8 @@ export function AdminPage() {
         <Card>
           <CardContent className="pt-6">
             <EmptyState
-              title="Доступ запрещён"
-              description="Раздел администрирования парсинга доступен только superuser-аккаунтам."
+              title={t("common.error")}
+              description={t("admin.markets.refreshError")}
             />
           </CardContent>
         </Card>
@@ -184,32 +184,29 @@ export function AdminPage() {
 
       <Tabs defaultValue="parsing" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="overview">Обзор</TabsTrigger>
-          <TabsTrigger value="parsing">Тестовый парсинг</TabsTrigger>
+          <TabsTrigger value="overview">{t("dashboard.market.title")}</TabsTrigger>
+          <TabsTrigger value="parsing">{t("admin.pool.title")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Системные показатели</CardTitle>
-              <CardDescription>
-                Краткая сводка superuser-админки. Основной рабочий блок находится во вкладке
-                «Тестовый парсинг».
-              </CardDescription>
+              <CardTitle>{t("admin.title")}</CardTitle>
+              <CardDescription>{t("admin.stats.scrapesToday")}</CardDescription>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div className="rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">Пользователи</p>
+                <p className="text-sm text-muted-foreground">{t("admin.stats.users")}</p>
                 <p className="text-2xl font-semibold">{stats?.users_count ?? stats?.users ?? 0}</p>
               </div>
               <div className="rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">Маркетплейсы</p>
+                <p className="text-sm text-muted-foreground">{t("admin.stats.marketplaces")}</p>
                 <p className="text-2xl font-semibold">
                   {stats?.marketplaces_count ?? stats?.marketplaces ?? 0}
                 </p>
               </div>
               <div className="rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">Листинги</p>
+                <p className="text-sm text-muted-foreground">{t("admin.marketplaces.products")}</p>
                 <p className="text-2xl font-semibold">{stats?.total_products_monitored ?? 0}</p>
               </div>
             </CardContent>
@@ -219,31 +216,26 @@ export function AdminPage() {
         <TabsContent value="parsing" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Администрирование парсинга</CardTitle>
-              <CardDescription>
-                Единая точка управления тестовым пулом маркетплейсов и полным циклом
-                discovery → scrape → persist.
-              </CardDescription>
+              <CardTitle>{t("admin.pool.title")}</CardTitle>
+              <CardDescription>{t("admin.pool.diagnostics")}</CardDescription>
             </CardHeader>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <div>
-                <CardTitle>Тестовые маркетплейсы</CardTitle>
-                <CardDescription>
-                  Список тестового пула с показателями успешности и последними запусками.
-                </CardDescription>
+                <CardTitle>{t("admin.pool.marketplaces")}</CardTitle>
+                <CardDescription>{t("admin.marketplaces.successRate")}</CardDescription>
               </div>
               <Button
                 onClick={async () => {
                   try {
                     const result = await addMarketplaces.mutateAsync();
                     toast.success(
-                      `Обновлено: добавлено ${result.added}, пропущено ${result.skipped}`,
+                      `${t("common.save")}: +${result.added}, ${t("common.next")}: ${result.skipped}`,
                     );
                   } catch {
-                    toast.error("Не удалось добавить тестовые маркетплейсы");
+                    toast.error(t("admin.markets.refreshError"));
                   }
                 }}
                 disabled={addMarketplaces.isPending}
@@ -253,7 +245,7 @@ export function AdminPage() {
                 ) : (
                   <Plus className="mr-2 size-4" />
                 )}
-                Добавить 5 тестовых маркетплейсов
+                {t("common.add")}
               </Button>
             </CardHeader>
             <CardContent>
@@ -261,20 +253,20 @@ export function AdminPage() {
                 <Skeleton className="h-40 w-full" />
               ) : (marketplacesQuery.data?.length ?? 0) === 0 ? (
                 <EmptyState
-                  title="Пул тестовых маркетплейсов пуст"
-                  description="Добавьте тестовые маркетплейсы, чтобы подготовить пайплайн к запуску."
+                  title={t("common.noData")}
+                  description={t("admin.pool.marketplaces")}
                 />
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Маркетплейс</TableHead>
-                      <TableHead>URL</TableHead>
-                      <TableHead>Товаров в пуле</TableHead>
-                      <TableHead>Последний успешный scrape</TableHead>
-                      <TableHead>Success rate</TableHead>
-                      <TableHead>Последний запуск</TableHead>
-                      <TableHead>Статус</TableHead>
+                      <TableHead>{t("products.marketplace")}</TableHead>
+                      <TableHead>{t("competitors.tableUrl")}</TableHead>
+                      <TableHead>{t("admin.pool.productsInPool")}</TableHead>
+                      <TableHead>{t("admin.marketplaces.lastScrape")}</TableHead>
+                      <TableHead>{t("admin.marketplaces.successRate")}</TableHead>
+                      <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
+                      <TableHead>{t("common.status")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -283,12 +275,16 @@ export function AdminPage() {
                         <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell className="max-w-60 truncate">{item.url}</TableCell>
                         <TableCell>{item.products_in_pool}</TableCell>
-                        <TableCell>{formatDateTime(item.last_successful_scrape)}</TableCell>
+                        <TableCell>
+                          {formatDateTime(item.last_successful_scrape, i18n.resolvedLanguage || "en", t("common.dash"))}
+                        </TableCell>
                         <TableCell>{item.success_rate.toFixed(2)}%</TableCell>
-                        <TableCell>{formatDateTime(item.last_run)}</TableCell>
+                        <TableCell>
+                          {formatDateTime(item.last_run, i18n.resolvedLanguage || "en", t("common.dash"))}
+                        </TableCell>
                         <TableCell>
                           <Badge variant={statusBadgeVariant(item.status)}>
-                            {marketplaceActivityLabel(item.status)}
+                            {t(marketplaceActivityLabelKey(item.status))}
                           </Badge>
                         </TableCell>
                       </TableRow>
@@ -301,11 +297,8 @@ export function AdminPage() {
 
           <Card>
             <CardHeader className="space-y-3">
-              <CardTitle>Запуск тестового пайплайна</CardTitle>
-              <CardDescription>
-                Запускает полный цикл для тестового пула и обновляет статус через polling каждые 4–5
-                секунд.
-              </CardDescription>
+              <CardTitle>{t("admin.pool.triggerScraping")}</CardTitle>
+              <CardDescription>{t("admin.pool.diagnosticsResult")}</CardDescription>
               <Button
                 className="w-full md:w-auto"
                 size="lg"
@@ -314,7 +307,7 @@ export function AdminPage() {
                     const result = await runPipeline.mutateAsync();
                     previousActiveStatus.current = "running";
                     setActiveJobId(result.job_id);
-                    toast.success(`Запуск создан: ${result.job_id}`);
+                    toast.success(`${t("common.save")}: ${result.job_id}`);
                   } catch (error) {
                     const message =
                       typeof error === "object" &&
@@ -322,8 +315,8 @@ export function AdminPage() {
                       "response" in error &&
                       (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
                         ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-                        : "Не удалось запустить полный тест";
-                    toast.error(message ?? "Не удалось запустить полный тест");
+                        : t("admin.markets.refreshError");
+                    toast.error(message ?? t("admin.markets.refreshError"));
                   }
                 }}
                 disabled={runPipeline.isPending || activeStatus?.status === "running"}
@@ -333,7 +326,7 @@ export function AdminPage() {
                 ) : (
                   <Play className="mr-2 size-4" />
                 )}
-                Запустить полный цикл тестового парсинга
+                {t("admin.pool.triggerScraping")}
               </Button>
             </CardHeader>
             <CardContent>
@@ -341,25 +334,40 @@ export function AdminPage() {
                 <div className="space-y-4 rounded-lg border p-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={statusBadgeVariant(activeStatus.status)}>
-                      {statusLabel(activeStatus.status)}
+                      {t(statusLabelKey(activeStatus.status))}
                     </Badge>
-                    <span className="text-sm text-muted-foreground">Job ID: {activeStatus.job_id}</span>
+                    <span className="text-sm text-muted-foreground">{activeStatus.job_id}</span>
                   </div>
                   <Progress value={progress} max={100} />
                   <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground md:grid-cols-3">
-                    <span>Discovery: {currentStage === "discovery" ? "выполняется" : "ожидание"}</span>
-                    <span>Scrape: {currentStage === "scrape" ? "выполняется" : "ожидание"}</span>
-                    <span>Persist: {currentStage === "persist" ? "выполняется" : "ожидание"}</span>
+                    <span>
+                      {t("admin.pool.triggerDiscovery")}:{" "}
+                      {currentStage === "discovery" ? t("common.loading") : t("common.noData")}
+                    </span>
+                    <span>
+                      {t("admin.pool.triggerScraping")}:{" "}
+                      {currentStage === "scrape" ? t("common.loading") : t("common.noData")}
+                    </span>
+                    <span>
+                      {t("admin.pool.diagnostics")}:{" "}
+                      {currentStage === "persist" ? t("common.loading") : t("common.noData")}
+                    </span>
                   </div>
                   <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
-                    <span>Старт: {formatDateTime(activeStatus.started_at)}</span>
-                    <span>Завершение: {formatDateTime(activeStatus.completed_at)}</span>
+                    <span>
+                      {t("alerts.date")}:{" "}
+                      {formatDateTime(activeStatus.started_at, i18n.resolvedLanguage || "en", t("common.dash"))}
+                    </span>
+                    <span>
+                      {t("admin.markets.lastRefresh")}:{" "}
+                      {formatDateTime(activeStatus.completed_at, i18n.resolvedLanguage || "en", t("common.dash"))}
+                    </span>
                   </div>
                 </div>
               ) : (
                 <EmptyState
-                  title="Активный запуск отсутствует"
-                  description="Запустите полный цикл, чтобы начать мониторинг этапов в реальном времени."
+                  title={t("common.noData")}
+                  description={t("admin.pool.triggerScraping")}
                 />
               )}
             </CardContent>
@@ -367,32 +375,30 @@ export function AdminPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>История тестовых запусков</CardTitle>
-              <CardDescription>
-                Таблица оптимизирована для большого объёма записей через постраничный вывод.
-              </CardDescription>
+              <CardTitle>{t("admin.pool.discoveryLogs")}</CardTitle>
+              <CardDescription>{t("admin.pool.diagnosticsResult")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {runsQuery.isLoading ? (
                 <Skeleton className="h-56 w-full" />
               ) : sortedRuns.length === 0 ? (
                 <EmptyState
-                  title="Запусков пока нет"
-                  description="После первого запуска тестового цикла здесь появится история."
+                  title={t("common.noData")}
+                  description={t("admin.pool.discoveryLogs")}
                 />
               ) : (
                 <>
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Job ID</TableHead>
-                        <TableHead>Начало</TableHead>
-                        <TableHead>Завершение</TableHead>
-                        <TableHead>Длительность</TableHead>
-                        <TableHead>Listings</TableHead>
-                        <TableHead>Prices</TableHead>
-                        <TableHead>Errors</TableHead>
-                        <TableHead>Статус</TableHead>
+                        <TableHead>{t("admin.pool.diagnostics")}</TableHead>
+                        <TableHead>{t("alerts.date")}</TableHead>
+                        <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
+                        <TableHead>{t("admin.claude.avgLatency")}</TableHead>
+                        <TableHead>{t("admin.marketplaces.products")}</TableHead>
+                        <TableHead>{t("common.price")}</TableHead>
+                        <TableHead>{t("admin.stats.errors")}</TableHead>
+                        <TableHead>{t("common.status")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -412,21 +418,27 @@ export function AdminPage() {
                               onClick={(event) => {
                                 event.stopPropagation();
                                 navigator.clipboard.writeText(run.job_id);
-                                toast.success("Job ID скопирован");
+                                toast.success(t("common.copied"));
                               }}
                             >
                               <Copy className="size-3.5" />
                               {run.job_id.slice(0, 8)}…
                             </button>
                           </TableCell>
-                          <TableCell>{formatDateTime(run.started_at)}</TableCell>
-                          <TableCell>{formatDateTime(run.completed_at)}</TableCell>
-                          <TableCell>{formatDuration(run.duration_seconds)}</TableCell>
+                          <TableCell>
+                            {formatDateTime(run.started_at, i18n.resolvedLanguage || "en", t("common.dash"))}
+                          </TableCell>
+                          <TableCell>
+                            {formatDateTime(run.completed_at, i18n.resolvedLanguage || "en", t("common.dash"))}
+                          </TableCell>
+                          <TableCell>{formatDuration(run.duration_seconds, t("common.dash"))}</TableCell>
                           <TableCell>{run.listings_created}</TableCell>
                           <TableCell>{run.prices_saved}</TableCell>
                           <TableCell>{run.errors_count}</TableCell>
                           <TableCell>
-                            <Badge variant={statusBadgeVariant(run.status)}>{statusLabel(run.status)}</Badge>
+                            <Badge variant={statusBadgeVariant(run.status)}>
+                              {t(statusLabelKey(run.status))}
+                            </Badge>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -434,9 +446,7 @@ export function AdminPage() {
                   </Table>
 
                   <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                      Страница {historyPage} из {totalPages}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{historyPage}/{totalPages}</p>
                     <div className="flex items-center gap-2">
                       <Button
                         variant="outline"
@@ -444,7 +454,7 @@ export function AdminPage() {
                         onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
                         disabled={historyPage <= 1}
                       >
-                        Назад
+                        {t("common.back")}
                       </Button>
                       <Button
                         variant="outline"
@@ -452,7 +462,7 @@ export function AdminPage() {
                         onClick={() => setHistoryPage((prev) => Math.min(totalPages, prev + 1))}
                         disabled={historyPage >= totalPages}
                       >
-                        Вперёд
+                        {t("common.next")}
                       </Button>
                     </div>
                   </div>
@@ -473,11 +483,10 @@ export function AdminPage() {
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>
-              Детали запуска {detailsStatus?.job_id ? `#${detailsStatus.job_id.slice(0, 8)}` : ""}
+              {t("admin.pool.diagnosticsResult")}{" "}
+              {detailsStatus?.job_id ? `#${detailsStatus.job_id.slice(0, 8)}` : ""}
             </DialogTitle>
-            <DialogDescription>
-              Разбивка времени выполнения и статистика по каждому маркетплейсу.
-            </DialogDescription>
+            <DialogDescription>{t("admin.pool.diagnostics")}</DialogDescription>
           </DialogHeader>
 
           {detailsStatusQuery.isLoading ? (
@@ -487,69 +496,73 @@ export function AdminPage() {
               <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                 <Card>
                   <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">Статус</p>
+                    <p className="text-xs text-muted-foreground">{t("common.status")}</p>
                     <Badge variant={statusBadgeVariant(detailsStatus.status)}>
-                      {statusLabel(detailsStatus.status)}
+                      {t(statusLabelKey(detailsStatus.status))}
                     </Badge>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">Старт</p>
-                    <p className="text-sm">{formatDateTime(detailsStatus.started_at)}</p>
+                    <p className="text-xs text-muted-foreground">{t("alerts.date")}</p>
+                    <p className="text-sm">
+                      {formatDateTime(detailsStatus.started_at, i18n.resolvedLanguage || "en", t("common.dash"))}
+                    </p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">Завершение</p>
-                    <p className="text-sm">{formatDateTime(detailsStatus.completed_at)}</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.markets.lastRefresh")}</p>
+                    <p className="text-sm">
+                      {formatDateTime(detailsStatus.completed_at, i18n.resolvedLanguage || "en", t("common.dash"))}
+                    </p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-4">
-                    <p className="text-xs text-muted-foreground">Общее время</p>
-                    <p className="text-sm">{formatDuration(detailsStatus.duration_seconds)}</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.claude.avgLatency")}</p>
+                    <p className="text-sm">{formatDuration(detailsStatus.duration_seconds, t("common.dash"))}</p>
                   </CardContent>
                 </Card>
               </div>
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Breakdown времени</CardTitle>
+                  <CardTitle className="text-base">{t("admin.pool.diagnosticsResult")}</CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 gap-2 text-sm md:grid-cols-4">
                   <div className="rounded border p-2">
-                    Discovery: {detailsStatus.metadata?.timings?.discovery_ms ?? 0} ms
+                    {t("admin.pool.triggerDiscovery")}: {detailsStatus.metadata?.timings?.discovery_ms ?? 0} ms
                   </div>
                   <div className="rounded border p-2">
-                    Scrape: {detailsStatus.metadata?.timings?.scrape_ms ?? 0} ms
+                    {t("admin.pool.triggerScraping")}: {detailsStatus.metadata?.timings?.scrape_ms ?? 0} ms
                   </div>
                   <div className="rounded border p-2">
-                    Persist: {detailsStatus.metadata?.timings?.persist_ms ?? 0} ms
+                    {t("admin.pool.diagnostics")}: {detailsStatus.metadata?.timings?.persist_ms ?? 0} ms
                   </div>
                   <div className="rounded border p-2">
-                    Total: {detailsStatus.metadata?.timings?.total_ms ?? 0} ms
+                    {t("admin.claude.tokens24h")}: {detailsStatus.metadata?.timings?.total_ms ?? 0} ms
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">По маркетплейсам</CardTitle>
+                  <CardTitle className="text-base">{t("admin.pool.marketplaces")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {(detailsStatus.metadata?.per_marketplace?.length ?? 0) === 0 ? (
-                    <p className="text-sm text-muted-foreground">Детализация по маркетплейсам отсутствует.</p>
+                    <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
                   ) : (
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Маркетплейс</TableHead>
-                          <TableHead>Listings</TableHead>
-                          <TableHead>Prices</TableHead>
-                          <TableHead>Errors</TableHead>
-                          <TableHead>Success rate</TableHead>
-                          <TableHead>Статус</TableHead>
+                          <TableHead>{t("products.marketplace")}</TableHead>
+                          <TableHead>{t("admin.marketplaces.products")}</TableHead>
+                          <TableHead>{t("common.price")}</TableHead>
+                          <TableHead>{t("admin.stats.errors")}</TableHead>
+                          <TableHead>{t("admin.marketplaces.successRate")}</TableHead>
+                          <TableHead>{t("common.status")}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -564,7 +577,9 @@ export function AdminPage() {
                               <TableCell>{row.errors_count}</TableCell>
                               <TableCell>{rate.toFixed(2)}%</TableCell>
                               <TableCell>
-                                <Badge variant={statusBadgeVariant(row.status)}>{statusLabel(row.status)}</Badge>
+                                <Badge variant={statusBadgeVariant(row.status)}>
+                                  {t(statusLabelKey(row.status))}
+                                </Badge>
                               </TableCell>
                             </TableRow>
                           );
@@ -577,13 +592,13 @@ export function AdminPage() {
             </div>
           ) : (
             <EmptyState
-              title="Данные запуска недоступны"
-              description="Не удалось загрузить детали выбранного запуска."
+              title={t("common.error")}
+              description={t("admin.markets.refreshError")}
             />
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
-              Закрыть
+              {t("common.close")}
             </Button>
             <Button
               onClick={async () => {
@@ -592,9 +607,9 @@ export function AdminPage() {
                   previousActiveStatus.current = "running";
                   setActiveJobId(result.job_id);
                   setIsDetailsOpen(false);
-                  toast.success(`Повторный запуск создан: ${result.job_id}`);
+                  toast.success(`${t("common.refresh")}: ${result.job_id}`);
                 } catch {
-                  toast.error("Не удалось запустить повторный тест");
+                  toast.error(t("admin.markets.refreshError"));
                 }
               }}
               disabled={runPipeline.isPending}
@@ -604,7 +619,7 @@ export function AdminPage() {
               ) : (
                 <Clock3 className="mr-2 size-4" />
               )}
-              Повторить запуск
+              {t("common.refresh")}
             </Button>
           </DialogFooter>
         </DialogContent>

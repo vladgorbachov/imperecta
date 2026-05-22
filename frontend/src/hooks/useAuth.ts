@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import i18n from "@/i18n";
 import { authApi } from "@/api/auth";
 
 export function useAuth() {
@@ -18,7 +19,8 @@ export function useAuth() {
       password: string;
       name: string;
       companyName?: string;
-    }) => authApi.register(email, password, name, companyName),
+      language?: string;
+    }) => authApi.register(email, password, name, companyName, language ?? i18n.language),
   });
   return { loginMutation, registerMutation, queryClient };
 }

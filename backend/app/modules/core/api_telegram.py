@@ -82,7 +82,11 @@ async def generate_link_code(current_user: User = Depends(get_current_user), db:
     _ = db
     code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
     current_user.telegram_link_code = code
-    return {"code": code, "bot_url": "https://t.me/ImperectaBot", "message": f"Отправьте код {code} боту @ImperectaBot в Telegram"}
+    return {
+        "code": code,
+        "bot_url": settings.telegram_bot_url,
+        "message": f"Отправьте код {code} в Telegram-бот.",
+    }
 
 
 @router.post("/unlink")

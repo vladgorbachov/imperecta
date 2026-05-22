@@ -30,7 +30,7 @@ export const authApi = {
       expires_at?: string;
     }>(
       "/auth/register",
-      { email, password, name, company_name: companyName ?? null, language: language ?? "en" }
+      { email, password, name, company_name: companyName ?? null, language }
     ),
   getMe: () =>
     apiClient.get<{

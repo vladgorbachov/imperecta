@@ -61,21 +61,24 @@ import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { PriceSparkline } from "@/components/competitors/PriceSparkline";
 import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/authStore";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
 
 type ScraperType = "auto" | "universal";
 type ViewMode = "grid" | "table";
 
-function mapScraperToApi(_type: ScraperType): string {
-  return "universal";
+function mapScraperToApi(type: ScraperType): string {
+  return type;
 }
 
 function getScraperLabel(type: ScraperType): string {
   return type === "auto" ? "competitors.scraperAuto" : "competitors.scraperUniversal";
 }
 
-function detectScraperFromUrl(_url: string): ScraperType {
-  return "auto";
+function detectScraperFromUrl(url: string): ScraperType {
+  const normalized = url.trim().toLowerCase();
+  if (!normalized) return "auto";
+  return normalized.includes("/api/") ? "universal" : "auto";
 }
 
 function strengthFromScore(score: number): "weak" | "moderate" | "strong" {
@@ -198,16 +201,22 @@ export function CompetitorsPage() {
     queryKey: ["competitors"],
     queryFn: async () => {
       const { data } = await competitorsApi.list();
-      return data;
+      if (Array.isArray(data)) return data;
+      if (data && typeof data === "object" && "items" in data) {
+        const items = (data as { items?: unknown }).items;
+        return Array.isArray(items) ? (items as Competitor[]) : [];
+      }
+      return [];
     },
   });
 
-  const { data: benchmarksRaw = [] } = useQuery({
+  const { data: benchmarksRaw } = useQuery({
     queryKey: ["analytics", "competitor-benchmark"],
     queryFn: () => analyticsApi.getCompetitorBenchmark().then((r) => r.data),
   });
+  const benchmarkRows = Array.isArray(benchmarksRaw) ? benchmarksRaw : [];
   const benchmarkMap = Object.fromEntries(
-    benchmarksRaw.map((b: { competitor_id?: string; competitor_name?: string; score?: number; trend_30d?: number[] }) => [
+    benchmarkRows.map((b: { competitor_id?: string; competitor_name?: string; score?: number; trend_30d?: number[] }) => [
       (b as { competitor_id?: string }).competitor_id ?? "",
       {
         score: (b as { score?: number }).score ?? 0,
@@ -219,7 +228,7 @@ export function CompetitorsPage() {
   const { data: productsData } = useQuery({
     queryKey: ["products"],
     queryFn: async () => {
-      const { data } = await productsApi.list({ limit: 500 });
+      const { data } = await productsApi.list({ limit: 100 });
       return data;
     },
   });
@@ -228,6 +237,16 @@ export function CompetitorsPage() {
   const filteredCompetitors = competitors.filter((c) =>
     search ? c.name.toLowerCase().includes(search.toLowerCase()) : true
   );
+
+  const getCompetitorProducts = async (competitorId: string): Promise<CompetitorProduct[]> => {
+    const { data } = await competitorsApi.getProducts(competitorId);
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === "object" && "items" in data) {
+      const items = (data as { items?: unknown }).items;
+      return Array.isArray(items) ? (items as CompetitorProduct[]) : [];
+    }
+    return [];
+  };
 
   const createMutation = useMutation({
     mutationFn: competitorsApi.create,
@@ -269,10 +288,10 @@ export function CompetitorsPage() {
         queryKey: ["competitors", variables.competitorId, "products"],
       });
       queryClient.invalidateQueries({ queryKey: ["markets", "overview"] });
-      toast.success("Парсинг запущен");
+      toast.success(t("competitors.scrapeStarted"));
     },
     onError: () => {
-      toast.error("Не удалось запустить парсинг");
+      toast.error(t("competitors.scrapeFailed"));
     },
   });
 
@@ -400,10 +419,11 @@ export function CompetitorsPage() {
               key={c.id}
               competitor={c}
               benchmark={benchmarkMap[c.id]}
-              onWhatIsDoingNow={() => handleWhatIsDoingNow(c)}
+              onWhatIsDoingNow={() => handleWhatIsDoingNow()}
               onDetails={() => setExpandedId((id) => (id === c.id ? null : c.id))}
               expanded={expandedId === c.id}
               products={products}
+              loadCompetitorProducts={getCompetitorProducts}
               onAddProduct={() => {
                 setSelectedCompetitor(c);
                 setAddProductOpen(true);
@@ -434,6 +454,7 @@ export function CompetitorsPage() {
                   competitor={c}
                   benchmark={benchmarkMap[c.id]}
                   products={products}
+                  loadCompetitorProducts={getCompetitorProducts}
                   expanded={expandedId === c.id}
                   onToggle={() => setExpandedId((id) => (id === c.id ? null : c.id))}
                   onAddProduct={() => {
@@ -490,6 +511,7 @@ function CompetitorCard({
   onDetails,
   expanded,
   products,
+  loadCompetitorProducts,
   onAddProduct,
   onManualScrape,
   isScrapePending,
@@ -500,6 +522,7 @@ function CompetitorCard({
   onDetails: () => void;
   expanded: boolean;
   products: { id: string; name: string; sku: string | null }[];
+  loadCompetitorProducts: (competitorId: string) => Promise<CompetitorProduct[]>;
   onAddProduct: () => void;
   onManualScrape: (competitorProductId: string, competitorId: string) => void;
   isScrapePending: boolean;
@@ -513,10 +536,7 @@ function CompetitorCard({
 
   const { data: competitorProducts = [], isLoading } = useQuery({
     queryKey: ["competitors", competitor.id, "products"],
-    queryFn: async () => {
-      const { data } = await competitorsApi.getProducts(competitor.id);
-      return data;
-    },
+    queryFn: () => loadCompetitorProducts(competitor.id),
     enabled: expanded,
   });
 
@@ -634,6 +654,7 @@ function LinkedProductRow({
   isScrapePending: boolean;
 }) {
   const { t } = useTranslation();
+  const defaultCurrency = useAuthStore((s) => s.user?.default_currency ?? null);
   const productName =
     products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
   const trend =
@@ -659,8 +680,8 @@ function LinkedProductRow({
         </a>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {cp.last_price != null && (
-          <span className="text-sm">{formatPrice(cp.last_price, "RUB", locale)}</span>
+        {cp.last_price != null && defaultCurrency && (
+          <span className="text-sm">{formatPrice(cp.last_price, defaultCurrency, locale)}</span>
         )}
         {trend && (
           <TrendBadge
@@ -676,7 +697,7 @@ function LinkedProductRow({
           onClick={onManualScrape}
         >
           <Wand2 className="mr-2 size-4" />
-          Парсинг
+          {t("competitors.scrape")}
         </Button>
       </div>
     </div>
@@ -687,6 +708,7 @@ function ExpandableCompetitorRow({
   competitor,
   benchmark,
   products,
+  loadCompetitorProducts,
   expanded,
   onToggle,
   onAddProduct,
@@ -696,6 +718,7 @@ function ExpandableCompetitorRow({
   competitor: Competitor;
   benchmark?: { score: number; trend_30d: number[] };
   products: { id: string; name: string; sku: string | null }[];
+  loadCompetitorProducts: (competitorId: string) => Promise<CompetitorProduct[]>;
   expanded: boolean;
   onToggle: () => void;
   onAddProduct: () => void;
@@ -706,10 +729,7 @@ function ExpandableCompetitorRow({
   const locale = i18n.language;
   const { data: competitorProducts = [], isLoading } = useQuery({
     queryKey: ["competitors", competitor.id, "products"],
-    queryFn: async () => {
-      const { data } = await competitorsApi.getProducts(competitor.id);
-      return data;
-    },
+    queryFn: () => loadCompetitorProducts(competitor.id),
     enabled: expanded,
   });
 
@@ -821,6 +841,7 @@ function TableLinkedProductRow({
   isScrapePending: boolean;
 }) {
   const { t } = useTranslation();
+  const defaultCurrency = useAuthStore((s) => s.user?.default_currency ?? null);
   const productName =
     products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
   const trend =
@@ -841,8 +862,8 @@ function TableLinkedProductRow({
         </a>
       </TableCell>
       <TableCell>
-        {cp.last_price != null
-          ? formatPrice(cp.last_price, "RUB", locale)
+        {cp.last_price != null && defaultCurrency
+          ? formatPrice(cp.last_price, defaultCurrency, locale)
           : t("common.dash")}
       </TableCell>
       <TableCell>
@@ -861,7 +882,7 @@ function TableLinkedProductRow({
             onClick={onManualScrape}
           >
             <Wand2 className="mr-2 size-4" />
-            Парсинг
+            {t("competitors.scrape")}
           </Button>
         </div>
       </TableCell>

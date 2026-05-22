@@ -34,12 +34,6 @@ from app.modules.user_products.api_products import router as products_router
 logger = logging.getLogger(__name__)
 settings = Settings()
 
-DEFAULT_JWT_SECRET = "change-me-in-production"
-if settings.app_env == "production" and settings.jwt_secret == DEFAULT_JWT_SECRET:
-    logger.warning(
-        "JWT_SECRET is default value. Set JWT_SECRET in production for security."
-    )
-
 if settings.sentry_dsn:
     import sentry_sdk
 

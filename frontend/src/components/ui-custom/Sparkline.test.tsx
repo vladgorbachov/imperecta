@@ -15,7 +15,7 @@ vi.mock("recharts", () => ({
 describe("Sparkline", () => {
   it("renders empty state without enough points", () => {
     render(<Sparkline points={[{ date: "2026-05-01", price: 100 }]} />);
-    expect(screen.getByText("Нет истории")).toBeInTheDocument();
+    expect(screen.getByText("market.overview.noHistory")).toBeInTheDocument();
   });
 
   it("renders chart with enough points", () => {

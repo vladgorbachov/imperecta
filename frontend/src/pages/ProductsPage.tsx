@@ -11,7 +11,7 @@ import { PoolProductsTab } from "@/components/products/PoolProductsTab";
 import { MyProductsTab } from "@/components/products/MyProductsTab";
 
 export function ProductsPage() {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [activeTab, setActiveTab] = useState<"pool" | "my">("pool");
   const locale = i18n.language;
 
@@ -26,10 +26,10 @@ export function ProductsPage() {
       >
         <TabsList className="glass-card mb-4 w-fit rounded-xl p-1">
           <TabsTrigger value="pool" className="rounded-lg px-4">
-            Все товары
+            {t("products.tabs.all")}
           </TabsTrigger>
           <TabsTrigger value="my" className="rounded-lg px-4">
-            Мои товары
+            {t("products.tabs.mine")}
           </TabsTrigger>
         </TabsList>
 

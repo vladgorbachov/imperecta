@@ -3,11 +3,11 @@
  *
  * Toolbar:
  * - Search, category filter, sort
- * - "+ Добавить товар" button (navigates to add flow)
- * - "Импорт CSV" button (navigates to import)
- * - "Импорт Excel" button (navigates to import, accepts .xls, .xlsx, .xlsm)
+ * - Add product button (navigates to import flow)
+ * - CSV import button (navigates to import)
+ * - Excel import button (navigates to import, accepts .xls, .xlsx, .xlsm)
  *
- * Table: checkboxes, SKU, name, "Моя цена", "Мин. цена конкурентов", actions (edit, delete)
+ * Table: checkboxes, SKU, name, price columns, actions (edit, delete)
  * Bulk delete: select rows, Ctrl+A, Delete key, SelectionActionBar.
  */
 
@@ -65,11 +65,11 @@ import { cn } from "@/lib/utils";
 
 const PAGE_SIZES = [20, 50, 100] as const;
 const SORT_OPTIONS = [
-  { value: "recent", label: "По дате" },
-  { value: "name_asc", label: "По алфавиту ↑" },
-  { value: "name_desc", label: "По алфавиту ↓" },
-  { value: "price_asc", label: "По цене ↑" },
-  { value: "price_desc", label: "По цене ↓" },
+  { value: "recent", labelKey: "products.sort.recent" },
+  { value: "name_asc", labelKey: "products.sort.nameAsc" },
+  { value: "name_desc", labelKey: "products.sort.nameDesc" },
+  { value: "price_asc", labelKey: "products.sort.priceAsc" },
+  { value: "price_desc", labelKey: "products.sort.priceDesc" },
 ] as const;
 
 export function MyProductsTab({ locale }: { locale: string }) {
@@ -139,16 +139,16 @@ export function MyProductsTab({ locale }: { locale: string }) {
     setIsDeleting(true);
     try {
       const { data } = await productsApi.bulkDelete(ids);
-      toast.success(`Удалено ${data.deleted} товаров`);
+      toast.success(t("products.bulkDeleted", { count: data.deleted }));
       clearSelection();
       setShowDeleteDialog(false);
       queryClient.invalidateQueries({ queryKey: ["products"] });
     } catch {
-      toast.error("Ошибка при удалении");
+      toast.error(t("products.bulkDeleteFailed"));
     } finally {
       setIsDeleting(false);
     }
-  }, [selectedIds, clearSelection, queryClient]);
+  }, [selectedIds, clearSelection, queryClient, t]);
 
   const handleAddProduct = useCallback(() => {
     navigate("/import");
@@ -165,13 +165,13 @@ export function MyProductsTab({ locale }: { locale: string }) {
   const handleDelete = useCallback(
     (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!confirm("Удалить товар?")) return;
+      if (!confirm(t("products.deleteConfirm"))) return;
       deleteMutation.mutate(id, {
-        onSuccess: () => toast.success("Товар удалён"),
-        onError: () => toast.error("Ошибка удаления"),
+        onSuccess: () => toast.success(t("products.deleted")),
+        onError: () => toast.error(t("products.deleteFailed")),
       });
     },
-    [deleteMutation]
+    [deleteMutation, t]
   );
 
   return (
@@ -183,7 +183,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
           <div className="relative flex-1 lg:max-w-72">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Поиск по названию или SKU"
+              placeholder={t("products.searchByNameOrSku")}
               value={searchRaw}
               onChange={(e) => {
                 setSearchRaw(e.target.value);
@@ -200,10 +200,10 @@ export function MyProductsTab({ locale }: { locale: string }) {
             }}
           >
             <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="Категория" />
+              <SelectValue placeholder={t("products.category")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Все категории</SelectItem>
+              <SelectItem value="all">{t("products.allCategories")}</SelectItem>
               {categories.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
@@ -219,12 +219,12 @@ export function MyProductsTab({ locale }: { locale: string }) {
             }}
           >
             <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="Сортировка" />
+              <SelectValue placeholder={t("products.sorting")} />
             </SelectTrigger>
             <SelectContent>
               {SORT_OPTIONS.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
-                  {o.label}
+                  {t(o.labelKey)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -239,7 +239,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
             title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
           >
             <Upload className="mr-2 size-4" />
-            Импорт CSV
+            {t("products.importCsv")}
           </Button>
           <Button
             variant="outline"
@@ -249,7 +249,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
             title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
           >
             <FileSpreadsheet className="mr-2 size-4" />
-            Импорт Excel
+            {t("products.importExcel")}
           </Button>
           <Button
             size="sm"
@@ -258,7 +258,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
             title={!canAddProducts ? t("planLimit.cannotAdd") : undefined}
           >
             <Plus className="mr-2 size-4" />
-            Добавить товар
+            {t("products.addProduct")}
           </Button>
         </div>
       </div>
@@ -286,7 +286,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
           />
         ) : isEmpty && hasFilters ? (
           <div className="flex flex-col items-center justify-center gap-4 px-4 py-12">
-            <p className="text-sm text-muted-foreground">Нет результатов</p>
+            <p className="text-sm text-muted-foreground">{t("products.noResults")}</p>
             <Button
               variant="outline"
               onClick={() => {
@@ -295,7 +295,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
                 setPage(1);
               }}
             >
-              Сбросить фильтры
+              {t("products.clearFilters")}
             </Button>
           </div>
         ) : (
@@ -308,13 +308,13 @@ export function MyProductsTab({ locale }: { locale: string }) {
                       <Checkbox
                         checked={isAllSelected}
                         onCheckedChange={toggleAll}
-                        aria-label="Выбрать все"
+                        aria-label={t("products.selectAll")}
                       />
                     </TableHead>
                     <TableHead>SKU</TableHead>
-                    <TableHead>Название</TableHead>
-                    <TableHead>Моя цена</TableHead>
-                    <TableHead>Мин. цена конкурентов</TableHead>
+                    <TableHead>{t("products.name")}</TableHead>
+                    <TableHead>{t("products.myPrice")}</TableHead>
+                    <TableHead>{t("products.minCompetitorPrice")}</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -344,7 +344,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
                         <Checkbox
                           checked={isSelected(p.id)}
                           onCheckedChange={() => toggleItem(p.id)}
-                          aria-label={`Выбрать ${p.name}`}
+                          aria-label={t("products.selectProduct", { name: p.name })}
                         />
                       </TableCell>
                       <TableCell className="text-muted-foreground">
@@ -371,14 +371,14 @@ export function MyProductsTab({ locale }: { locale: string }) {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => navigate(`/products/${p.id}`)}>
                               <Pencil className="mr-2 size-4" />
-                              Редактировать
+                              {t("common.edit")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={(e) => handleDelete(p.id, e as unknown as React.MouseEvent)}
                             >
                               <Trash2 className="mr-2 size-4" />
-                              Удалить
+                              {t("common.delete")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -412,7 +412,11 @@ export function MyProductsTab({ locale }: { locale: string }) {
       {!isEmpty && !isLoading && total > 0 && (
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
-            Показано {start + 1}–{Math.min(start + pageSize, total)} из {total}
+            {t("products.paginationShown", {
+              from: start + 1,
+              to: Math.min(start + pageSize, total),
+              total,
+            })}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -421,7 +425,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
               disabled={clampedPage <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
-              Назад
+              {t("common.back")}
             </Button>
             <span className="px-2 text-sm">
               {clampedPage} / {totalPages}
@@ -432,7 +436,7 @@ export function MyProductsTab({ locale }: { locale: string }) {
               disabled={clampedPage >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
-              Вперёд
+              {t("common.next")}
             </Button>
             <Select
               value={String(pageSize)}

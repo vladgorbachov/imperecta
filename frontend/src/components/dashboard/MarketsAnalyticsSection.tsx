@@ -1,8 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function MarketsAnalyticsSection() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language || "en";
+
   const { data: marketplaceStats, isLoading: statsLoading } = useQuery({
     queryKey: marketsQueryKeys.poolMarketplaceStats(),
     queryFn: async () => {
@@ -40,14 +44,14 @@ export function MarketsAnalyticsSection() {
         className="rounded-xl p-8 text-center text-sm"
         style={{ background: "var(--glass-bg)", color: "var(--foreground-muted)" }}
       >
-        Нет данных по маркетплейсам. Discovery crawler ещё наполняет пул.
+        {t("markets.analytics.noMarketplaceData")}
       </div>
     );
   }
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <AnalyticsBlock title="Обзор категорий/сегментов">
+      <AnalyticsBlock title={t("markets.analytics.categoryOverview")}>
         <div className="space-y-2">
           {rows.slice(0, 8).map((item) => (
             <div
@@ -63,40 +67,45 @@ export function MarketsAnalyticsSection() {
         </div>
       </AnalyticsBlock>
 
-      <AnalyticsBlock title="Категории в охвате">
+      <AnalyticsBlock title={t("markets.analytics.categoriesInScope")}>
         <ul className="space-y-1.5">
           {rows.map((item) => (
             <li key={item.marketplace_domain} className="flex items-center justify-between text-sm">
               <span className="truncate font-medium">
                 {item.marketplace_name || item.marketplace_domain}
               </span>
-              <span className="text-muted-foreground">{item.product_count} товаров</span>
+              <span className="text-muted-foreground">
+                {t("markets.analytics.itemsCount", { count: item.product_count })}
+              </span>
             </li>
           ))}
         </ul>
       </AnalyticsBlock>
 
-      <AnalyticsBlock title="Статистика пула">
+      <AnalyticsBlock title={t("markets.analytics.poolStats")}>
         {poolStats ? (
           <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Всего товаров</span>
+              <span className="text-muted-foreground">{t("markets.analytics.totalProducts")}</span>
               <span className="font-medium">{poolStats.total_products}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Маркетплейсов</span>
+              <span className="text-muted-foreground">{t("markets.analytics.marketplaces")}</span>
               <span className="font-medium">{poolStats.total_marketplaces}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">С ценой</span>
+              <span className="text-muted-foreground">{t("markets.analytics.withPrice")}</span>
               <span className="font-medium">{poolStats.products_with_price}</span>
             </div>
             <div className="rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground">
-              Последнее обновление: {poolStats.last_discovery_at ? new Date(poolStats.last_discovery_at).toLocaleString("ru-RU") : "—"}
+              {t("markets.analytics.lastUpdate")}:{" "}
+              {poolStats.last_discovery_at
+                ? new Date(poolStats.last_discovery_at).toLocaleString(locale)
+                : t("common.dash")}
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Нет данных по статистике.</p>
+          <p className="text-sm text-muted-foreground">{t("markets.analytics.noStatsData")}</p>
         )}
       </AnalyticsBlock>
     </div>

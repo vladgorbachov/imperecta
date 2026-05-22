@@ -137,21 +137,21 @@ describe("MarketsOverviewSection", () => {
 
   it("renders KPI cards", async () => {
     renderSection();
-    await screen.findByText("Всего товаров в пуле");
-    expect(screen.getByText("Обновлено за 24ч")).toBeInTheDocument();
-    expect(screen.getByText("Товаров с изменением >5%")).toBeInTheDocument();
-    expect(screen.getByText("Средняя волатильность пула")).toBeInTheDocument();
-    expect(screen.getByText("Последнее обновление")).toBeInTheDocument();
+    await screen.findByText("market.overview.kpi.totalPool");
+    expect(screen.getByText("market.overview.kpi.updated24h")).toBeInTheDocument();
+    expect(screen.getByText("market.overview.kpi.changedMore5")).toBeInTheDocument();
+    expect(screen.getByText("market.overview.kpi.avgVolatility")).toBeInTheDocument();
+    expect(screen.getByText("market.overview.kpi.lastUpdate")).toBeInTheDocument();
   });
 
   it("renders table with sparkline and allows switching to cards", async () => {
     renderSection();
     expect((await screen.findAllByRole("cell", { name: "Смартфон X" })).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Sparkline (7д)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("market.overview.sparkline7d").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Карточки/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /market\.overview\.viewCards/i })[0]);
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: "В мои товары" }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole("button", { name: "market.overview.addToMyProducts" }).length).toBeGreaterThan(0);
     });
   });
 
@@ -159,11 +159,11 @@ describe("MarketsOverviewSection", () => {
     renderSection();
     expect((await screen.findAllByRole("cell", { name: "Смартфон X" })).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Только с историей цен" }));
-    expect(screen.getByRole("button", { name: "Только с историей цен" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "market.overview.historyOnly" }));
+    expect(screen.getByRole("button", { name: "market.overview.historyOnly" })).toBeInTheDocument();
 
     const callsBeforeTab = getOverviewMock.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "Растут" }));
+    fireEvent.click(screen.getByRole("button", { name: "dashboard.market.topGainers" }));
     await waitFor(() => {
       expect(getOverviewMock.mock.calls.length).toBeGreaterThan(callsBeforeTab);
     });
@@ -173,8 +173,8 @@ describe("MarketsOverviewSection", () => {
     renderSection();
     expect((await screen.findAllByRole("cell", { name: "Смартфон X" })).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Алерт/i })[0]);
-    fireEvent.click(screen.getAllByRole("button", { name: /В мои/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /alerts\.createAlert/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /market\.overview\.addToMy/i })[0]);
 
     await waitFor(() => {
       expect(createAlertMock).toHaveBeenCalled();

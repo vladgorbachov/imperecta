@@ -12,13 +12,14 @@ from app.modules.market_data.providers.base import CryptoProviderAdapter
 from app.modules.market_data.providers.binance_adapter import BinanceCryptoAdapter
 
 logger = logging.getLogger(__name__)
+COINGECKO_FALLBACK_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 
 class CryptoCoingeckoAdapter(CryptoProviderAdapter):
     """CoinGecko markets adapter (backup). Normalizes to NormalizedCrypto."""
 
     def __init__(self, base_url: str | None = None, timeout: float = 15.0, per_page: int = 50):
-        self.base_url = base_url or Settings().market_data_crypto_url
+        self.base_url = base_url or COINGECKO_FALLBACK_URL
         self.timeout = timeout
         self.per_page = per_page
 
@@ -95,3 +96,26 @@ class CryptoCompositeAdapter(CryptoProviderAdapter):
         except Exception as error:
             logger.error("Both crypto sources failed: %s", error)
             return []
+
+
+class CryptoUnifiedAdapter(CryptoProviderAdapter):
+    """Unified crypto adapter: configured provider + Binance + CoinGecko chain."""
+
+    def __init__(self, timeout: float = 15.0):
+        self.timeout = timeout
+        self._configured_url = (Settings().market_data_crypto_url or "").strip()
+
+    async def fetch(self) -> list[NormalizedCrypto]:
+        adapters: list[CryptoProviderAdapter] = []
+        if self._configured_url:
+            adapters.append(CryptoCoingeckoAdapter(base_url=self._configured_url, timeout=self.timeout, per_page=50))
+        adapters.append(CryptoCompositeAdapter(timeout=self.timeout))
+
+        for adapter in adapters:
+            try:
+                items = await adapter.fetch()
+                if items:
+                    return items
+            except Exception as error:
+                logger.warning("Crypto provider %s failed: %s", adapter.__class__.__name__, error)
+        return []

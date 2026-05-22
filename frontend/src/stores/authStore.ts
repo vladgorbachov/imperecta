@@ -32,7 +32,9 @@ export interface User {
   plan: string;
   trial_ends_at: string | null;
   language: string;
+  timezone?: string | null;
   ai_tone?: string;
+  default_currency?: string | null;
   created_at: string;
   telegram_chat_id?: number | null;
   avatar_url?: string | null;

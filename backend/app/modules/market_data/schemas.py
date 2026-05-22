@@ -39,6 +39,20 @@ class MarketsPreferencesUpdate(UserPreferencesUpdate):
     """PUT /markets/preferences body."""
 
 
+class MarketsInstrumentOption(BaseModel):
+    symbol: str
+    name: str | None = None
+    rank: int | None = None
+    category: str | None = None
+    market_cap_usd: float | None = None
+
+
+class MarketsInstrumentsResponse(BaseModel):
+    forex: list[MarketsInstrumentOption] = Field(default_factory=list)
+    crypto: list[MarketsInstrumentOption] = Field(default_factory=list)
+    commodities: list[MarketsInstrumentOption] = Field(default_factory=list)
+
+
 # --- Refresh metadata (legacy list shape for API) ---
 
 

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog
 from app.models.core import UserProduct
+from app.modules.ai_analyst.claude_client import resolve_claude_model
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -74,9 +75,10 @@ async def chat(
         )
     )
     messages = [{"role": m.role, "content": m.content} for m in history]
+    model_id = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
     start = time.time()
     response = await client.messages.create(
-        model=settings.claude_model,
+        model=model_id,
         max_tokens=2000,
         system=f"{SYSTEM_PROMPT}\n{context}",
         messages=messages,
@@ -107,7 +109,8 @@ async def auto_categorize(products: list[dict]) -> list[dict]:
     client = AsyncAnthropic(api_key=settings.claude_api_key)
     items = [{"name": p.get("name", ""), "sku": p.get("sku", ""), "price": str(p.get("price", ""))} for p in products]
     prompt = f"""Given these products, suggest short category name. JSON array with index/suggested_category. Products: {json.dumps(items, ensure_ascii=False)}"""
-    response = await client.messages.create(model=settings.claude_model, max_tokens=512, messages=[{"role": "user", "content": prompt}])
+    model_id = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
+    response = await client.messages.create(model=model_id, max_tokens=512, messages=[{"role": "user", "content": prompt}])
     text = response.content[0].text if response.content else "[]"
     match = re.search(r"\[[\s\S]*\]", text)
     suggestions = json.loads(match.group()) if match else []

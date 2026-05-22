@@ -14,9 +14,9 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: imperecta_test
+          POSTGRES_USER: ${{ secrets.TEST_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.TEST_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.TEST_POSTGRES_DB }}
         ports:
           - 5432:5432
         options: >-
@@ -40,12 +40,31 @@ jobs:
       - name: Run tests
         env:
           APP_ENV: test
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/imperecta_test
-          REDIS_URL: redis://localhost:6379/0
-          JWT_SECRET: test-secret-for-ci-only
-          CLAUDE_API_KEY: ""
-          RESEND_API_KEY: ""
-          TELEGRAM_BOT_TOKEN: ""
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.TEST_REDIS_URL }}
+          JWT_SECRET: ${{ secrets.TEST_JWT_SECRET }}
+          JWT_ALGORITHM: ${{ secrets.TEST_JWT_ALGORITHM }}
+          JWT_EXPIRATION_MINUTES: ${{ secrets.TEST_JWT_EXPIRATION_MINUTES }}
+          JWT_REFRESH_EXPIRATION_DAYS: ${{ secrets.TEST_JWT_REFRESH_EXPIRATION_DAYS }}
+          JWT_REFRESH_EXPIRATION_DAYS_REMEMBER: ${{ secrets.TEST_JWT_REFRESH_EXPIRATION_DAYS_REMEMBER }}
+          MARKET_DATA_FOREX_URL: ${{ secrets.TEST_MARKET_DATA_FOREX_URL }}
+          MARKET_DATA_CRYPTO_URL: ${{ secrets.TEST_MARKET_DATA_CRYPTO_URL }}
+          MARKET_DATA_TIMEOUT_SECONDS: ${{ secrets.TEST_MARKET_DATA_TIMEOUT_SECONDS }}
+          MARKET_DATA_RETRY_ATTEMPTS: ${{ secrets.TEST_MARKET_DATA_RETRY_ATTEMPTS }}
+          CLAUDE_MODEL: ${{ secrets.TEST_CLAUDE_MODEL }}
+          EMAIL_FROM: ${{ secrets.TEST_EMAIL_FROM }}
+          APP_URL: ${{ secrets.TEST_APP_URL }}
+          PROXY_STICKY_DURATION: ${{ secrets.TEST_PROXY_STICKY_DURATION }}
+          PROXY_COUNTRY_ROUTING: ${{ secrets.TEST_PROXY_COUNTRY_ROUTING }}
+          DECODO_API_URL: ${{ secrets.TEST_DECODO_API_URL }}
+          DECODO_ENABLED: ${{ secrets.TEST_DECODO_ENABLED }}
+          ALLOWED_ORIGINS: ${{ secrets.TEST_ALLOWED_ORIGINS }}
+          PORT: ${{ secrets.TEST_PORT }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.TEST_BOOTSTRAP_ADMIN_EMAIL }}
+          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.TEST_BOOTSTRAP_ADMIN_PASSWORD }}
+          BOOTSTRAP_ADMIN_NAME: ${{ secrets.TEST_BOOTSTRAP_ADMIN_NAME }}
+          BOOTSTRAP_ADMIN_LANGUAGE: ${{ secrets.TEST_BOOTSTRAP_ADMIN_LANGUAGE }}
+          BOOTSTRAP_ADMIN_PLAN: ${{ secrets.TEST_BOOTSTRAP_ADMIN_PLAN }}
         run: pytest tests/ -v --tb=short
 
   e2e-smoke:
