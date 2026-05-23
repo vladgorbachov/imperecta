@@ -234,6 +234,95 @@ class GlobalScrapeService:
         self.pool = scraper_pool
         self.scrape_job_id = scrape_job_id
 
+    def _build_scrape_log_entry(
+        self,
+        *,
+        listing: FactListing,
+        log_status: str,
+        price_found: float | None,
+        in_stock_found: bool | None,
+        duration_ms: int | None,
+        scraper_type: str | None,
+        error_message: str | None,
+        error_category: str | None,
+    ) -> ScrapeLog:
+        """Create a fresh ScrapeLog object for safe retry attempts."""
+        return ScrapeLog(
+            scrape_job_id=self.scrape_job_id,
+            listing_id=listing.id,
+            marketplace_id=listing.marketplace_id,
+            status=log_status,
+            url=listing.external_url,
+            price_found=price_found,
+            in_stock_found=in_stock_found,
+            duration_ms=duration_ms,
+            scraper_type=scraper_type,
+            error_message=error_message,
+            error_category=error_category,
+        )
+
+    def _persist_scrape_log(
+        self,
+        *,
+        listing: FactListing,
+        log_status: str,
+        price_found: float | None,
+        in_stock_found: bool | None,
+        duration_ms: int | None,
+        scraper_type: str | None,
+        error_message: str | None,
+        error_category: str | None,
+    ) -> bool:
+        """Persist scrape_logs row without risking rollback of listing/price transaction."""
+
+        def _try_commit(status: str) -> bool:
+            entry = self._build_scrape_log_entry(
+                listing=listing,
+                log_status=status,
+                price_found=price_found,
+                in_stock_found=in_stock_found,
+                duration_ms=duration_ms,
+                scraper_type=scraper_type,
+                error_message=error_message,
+                error_category=error_category,
+            )
+            self.db.add(entry)
+            self.db.flush()
+            self.db.commit()
+            return True
+
+        try:
+            return _try_commit(log_status)
+        except Exception as exc:
+            self.db.rollback()
+
+            if _needs_scrape_logs_constraint_repair(exc) and _repair_scrape_logs_status_constraint(self.db):
+                try:
+                    return _try_commit(log_status)
+                except Exception:
+                    self.db.rollback()
+
+            if _needs_scrape_logs_status_column_repair(exc) and _repair_scrape_logs_status_column(self.db):
+                try:
+                    return _try_commit(log_status)
+                except Exception:
+                    self.db.rollback()
+
+            # Legacy emergency fallback: keep business data committed even if status taxonomy drifts.
+            if log_status != "error":
+                try:
+                    return _try_commit("error")
+                except Exception:
+                    self.db.rollback()
+
+            logger.error(
+                "scrape log persist failed listing_id=%s err=%s",
+                listing.id,
+                exc,
+                exc_info=True,
+            )
+            return False
+
     def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
         """Scrape a single listing and save to fact_price (sync Session; pool I/O is async)."""
         listing = self.db.get(FactListing, listing_id)
@@ -436,27 +525,8 @@ class GlobalScrapeService:
         price_found = None
         if result.success and data and data.price is not None:
             price_found = float(data.price)
-
-        log_entry = ScrapeLog(
-            scrape_job_id=self.scrape_job_id,
-            listing_id=listing.id,
-            marketplace_id=listing.marketplace_id,
-            status=log_status,
-            url=listing.external_url,
-            price_found=price_found,
-            in_stock_found=last_in_stock if (result.success and data) else None,
-            duration_ms=result.duration_ms,
-            scraper_type=result.scraper_layer,
-            error_message=result.error,
-            error_category=self._categorize_error(result.error) if result.error else None,
-        )
-        self.db.add(log_entry)
-        slog.info(
-            "scrape_logs_queued",
-            listing_id=str(listing_id),
-            status=log_status,
-            success=result.success,
-        )
+        in_stock_found = last_in_stock if (result.success and data) else None
+        error_category = self._categorize_error(result.error) if result.error else None
 
         product_name_used = getattr(data, "product_name", None) if data else None
         title = getattr(data, "title", None) if data else None
@@ -481,70 +551,42 @@ class GlobalScrapeService:
             self.db.flush()
             self.db.commit()
         except Exception as exc:
-            needs_repair = (
-                log_status == "technical_error"
-                and _needs_scrape_logs_constraint_repair(exc)
+            logger.error(
+                "scrape persist rollback listing_id=%s err=%s",
+                listing_id,
+                exc,
+                exc_info=True,
             )
-            needs_status_column_repair = (
-                log_status == "missing_critical_data"
-                and _needs_scrape_logs_status_column_repair(exc)
+            self.db.rollback()
+            return PoolScrapeResult(
+                success=False,
+                url=listing.external_url,
+                data=data,
+                error="persist_failed",
             )
-            if needs_repair:
-                self.db.rollback()
-            if needs_status_column_repair:
-                self.db.rollback()
-            if needs_repair and _repair_scrape_logs_status_constraint(self.db):
-                try:
-                    self.db.add(log_entry)
-                    self.db.flush()
-                    self.db.commit()
-                except Exception as retry_exc:
-                    logger.error(
-                        "scrape persist rollback listing_id=%s err=%s",
-                        listing_id,
-                        retry_exc,
-                        exc_info=True,
-                    )
-                    self.db.rollback()
-                    return PoolScrapeResult(
-                        success=False,
-                        url=listing.external_url,
-                        data=data,
-                        error="persist_failed",
-                    )
-            elif needs_status_column_repair and _repair_scrape_logs_status_column(self.db):
-                try:
-                    self.db.add(log_entry)
-                    self.db.flush()
-                    self.db.commit()
-                except Exception as retry_exc:
-                    logger.error(
-                        "scrape persist rollback listing_id=%s err=%s",
-                        listing_id,
-                        retry_exc,
-                        exc_info=True,
-                    )
-                    self.db.rollback()
-                    return PoolScrapeResult(
-                        success=False,
-                        url=listing.external_url,
-                        data=data,
-                        error="persist_failed",
-                    )
-            else:
-                logger.error(
-                    "scrape persist rollback listing_id=%s err=%s",
-                    listing_id,
-                    exc,
-                    exc_info=True,
-                )
-                self.db.rollback()
-                return PoolScrapeResult(
-                    success=False,
-                    url=listing.external_url,
-                    data=data,
-                    error="persist_failed",
-                )
+
+        slog.info(
+            "scrape_logs_queued",
+            listing_id=str(listing_id),
+            status=log_status,
+            success=result.success,
+        )
+        log_saved = self._persist_scrape_log(
+            listing=listing,
+            log_status=log_status,
+            price_found=price_found,
+            in_stock_found=in_stock_found,
+            duration_ms=result.duration_ms,
+            scraper_type=result.scraper_layer,
+            error_message=result.error,
+            error_category=error_category,
+        )
+        if not log_saved:
+            slog.error(
+                "scrape_log_persist_failed_non_blocking",
+                listing_id=str(listing_id),
+                status=log_status,
+            )
 
         slog.info(
             "SCRAPE_COMPLETE",
