@@ -250,68 +250,94 @@ def _run_scrape_all_pool(scrape_job_id: UUID | None = None) -> dict:
 
 def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
     scraper_pool = ScraperPool()
+    settings = Settings()
     threshold = datetime.now(timezone.utc) - timedelta(hours=6)
-    stale_ids: list[UUID] = []
+    batch_size = max(int(settings.scrape_pool_batch_size or 1000), 1)
+    max_listings_per_run = max(int(settings.scrape_pool_max_listings_per_run or 200000), 1)
+    queued_total = 0
+    processed_ids: set[UUID] = set()
     ok = 0
     failed = 0
     db = sync_session_factory()
     try:
-        result = db.execute(
-            select(FactListing.id)
-            .where(FactListing.is_active.is_(True))
-            .where(
-                or_(
-                    FactListing.last_checked_at.is_(None),
-                    FactListing.last_checked_at < threshold,
-                ),
-            )
-            .limit(500),
-        )
-        stale_ids = [r[0] for r in result.all()]
-        slog.info("scrape_all_pool_products", eligible_listings=len(stale_ids))
         svc = GlobalScrapeService(db, scraper_pool, scrape_job_id=scrape_job_id)
-        for lid in stale_ids:
-            try:
-                listing_row = db.get(FactListing, lid)
-                url_hint = (listing_row.external_url if listing_row else "")[:160]
-                slog.info("scrape_listing_start", listing_id=str(lid), url=url_hint)
-                r = svc.scrape_product(lid)
-                slog.info(
-                    "scrape_listing_end",
-                    listing_id=str(lid),
-                    success=r.success,
-                    err=(r.error or "")[:120],
+        while queued_total < max_listings_per_run:
+            result = db.execute(
+                select(FactListing.id)
+                .where(FactListing.is_active.is_(True))
+                .where(
+                    or_(
+                        FactListing.last_checked_at.is_(None),
+                        FactListing.last_checked_at < threshold,
+                    ),
                 )
-                if r.success:
-                    ok += 1
-                else:
-                    failed += 1
-            except Exception as exc:
-                tb = traceback.format_exc()
-                slog.exception("scrape_listing_failed", listing_id=str(lid), traceback=tb)
-                slog.error(
-                    "exception_before_technical_error_log",
-                    listing_id=str(lid),
-                    exc_type=exc.__class__.__name__,
-                    exc_message=str(exc)[:2000],
-                )
+                .limit(batch_size),
+            )
+            batch_ids = [r[0] for r in result.all()]
+            if not batch_ids:
+                break
+
+            stale_ids = [listing_id for listing_id in batch_ids if listing_id not in processed_ids]
+            if not stale_ids:
+                # Safety guard for mocked/inconsistent sessions returning the same rows repeatedly.
+                break
+
+            remaining = max_listings_per_run - queued_total
+            stale_ids = stale_ids[:remaining]
+            if not stale_ids:
+                break
+
+            queued_total += len(stale_ids)
+            processed_ids.update(stale_ids)
+            slog.info(
+                "scrape_all_pool_batch",
+                batch_size=len(stale_ids),
+                queued_total=queued_total,
+                max_listings_per_run=max_listings_per_run,
+            )
+
+            for lid in stale_ids:
                 try:
-                    db.rollback()
-                except Exception:
-                    slog.exception("rollback_after_listing_failure", listing_id=str(lid))
-                _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
-                failed += 1
+                    listing_row = db.get(FactListing, lid)
+                    url_hint = (listing_row.external_url if listing_row else "")[:160]
+                    slog.info("scrape_listing_start", listing_id=str(lid), url=url_hint)
+                    r = svc.scrape_product(lid)
+                    slog.info(
+                        "scrape_listing_end",
+                        listing_id=str(lid),
+                        success=r.success,
+                        err=(r.error or "")[:120],
+                    )
+                    if r.success:
+                        ok += 1
+                    else:
+                        failed += 1
+                except Exception as exc:
+                    tb = traceback.format_exc()
+                    slog.exception("scrape_listing_failed", listing_id=str(lid), traceback=tb)
+                    slog.error(
+                        "exception_before_technical_error_log",
+                        listing_id=str(lid),
+                        exc_type=exc.__class__.__name__,
+                        exc_message=str(exc)[:2000],
+                    )
+                    try:
+                        db.rollback()
+                    except Exception:
+                        slog.exception("rollback_after_listing_failure", listing_id=str(lid))
+                    _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
+                    failed += 1
     finally:
         db.close()
 
     slog.info(
         "scrape_all_pool_products_finished",
-        eligible=len(stale_ids),
+        eligible=queued_total,
         ok=ok,
         failed=failed,
     )
     return {
-        "queued": len(stale_ids),
+        "queued": queued_total,
         "scraped_ok": ok,
         "scraped_failed": failed,
     }
