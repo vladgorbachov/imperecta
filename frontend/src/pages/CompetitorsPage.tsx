@@ -344,30 +344,30 @@ export function CompetitorsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <PageHeader
         title="nav.competitors"
         actions={
           <Button onClick={() => setAddCompetitorOpen(true)}>
-            <Plus className="mr-2 size-4" />
+            <Plus className="mr-1.5 size-3.5" />
             {t("competitors.addCompetitor")}
           </Button>
         }
       />
 
       {/* Toolbar */}
-      <div className="glass-card flex flex-col gap-[0.9rem] rounded-2xl p-[0.9rem] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex w-full flex-col gap-[0.9rem] sm:flex-row sm:items-center sm:gap-2">
+      <div className="glass-card flex flex-col gap-2.5 rounded-xl p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-2">
           <div className="relative flex-1 sm:max-w-64">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder={t("products.search")}
               value={searchRaw}
               onChange={(e) => setSearchRaw(e.target.value)}
-              className="w-full pl-9"
+              className="w-full pl-8"
             />
           </div>
-          <div className="glass-card flex rounded-xl border border-input bg-background p-[0.225rem]">
+          <div className="glass-card flex rounded-md border border-input bg-background p-0.5">
             <Button
               variant={viewMode === "grid" ? "secondary" : "ghost"}
               size="sm"
@@ -413,7 +413,7 @@ export function CompetitorsPage() {
           }}
         />
       ) : viewMode === "grid" ? (
-        <div className="grid grid-cols-1 gap-[0.9rem] sm:grid-cols-2 sm:gap-[1.125rem] lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-3.5 lg:grid-cols-3">
           {filteredCompetitors.map((c) => (
             <CompetitorCard
               key={c.id}
@@ -434,7 +434,7 @@ export function CompetitorsPage() {
           ))}
         </div>
       ) : (
-        <div className="glass-card overflow-x-auto overflow-hidden rounded-2xl border border-border dark:border-border">
+        <div className="glass-card overflow-x-auto overflow-hidden rounded-xl border border-border dark:border-border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -548,7 +548,7 @@ function CompetitorCard({
         : "competitors.strengthWeak";
 
   return (
-    <div className="glass-card flex flex-col rounded-xl border border-border bg-card p-[1.125rem] shadow-sm dark:border-border dark:bg-card">
+    <div className="glass-card flex flex-col rounded-xl border border-border bg-card p-3.5 shadow-sm dark:border-border dark:bg-card">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <a
@@ -568,14 +568,14 @@ function CompetitorCard({
         <CircularScore value={score} size={44} strokeWidth={3} />
       </div>
 
-      <div className="mt-[0.9rem] h-10">
+      <div className="mt-2.5 h-8">
         <PriceSparkline data={sparklineData} />
       </div>
 
-      <div className="mt-[0.9rem] flex flex-wrap items-center gap-2">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <span
           className={cn(
-            "rounded-md border px-2 py-0.5 text-xs font-medium",
+            "rounded-md border px-2 py-0.5 text-[11px] font-medium",
             strength === "strong" &&
               "bg-[var(--color-price-up-bg)] text-[var(--color-price-up)] border-[var(--color-price-up-border)]",
             strength === "moderate" &&
@@ -588,7 +588,7 @@ function CompetitorCard({
         </span>
       </div>
 
-      <div className="mt-[1.125rem] flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -782,7 +782,7 @@ function ExpandableCompetitorRow({
               expanded ? "max-h-[600px]" : "max-h-0"
             )}
           >
-            <div className="border-t border-border px-[1.125rem] py-[1.125rem] dark:border-border">
+            <div className="border-t border-border px-3.5 py-3 dark:border-border">
               <div className="mb-4 flex justify-end">
                 <Button size="sm" variant="outline" onClick={onAddProduct}>
                   <Plus className="mr-2 size-4" />

@@ -270,7 +270,7 @@ export function MarketsTickerBar() {
 
   return (
     <div
-      className="liquid-glass flex flex-col gap-[0.675rem] rounded-2xl p-[1.125rem] sm:flex-row sm:items-center sm:justify-between"
+      className="liquid-glass flex flex-col gap-2 rounded-xl p-3 sm:flex-row sm:items-center sm:justify-between"
       style={{ background: "var(--glass-bg)" }}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -281,7 +281,7 @@ export function MarketsTickerBar() {
 
       {showTicker && (
         <div className="group flex max-w-full overflow-hidden">
-          <div className="flex animate-marquee gap-9 whitespace-nowrap group-hover:[animation-play-state:paused]">
+          <div className="flex animate-marquee gap-7 whitespace-nowrap group-hover:[animation-play-state:paused]">
             {[...items, ...items].map((item, i) => (
               <span key={`${item.symbol}-${i}`} className="flex shrink-0 items-center gap-2">
                 <TickerItem item={item} locale={locale} />

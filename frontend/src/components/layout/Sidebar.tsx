@@ -61,7 +61,7 @@ function SidebarLogo({
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-16 shrink-0 items-stretch border-b px-0 transition-colors",
+        "flex h-12 shrink-0 items-stretch border-b px-0 transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
@@ -113,8 +113,8 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-[0.675rem] rounded-lg py-[0.675rem] text-sm transition-all duration-200",
-        showLabels ? "ps-[0.8rem] pe-[0.8rem]" : "justify-center ps-[0.55rem] pe-[0.55rem]",
+        "group relative flex items-center gap-2 rounded-md py-1.5 text-xs transition-all duration-200",
+        showLabels ? "ps-2.5 pe-2.5" : "justify-center ps-2 pe-2",
         isActive
           ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
           : "text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
@@ -122,7 +122,7 @@ function SidebarItem({
     >
       {isActive && (
         <div
-          className="absolute inset-y-1.5 start-0 w-[3px] rounded-e-full"
+          className="absolute inset-y-1 start-0 w-[2px] rounded-e-full"
           style={{
             background: "var(--accent)",
             boxShadow: "0 0 8px var(--accent-glow)",
@@ -131,7 +131,7 @@ function SidebarItem({
       )}
       <Icon
         className={cn(
-          "size-5 shrink-0",
+          "size-4 shrink-0",
           isActive && "text-[var(--accent)]"
         )}
         style={
@@ -174,11 +174,11 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
   const showLabels = !collapsed;
 
   return (
-    <Collapsible defaultOpen className="px-2">
+    <Collapsible defaultOpen className="px-1.5">
       {showLabels && (
-        <div className="flex w-full items-center justify-between gap-2 py-[0.55rem]">
+        <div className="flex w-full items-center justify-between gap-2 py-1.5">
           <CollapsibleTrigger
-            className="flex flex-1 items-center text-left text-xs font-medium uppercase tracking-wider text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            className="flex flex-1 items-center text-left text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
             {label}
           </CollapsibleTrigger>
@@ -186,7 +186,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
         </div>
       )}
       <CollapsibleContent>
-        <div className="space-y-1 py-1">{children}</div>
+        <div className="space-y-0.5 py-0.5">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -287,12 +287,12 @@ export function Sidebar({
       className={cn(
         "flex flex-col text-[var(--foreground)] transition-[width] duration-300 ease-in-out",
         "border-e border-[var(--glass-border)]",
-        isMobile ? "w-full" : collapsed ? "w-16" : "w-[252px]"
+        isMobile ? "w-full" : collapsed ? "w-12" : "w-[200px]"
       )}
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
-      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4">
+      <nav className="flex flex-1 flex-col gap-1.5 overflow-y-auto py-2.5">
         <SidebarSection
           label={t("nav.section.core")}
           collapsed={collapsed}
