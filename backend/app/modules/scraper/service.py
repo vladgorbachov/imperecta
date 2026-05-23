@@ -522,6 +522,9 @@ class GlobalScrapeService:
             data=data if result.success else None,
         )
         result.log_status = log_status
+        error_message = result.error
+        if (not result.success) and (not error_message):
+            error_message = f"status:{log_status}"
         price_found = None
         if result.success and data and data.price is not None:
             price_found = float(data.price)
@@ -578,7 +581,7 @@ class GlobalScrapeService:
             in_stock_found=in_stock_found,
             duration_ms=result.duration_ms,
             scraper_type=result.scraper_layer,
-            error_message=result.error,
+            error_message=error_message,
             error_category=error_category,
         )
         if not log_saved:

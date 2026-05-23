@@ -63,6 +63,11 @@ def test_parse_price_text_ignores_cashback_noise():
     assert parse_price_text("38лейКэшбэк:1лей ... до 30%") == 38.0
 
 
+def test_parse_price_text_ignores_huge_numeric_ids_without_currency():
+    """Large catalog/barcode IDs must not be interpreted as product prices."""
+    assert parse_price_text("code: 8606012799980") is None
+
+
 def test_merge_and_finalize_detects_currency_from_page_text():
     """If extractor price exists but currency is missing, fallback should detect it from page text."""
     html = "<html><body><div>Цена: 38 лей</div></body></html>"

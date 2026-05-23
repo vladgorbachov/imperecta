@@ -234,3 +234,44 @@ async def test_discover_seed_url_https_prefix_from_domain():
     res = await crawler.discover(mp)
     assert res.status == "no_categories"
     assert urls_passed and str(urls_passed[0]).startswith("https://")
+
+
+@pytest.mark.asyncio
+async def test_discover_fallback_seed_candidate_after_initial_failure():
+    """Discovery should try alternate seed URLs when homepage seed fails."""
+    mp = _marketplace()
+    mp.base_url = "https://example.com"
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.flush = AsyncMock()
+    db.scalar = AsyncMock(side_effect=[0, 1])
+    existing = MagicMock()
+    existing.all.return_value = []
+    db.execute = AsyncMock(return_value=existing)
+
+    called_urls: list[str] = []
+
+    async def scrape_listing(**kwargs):
+        url = kwargs["url"]
+        called_urls.append(url)
+        if url.endswith("/catalog"):
+            return ListingScrapeResult(
+                success=True,
+                url=url,
+                product_urls=["https://example.com/p/one"],
+                next_page_url=None,
+                scraper_layer="httpx",
+            )
+        return ListingScrapeResult(success=False, url=url, error="fetch_failed")
+
+    pool = MagicMock()
+    pool.scrape_listing = AsyncMock(side_effect=scrape_listing)
+
+    crawler = disc.DiscoveryCrawler(db, pool)
+    res = await crawler.discover(mp)
+    assert res.status == "completed"
+    assert res.persisted_listings >= 1
+    assert any(url.endswith("/catalog") for url in called_urls)

@@ -352,8 +352,23 @@ def _extract_pipeline_metadata(config: Any) -> dict[str, Any]:
     return ParsingAdminService._build_initial_metadata()
 
 
+def _touch_pipeline_metadata(
+    metadata: dict[str, Any],
+    *,
+    stage: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Update pipeline heartbeat metadata in-place and return it."""
+    touched_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    metadata["last_activity_at"] = touched_at
+    if stage is not None:
+        metadata["current_stage"] = stage
+    return metadata
+
+
 async def _discover_for_full_pipeline(
     db: AsyncSession,
+    on_progress: Any | None = None,
 ) -> tuple[int, dict[UUID, dict[str, Any]], list[str]]:
     result = await db.execute(
         select(DimMarketplace)
@@ -381,6 +396,8 @@ async def _discover_for_full_pipeline(
                 "status": "failed" if discovered.status == "error" else "completed",
             }
             errors.extend(discovered.errors)
+            if on_progress is not None:
+                await on_progress()
         except Exception as exc:
             slog.exception(
                 "full_pipeline_discovery_failed",
@@ -397,6 +414,8 @@ async def _discover_for_full_pipeline(
                 "duration_ms": 0,
                 "status": "failed",
             }
+            if on_progress is not None:
+                await on_progress()
     return len(marketplaces), per_marketplace, errors
 
 
@@ -440,12 +459,34 @@ async def _finalize_full_pipeline_job(
             merged_entry["status"] = "failed"
         merged.append(merged_entry)
 
+    # Include marketplaces that were scraped but absent in discovery seed.
+    missing_marketplace_ids = set(stats_by_marketplace) - set(per_marketplace_seed)
+    if missing_marketplace_ids:
+        domains_result = await db.execute(
+            select(DimMarketplace.id, DimMarketplace.domain).where(DimMarketplace.id.in_(missing_marketplace_ids))
+        )
+        domain_map = {row.id: row.domain for row in domains_result}
+        for marketplace_id in missing_marketplace_ids:
+            stats = stats_by_marketplace[marketplace_id]
+            merged.append(
+                {
+                    "marketplace_id": str(marketplace_id),
+                    "domain": domain_map.get(marketplace_id),
+                    "listings_created": 0,
+                    "prices_saved": int(stats.get("prices_saved", 0)),
+                    "errors_count": int(stats.get("errors_count", 0)),
+                    "duration_ms": 0,
+                    "status": "failed" if int(stats.get("errors_count", 0)) > 0 else "completed",
+                }
+            )
+
     listings_created = int(sum(item["listings_created"] for item in merged))
     prices_saved = int(sum(item["prices_saved"] for item in merged))
     errors_count = int(sum(item["errors_count"] for item in merged))
     total_ms = int(discovery_ms + scrape_ms + persist_ms)
 
     metadata = _extract_pipeline_metadata(job.config)
+    _touch_pipeline_metadata(metadata)
     metadata.update(
         {
             "current_stage": "failed" if hard_error else "completed",
@@ -503,17 +544,30 @@ def run_full_pipeline_test(self, parent_job_id: str) -> dict:
                     return {"status": "not_found", "job_id": str(job_uuid)}
 
                 metadata = _extract_pipeline_metadata(parent.config)
-                metadata["current_stage"] = "discovery"
+                _touch_pipeline_metadata(metadata, stage="discovery")
                 metadata["celery_task_id"] = self.request.id
+                parent.status = "running"
                 parent.config = {"metadata": metadata}
                 await db.commit()
 
+                async def _pulse_discovery() -> None:
+                    parent_local = await db.get(ScrapeJob, job_uuid)
+                    if parent_local is None:
+                        return
+                    pulse_meta = _extract_pipeline_metadata(parent_local.config)
+                    _touch_pipeline_metadata(pulse_meta, stage="discovery")
+                    parent_local.config = {"metadata": pulse_meta}
+                    await db.commit()
+
                 discovery_started = time.perf_counter()
-                _seen, per_marketplace_seed, discovery_errors = await _discover_for_full_pipeline(db)
+                _seen, per_marketplace_seed, discovery_errors = await _discover_for_full_pipeline(
+                    db,
+                    on_progress=_pulse_discovery,
+                )
                 discovery_ms = int((time.perf_counter() - discovery_started) * 1000)
 
                 metadata = _extract_pipeline_metadata(parent.config)
-                metadata["current_stage"] = "scrape"
+                _touch_pipeline_metadata(metadata, stage="scrape")
                 metadata["discovery_errors"] = discovery_errors[:20]
                 parent.config = {"metadata": metadata}
                 await db.commit()
@@ -530,6 +584,10 @@ def run_full_pipeline_test(self, parent_job_id: str) -> dict:
                 if scrape_result.get("error"):
                     hard_error = str(scrape_result["error"])
                 persist_ms = int((time.perf_counter() - persist_started) * 1000)
+                metadata = _extract_pipeline_metadata(parent.config)
+                _touch_pipeline_metadata(metadata, stage="persist")
+                parent.config = {"metadata": metadata}
+                await db.commit()
 
                 metadata = await _finalize_full_pipeline_job(
                     db,
