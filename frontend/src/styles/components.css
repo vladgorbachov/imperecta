@@ -62,9 +62,9 @@ table {
 thead th {
   background: rgba(255, 255, 255, 0.03);
   color: var(--foreground-muted);
-  font-size: 0.82rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   border-bottom: 1px solid var(--border);
 }
@@ -79,10 +79,10 @@ tbody tr:hover {
 /* Badge */
 .badge {
   border-radius: var(--radius-sm) !important;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  padding: 2px 8px !important;
+  padding: 1px 6px !important;
 }
 
 /* Sidebar */

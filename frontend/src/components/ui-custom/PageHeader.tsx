@@ -25,13 +25,13 @@ export function PageHeader({ title, description, actions, className }: PageHeade
   return (
     <div
       className={cn(
-        "flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between",
+        "flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between",
         className
       )}
     >
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         <h1
-          className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl"
+          className="text-lg font-semibold tracking-tight sm:text-xl md:text-2xl"
           style={{
             fontFamily: "var(--font-display)",
             ...(isLight
@@ -47,7 +47,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
           {t(title)}
         </h1>
         {description && (
-          <p className="text-base" style={{ color: "var(--foreground-muted)" }}>
+          <p className="text-xs" style={{ color: "var(--foreground-muted)" }}>
             {t(description)}
           </p>
         )}

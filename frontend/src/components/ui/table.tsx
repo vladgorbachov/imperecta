@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 const Table = ({ className, ...props }: HTMLAttributes<HTMLTableElement>) => (
   <div className="relative w-full overflow-auto">
     <table
-      className={cn("w-full caption-bottom text-sm", className)}
+      className={cn("w-full caption-bottom text-xs", className)}
       {...props}
     />
   </div>
@@ -61,7 +61,7 @@ const TableHead = ({
 }: HTMLAttributes<HTMLTableCellElement>) => (
   <th
     className={cn(
-      "h-[3.15rem] px-[1.125rem] text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
+      "h-9 px-3 text-left align-middle text-xs font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
       className
     )}
     {...props}
@@ -76,7 +76,7 @@ const TableCell = ({
 }: HTMLAttributes<HTMLTableCellElement> & { colSpan?: number }) => (
   <td
     colSpan={colSpan}
-    className={cn("p-[1.125rem] align-middle [&:has([role=checkbox])]:pr-0", className)}
+    className={cn("px-3 py-2.5 align-middle [&:has([role=checkbox])]:pr-0", className)}
     {...props}
   />
 );

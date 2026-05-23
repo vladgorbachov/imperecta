@@ -66,6 +66,26 @@ def _needs_scrape_logs_constraint_repair(exc: Exception) -> bool:
     )
 
 
+def _needs_scrape_logs_status_column_repair(exc: Exception) -> bool:
+    """Detect legacy scrape_logs.status VARCHAR(20) drift."""
+    message = str(exc).lower()
+    return (
+        "stringdatarighttruncation" in message
+        and "character varying(20)" in message
+    )
+
+
+def _repair_scrape_logs_status_column(db: Session) -> bool:
+    """Widen scrape_logs.status to varchar(50) for current status taxonomy."""
+    try:
+        db.execute(text("ALTER TABLE scrape_logs ALTER COLUMN status TYPE VARCHAR(50)"))
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
+
+
 def _repair_scrape_logs_status_constraint(db: Session) -> bool:
     """Repair scrape_logs.status CHECK to allow all supported statuses."""
     allowed = ",".join(f"'{status}'" for status in _SCRAPE_LOG_STATUSES)
@@ -465,9 +485,34 @@ class GlobalScrapeService:
                 log_status == "technical_error"
                 and _needs_scrape_logs_constraint_repair(exc)
             )
+            needs_status_column_repair = (
+                log_status == "missing_critical_data"
+                and _needs_scrape_logs_status_column_repair(exc)
+            )
             if needs_repair:
                 self.db.rollback()
+            if needs_status_column_repair:
+                self.db.rollback()
             if needs_repair and _repair_scrape_logs_status_constraint(self.db):
+                try:
+                    self.db.add(log_entry)
+                    self.db.flush()
+                    self.db.commit()
+                except Exception as retry_exc:
+                    logger.error(
+                        "scrape persist rollback listing_id=%s err=%s",
+                        listing_id,
+                        retry_exc,
+                        exc_info=True,
+                    )
+                    self.db.rollback()
+                    return PoolScrapeResult(
+                        success=False,
+                        url=listing.external_url,
+                        data=data,
+                        error="persist_failed",
+                    )
+            elif needs_status_column_repair and _repair_scrape_logs_status_column(self.db):
                 try:
                     self.db.add(log_entry)
                     self.db.flush()

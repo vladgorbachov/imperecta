@@ -49,29 +49,29 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
   return (
     <header
       className={cn(
-        "flex h-[3.6rem] min-h-[51px] shrink-0 items-center justify-between px-[0.9rem] backdrop-blur-xl safe-area-top sm:h-[4.05rem] sm:px-[1.125rem] md:px-[1.575rem]",
+        "flex h-12 min-h-[44px] shrink-0 items-center justify-between px-3 backdrop-blur-xl safe-area-top sm:h-14 sm:px-4 md:px-5",
         "bg-[var(--background-mid)] border-b border-[var(--glass-border)]"
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-[0.675rem]">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         {onMenuClick && (
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0 min-h-12 min-w-12 touch-manipulation md:hidden"
+            className="shrink-0 min-h-10 min-w-10 touch-manipulation md:hidden"
             onClick={onMenuClick}
             aria-label={t("common.menu")}
           >
-            <Menu className="size-5" />
+            <Menu className="size-4" />
           </Button>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-[0.45rem] sm:gap-[0.55rem]">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <Button
           variant="ghost"
           size="icon"
           className={cn(
-            "min-h-11 min-w-11 touch-manipulation sm:min-h-10 sm:min-w-10",
+            "min-h-9 min-w-9 size-9 touch-manipulation",
             "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]",
             "hover:shadow-[0_0_12px_var(--accent-glow)] transition-all duration-200"
           )}
@@ -79,21 +79,21 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           aria-label={t("common.toggleTheme")}
         >
           {isDark ? (
-            <Sun className="size-5 text-[var(--foreground)]" />
+            <Sun className="size-4 text-[var(--foreground)]" />
           ) : (
-            <Moon className="size-5 text-[var(--foreground)]" />
+            <Moon className="size-4 text-[var(--foreground)]" />
           )}
         </Button>
         <Button
           variant="ghost"
           size="icon"
           className={cn(
-            "relative min-h-11 min-w-11 touch-manipulation sm:min-h-10 sm:min-w-10",
+            "relative min-h-9 min-w-9 size-9 touch-manipulation",
             "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]"
           )}
           aria-label={t("common.notifications")}
         >
-          <Bell className="size-5 text-[var(--foreground)]" />
+          <Bell className="size-4 text-[var(--foreground)]" />
           {notificationCount > 0 && (
             <span
               className={cn(
@@ -113,11 +113,11 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className="relative min-h-11 min-w-11 rounded-full touch-manipulation sm:min-h-10 sm:min-w-10 p-0"
+              className="relative min-h-9 min-w-9 size-9 rounded-full touch-manipulation p-0"
               aria-label={t("auth.profile")}
             >
               <Avatar
-                className="size-9 sm:size-9 ring-2 ring-[var(--accent)]"
+                className="size-8 ring-2 ring-[var(--accent)]"
                 style={{ boxShadow: "0 0 12px var(--accent-glow)" }}
               >
                 <AvatarImage src={user?.avatar_url ?? undefined} alt={user?.name} />

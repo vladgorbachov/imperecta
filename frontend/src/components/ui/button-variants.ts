@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority";
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-md text-sm font-semibold transition-colors",
+  "inline-flex items-center justify-center rounded-md text-xs font-medium transition-colors",
   {
     variants: {
       variant: {
@@ -13,10 +13,10 @@ export const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 min-w-[2.5rem] px-[1.125rem] py-[0.55rem]",
-        sm: "h-9 min-w-[2.25rem] px-3.5",
-        lg: "h-11 min-w-[3rem] px-8",
-        icon: "size-10",
+        default: "h-8 min-w-[2rem] px-3 py-1.5",
+        sm: "h-7 min-w-[1.75rem] px-2.5 text-xs",
+        lg: "h-9 min-w-[2.5rem] px-5",
+        icon: "size-8",
       },
     },
     defaultVariants: {

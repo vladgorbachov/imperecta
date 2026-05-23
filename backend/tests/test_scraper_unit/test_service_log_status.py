@@ -12,6 +12,7 @@ from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
     _compute_price_change_pct,
+    _needs_scrape_logs_status_column_repair,
     _optional_in_stock,
     _payload_has_product_name_field,
     _previous_price_snapshot,
@@ -127,6 +128,13 @@ def test_compute_price_change_pct_bounds():
     assert _compute_price_change_pct(100.0, 120.0) == 20.0
     # Numeric(8,4) cap protection: values above 9999.9999 become NULL.
     assert _compute_price_change_pct(1.0, 1000.0) is None
+
+
+def test_detect_status_column_drift_error():
+    err = Exception(
+        "(psycopg2.errors.StringDataRightTruncation) value too long for type character varying(20)"
+    )
+    assert _needs_scrape_logs_status_column_repair(err) is True
 
 
 def test_recalculate_analytics_noop():
