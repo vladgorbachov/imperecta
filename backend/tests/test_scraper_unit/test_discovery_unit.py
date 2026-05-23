@@ -34,7 +34,9 @@ async def test_save_product_urls_creates_new_rows():
 
     mp_id = uuid4()
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=None)
+    existing = MagicMock()
+    existing.all.return_value = []
+    db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
     db.flush = AsyncMock()
 
@@ -55,12 +57,16 @@ async def test_save_product_urls_skips_duplicate_hash():
     from unittest.mock import AsyncMock, MagicMock
 
     mp_id = uuid4()
+    url = "https://shop.example/p/exists"
+    url_hash = disc.FactListing.compute_url_hash(url)
     db = AsyncMock()
-    db.scalar = AsyncMock(return_value=uuid4())
+    existing = MagicMock()
+    existing.all.return_value = [(url_hash,)]
+    db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
     db.flush = AsyncMock()
 
     crawler = disc.DiscoveryCrawler(db, MagicMock())
-    count = await crawler._save_product_urls(mp_id, ["https://shop.example/p/exists"])
+    count = await crawler._save_product_urls(mp_id, [url])
     assert count == 0
     db.add.assert_not_called()

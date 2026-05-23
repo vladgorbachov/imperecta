@@ -31,8 +31,11 @@ async def test_discover_completed_saves_urls():
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
     db.flush = AsyncMock()
-    # current listings, url_hash check (new), pool count
-    db.scalar = AsyncMock(side_effect=[0, None, 3])
+    # current listings, pool count
+    db.scalar = AsyncMock(side_effect=[0, 3])
+    existing = MagicMock()
+    existing.all.return_value = []
+    db.execute = AsyncMock(return_value=existing)
 
     async def scrape_listing(**_kwargs):
         return ListingScrapeResult(
@@ -110,8 +113,11 @@ async def test_discover_partial_second_page_fails():
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
     db.flush = AsyncMock()
-    # initial count, url_hash miss, final pool count
-    db.scalar = AsyncMock(side_effect=[0, None, 1])
+    # initial count, final pool count
+    db.scalar = AsyncMock(side_effect=[0, 1])
+    existing = MagicMock()
+    existing.all.return_value = []
+    db.execute = AsyncMock(return_value=existing)
 
     calls = []
 
@@ -182,7 +188,10 @@ async def test_discover_success_path_final_commit_raises():
             next_page_url=None,
         ),
     )
-    db.scalar = AsyncMock(side_effect=[0, None, 1])
+    db.scalar = AsyncMock(side_effect=[0, 1])
+    existing = MagicMock()
+    existing.all.return_value = []
+    db.execute = AsyncMock(return_value=existing)
 
     crawler = disc.DiscoveryCrawler(db, pool)
     res = await crawler.discover(mp)

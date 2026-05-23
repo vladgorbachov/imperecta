@@ -5,11 +5,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
@@ -69,32 +70,45 @@ class DiscoveryCrawler:
 
     async def _save_product_urls(self, marketplace_id: UUID, urls: list[str]) -> int:
         """Save discovered URLs. Creates DimProduct + FactListing per new URL."""
+        if not urls:
+            return 0
+
+        normalized_urls = [url for url in urls if url]
+        hash_by_url = {url: FactListing.compute_url_hash(url) for url in normalized_urls}
+        existing_hashes_result = await self.db.execute(
+            select(FactListing.url_hash).where(FactListing.url_hash.in_(list(hash_by_url.values()))),
+        )
+        existing_hashes = {row[0] for row in existing_hashes_result.all() if row[0]}
+
         new_count = 0
-        for url in urls:
-            url_hash = FactListing.compute_url_hash(url)
-            exists = await self.db.scalar(select(FactListing.id).where(FactListing.url_hash == url_hash))
-            if exists:
+        for url in normalized_urls:
+            url_hash = hash_by_url[url]
+            if url_hash in existing_hashes:
                 continue
 
             title = _title_from_url(url) or "product"
+            product_id = uuid4()
             product = DimProduct(
+                id=product_id,
                 name=title,
                 name_normalized=_normalize_name(title) or "product",
                 is_active=True,
             )
             self.db.add(product)
-            await self.db.flush()
 
             listing = FactListing(
-                product_id=product.id,
+                product_id=product_id,
                 marketplace_id=marketplace_id,
                 external_url=url,
                 url_hash=url_hash,
                 is_active=True,
             )
             self.db.add(listing)
+            existing_hashes.add(url_hash)
             new_count += 1
 
+        if new_count > 0:
+            await self.db.flush()
         return new_count
 
     async def discover(self, marketplace: DimMarketplace) -> DiscoveryResult:
@@ -126,6 +140,7 @@ class DiscoveryCrawler:
         completed_at: datetime | None = None
 
         try:
+            settings = Settings()
             seed_url = (marketplace.base_url or f"https://{domain}").strip()
             if not seed_url.startswith("http"):
                 seed_url = f"https://{seed_url}"
@@ -135,14 +150,16 @@ class DiscoveryCrawler:
             )
             current_count = int(current or 0)
             quota = int(marketplace.product_quota or 0)
+            no_quota_limit = max(int(settings.discovery_no_quota_limit or 200000), 1)
+            max_pages = max(int(settings.discovery_max_pages_per_run or 5000), 1)
             # quota 0 = no explicit cap (large ceiling); quota > 0 = remaining slots
-            remaining = max(0, quota - current_count) if quota > 0 else 10_000
+            remaining = max(0, quota - current_count) if quota > 0 else no_quota_limit
 
             seen_urls: set[str] = set()
             page_url: str | None = seed_url
             requires_js = bool(marketplace.requires_js)
 
-            while page_url and remaining > 0 and pages_scanned < 50:
+            while page_url and remaining > 0 and pages_scanned < max_pages:
                 listing_res = await self.pool.scrape_listing(
                     url=page_url,
                     custom_link_selector=marketplace.custom_product_link_selector,

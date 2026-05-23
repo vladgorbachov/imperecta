@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     port: int
 
     debug: bool = False
+    discovery_max_pages_per_run: int = 5000
+    discovery_no_quota_limit: int = 200000
     scrape_pool_batch_size: int = 1000
     scrape_pool_max_listings_per_run: int = 200000
     bootstrap_admin_email: str | None = None
