@@ -203,6 +203,25 @@ async def test_get_job_live_feed_contract_for_empty_job(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_active_pipeline_job_returns_latest_running(monkeypatch):
+    """Active job endpoint helper should return running pipeline row."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+
+        created = await service.trigger_full_pipeline_test()
+        active = await service.get_active_pipeline_job()
+        assert active is not None
+        assert active["job_id"] == created["job_id"]
+        assert active["status"] == "running"
+
+        job = await session.get(ScrapeJob, UUID(created["job_id"]))
+        if job is not None:
+            await session.delete(job)
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_get_test_runs_falls_back_to_job_counters(monkeypatch):
     """History payload falls back to ScrapeJob counters when metadata summary is missing."""
     async with async_session_maker() as session:
