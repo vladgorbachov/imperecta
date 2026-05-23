@@ -62,7 +62,7 @@ async def test_trigger_status_and_runs_with_supported_job_type(monkeypatch):
         running = await service.get_job_status(job_id)
         assert running["status"] == "running"
         assert running["current_stage"] == "queued"
-        assert running["metadata"] is None
+        assert isinstance(running["metadata"], dict)
 
         job = await session.get(ScrapeJob, job_id)
         assert job is not None
@@ -179,6 +179,27 @@ async def test_get_job_status_not_found():
         with pytest.raises(ValueError) as exc:
             await service.get_job_status(UUID("00000000-0000-0000-0000-000000000001"))
         assert "Scrape job not found" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_get_job_live_feed_contract_for_empty_job(monkeypatch):
+    """Live feed returns stable contract even before any scrape_logs exist."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+        created = await service.trigger_full_pipeline_test()
+        job_id = UUID(created["job_id"])
+
+        feed = await service.get_job_live_feed(job_id, limit=50, offset=0)
+        assert feed["job_id"] == str(job_id)
+        assert isinstance(feed["steps"], list)
+        assert isinstance(feed["status_counts"], dict)
+        assert "paging" in feed
+
+        job = await session.get(ScrapeJob, job_id)
+        if job is not None:
+            await session.delete(job)
+            await session.commit()
 
 
 @pytest.mark.asyncio

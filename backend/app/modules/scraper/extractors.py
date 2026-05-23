@@ -77,11 +77,34 @@ _CURRENCY_TEXT_CODES: dict[str, str] = {
     "hrk": "HRK",
     "rsd": "RSD",
     "mdl": "MDL",
+    "лей": "MDL",
+    "лэй": "MDL",
     "chf": "CHF",
     "uzs": "UZS",
     "kgs": "KGS",
     "tjs": "TJS",
 }
+
+_PRICE_CONTEXT_POSITIVE = (
+    "price",
+    "цена",
+    "стоимость",
+    "total",
+    "итого",
+    "sale",
+    "our price",
+)
+_PRICE_CONTEXT_NEGATIVE = (
+    "%",
+    "cashback",
+    "кэшбэк",
+    "bonus",
+    "бонус",
+    "скидка",
+    "discount",
+    "save",
+    "эконом",
+)
 
 _EXCLUDED_LINK_HINTS = (
     "login",
@@ -536,69 +559,84 @@ def parse_price_text(text: str) -> float | None:
         return None
 
     raw = str(text).strip()
-
-    # Collapse non-breaking spaces and thin spaces to regular space.
     raw = raw.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
+    lowered = raw.lower()
 
-    # Strip everything except digits, comma, dot, space, hyphen/minus.
-    cleaned = re.sub(r"[^\d,.\s\-]", "", raw)
-    # Collapse spaces around separators (e.g. "1 234 , 56" → "1 234,56").
-    cleaned = re.sub(r"\s*([,.])\s*", r"\1", cleaned)
+    def _parse_number_token(token: str) -> float | None:
+        value = token.strip()
+        if not value:
+            return None
 
-    # Extract the number portion (digits, commas, dots, spaces as thousand seps).
-    match = re.search(r"(\d[\d,.\s]*\d|\d+)", cleaned)
-    if not match:
-        return None
-    value = match.group(1).strip()
+        value = re.sub(r"\s*([,.])\s*", r"\1", value)
+        has_comma = "," in value
+        has_dot = "." in value
+        has_space = " " in value
 
-    # Determine the role of commas and dots.
-    has_comma = "," in value
-    has_dot = "." in value
-    has_space = " " in value
-
-    if has_comma and has_dot:
-        # Mixed: last separator is decimal, earlier ones are thousands.
-        if value.rfind(",") > value.rfind("."):
-            value = value.replace(" ", "").replace(".", "").replace(",", ".")
-        else:
-            value = value.replace(" ", "").replace(",", "")
-    elif has_comma and not has_dot:
-        parts = value.replace(" ", "").split(",")
-        if len(parts) == 2 and len(parts[-1]) in (1, 2):
-            # "1234,56" or "1 234,5" — comma is decimal.
-            value = value.replace(" ", "").replace(",", ".")
-        elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
-            # "1,234,567" — commas are thousands.
-            value = value.replace(" ", "").replace(",", "")
-        else:
-            # Ambiguous; treat last comma as decimal if fractional part ≤ 2 digits.
-            last_part = parts[-1]
-            if len(last_part) <= 2:
-                value = ",".join(parts[:-1]).replace(",", "") + "." + last_part
-                value = value.replace(" ", "")
+        if has_comma and has_dot:
+            if value.rfind(",") > value.rfind("."):
+                value = value.replace(" ", "").replace(".", "").replace(",", ".")
             else:
                 value = value.replace(" ", "").replace(",", "")
-    elif has_dot and not has_comma:
-        parts = value.replace(" ", "").split(".")
-        if len(parts) == 2 and len(parts[-1]) in (1, 2):
-            # "1234.56" — dot is decimal.
+        elif has_comma and not has_dot:
+            parts = value.replace(" ", "").split(",")
+            if len(parts) == 2 and len(parts[-1]) in (1, 2):
+                value = value.replace(" ", "").replace(",", ".")
+            elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
+                value = value.replace(" ", "").replace(",", "")
+            else:
+                last_part = parts[-1]
+                if len(last_part) <= 2:
+                    value = ",".join(parts[:-1]).replace(",", "") + "." + last_part
+                    value = value.replace(" ", "")
+                else:
+                    value = value.replace(" ", "").replace(",", "")
+        elif has_dot and not has_comma:
+            parts = value.replace(" ", "").split(".")
+            if len(parts) == 2 and len(parts[-1]) in (1, 2):
+                value = value.replace(" ", "")
+            elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
+                value = value.replace(" ", "").replace(".", "")
+            else:
+                value = value.replace(" ", "")
+        elif has_space:
             value = value.replace(" ", "")
-        elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
-            # "1.234.567" — dots are thousands.
-            value = value.replace(" ", "").replace(".", "")
-        else:
-            # Default: last dot is decimal.
-            value = value.replace(" ", "")
-    elif has_space:
-        # "1 234" — spaces are thousands, no decimal.
-        value = value.replace(" ", "")
-    # else: plain integer/already clean.
 
-    try:
-        number = float(value)
-        return number if number > 0 else None
-    except ValueError:
+        try:
+            number = float(value)
+            return number if number > 0 else None
+        except ValueError:
+            return None
+
+    candidates: list[tuple[float, int]] = []
+    token_pattern = re.compile(r"\d{1,3}(?:[ \u00a0\u2009\u202f.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?")
+    for match in token_pattern.finditer(raw):
+        token = match.group(0)
+        parsed = _parse_number_token(token)
+        if parsed is None:
+            continue
+
+        start, end = match.span()
+        context = lowered[max(0, start - 20):min(len(lowered), end + 20)]
+        score = 0
+        if _detect_currency(context):
+            score += 8
+        if any(marker in context for marker in _PRICE_CONTEXT_POSITIVE):
+            score += 4
+        if any(marker in context for marker in _PRICE_CONTEXT_NEGATIVE):
+            score -= 6
+        if parsed < 1:
+            score -= 3
+        if parsed > 1_000_000_000:
+            score -= 8
+
+        candidates.append((parsed, score))
+
+    if not candidates:
         return None
+
+    # Prefer high-confidence contexts; for ties choose larger realistic amount.
+    candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    return candidates[0][0]
 
 
 def parse_currency_symbol(text: str) -> str | None:
@@ -646,6 +684,18 @@ def merge_and_finalize(
 ) -> ExtractedProduct:
     """Merge extractor outputs and ensure title fallback from the full DOM."""
     merged = merge_results(*results)
+    if merged.currency is None:
+        if merged.price_raw_text:
+            detected = _detect_currency(merged.price_raw_text)
+            if detected:
+                merged.currency = detected
+                merged.currency_raw = merged.price_raw_text[:100]
+        if merged.currency is None and merged.price is not None:
+            text_probe = soup.get_text(" ", strip=True)[:4000]
+            detected = _detect_currency(text_probe)
+            if detected:
+                merged.currency = detected
+                merged.currency_raw = text_probe[:100]
     _ensure_title(merged, soup, page_url)
     logger.debug(
         "EXTRACTED title=%s price=%s currency=%s",

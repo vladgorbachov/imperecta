@@ -61,7 +61,7 @@ function SidebarLogo({
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-12 shrink-0 items-stretch border-b px-0 transition-colors",
+        "flex h-[3.6rem] shrink-0 items-stretch border-b px-0 transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
@@ -78,7 +78,7 @@ function SidebarLogo({
 function SparklesBadge({ className }: { className?: string }) {
   return (
     <Sparkles
-      className={cn("size-3.5 shrink-0 text-[var(--accent)]", className)}
+      className={cn("size-4 shrink-0 text-[var(--accent)]", className)}
       style={{ filter: "drop-shadow(0 0 4px var(--accent-glow))" }}
       aria-hidden
     />
@@ -113,8 +113,8 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-2 rounded-md py-1.5 text-xs transition-all duration-200",
-        showLabels ? "ps-2.5 pe-2.5" : "justify-center ps-2 pe-2",
+        "group relative flex items-center gap-[0.6rem] rounded-md py-[0.45rem] text-sm transition-all duration-200",
+        showLabels ? "ps-3 pe-3" : "justify-center ps-[0.6rem] pe-[0.6rem]",
         isActive
           ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
           : "text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
@@ -122,7 +122,7 @@ function SidebarItem({
     >
       {isActive && (
         <div
-          className="absolute inset-y-1 start-0 w-[2px] rounded-e-full"
+          className="absolute inset-y-[0.3rem] start-0 w-[2.5px] rounded-e-full"
           style={{
             background: "var(--accent)",
             boxShadow: "0 0 8px var(--accent-glow)",
@@ -131,7 +131,7 @@ function SidebarItem({
       )}
       <Icon
         className={cn(
-          "size-4 shrink-0",
+          "size-5 shrink-0",
           isActive && "text-[var(--accent)]"
         )}
         style={
@@ -174,11 +174,11 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
   const showLabels = !collapsed;
 
   return (
-    <Collapsible defaultOpen className="px-1.5">
+    <Collapsible defaultOpen className="px-[0.45rem]">
       {showLabels && (
-        <div className="flex w-full items-center justify-between gap-2 py-1.5">
+        <div className="flex w-full items-center justify-between gap-2 py-[0.45rem]">
           <CollapsibleTrigger
-            className="flex flex-1 items-center text-left text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            className="flex flex-1 items-center text-left text-xs font-medium uppercase tracking-[0.08em] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
             {label}
           </CollapsibleTrigger>
@@ -186,7 +186,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
         </div>
       )}
       <CollapsibleContent>
-        <div className="space-y-0.5 py-0.5">{children}</div>
+        <div className="space-y-1 py-1">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -214,12 +214,12 @@ function SidebarFooter({
   const progress = Math.min(100, (trialDaysLeft / maxDays) * 100);
 
   return (
-    <div className="shrink-0 border-t border-[var(--glass-border)] p-3">
+    <div className="shrink-0 border-t border-[var(--glass-border)] p-[0.9rem]">
       {isTrial && (
-        <div className="glass-card overflow-hidden p-3">
+        <div className="glass-card overflow-hidden p-[0.9rem]">
           <p
             className={cn(
-              "mb-2 text-xs text-[var(--foreground-muted)]",
+              "mb-[0.6rem] text-sm text-[var(--foreground-muted)]",
               !showLabels && "text-center"
             )}
           >
@@ -228,7 +228,7 @@ function SidebarFooter({
               : trialDaysLeft}
           </p>
           <div
-            className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--glass-bg)]"
+            className="mb-[0.9rem] h-[0.45rem] w-full overflow-hidden rounded-full bg-[var(--glass-bg)]"
             style={{ border: "1px solid var(--glass-border)" }}
           >
             <div
@@ -257,11 +257,11 @@ function SidebarFooter({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-full text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+          className="h-[2.4rem] w-full text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
           onClick={onToggle}
           aria-label={t("common.expand")}
         >
-          <ChevronRight className="size-4" />
+          <ChevronRight className="size-5" />
         </Button>
       )}
     </div>
@@ -287,12 +287,12 @@ export function Sidebar({
       className={cn(
         "flex flex-col text-[var(--foreground)] transition-[width] duration-300 ease-in-out",
         "border-e border-[var(--glass-border)]",
-        isMobile ? "w-full" : collapsed ? "w-12" : "w-[200px]"
+        isMobile ? "w-full" : collapsed ? "w-[3.6rem]" : "w-[240px]"
       )}
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
-      <nav className="flex flex-1 flex-col gap-1.5 overflow-y-auto py-2.5">
+      <nav className="flex flex-1 flex-col gap-[0.45rem] overflow-y-auto py-3">
         <SidebarSection
           label={t("nav.section.core")}
           collapsed={collapsed}
@@ -301,14 +301,14 @@ export function Sidebar({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+                className="h-[2.1rem] w-[2.1rem] shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
                 onClick={onToggle}
                 aria-label={collapsed ? t("common.expand") : t("common.collapse")}
               >
                 {collapsed ? (
-                  <ChevronRight className="size-4" />
+                  <ChevronRight className="size-5" />
                 ) : (
-                  <ChevronLeft className="size-4" />
+                  <ChevronLeft className="size-5" />
                 )}
               </Button>
             ) : undefined

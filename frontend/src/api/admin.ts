@@ -217,6 +217,95 @@ export interface ParsingJobStatus {
   metadata: ParsingJobMetadata | null;
 }
 
+export interface ParsingDetailedUser {
+  id: string;
+  email: string;
+  name: string | null;
+  plan: string;
+  is_active: boolean;
+  is_superuser: boolean;
+  language: string;
+  timezone: string;
+  login_count: number;
+  tracked_products: number;
+  last_login_at: string | null;
+  created_at: string | null;
+}
+
+export interface ParsingDetailedMarketplace {
+  id: string;
+  marketplace_code: string;
+  name: string;
+  domain: string;
+  base_url: string;
+  country_code: string;
+  currency_code: string;
+  scraper_type: string;
+  requires_js: boolean;
+  is_active: boolean;
+  product_quota: number;
+  products_in_pool: number;
+  active_listings: number;
+  rate_limit_delay: number;
+  last_discovery_at: string | null;
+  last_discovery_status: string | null;
+  last_discovery_products_found: number;
+  last_scrape_at: string | null;
+  last_scrape_status: string | null;
+  last_log_at: string | null;
+  total_runs: number;
+  success_runs: number;
+  error_runs: number;
+  success_rate: number;
+  last_error_message: string | null;
+}
+
+export interface ParsingLiveStep {
+  event_id: number;
+  event_type: "listing_scrape";
+  created_at: string | null;
+  status: string;
+  listing_id: string;
+  marketplace_id: string;
+  marketplace_domain: string | null;
+  url: string;
+  price_found: number | null;
+  in_stock_found: boolean | null;
+  duration_ms: number | null;
+  scraper_type: string | null;
+  error_category: string | null;
+  error_message: string | null;
+}
+
+export interface ParsingJobLiveFeed {
+  job_id: string;
+  status: "running" | "completed" | "failed";
+  current_stage: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  total_steps: number;
+  status_counts: Record<string, number>;
+  summary: {
+    listings_created: number;
+    prices_saved: number;
+    errors_count: number;
+  };
+  timings: {
+    discovery_ms: number;
+    scrape_ms: number;
+    persist_ms: number;
+    total_ms: number;
+  };
+  steps: ParsingLiveStep[];
+  paging: {
+    limit: number;
+    offset: number;
+    total: number;
+    has_more: boolean;
+  };
+}
+
 export const getParsingTestMarketplaces = () =>
   apiClient.get<ParsingTestMarketplace[]>("/admin/parsing/test-marketplaces");
 
@@ -228,3 +317,14 @@ export const getParsingTestRuns = (limit = 50) =>
 
 export const getParsingJobStatus = (jobId: string) =>
   apiClient.get<ParsingJobStatus>(`/admin/parsing/job-status/${jobId}`);
+
+export const getParsingUsersDetailed = (limit = 500) =>
+  apiClient.get<ParsingDetailedUser[]>("/admin/parsing/users-detailed", { params: { limit } });
+
+export const getParsingMarketplacesDetailed = (limit = 1000) =>
+  apiClient.get<ParsingDetailedMarketplace[]>("/admin/parsing/marketplaces-detailed", { params: { limit } });
+
+export const getParsingJobLiveFeed = (jobId: string, limit = 200, offset = 0) =>
+  apiClient.get<ParsingJobLiveFeed>(`/admin/parsing/job-live-feed/${jobId}`, {
+    params: { limit, offset },
+  });

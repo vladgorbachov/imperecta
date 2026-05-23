@@ -30,9 +30,12 @@ import { Progress } from "@/components/ui/progress";
 import { useAuthStore } from "@/stores/authStore";
 import {
   useAdminStats,
+  useParsingJobLiveFeed,
+  useParsingMarketplacesDetailed,
   useParsingJobStatus,
   useParsingTestMarketplaces,
   useParsingTestRuns,
+  useParsingUsersDetailed,
   useRunParsingFullTest,
 } from "@/hooks/useAdmin";
 
@@ -95,6 +98,7 @@ export function AdminPage() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [liveJobId, setLiveJobId] = useState<string | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [detailsJobId, setDetailsJobId] = useState<string | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -102,6 +106,8 @@ export function AdminPage() {
 
   const { data: stats } = useAdminStats();
   const marketplacesQuery = useParsingTestMarketplaces();
+  const usersDetailedQuery = useParsingUsersDetailed(1000);
+  const marketplacesDetailedQuery = useParsingMarketplacesDetailed(2000);
   const runsQuery = useParsingTestRuns(RUNS_LIMIT);
   const runPipeline = useRunParsingFullTest();
 
@@ -112,6 +118,12 @@ export function AdminPage() {
   const detailsStatusQuery = useParsingJobStatus(detailsJobId, {
     enabled: isDetailsOpen && Boolean(detailsJobId),
     refetchInterval: isDetailsOpen ? 4500 : false,
+  });
+  const liveFeedQuery = useParsingJobLiveFeed(liveJobId, {
+    enabled: Boolean(liveJobId),
+    refetchInterval: 3000,
+    limit: 300,
+    offset: 0,
   });
 
   const sortedRuns = useMemo(() => {
@@ -133,6 +145,16 @@ export function AdminPage() {
   useEffect(() => {
     setHistoryPage((page) => Math.min(page, totalPages));
   }, [totalPages]);
+
+  useEffect(() => {
+    if (activeJobId) {
+      setLiveJobId(activeJobId);
+      return;
+    }
+    if (!liveJobId && sortedRuns[0]?.job_id) {
+      setLiveJobId(sortedRuns[0].job_id);
+    }
+  }, [activeJobId, liveJobId, sortedRuns]);
 
   useEffect(() => {
     const status = activeStatusQuery.data?.status;
@@ -215,9 +237,336 @@ export function AdminPage() {
           <Card>
             <CardHeader>
               <CardTitle>{t("admin.pool.title")}</CardTitle>
-              <CardDescription>{t("admin.pool.diagnostics")}</CardDescription>
+              <CardDescription>
+                Подробные вкладки: pipeline, users, marketplaces и live-пошаговый трекинг.
+              </CardDescription>
             </CardHeader>
           </Card>
+
+          <Tabs defaultValue="pipeline" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
+              <TabsTrigger value="users">Users</TabsTrigger>
+              <TabsTrigger value="marketplaces">Marketplaces</TabsTrigger>
+              <TabsTrigger value="live">Live steps</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="pipeline" className="space-y-6">
+              <Card>
+                <CardHeader className="space-y-3">
+                  <CardTitle>{t("admin.pool.triggerScraping")}</CardTitle>
+                  <CardDescription>{t("admin.pool.diagnosticsResult")}</CardDescription>
+                  <Button
+                    className="w-full md:w-auto"
+                    size="lg"
+                    onClick={async () => {
+                      try {
+                        const result = await runPipeline.mutateAsync();
+                        previousActiveStatus.current = "running";
+                        setActiveJobId(result.job_id);
+                        setLiveJobId(result.job_id);
+                        toast.success(`${t("common.save")}: ${result.job_id}`);
+                      } catch (error) {
+                        const message =
+                          typeof error === "object" &&
+                          error &&
+                          "response" in error &&
+                          (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+                            ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+                            : t("admin.markets.refreshError");
+                        toast.error(message ?? t("admin.markets.refreshError"));
+                      }
+                    }}
+                    disabled={runPipeline.isPending || activeStatus?.status === "running"}
+                  >
+                    {runPipeline.isPending ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <Play className="mr-2 size-4" />
+                    )}
+                    {t("admin.pool.triggerScraping")}
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {activeJobId && activeStatus ? (
+                    <div className="space-y-4 rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={statusBadgeVariant(activeStatus.status)}>
+                          {t(statusLabelKey(activeStatus.status))}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">{activeStatus.job_id}</span>
+                      </div>
+                      <Progress value={progress} max={100} />
+                      <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground md:grid-cols-3">
+                        <span>{t("admin.pool.triggerDiscovery")}: {currentStage === "discovery" ? t("common.loading") : t("common.noData")}</span>
+                        <span>{t("admin.pool.triggerScraping")}: {currentStage === "scrape" ? t("common.loading") : t("common.noData")}</span>
+                        <span>{t("admin.pool.diagnostics")}: {currentStage === "persist" ? t("common.loading") : t("common.noData")}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <EmptyState title={t("common.noData")} description={t("admin.pool.triggerScraping")} />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t("admin.pool.discoveryLogs")}</CardTitle>
+                  <CardDescription>{t("admin.pool.diagnosticsResult")}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {runsQuery.isLoading ? (
+                    <Skeleton className="h-56 w-full" />
+                  ) : sortedRuns.length === 0 ? (
+                    <EmptyState title={t("common.noData")} description={t("admin.pool.discoveryLogs")} />
+                  ) : (
+                    <>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t("admin.pool.diagnostics")}</TableHead>
+                            <TableHead>{t("alerts.date")}</TableHead>
+                            <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
+                            <TableHead>{t("admin.claude.avgLatency")}</TableHead>
+                            <TableHead>{t("admin.marketplaces.products")}</TableHead>
+                            <TableHead>{t("common.price")}</TableHead>
+                            <TableHead>{t("admin.stats.errors")}</TableHead>
+                            <TableHead>{t("common.status")}</TableHead>
+                            <TableHead>Live</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pagedRuns.map((run) => (
+                            <TableRow
+                              key={run.job_id}
+                              className="cursor-pointer"
+                              onClick={() => {
+                                setDetailsJobId(run.job_id);
+                                setIsDetailsOpen(true);
+                              }}
+                            >
+                              <TableCell>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-2 text-left text-sm text-primary hover:underline"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    navigator.clipboard.writeText(run.job_id);
+                                    toast.success(t("common.copied"));
+                                  }}
+                                >
+                                  <Copy className="size-3.5" />
+                                  {run.job_id.slice(0, 8)}…
+                                </button>
+                              </TableCell>
+                              <TableCell>{formatDateTime(run.started_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                              <TableCell>{formatDateTime(run.completed_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                              <TableCell>{formatDuration(run.duration_seconds, t("common.dash"))}</TableCell>
+                              <TableCell>{run.listings_created}</TableCell>
+                              <TableCell>{run.prices_saved}</TableCell>
+                              <TableCell>{run.errors_count}</TableCell>
+                              <TableCell>
+                                <Badge variant={statusBadgeVariant(run.status)}>
+                                  {t(statusLabelKey(run.status))}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setLiveJobId(run.job_id);
+                                    toast.success(`Live feed: ${run.job_id.slice(0, 8)}…`);
+                                  }}
+                                >
+                                  Watch
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">{historyPage}/{totalPages}</p>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))} disabled={historyPage <= 1}>
+                            {t("common.back")}
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setHistoryPage((prev) => Math.min(totalPages, prev + 1))} disabled={historyPage >= totalPages}>
+                            {t("common.next")}
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="users">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Users details</CardTitle>
+                  <CardDescription>Полная таблица пользователей с активностью и нагрузкой.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {usersDetailedQuery.isLoading ? (
+                    <Skeleton className="h-56 w-full" />
+                  ) : (usersDetailedQuery.data?.length ?? 0) === 0 ? (
+                    <EmptyState title={t("common.noData")} description="Users details" />
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Plan</TableHead>
+                          <TableHead>Tracked</TableHead>
+                          <TableHead>Login count</TableHead>
+                          <TableHead>Last login</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {usersDetailedQuery.data?.map((userRow) => (
+                          <TableRow key={userRow.id}>
+                            <TableCell>{userRow.email}</TableCell>
+                            <TableCell>{userRow.name || t("common.dash")}</TableCell>
+                            <TableCell>{userRow.plan}</TableCell>
+                            <TableCell>{userRow.tracked_products}</TableCell>
+                            <TableCell>{userRow.login_count}</TableCell>
+                            <TableCell>{formatDateTime(userRow.last_login_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                            <TableCell>{formatDateTime(userRow.created_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                            <TableCell>
+                              <Badge variant={userRow.is_active ? "default" : "destructive"}>
+                                {userRow.is_active ? "active" : "inactive"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="marketplaces">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Marketplaces details</CardTitle>
+                  <CardDescription>Детальная телеметрия по каждому маркетплейсу и discovery/scrape состоянию.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {marketplacesDetailedQuery.isLoading ? (
+                    <Skeleton className="h-56 w-full" />
+                  ) : (marketplacesDetailedQuery.data?.length ?? 0) === 0 ? (
+                    <EmptyState title={t("common.noData")} description="Marketplaces details" />
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Domain</TableHead>
+                          <TableHead>Quota</TableHead>
+                          <TableHead>Pool</TableHead>
+                          <TableHead>Active listings</TableHead>
+                          <TableHead>Success rate</TableHead>
+                          <TableHead>Last discovery</TableHead>
+                          <TableHead>Last scrape</TableHead>
+                          <TableHead>Last error</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {marketplacesDetailedQuery.data?.map((mp) => (
+                          <TableRow key={mp.id}>
+                            <TableCell>{mp.domain}</TableCell>
+                            <TableCell>{mp.product_quota}</TableCell>
+                            <TableCell>{mp.products_in_pool}</TableCell>
+                            <TableCell>{mp.active_listings}</TableCell>
+                            <TableCell>{mp.success_rate.toFixed(2)}%</TableCell>
+                            <TableCell>{formatDateTime(mp.last_discovery_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                            <TableCell>{formatDateTime(mp.last_scrape_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                            <TableCell className="max-w-80 truncate">{mp.last_error_message || t("common.dash")}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="live">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Live process feed</CardTitle>
+                  <CardDescription>Пошаговый realtime-поток по `scrape_logs` для выбранного job.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm text-muted-foreground">
+                      Job: {liveJobId ?? t("common.dash")}
+                    </p>
+                    {liveFeedQuery.data && (
+                      <>
+                        <Badge variant={statusBadgeVariant(liveFeedQuery.data.status)}>
+                          {t(statusLabelKey(liveFeedQuery.data.status))}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
+                          {liveFeedQuery.data.current_stage || "queued"} | steps: {liveFeedQuery.data.total_steps}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {liveFeedQuery.isLoading ? (
+                    <Skeleton className="h-56 w-full" />
+                  ) : !liveFeedQuery.data ? (
+                    <EmptyState title={t("common.noData")} description="Live process feed" />
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(liveFeedQuery.data.status_counts).map(([statusKey, count]) => (
+                          <Badge key={statusKey} variant={statusKey === "success" ? "default" : "secondary"}>
+                            {statusKey}: {count}
+                          </Badge>
+                        ))}
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Time</TableHead>
+                            <TableHead>Marketplace</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Duration</TableHead>
+                            <TableHead>Price</TableHead>
+                            <TableHead>URL</TableHead>
+                            <TableHead>Error</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {liveFeedQuery.data.steps.map((step) => (
+                            <TableRow key={step.event_id}>
+                              <TableCell>{formatDateTime(step.created_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                              <TableCell>{step.marketplace_domain || step.marketplace_id.slice(0, 8)}</TableCell>
+                              <TableCell>{step.status}</TableCell>
+                              <TableCell>{step.duration_ms ?? t("common.dash")}</TableCell>
+                              <TableCell>{step.price_found ?? t("common.dash")}</TableCell>
+                              <TableCell className="max-w-72 truncate">{step.url}</TableCell>
+                              <TableCell className="max-w-80 truncate">{step.error_message || t("common.dash")}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -230,10 +579,7 @@ export function AdminPage() {
               {marketplacesQuery.isLoading ? (
                 <Skeleton className="h-40 w-full" />
               ) : (marketplacesQuery.data?.length ?? 0) === 0 ? (
-                <EmptyState
-                  title={t("common.noData")}
-                  description={t("admin.pool.marketplaces")}
-                />
+                <EmptyState title={t("common.noData")} description={t("admin.pool.marketplaces")} />
               ) : (
                 <Table>
                   <TableHeader>
@@ -253,13 +599,9 @@ export function AdminPage() {
                         <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell className="max-w-60 truncate">{item.url}</TableCell>
                         <TableCell>{item.products_in_pool}</TableCell>
-                        <TableCell>
-                          {formatDateTime(item.last_successful_scrape, i18n.resolvedLanguage || "en", t("common.dash"))}
-                        </TableCell>
+                        <TableCell>{formatDateTime(item.last_successful_scrape, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
                         <TableCell>{item.success_rate.toFixed(2)}%</TableCell>
-                        <TableCell>
-                          {formatDateTime(item.last_run, i18n.resolvedLanguage || "en", t("common.dash"))}
-                        </TableCell>
+                        <TableCell>{formatDateTime(item.last_run, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
                         <TableCell>
                           <Badge variant={statusBadgeVariant(item.status)}>
                             {t(marketplaceActivityLabelKey(item.status))}
@@ -269,182 +611,6 @@ export function AdminPage() {
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="space-y-3">
-              <CardTitle>{t("admin.pool.triggerScraping")}</CardTitle>
-              <CardDescription>{t("admin.pool.diagnosticsResult")}</CardDescription>
-              <Button
-                className="w-full md:w-auto"
-                size="lg"
-                onClick={async () => {
-                  try {
-                    const result = await runPipeline.mutateAsync();
-                    previousActiveStatus.current = "running";
-                    setActiveJobId(result.job_id);
-                    toast.success(`${t("common.save")}: ${result.job_id}`);
-                  } catch (error) {
-                    const message =
-                      typeof error === "object" &&
-                      error &&
-                      "response" in error &&
-                      (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-                        ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
-                        : t("admin.markets.refreshError");
-                    toast.error(message ?? t("admin.markets.refreshError"));
-                  }
-                }}
-                disabled={runPipeline.isPending || activeStatus?.status === "running"}
-              >
-                {runPipeline.isPending ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Play className="mr-2 size-4" />
-                )}
-                {t("admin.pool.triggerScraping")}
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {activeJobId && activeStatus ? (
-                <div className="space-y-4 rounded-lg border p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={statusBadgeVariant(activeStatus.status)}>
-                      {t(statusLabelKey(activeStatus.status))}
-                    </Badge>
-                    <span className="text-sm text-muted-foreground">{activeStatus.job_id}</span>
-                  </div>
-                  <Progress value={progress} max={100} />
-                  <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground md:grid-cols-3">
-                    <span>
-                      {t("admin.pool.triggerDiscovery")}:{" "}
-                      {currentStage === "discovery" ? t("common.loading") : t("common.noData")}
-                    </span>
-                    <span>
-                      {t("admin.pool.triggerScraping")}:{" "}
-                      {currentStage === "scrape" ? t("common.loading") : t("common.noData")}
-                    </span>
-                    <span>
-                      {t("admin.pool.diagnostics")}:{" "}
-                      {currentStage === "persist" ? t("common.loading") : t("common.noData")}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
-                    <span>
-                      {t("alerts.date")}:{" "}
-                      {formatDateTime(activeStatus.started_at, i18n.resolvedLanguage || "en", t("common.dash"))}
-                    </span>
-                    <span>
-                      {t("admin.markets.lastRefresh")}:{" "}
-                      {formatDateTime(activeStatus.completed_at, i18n.resolvedLanguage || "en", t("common.dash"))}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <EmptyState
-                  title={t("common.noData")}
-                  description={t("admin.pool.triggerScraping")}
-                />
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("admin.pool.discoveryLogs")}</CardTitle>
-              <CardDescription>{t("admin.pool.diagnosticsResult")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {runsQuery.isLoading ? (
-                <Skeleton className="h-56 w-full" />
-              ) : sortedRuns.length === 0 ? (
-                <EmptyState
-                  title={t("common.noData")}
-                  description={t("admin.pool.discoveryLogs")}
-                />
-              ) : (
-                <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("admin.pool.diagnostics")}</TableHead>
-                        <TableHead>{t("alerts.date")}</TableHead>
-                        <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
-                        <TableHead>{t("admin.claude.avgLatency")}</TableHead>
-                        <TableHead>{t("admin.marketplaces.products")}</TableHead>
-                        <TableHead>{t("common.price")}</TableHead>
-                        <TableHead>{t("admin.stats.errors")}</TableHead>
-                        <TableHead>{t("common.status")}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {pagedRuns.map((run) => (
-                        <TableRow
-                          key={run.job_id}
-                          className="cursor-pointer"
-                          onClick={() => {
-                            setDetailsJobId(run.job_id);
-                            setIsDetailsOpen(true);
-                          }}
-                        >
-                          <TableCell>
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-2 text-left text-sm text-primary hover:underline"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                navigator.clipboard.writeText(run.job_id);
-                                toast.success(t("common.copied"));
-                              }}
-                            >
-                              <Copy className="size-3.5" />
-                              {run.job_id.slice(0, 8)}…
-                            </button>
-                          </TableCell>
-                          <TableCell>
-                            {formatDateTime(run.started_at, i18n.resolvedLanguage || "en", t("common.dash"))}
-                          </TableCell>
-                          <TableCell>
-                            {formatDateTime(run.completed_at, i18n.resolvedLanguage || "en", t("common.dash"))}
-                          </TableCell>
-                          <TableCell>{formatDuration(run.duration_seconds, t("common.dash"))}</TableCell>
-                          <TableCell>{run.listings_created}</TableCell>
-                          <TableCell>{run.prices_saved}</TableCell>
-                          <TableCell>{run.errors_count}</TableCell>
-                          <TableCell>
-                            <Badge variant={statusBadgeVariant(run.status)}>
-                              {t(statusLabelKey(run.status))}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">{historyPage}/{totalPages}</p>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
-                        disabled={historyPage <= 1}
-                      >
-                        {t("common.back")}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setHistoryPage((prev) => Math.min(totalPages, prev + 1))}
-                        disabled={historyPage >= totalPages}
-                      >
-                        {t("common.next")}
-                      </Button>
-                    </div>
-                  </div>
-                </>
               )}
             </CardContent>
           </Card>
@@ -584,6 +750,7 @@ export function AdminPage() {
                   const result = await runPipeline.mutateAsync();
                   previousActiveStatus.current = "running";
                   setActiveJobId(result.job_id);
+                  setLiveJobId(result.job_id);
                   setIsDetailsOpen(false);
                   toast.success(`${t("common.refresh")}: ${result.job_id}`);
                 } catch {

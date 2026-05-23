@@ -20,6 +20,9 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("POST", "/api/admin/parsing/run-full-test"),
         ("GET", "/api/admin/parsing/test-runs"),
         ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
+        ("GET", "/api/admin/parsing/users-detailed"),
+        ("GET", "/api/admin/parsing/marketplaces-detailed"),
+        ("GET", "/api/admin/parsing/job-live-feed/00000000-0000-0000-0000-000000000001"),
     ]
     for method, path in paths:
         if method == "GET":
@@ -47,6 +50,23 @@ async def test_parsing_admin_get_marketplaces_contract(client, superuser_headers
             "status",
         }
         assert set(rows[0].keys()) == expected_keys
+
+
+@pytest.mark.asyncio
+async def test_parsing_admin_get_users_and_marketplaces_detailed(client, superuser_headers):
+    """Superuser can fetch detailed users/marketplaces lists for admin tabs."""
+    users_resp = await client.get("/api/admin/parsing/users-detailed", headers=superuser_headers)
+    assert users_resp.status_code == 200
+    users_payload = users_resp.json()
+    assert isinstance(users_payload, list)
+
+    marketplaces_resp = await client.get(
+        "/api/admin/parsing/marketplaces-detailed",
+        headers=superuser_headers,
+    )
+    assert marketplaces_resp.status_code == 200
+    marketplaces_payload = marketplaces_resp.json()
+    assert isinstance(marketplaces_payload, list)
 
 
 @pytest.mark.asyncio
