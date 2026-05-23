@@ -141,6 +141,69 @@ async def test_finalize_full_pipeline_job_failed_sets_error_payload():
         assert refreshed.failed == 0
 
 
+@pytest.mark.asyncio
+async def test_finalize_full_pipeline_job_includes_marketplaces_from_logs_when_seed_empty():
+    """Summary uses scrape_logs even if discovery seed is empty."""
+    async with async_session_maker() as session:
+        marketplace = await session.scalar(
+            select(DimMarketplace)
+            .where(DimMarketplace.is_active.is_(True))
+            .order_by(DimMarketplace.created_at.asc())
+            .limit(1)
+        )
+        if marketplace is None:
+            pytest.skip("No active marketplace found in dim_marketplace")
+
+        product = DimProduct(name="Seedless Product", name_normalized="seedless product", is_active=True)
+        session.add(product)
+        await session.flush()
+
+        listing = FactListing(
+            product_id=product.id,
+            marketplace_id=marketplace.id,
+            external_url=f"{marketplace.base_url.rstrip('/')}/seedless-test",
+            url_hash=FactListing.compute_url_hash(f"{marketplace.base_url.rstrip('/')}/seedless-test"),
+            is_active=True,
+        )
+        session.add(listing)
+        await session.flush()
+
+        job = ScrapeJob(
+            job_type="manual",
+            status="running",
+            started_at=datetime.now(UTC),
+            config={"metadata": {"current_stage": "scrape"}},
+        )
+        session.add(job)
+        await session.flush()
+
+        session.add(
+            ScrapeLog(
+                scrape_job_id=job.id,
+                listing_id=listing.id,
+                marketplace_id=marketplace.id,
+                status="success",
+                url=listing.external_url,
+                price_found=77.0,
+            )
+        )
+        await session.commit()
+
+        metadata = await _finalize_full_pipeline_job(
+            session,
+            job,
+            discovery_ms=50,
+            scrape_ms=80,
+            persist_ms=20,
+            per_marketplace_seed={},
+            hard_error=None,
+        )
+        assert metadata["summary"]["prices_saved"] == 1
+        assert metadata["summary"]["errors_count"] == 0
+        assert len(metadata["per_marketplace"]) == 1
+        assert metadata["per_marketplace"][0]["marketplace_id"] == str(marketplace.id)
+
+
 def test_extract_pipeline_metadata_handles_invalid_shapes():
     """Metadata extractor always returns compatible defaults for malformed config."""
     default_meta = _extract_pipeline_metadata(None)

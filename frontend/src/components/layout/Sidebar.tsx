@@ -61,7 +61,7 @@ function SidebarLogo({
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-[73px] shrink-0 items-stretch border-b px-0 transition-colors",
+        "flex h-[84px] shrink-0 items-stretch border-b px-0 transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
         showLabels ? "justify-start" : "justify-center"
       )}
@@ -78,7 +78,7 @@ function SidebarLogo({
 function SparklesBadge({ className }: { className?: string }) {
   return (
     <Sparkles
-      className={cn("size-[20px] shrink-0 text-[var(--accent)]", className)}
+      className={cn("size-[23px] shrink-0 text-[var(--accent)]", className)}
       style={{ filter: "drop-shadow(0 0 4px var(--accent-glow))" }}
       aria-hidden
     />
@@ -113,8 +113,8 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-[12px] rounded-md py-[9px] text-[14px] leading-[20px] transition-all duration-200",
-        showLabels ? "ps-[15px] pe-[15px]" : "justify-center ps-[12px] pe-[12px]",
+        "group relative flex items-center gap-[14px] rounded-md py-[10px] text-[16px] leading-[23px] transition-all duration-200",
+        showLabels ? "ps-[17px] pe-[17px]" : "justify-center ps-[14px] pe-[14px]",
         isActive
           ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
           : "text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
@@ -122,7 +122,7 @@ function SidebarItem({
     >
       {isActive && (
         <div
-          className="absolute inset-y-[6px] start-0 w-[2.5px] rounded-e-full"
+          className="absolute inset-y-[7px] start-0 w-[3px] rounded-e-full"
           style={{
             background: "var(--accent)",
             boxShadow: "0 0 8px var(--accent-glow)",
@@ -131,7 +131,7 @@ function SidebarItem({
       )}
       <Icon
         className={cn(
-          "size-[20px] shrink-0",
+          "size-[23px] shrink-0",
           isActive && "text-[var(--accent)]"
         )}
         style={
@@ -174,11 +174,11 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
   const showLabels = !collapsed;
 
   return (
-    <Collapsible defaultOpen className="px-[9px]">
+    <Collapsible defaultOpen className="px-[10px]">
       {showLabels && (
-        <div className="flex w-full items-center justify-between gap-[8px] py-[9px]">
+        <div className="flex w-full items-center justify-between gap-[9px] py-[10px]">
           <CollapsibleTrigger
-            className="flex flex-1 items-center text-left text-[12px] font-medium uppercase tracking-[0.08em] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            className="flex flex-1 items-center text-left text-[14px] font-medium uppercase tracking-[0.08em] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
             {label}
           </CollapsibleTrigger>
@@ -186,7 +186,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
         </div>
       )}
       <CollapsibleContent>
-        <div className="space-y-[4px] py-[4px]">{children}</div>
+        <div className="space-y-[5px] py-[5px]">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -214,12 +214,12 @@ function SidebarFooter({
   const progress = Math.min(100, (trialDaysLeft / maxDays) * 100);
 
   return (
-    <div className="shrink-0 border-t border-[var(--glass-border)] p-[18px]">
+    <div className="shrink-0 border-t border-[var(--glass-border)] p-[21px]">
       {isTrial && (
-        <div className="glass-card overflow-hidden p-[18px]">
+        <div className="glass-card overflow-hidden p-[21px]">
           <p
             className={cn(
-              "mb-[12px] text-[14px] leading-[20px] text-[var(--foreground-muted)]",
+              "mb-[14px] text-[16px] leading-[23px] text-[var(--foreground-muted)]",
               !showLabels && "text-center"
             )}
           >
@@ -228,7 +228,7 @@ function SidebarFooter({
               : trialDaysLeft}
           </p>
           <div
-            className="mb-[18px] h-[9px] w-full overflow-hidden rounded-full bg-[var(--glass-bg)]"
+            className="mb-[21px] h-[10px] w-full overflow-hidden rounded-full bg-[var(--glass-bg)]"
             style={{ border: "1px solid var(--glass-border)" }}
           >
             <div
@@ -241,7 +241,7 @@ function SidebarFooter({
             />
           </div>
           <Button
-            className="h-[44px] w-full text-[14px] font-semibold"
+            className="h-[51px] w-full text-[16px] font-semibold"
             style={{
               background: "linear-gradient(135deg, var(--accent-dim), var(--accent))",
               boxShadow: "0 0 16px var(--accent-glow)",
@@ -257,11 +257,11 @@ function SidebarFooter({
         <Button
           variant="ghost"
           size="icon"
-          className="h-[44px] w-full text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+          className="h-[51px] w-full text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
           onClick={onToggle}
           aria-label={t("common.expand")}
         >
-          <ChevronRight className="size-[20px]" />
+          <ChevronRight className="size-[23px]" />
         </Button>
       )}
     </div>
@@ -287,12 +287,12 @@ export function Sidebar({
       className={cn(
         "flex flex-col text-[var(--foreground)] transition-[width] duration-300 ease-in-out",
         "border-e border-[var(--glass-border)]",
-        isMobile ? "w-full" : collapsed ? "w-[73px]" : "w-[240px]"
+        isMobile ? "w-full" : collapsed ? "w-[80px]" : "w-[264px]"
       )}
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
-      <nav className="flex flex-1 flex-col gap-[9px] overflow-y-auto py-[15px] text-[14px]">
+      <nav className="flex flex-1 flex-col gap-[10px] overflow-y-auto py-[17px] text-[16px]">
         <SidebarSection
           label={t("nav.section.core")}
           collapsed={collapsed}
@@ -301,14 +301,14 @@ export function Sidebar({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-[33px] w-[33px] min-w-[33px] shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+                className="h-[38px] w-[38px] min-w-[38px] shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
                 onClick={onToggle}
                 aria-label={collapsed ? t("common.expand") : t("common.collapse")}
               >
                 {collapsed ? (
-                  <ChevronRight className="size-[20px]" />
+                  <ChevronRight className="size-[23px]" />
                 ) : (
-                  <ChevronLeft className="size-[20px]" />
+                  <ChevronLeft className="size-[23px]" />
                 )}
               </Button>
             ) : undefined

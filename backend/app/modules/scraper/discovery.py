@@ -68,6 +68,40 @@ class DiscoveryCrawler:
         self.db = db
         self.pool = scraper_pool
 
+    @staticmethod
+    def _seed_candidates(seed_url: str) -> list[str]:
+        """Generate alternative category/listing entry URLs for marketplaces."""
+        parsed = urlparse(seed_url)
+        if not parsed.scheme or not parsed.netloc:
+            return [seed_url]
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        raw_path = (parsed.path or "").strip("/")
+        candidates: list[str] = [seed_url]
+        if raw_path:
+            candidates.append(f"{origin}/{raw_path}")
+        fallbacks = (
+            "catalog",
+            "products",
+            "shop",
+            "categories",
+            "collections",
+            "ru/catalog",
+            "ua/catalog",
+            "bg/catalog",
+            "en/catalog",
+        )
+        for fallback in fallbacks:
+            candidates.append(f"{origin}/{fallback}")
+        # Preserve order, remove duplicates.
+        seen: set[str] = set()
+        out: list[str] = []
+        for url in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            out.append(url)
+        return out
+
     async def _save_product_urls(self, marketplace_id: UUID, urls: list[str]) -> int:
         """Save discovered URLs. Creates DimProduct + FactListing per new URL."""
         if not urls:
@@ -156,7 +190,8 @@ class DiscoveryCrawler:
             remaining = max(0, quota - current_count) if quota > 0 else no_quota_limit
 
             seen_urls: set[str] = set()
-            page_url: str | None = seed_url
+            seed_candidates = self._seed_candidates(seed_url)
+            page_url: str | None = seed_candidates.pop(0) if seed_candidates else seed_url
             requires_js = bool(marketplace.requires_js)
 
             while page_url and remaining > 0 and pages_scanned < max_pages:
@@ -168,6 +203,9 @@ class DiscoveryCrawler:
                 )
                 pages_scanned += 1
                 if not listing_res.success:
+                    if candidate_urls_found == 0 and persisted_listings == 0 and seed_candidates:
+                        page_url = seed_candidates.pop(0)
+                        continue
                     errors.append(listing_res.error or "listing_fetch_failed")
                     break
 
@@ -190,6 +228,9 @@ class DiscoveryCrawler:
                     remaining -= saved
 
                 page_url = listing_res.next_page_url
+                if not batch and not page_url and candidate_urls_found == 0 and persisted_listings == 0 and seed_candidates:
+                    page_url = seed_candidates.pop(0)
+                    continue
                 if not batch and not page_url:
                     break
 

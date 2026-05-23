@@ -180,6 +180,7 @@ _CATEGORY_PATH_SEGMENTS = (
     "best",
     "popular",
 )
+_MAX_REALISTIC_PRICE = 5_000_000.0
 
 
 @dataclass
@@ -626,8 +627,11 @@ def parse_price_text(text: str) -> float | None:
             score -= 6
         if parsed < 1:
             score -= 3
-        if parsed > 1_000_000_000:
-            score -= 8
+        has_currency_context = _detect_currency(context) is not None
+        if parsed > _MAX_REALISTIC_PRICE and not has_currency_context:
+            continue
+        if parsed > _MAX_REALISTIC_PRICE:
+            score -= 20
 
         candidates.append((parsed, score))
 
@@ -636,7 +640,10 @@ def parse_price_text(text: str) -> float | None:
 
     # Prefer high-confidence contexts; for ties choose larger realistic amount.
     candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
-    return candidates[0][0]
+    best_value = candidates[0][0]
+    if best_value > _MAX_REALISTIC_PRICE:
+        return None
+    return best_value
 
 
 def parse_currency_symbol(text: str) -> str | None:
@@ -728,6 +735,10 @@ def _is_category_url(path: str) -> bool:
     lowered = path.lower()
     segments = [s for s in lowered.split("/") if s]
     if len(segments) <= 1:
+        if segments:
+            single = segments[0]
+            if len(single) >= 16 and ("-" in single or any(ch.isdigit() for ch in single)):
+                return False
         return True
     if any(seg in _CATEGORY_PATH_SEGMENTS for seg in segments):
         return True
@@ -812,6 +823,11 @@ def extract_product_links(
         segments = [s for s in path.split("/") if s]
         if len(segments) >= 4:
             filtered.append(url)
+            continue
+        if len(segments) >= 2:
+            last = segments[-1]
+            if len(last) >= 18 and "-" in last:
+                filtered.append(url)
     return filtered
 
 

@@ -56,6 +56,7 @@ class ParsingAdminService:
     """
 
     TEST_PIPELINE_JOB_TYPE = "full_pipeline_test"
+    STALE_PIPELINE_TIMEOUT_MINUTES = 90
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -164,8 +165,16 @@ class ParsingAdminService:
           "started_at": "<iso_datetime>"
         }
         """
+        await self._fail_stale_running_pipeline_jobs()
+        active = await self.get_active_pipeline_job()
+        if active is not None:
+            raise ValueError(
+                f"Pipeline job already running: {active['job_id']}. Wait until it finishes or fails."
+            )
+
         started_at = datetime.now(UTC)
         metadata = self._build_initial_metadata()
+        metadata["last_activity_at"] = self._to_iso(started_at)
         job = ScrapeJob(
             job_type=self.TEST_PIPELINE_JOB_TYPE,
             status="running",
@@ -205,6 +214,7 @@ class ParsingAdminService:
         - errors_count
         - status
         """
+        await self._fail_stale_running_pipeline_jobs()
         safe_limit = max(1, min(limit, 200))
         result = await self.db.execute(
             select(ScrapeJob)
@@ -244,16 +254,23 @@ class ParsingAdminService:
         - duration_seconds
         - metadata (provided when status is completed/failed)
         """
+        await self._fail_stale_running_pipeline_jobs()
         job = await self.db.get(ScrapeJob, job_id)
         if job is None:
             raise ValueError(f"Scrape job not found: {job_id}")
 
-        normalized = self._normalize_job_status(job.status)
         metadata = self._extract_metadata(job.config)
+        last_log_at = await self._job_last_log_at(job.id)
+        metadata = self._merge_runtime_activity(
+            job=job,
+            metadata=metadata,
+            last_log_at=last_log_at,
+        )
+        normalized = self._normalize_job_status(job.status)
         return {
             "job_id": str(job.id),
             "status": normalized,
-            "current_stage": self._current_stage(metadata),
+            "current_stage": self._resolve_current_stage(metadata, normalized, last_log_at),
             "started_at": self._to_iso(job.started_at),
             "completed_at": self._to_iso(job.completed_at),
             "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
@@ -424,6 +441,7 @@ class ParsingAdminService:
         offset: int = 0,
     ) -> dict[str, Any]:
         """Real-time feed for every persisted scrape step inside one pipeline job."""
+        await self._fail_stale_running_pipeline_jobs()
         safe_limit = max(1, min(limit, 500))
         safe_offset = max(0, offset)
 
@@ -488,6 +506,12 @@ class ParsingAdminService:
         ]
 
         metadata = self._extract_metadata(job.config)
+        last_log_at = await self._job_last_log_at(job.id)
+        metadata = self._merge_runtime_activity(
+            job=job,
+            metadata=metadata,
+            last_log_at=last_log_at,
+        )
         summary = metadata.get("summary", {}) if isinstance(metadata, dict) else {}
         timings = metadata.get("timings", {}) if isinstance(metadata, dict) else {}
         elapsed_seconds = self._duration_seconds(
@@ -521,7 +545,11 @@ class ParsingAdminService:
         return {
             "job_id": str(job.id),
             "status": self._normalize_job_status(job.status),
-            "current_stage": self._current_stage(metadata),
+            "current_stage": self._resolve_current_stage(
+                metadata,
+                self._normalize_job_status(job.status),
+                last_log_at,
+            ),
             "started_at": self._to_iso(job.started_at),
             "completed_at": self._to_iso(job.completed_at),
             "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
@@ -541,6 +569,7 @@ class ParsingAdminService:
             "estimated_total_steps": estimated_total_steps if estimated_total_steps > 0 else None,
             "estimated_remaining_seconds": estimated_remaining_seconds,
             "warning_flags": warning_flags,
+            "last_activity_at": metadata.get("last_activity_at"),
             "steps": steps,
             "paging": {
                 "limit": safe_limit,
@@ -552,6 +581,7 @@ class ParsingAdminService:
 
     async def get_active_pipeline_job(self) -> dict[str, Any] | None:
         """Return currently running full pipeline job, if any."""
+        await self._fail_stale_running_pipeline_jobs()
         result = await self.db.execute(
             select(ScrapeJob)
             .where(
@@ -565,10 +595,20 @@ class ParsingAdminService:
         if job is None:
             return None
         metadata = self._extract_metadata(job.config)
+        last_log_at = await self._job_last_log_at(job.id)
+        metadata = self._merge_runtime_activity(
+            job=job,
+            metadata=metadata,
+            last_log_at=last_log_at,
+        )
         return {
             "job_id": str(job.id),
             "status": self._normalize_job_status(job.status),
-            "current_stage": self._current_stage(metadata),
+            "current_stage": self._resolve_current_stage(
+                metadata,
+                self._normalize_job_status(job.status),
+                last_log_at,
+            ),
             "started_at": self._to_iso(job.started_at),
             "metadata": metadata,
         }
@@ -620,6 +660,7 @@ class ParsingAdminService:
     def _build_initial_metadata() -> dict[str, Any]:
         return {
             "current_stage": "queued",
+            "last_activity_at": None,
             "timings": {
                 "discovery_ms": 0,
                 "scrape_ms": 0,
@@ -649,6 +690,89 @@ class ParsingAdminService:
         if isinstance(stage, str) and stage.strip():
             return stage
         return None
+
+    def _resolve_current_stage(
+        self,
+        metadata: dict[str, Any],
+        normalized_status: str,
+        last_log_at: datetime | None,
+    ) -> str | None:
+        stage = self._current_stage(metadata)
+        if normalized_status != "running":
+            return stage
+        if stage in {"queued", None} and last_log_at is not None:
+            return "scrape"
+        return stage
+
+    async def _job_last_log_at(self, job_id: UUID) -> datetime | None:
+        return await self.db.scalar(
+            select(func.max(ScrapeLog.created_at)).where(ScrapeLog.scrape_job_id == job_id)
+        )
+
+    def _merge_runtime_activity(
+        self,
+        *,
+        job: ScrapeJob,
+        metadata: dict[str, Any],
+        last_log_at: datetime | None,
+    ) -> dict[str, Any]:
+        out = dict(metadata)
+        if out.get("last_activity_at"):
+            return out
+        fallback = last_log_at or job.started_at
+        out["last_activity_at"] = self._to_iso(fallback)
+        return out
+
+    async def _fail_stale_running_pipeline_jobs(self) -> None:
+        """Mark stale running jobs as failed when no activity is observed."""
+        timeout_s = max(int(self.STALE_PIPELINE_TIMEOUT_MINUTES), 1) * 60
+        now = datetime.now(UTC)
+        result = await self.db.execute(
+            select(ScrapeJob)
+            .where(
+                ScrapeJob.job_type == self.TEST_PIPELINE_JOB_TYPE,
+                ScrapeJob.status == "running",
+            )
+            .order_by(ScrapeJob.started_at.asc().nullslast())
+        )
+        running_jobs = list(result.scalars().all())
+        changed = False
+        for job in running_jobs:
+            metadata = self._extract_metadata(job.config)
+            last_log_at = await self._job_last_log_at(job.id)
+            activity_iso = metadata.get("last_activity_at")
+            activity_dt: datetime | None = None
+            if isinstance(activity_iso, str) and activity_iso.strip():
+                try:
+                    activity_dt = datetime.fromisoformat(activity_iso)
+                except ValueError:
+                    activity_dt = None
+            activity_dt = activity_dt or last_log_at or job.started_at
+            if activity_dt is None:
+                continue
+            idle_s = (now - activity_dt).total_seconds()
+            if idle_s < timeout_s:
+                continue
+
+            normalized = self._normalize_job_status(job.status)
+            if normalized != "running":
+                continue
+            stale_metadata = dict(metadata)
+            stale_metadata["current_stage"] = "failed"
+            stale_metadata["last_activity_at"] = self._to_iso(activity_dt)
+            stale_metadata["error"] = (
+                f"stale_pipeline_timeout: idle_for_seconds={int(idle_s)} "
+                f"threshold_seconds={timeout_s}"
+            )
+            job.status = "failed"
+            job.completed_at = now
+            job.duration_ms = (
+                int((now - job.started_at).total_seconds() * 1000) if job.started_at is not None else None
+            )
+            job.config = {"metadata": stale_metadata}
+            changed = True
+        if changed:
+            await self.db.commit()
 
     async def _repair_scrape_job_type_constraint(self) -> bool:
         """Allow full_pipeline_test in scrape_jobs.job_type CHECK constraint."""

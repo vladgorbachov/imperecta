@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -219,6 +219,65 @@ async def test_get_active_pipeline_job_returns_latest_running(monkeypatch):
         if job is not None:
             await session.delete(job)
             await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_trigger_full_pipeline_test_blocks_parallel_running_job(monkeypatch):
+    """Second trigger is rejected while one full-pipeline job is still running."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+
+        first = await service.trigger_full_pipeline_test()
+        with pytest.raises(ValueError) as exc:
+            await service.trigger_full_pipeline_test()
+        assert "already running" in str(exc.value)
+
+        job = await session.get(ScrapeJob, UUID(first["job_id"]))
+        if job is not None:
+            await session.delete(job)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_stale_running_pipeline_job_is_marked_failed(monkeypatch):
+    """Stale running pipeline jobs are auto-failed before active-job lookup."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+        monkeypatch.setattr(service, "STALE_PIPELINE_TIMEOUT_MINUTES", 1)
+
+        stale_started = datetime.now(UTC) - timedelta(minutes=30)
+        stale_job = ScrapeJob(
+            job_type="manual",
+            status="running",
+            started_at=stale_started,
+            config={
+                "metadata": {
+                    "current_stage": "queued",
+                    "last_activity_at": (datetime.now(UTC) - timedelta(minutes=20)).isoformat(),
+                    "summary": {"listings_created": 0, "prices_saved": 0, "errors_count": 0},
+                    "timings": {"discovery_ms": 0, "scrape_ms": 0, "persist_ms": 0, "total_ms": 0},
+                    "per_marketplace": [],
+                }
+            },
+        )
+        session.add(stale_job)
+        await session.commit()
+
+        active = await service.get_active_pipeline_job()
+        assert active is None
+
+        refreshed = await session.get(ScrapeJob, stale_job.id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        meta = (refreshed.config or {}).get("metadata") if isinstance(refreshed.config, dict) else {}
+        assert isinstance(meta, dict)
+        assert meta.get("current_stage") == "failed"
+        assert "stale_pipeline_timeout" in str(meta.get("error"))
+
+        await session.delete(refreshed)
+        await session.commit()
 
 
 @pytest.mark.asyncio
