@@ -115,3 +115,10 @@ export const useParsingJobLiveFeed = (
     enabled: Boolean(jobId) && (options?.enabled ?? true),
     refetchInterval: options?.refetchInterval,
   });
+
+export const useParsingActiveJob = (refetchInterval: number | false = 5000) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "active-job"],
+    queryFn: () => adminApi.getParsingActiveJob().then((r) => r.data),
+    refetchInterval,
+  });

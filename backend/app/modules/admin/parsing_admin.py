@@ -490,6 +490,34 @@ class ParsingAdminService:
         metadata = self._extract_metadata(job.config)
         summary = metadata.get("summary", {}) if isinstance(metadata, dict) else {}
         timings = metadata.get("timings", {}) if isinstance(metadata, dict) else {}
+        elapsed_seconds = self._duration_seconds(
+            job.started_at,
+            job.completed_at if job.completed_at is not None else datetime.now(UTC),
+            None,
+        )
+        estimated_total_steps = int(job.total_listings or 0)
+        estimated_remaining_seconds: float | None = None
+        if (
+            elapsed_seconds is not None
+            and elapsed_seconds > 0
+            and total_steps > 0
+            and estimated_total_steps > total_steps
+        ):
+            speed = total_steps / elapsed_seconds
+            if speed > 0:
+                estimated_remaining_seconds = round((estimated_total_steps - total_steps) / speed, 3)
+
+        warning_flags: list[str] = []
+        missing_critical_count = int(status_counts.get("missing_critical_data", 0))
+        technical_error_count = int(status_counts.get("technical_error", 0))
+        error_ratio = (missing_critical_count + technical_error_count) / total_steps if total_steps > 0 else 0.0
+        if missing_critical_count > 0:
+            warning_flags.append("missing_currency_or_critical_fields")
+        if technical_error_count > 0:
+            warning_flags.append("technical_extraction_errors")
+        if error_ratio >= 0.25 and total_steps >= 20:
+            warning_flags.append("high_error_ratio")
+
         return {
             "job_id": str(job.id),
             "status": self._normalize_job_status(job.status),
@@ -510,6 +538,9 @@ class ParsingAdminService:
                 "persist_ms": int(timings.get("persist_ms", 0)),
                 "total_ms": int(timings.get("total_ms", job.duration_ms or 0)),
             },
+            "estimated_total_steps": estimated_total_steps if estimated_total_steps > 0 else None,
+            "estimated_remaining_seconds": estimated_remaining_seconds,
+            "warning_flags": warning_flags,
             "steps": steps,
             "paging": {
                 "limit": safe_limit,
@@ -517,6 +548,29 @@ class ParsingAdminService:
                 "total": int(logs_total or 0),
                 "has_more": safe_offset + len(steps) < int(logs_total or 0),
             },
+        }
+
+    async def get_active_pipeline_job(self) -> dict[str, Any] | None:
+        """Return currently running full pipeline job, if any."""
+        result = await self.db.execute(
+            select(ScrapeJob)
+            .where(
+                ScrapeJob.job_type == self.TEST_PIPELINE_JOB_TYPE,
+                ScrapeJob.status == "running",
+            )
+            .order_by(ScrapeJob.started_at.desc().nullslast())
+            .limit(1)
+        )
+        job = result.scalar_one_or_none()
+        if job is None:
+            return None
+        metadata = self._extract_metadata(job.config)
+        return {
+            "job_id": str(job.id),
+            "status": self._normalize_job_status(job.status),
+            "current_stage": self._current_stage(metadata),
+            "started_at": self._to_iso(job.started_at),
+            "metadata": metadata,
         }
 
     @staticmethod

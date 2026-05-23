@@ -297,6 +297,9 @@ export interface ParsingJobLiveFeed {
     persist_ms: number;
     total_ms: number;
   };
+  estimated_total_steps: number | null;
+  estimated_remaining_seconds: number | null;
+  warning_flags: string[];
   steps: ParsingLiveStep[];
   paging: {
     limit: number;
@@ -304,6 +307,16 @@ export interface ParsingJobLiveFeed {
     total: number;
     has_more: boolean;
   };
+}
+
+export interface ParsingActiveJobResponse {
+  active_job: {
+    job_id: string;
+    status: "running" | "completed" | "failed";
+    current_stage: string | null;
+    started_at: string | null;
+    metadata: ParsingJobMetadata | null;
+  } | null;
 }
 
 export const getParsingTestMarketplaces = () =>
@@ -328,3 +341,6 @@ export const getParsingJobLiveFeed = (jobId: string, limit = 200, offset = 0) =>
   apiClient.get<ParsingJobLiveFeed>(`/admin/parsing/job-live-feed/${jobId}`, {
     params: { limit, offset },
   });
+
+export const getParsingActiveJob = () =>
+  apiClient.get<ParsingActiveJobResponse>("/admin/parsing/active-job");

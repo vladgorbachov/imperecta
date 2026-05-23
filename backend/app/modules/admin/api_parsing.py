@@ -104,3 +104,14 @@ async def get_job_live_feed(
         return await service.get_job_live_feed(job_id, limit=limit, offset=offset)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/active-job")
+async def get_active_job(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Current running full pipeline job for page restore after reload."""
+    service = ParsingAdminService(db)
+    active = await service.get_active_pipeline_job()
+    return {"active_job": active}

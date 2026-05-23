@@ -23,6 +23,7 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("GET", "/api/admin/parsing/users-detailed"),
         ("GET", "/api/admin/parsing/marketplaces-detailed"),
         ("GET", "/api/admin/parsing/job-live-feed/00000000-0000-0000-0000-000000000001"),
+        ("GET", "/api/admin/parsing/active-job"),
     ]
     for method, path in paths:
         if method == "GET":
