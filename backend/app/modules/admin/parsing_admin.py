@@ -14,7 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_tables import ScrapeJob, ScrapeLog
+from app.models.core import User, UserProduct
 from app.models.dimensions import DimMarketplace
+from app.models.facts import FactListing
 
 
 class ParsingAdminService:
@@ -247,15 +249,274 @@ class ParsingAdminService:
             raise ValueError(f"Scrape job not found: {job_id}")
 
         normalized = self._normalize_job_status(job.status)
-        completed = normalized in {"completed", "failed"}
+        metadata = self._extract_metadata(job.config)
         return {
             "job_id": str(job.id),
             "status": normalized,
-            "current_stage": self._current_stage(self._extract_metadata(job.config)),
+            "current_stage": self._current_stage(metadata),
             "started_at": self._to_iso(job.started_at),
             "completed_at": self._to_iso(job.completed_at),
             "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
-            "metadata": self._extract_metadata(job.config) if completed else None,
+            "metadata": metadata,
+        }
+
+    async def get_users_detailed(self, limit: int = 500) -> list[dict[str, Any]]:
+        """Detailed users list for admin diagnostics tab."""
+        safe_limit = max(1, min(limit, 2000))
+        stmt = (
+            select(
+                User.id,
+                User.email,
+                User.name,
+                User.plan,
+                User.is_active,
+                User.is_superuser,
+                User.language,
+                User.timezone,
+                User.login_count,
+                User.last_login_at,
+                User.created_at,
+                func.count(UserProduct.id).label("tracked_products"),
+            )
+            .outerjoin(UserProduct, UserProduct.user_id == User.id)
+            .group_by(User.id)
+            .order_by(User.created_at.desc())
+            .limit(safe_limit)
+        )
+        result = await self.db.execute(stmt)
+        rows = result.mappings().all()
+        return [
+            {
+                "id": str(row["id"]),
+                "email": row["email"],
+                "name": row["name"],
+                "plan": row["plan"],
+                "is_active": bool(row["is_active"]),
+                "is_superuser": bool(row["is_superuser"]),
+                "language": row["language"],
+                "timezone": row["timezone"],
+                "login_count": int(row["login_count"] or 0),
+                "tracked_products": int(row["tracked_products"] or 0),
+                "last_login_at": self._to_iso(row["last_login_at"]),
+                "created_at": self._to_iso(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    async def get_marketplaces_detailed(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Detailed active marketplace list with scrape/discovery diagnostics."""
+        safe_limit = max(1, min(limit, 5000))
+        scrape_stats_sq = (
+            select(
+                ScrapeLog.marketplace_id.label("marketplace_id"),
+                func.count(ScrapeLog.id).label("total_runs"),
+                func.sum(case((ScrapeLog.status == "success", 1), else_=0)).label("success_runs"),
+                func.max(ScrapeLog.created_at).label("last_log_at"),
+            )
+            .group_by(ScrapeLog.marketplace_id)
+            .subquery()
+        )
+        active_listings_sq = (
+            select(
+                FactListing.marketplace_id.label("marketplace_id"),
+                func.count(FactListing.id).label("active_listings"),
+            )
+            .where(FactListing.is_active.is_(True))
+            .group_by(FactListing.marketplace_id)
+            .subquery()
+        )
+        latest_error_sq = (
+            select(
+                ScrapeLog.marketplace_id.label("marketplace_id"),
+                ScrapeLog.error_message.label("last_error_message"),
+                func.row_number()
+                .over(
+                    partition_by=ScrapeLog.marketplace_id,
+                    order_by=ScrapeLog.created_at.desc(),
+                )
+                .label("row_idx"),
+            )
+            .where(ScrapeLog.status != "success")
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                DimMarketplace.id,
+                DimMarketplace.marketplace_code,
+                DimMarketplace.name,
+                DimMarketplace.domain,
+                DimMarketplace.base_url,
+                DimMarketplace.country_code,
+                DimMarketplace.currency_code,
+                DimMarketplace.scraper_type,
+                DimMarketplace.requires_js,
+                DimMarketplace.is_active,
+                DimMarketplace.product_quota,
+                DimMarketplace.products_in_pool,
+                DimMarketplace.rate_limit_delay,
+                DimMarketplace.last_discovery_at,
+                DimMarketplace.last_discovery_status,
+                DimMarketplace.last_discovery_products_found,
+                DimMarketplace.last_scrape_at,
+                DimMarketplace.last_scrape_status,
+                scrape_stats_sq.c.total_runs,
+                scrape_stats_sq.c.success_runs,
+                scrape_stats_sq.c.last_log_at,
+                active_listings_sq.c.active_listings,
+                latest_error_sq.c.last_error_message,
+            )
+            .outerjoin(scrape_stats_sq, scrape_stats_sq.c.marketplace_id == DimMarketplace.id)
+            .outerjoin(active_listings_sq, active_listings_sq.c.marketplace_id == DimMarketplace.id)
+            .outerjoin(
+                latest_error_sq,
+                (latest_error_sq.c.marketplace_id == DimMarketplace.id)
+                & (latest_error_sq.c.row_idx == 1),
+            )
+            .where(DimMarketplace.is_active.is_(True))
+            .order_by(DimMarketplace.name.asc())
+            .limit(safe_limit)
+        )
+        result = await self.db.execute(stmt)
+        rows = result.mappings().all()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            total_runs = int(row["total_runs"] or 0)
+            success_runs = int(row["success_runs"] or 0)
+            success_rate = float((success_runs / total_runs) * 100) if total_runs > 0 else 0.0
+            out.append(
+                {
+                    "id": str(row["id"]),
+                    "marketplace_code": row["marketplace_code"],
+                    "name": row["name"],
+                    "domain": row["domain"],
+                    "base_url": row["base_url"],
+                    "country_code": row["country_code"],
+                    "currency_code": row["currency_code"],
+                    "scraper_type": row["scraper_type"],
+                    "requires_js": bool(row["requires_js"]),
+                    "is_active": bool(row["is_active"]),
+                    "product_quota": int(row["product_quota"] or 0),
+                    "products_in_pool": int(row["products_in_pool"] or 0),
+                    "active_listings": int(row["active_listings"] or 0),
+                    "rate_limit_delay": float(row["rate_limit_delay"] or 0.0),
+                    "last_discovery_at": self._to_iso(row["last_discovery_at"]),
+                    "last_discovery_status": row["last_discovery_status"],
+                    "last_discovery_products_found": int(row["last_discovery_products_found"] or 0),
+                    "last_scrape_at": self._to_iso(row["last_scrape_at"]),
+                    "last_scrape_status": row["last_scrape_status"],
+                    "last_log_at": self._to_iso(row["last_log_at"]),
+                    "total_runs": total_runs,
+                    "success_runs": success_runs,
+                    "error_runs": max(0, total_runs - success_runs),
+                    "success_rate": round(success_rate, 2),
+                    "last_error_message": row["last_error_message"],
+                }
+            )
+        return out
+
+    async def get_job_live_feed(
+        self,
+        job_id: UUID,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Real-time feed for every persisted scrape step inside one pipeline job."""
+        safe_limit = max(1, min(limit, 500))
+        safe_offset = max(0, offset)
+
+        job = await self.db.get(ScrapeJob, job_id)
+        if job is None:
+            raise ValueError(f"Scrape job not found: {job_id}")
+
+        status_counts_result = await self.db.execute(
+            select(ScrapeLog.status, func.count(ScrapeLog.id))
+            .where(ScrapeLog.scrape_job_id == job.id)
+            .group_by(ScrapeLog.status)
+        )
+        status_counts = {row[0]: int(row[1] or 0) for row in status_counts_result.all()}
+        total_steps = int(sum(status_counts.values()))
+
+        logs_total = await self.db.scalar(
+            select(func.count(ScrapeLog.id)).where(ScrapeLog.scrape_job_id == job.id)
+        )
+
+        logs_result = await self.db.execute(
+            select(
+                ScrapeLog.id,
+                ScrapeLog.created_at,
+                ScrapeLog.status,
+                ScrapeLog.listing_id,
+                ScrapeLog.marketplace_id,
+                ScrapeLog.url,
+                ScrapeLog.price_found,
+                ScrapeLog.in_stock_found,
+                ScrapeLog.duration_ms,
+                ScrapeLog.scraper_type,
+                ScrapeLog.error_category,
+                ScrapeLog.error_message,
+                DimMarketplace.domain.label("marketplace_domain"),
+            )
+            .outerjoin(DimMarketplace, DimMarketplace.id == ScrapeLog.marketplace_id)
+            .where(ScrapeLog.scrape_job_id == job.id)
+            .order_by(ScrapeLog.created_at.desc(), ScrapeLog.id.desc())
+            .offset(safe_offset)
+            .limit(safe_limit)
+        )
+        rows = logs_result.mappings().all()
+
+        steps = [
+            {
+                "event_id": int(row["id"]),
+                "event_type": "listing_scrape",
+                "created_at": self._to_iso(row["created_at"]),
+                "status": row["status"],
+                "listing_id": str(row["listing_id"]),
+                "marketplace_id": str(row["marketplace_id"]),
+                "marketplace_domain": row["marketplace_domain"],
+                "url": row["url"],
+                "price_found": float(row["price_found"]) if row["price_found"] is not None else None,
+                "in_stock_found": row["in_stock_found"],
+                "duration_ms": row["duration_ms"],
+                "scraper_type": row["scraper_type"],
+                "error_category": row["error_category"],
+                "error_message": row["error_message"],
+            }
+            for row in rows
+        ]
+
+        metadata = self._extract_metadata(job.config)
+        summary = metadata.get("summary", {}) if isinstance(metadata, dict) else {}
+        timings = metadata.get("timings", {}) if isinstance(metadata, dict) else {}
+        return {
+            "job_id": str(job.id),
+            "status": self._normalize_job_status(job.status),
+            "current_stage": self._current_stage(metadata),
+            "started_at": self._to_iso(job.started_at),
+            "completed_at": self._to_iso(job.completed_at),
+            "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
+            "total_steps": total_steps,
+            "status_counts": status_counts,
+            "summary": {
+                "listings_created": int(summary.get("listings_created", job.total_listings or 0)),
+                "prices_saved": int(summary.get("prices_saved", job.successful or 0)),
+                "errors_count": int(summary.get("errors_count", job.failed or 0)),
+            },
+            "timings": {
+                "discovery_ms": int(timings.get("discovery_ms", 0)),
+                "scrape_ms": int(timings.get("scrape_ms", 0)),
+                "persist_ms": int(timings.get("persist_ms", 0)),
+                "total_ms": int(timings.get("total_ms", job.duration_ms or 0)),
+            },
+            "steps": steps,
+            "paging": {
+                "limit": safe_limit,
+                "offset": safe_offset,
+                "total": int(logs_total or 0),
+                "has_more": safe_offset + len(steps) < int(logs_total or 0),
+            },
         }
 
     @staticmethod

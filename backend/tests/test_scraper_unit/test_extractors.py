@@ -58,6 +58,23 @@ def test_parse_price_text():
     assert parse_price_text("1.299,50 €") == 1299.50
 
 
+def test_parse_price_text_ignores_cashback_noise():
+    """Price parser should avoid concatenating cashback/percent suffix digits."""
+    assert parse_price_text("38лейКэшбэк:1лей ... до 30%") == 38.0
+
+
+def test_merge_and_finalize_detects_currency_from_page_text():
+    """If extractor price exists but currency is missing, fallback should detect it from page text."""
+    html = "<html><body><div>Цена: 38 лей</div></body></html>"
+    soup = BeautifulSoup(html, "html.parser")
+    merged = merge_and_finalize(
+        soup,
+        "https://shop.example/p/item",
+        ExtractedProduct(title="Item", price=38.0, currency=None, price_raw_text="38"),
+    )
+    assert merged.currency == "MDL"
+
+
 def test_completeness_score():
     """Completeness score should match required fields ratio."""
     full = ExtractedProduct(title="x", price=10.0, image_url="img")

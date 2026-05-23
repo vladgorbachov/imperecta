@@ -66,3 +66,41 @@ async def get_job_status(
         return await service.get_job_status(job_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/users-detailed")
+async def get_users_detailed(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+    limit: int = Query(500, ge=1, le=2000),
+) -> list[dict]:
+    """Detailed users list for admin diagnostics UI."""
+    service = ParsingAdminService(db)
+    return await service.get_users_detailed(limit=limit)
+
+
+@router.get("/marketplaces-detailed")
+async def get_marketplaces_detailed(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+    limit: int = Query(1000, ge=1, le=5000),
+) -> list[dict]:
+    """Detailed active marketplaces list for admin diagnostics UI."""
+    service = ParsingAdminService(db)
+    return await service.get_marketplaces_detailed(limit=limit)
+
+
+@router.get("/job-live-feed/{job_id}")
+async def get_job_live_feed(
+    job_id: UUID,
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Real-time per-step job feed from scrape_logs."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.get_job_live_feed(job_id, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

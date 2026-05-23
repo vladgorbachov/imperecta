@@ -77,3 +77,41 @@ export const useParsingJobStatus = (
     enabled: Boolean(jobId) && (options?.enabled ?? true),
     refetchInterval: options?.refetchInterval,
   });
+
+export const useParsingUsersDetailed = (limit = 500) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "users-detailed", limit],
+    queryFn: () => adminApi.getParsingUsersDetailed(limit).then((r) => r.data),
+  });
+
+export const useParsingMarketplacesDetailed = (limit = 1000) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "marketplaces-detailed", limit],
+    queryFn: () => adminApi.getParsingMarketplacesDetailed(limit).then((r) => r.data),
+  });
+
+export const useParsingJobLiveFeed = (
+  jobId: string | null,
+  options?: {
+    enabled?: boolean;
+    refetchInterval?: number | false;
+    limit?: number;
+    offset?: number;
+  },
+) =>
+  useQuery({
+    queryKey: [
+      "admin",
+      "parsing",
+      "job-live-feed",
+      jobId,
+      options?.limit ?? 200,
+      options?.offset ?? 0,
+    ],
+    queryFn: () =>
+      adminApi
+        .getParsingJobLiveFeed(jobId as string, options?.limit ?? 200, options?.offset ?? 0)
+        .then((r) => r.data),
+    enabled: Boolean(jobId) && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval,
+  });
