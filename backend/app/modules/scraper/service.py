@@ -25,6 +25,7 @@ _CORO_RESULT = TypeVar("_CORO_RESULT")
 
 _SCRAPE_LOG_STATUSES = (
     "success",
+    "no_change",
     "error",
     "timeout",
     "blocked",
@@ -36,6 +37,9 @@ _SCRAPE_LOG_STATUSES = (
     "technical_error",
 )
 _MAX_ABS_PRICE_CHANGE_PCT = 9_999.9999
+# Number of consecutive scrape failures before a listing is deactivated.
+# Deactivated listings are excluded from the scrape pool.
+LISTING_DEACTIVATE_AFTER_ERRORS = 15
 
 
 def _run_coro_in_worker(coro: Awaitable[_CORO_RESULT]) -> _CORO_RESULT:
@@ -234,6 +238,37 @@ class GlobalScrapeService:
         self.pool = scraper_pool
         self.scrape_job_id = scrape_job_id
 
+    @staticmethod
+    def _should_skip_price_record(
+        listing: FactListing,
+        new_price: float | None,
+        new_currency: str | None,
+        new_in_stock: bool,
+    ) -> bool:
+        """Return True when extracted values are identical to the last known state.
+
+        When True:
+        - No new fact_price row is written.
+        - last_checked_at on the listing is still updated.
+        - scrape_log is written with status 'no_change'.
+
+        Returns False (always write) when:
+        - listing.last_price is None -> no prior record exists.
+        - new_price or new_currency is None -> quality gate handles this separately.
+        - Any value differs from last known state.
+        """
+        if listing.last_price is None or listing.last_currency_code is None:
+            return False
+        if new_price is None or new_currency is None:
+            return False
+
+        price_same = abs(float(new_price) - float(listing.last_price)) < 0.001
+        currency_same = (
+            new_currency.strip().upper() == listing.last_currency_code.strip().upper()
+        )
+        stock_same = new_in_stock == bool(listing.last_in_stock)
+        return price_same and currency_same and stock_same
+
     def _build_scrape_log_entry(
         self,
         *,
@@ -352,8 +387,6 @@ class GlobalScrapeService:
             listing_id=str(listing_id),
             url=(listing.external_url or "")[:200],
         )
-        listing.last_error = None
-        listing.consecutive_errors = 0
         try:
             result = _run_coro_in_worker(
                 self.pool.scrape_product(
@@ -397,11 +430,20 @@ class GlobalScrapeService:
             missing_fields=getattr(result, "missing_fields", []),
         )
         is_partial = bool(result.is_partial)
+        forced_log_status: str | None = None
 
         if not result.success or not data:
             if not result.success:
                 listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
                 listing.last_error = result.error or "scrape_failed"
+                if listing.consecutive_errors >= LISTING_DEACTIVATE_AFTER_ERRORS:
+                    listing.is_active = False
+                    logger.warning(
+                        "LISTING_DEACTIVATED listing_id=%s consecutive_errors=%d url=%s",
+                        listing_id,
+                        listing.consecutive_errors,
+                        listing.external_url,
+                    )
         elif data:
             # product_name from extractor, or title as fallback when product_name is empty.
             product_name_ok = bool(
@@ -417,10 +459,6 @@ class GlobalScrapeService:
                     "Missing product_name for %s - partial result",
                     listing.external_url[:80],
                 )
-
-            listing.last_price = data.price
-            listing.last_currency_code = data.currency[:3] if data.currency else None
-            listing.last_in_stock = last_in_stock
 
             product = self.db.get(DimProduct, listing.product_id)
             if product:
@@ -471,40 +509,63 @@ class GlobalScrapeService:
                         listing_id,
                     )
             if should_write_price_snapshot:
-                date_id = _today_date_id(self.db)
-                self.db.execute(
-                    delete(FactPrice).where(
-                        FactPrice.listing_id == listing.id,
-                        FactPrice.date_id == date_id,
-                    ),
+                new_in_stock = (
+                    getattr(result, "in_stock", None)
+                    or getattr(data, "in_stock", None)
+                    or False
                 )
-                prev = _previous_price_snapshot(self.db, listing.id, date_id)
-                price_change_pct = _compute_price_change_pct(prev, float(data.price))
-                if prev is not None and prev > 0 and price_change_pct is None:
-                    logger.warning(
-                        "price_change_pct_out_of_range listing_id=%s prev=%s current=%s",
+                if self._should_skip_price_record(listing, data.price, data.currency, new_in_stock):
+                    listing.last_checked_at = datetime.now(tz=timezone.utc)
+                    listing.last_price = data.price
+                    listing.last_currency_code = data.currency[:3] if data.currency else None
+                    listing.last_in_stock = new_in_stock
+                    forced_log_status = "no_change"
+                    logger.info(
+                        "PRICE_UNCHANGED listing_id=%s price=%s %s",
                         listing_id,
-                        prev,
-                        float(data.price),
+                        data.price,
+                        data.currency,
                     )
+                else:
+                    date_id = _today_date_id(self.db)
+                    self.db.execute(
+                        delete(FactPrice).where(
+                            FactPrice.listing_id == listing.id,
+                            FactPrice.date_id == date_id,
+                        ),
+                    )
+                    prev = _previous_price_snapshot(self.db, listing.id, date_id)
+                    price_change_pct = _compute_price_change_pct(prev, float(data.price))
+                    if prev is not None and prev > 0 and price_change_pct is None:
+                        logger.warning(
+                            "price_change_pct_out_of_range listing_id=%s prev=%s current=%s",
+                            listing_id,
+                            prev,
+                            float(data.price),
+                        )
 
-                price_record = FactPrice(
-                    listing_id=listing.id,
-                    date_id=date_id,
-                    price=float(data.price),
-                    currency_code=data.currency[:3],
-                    original_price=float(data.original_price) if data.original_price else None,
-                    in_stock=last_in_stock,
-                    scraped_at=now,
-                    price_change_pct=price_change_pct,
-                )
-                self.db.add(price_record)
-                logger.info(
-                    "fact_price write listing_id=%s date_id=%s currency=%s",
-                    listing_id,
-                    date_id,
-                    data.currency[:3] if data.currency else None,
-                )
+                    price_record = FactPrice(
+                        listing_id=listing.id,
+                        date_id=date_id,
+                        price=float(data.price),
+                        currency_code=data.currency[:3],
+                        original_price=float(data.original_price) if data.original_price else None,
+                        in_stock=new_in_stock,
+                        scraped_at=now,
+                        price_change_pct=price_change_pct,
+                    )
+                    self.db.add(price_record)
+                    listing.last_price = data.price
+                    listing.last_currency_code = data.currency[:3] if data.currency else None
+                    listing.last_in_stock = new_in_stock
+                    listing.last_price_changed_at = datetime.now(tz=timezone.utc)
+                    forced_log_status = "success"
+                    logger.info(
+                        "fact_price write listing_id=%s date_id=%s currency=%s",
+                        listing_id,
+                        date_id,
+                        data.currency[:3] if data.currency else None,
+                    )
             elif not product_name_ok:
                 logger.warning(
                     "Skipping price snapshot (no product title) for %s",
@@ -516,11 +577,14 @@ class GlobalScrapeService:
                     listing.external_url[:80],
                 )
 
-        log_status = self._determine_log_status(
-            result,
-            is_partial,
-            data=data if result.success else None,
-        )
+        if forced_log_status is None:
+            log_status = self._determine_log_status(
+                result,
+                is_partial,
+                data=data if result.success else None,
+            )
+        else:
+            log_status = forced_log_status
         result.log_status = log_status
         error_message = result.error
         if (not result.success) and (not error_message):
