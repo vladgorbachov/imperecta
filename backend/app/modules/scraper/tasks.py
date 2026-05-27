@@ -27,6 +27,7 @@ from app.workers.celery_app import celery_app
 slog = structlog.get_logger(__name__)
 _SCRAPE_LOG_STATUSES = (
     "success",
+    "no_change",
     "error",
     "timeout",
     "blocked",
