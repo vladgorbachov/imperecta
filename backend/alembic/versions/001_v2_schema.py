@@ -587,7 +587,7 @@ def upgrade() -> None:
             search_volume INTEGER,
             source VARCHAR(30) NOT NULL
                 CHECK (source IN (
-                    'google_trends','ozon_trends','wb_trends','kaspi_trends','amazon_trends',
+                    'google_trends','kaspi_trends','amazon_trends',
                     'allegro_trends','custom'
                 )),
             category_id UUID REFERENCES dim_category(id),

@@ -84,6 +84,69 @@ export const useParsingUsersDetailed = (limit = 500) =>
     queryFn: () => adminApi.getParsingUsersDetailed(limit).then((r) => r.data),
   });
 
+export const useCreateAdminUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: adminApi.AdminUserCreatePayload) =>
+      adminApi.createAdminUser(payload).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "parsing", "users-detailed"] }),
+  });
+};
+
+export const useUpdateAdminUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, payload }: { userId: string; payload: adminApi.AdminUserUpdatePayload }) =>
+      adminApi.updateAdminUser(userId, payload).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "parsing", "users-detailed"] }),
+  });
+};
+
+export const useSetAdminUserStatus = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, is_active }: { userId: string; is_active: boolean }) =>
+      adminApi.setAdminUserStatus(userId, { is_active }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "parsing", "users-detailed"] }),
+  });
+};
+
+export const useSetAdminUserRole = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, is_superuser }: { userId: string; is_superuser: boolean }) =>
+      adminApi.setAdminUserRole(userId, { is_superuser }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "parsing", "users-detailed"] }),
+  });
+};
+
+export const useResetAdminUserPassword = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      userId,
+      new_password,
+      force_password_change,
+    }: {
+      userId: string;
+      new_password: string;
+      force_password_change: boolean;
+    }) =>
+      adminApi
+        .resetAdminUserPassword(userId, { new_password, force_password_change })
+        .then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "parsing", "users-detailed"] }),
+  });
+};
+
+export const useDeleteAdminUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => adminApi.deleteAdminUser(userId).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "parsing", "users-detailed"] }),
+  });
+};
+
 export const useParsingMarketplacesDetailed = (limit = 1000) =>
   useQuery({
     queryKey: ["admin", "parsing", "marketplaces-detailed", limit],

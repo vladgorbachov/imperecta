@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, EmailStr, Field
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.modules.admin.parsing_admin import ParsingAdminService
@@ -15,6 +16,49 @@ router = APIRouter(
     tags=["admin-parsing"],
     dependencies=[Depends(get_current_superuser)],
 )
+
+
+class AdminUserCreateRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    name: str | None = Field(default=None, max_length=100)
+    company_name: str | None = Field(default=None, max_length=200)
+    plan: str
+    language: str
+    timezone: str | None = Field(default="UTC", max_length=50)
+    is_active: bool = True
+    is_superuser: bool = False
+
+
+class AdminUserUpdateRequest(BaseModel):
+    email: EmailStr | None = None
+    name: str | None = Field(default=None, max_length=100)
+    company_name: str | None = Field(default=None, max_length=200)
+    plan: str | None = None
+    language: str | None = None
+    timezone: str | None = Field(default=None, max_length=50)
+    is_active: bool | None = None
+    is_superuser: bool | None = None
+
+
+class AdminUserStatusRequest(BaseModel):
+    is_active: bool
+
+
+class AdminUserRoleRequest(BaseModel):
+    is_superuser: bool
+
+
+class AdminUserPasswordResetRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+    force_password_change: bool = True
+
+
+def _raise_user_crud_error(exc: ValueError) -> None:
+    message = str(exc)
+    if message.startswith("User not found:"):
+        raise HTTPException(status_code=404, detail=message) from exc
+    raise HTTPException(status_code=400, detail=message) from exc
 
 
 @router.get("/test-marketplaces")
@@ -77,6 +121,133 @@ async def get_users_detailed(
     """Detailed users list for admin diagnostics UI."""
     service = ParsingAdminService(db)
     return await service.get_users_detailed(limit=limit)
+
+
+@router.post("/users")
+async def create_user(
+    payload: AdminUserCreateRequest,
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Create user from Users Management tab."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.create_user(
+            email=payload.email,
+            password=payload.password,
+            name=payload.name,
+            company_name=payload.company_name,
+            plan=payload.plan,
+            language=payload.language,
+            timezone=payload.timezone,
+            is_active=payload.is_active,
+            is_superuser=payload.is_superuser,
+        )
+    except ValueError as exc:
+        _raise_user_crud_error(exc)
+        raise
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: UUID,
+    payload: AdminUserUpdateRequest,
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Update user profile, plan and flags from Users Management tab."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.update_user(
+            user_id,
+            email=str(payload.email) if payload.email is not None else None,
+            name=payload.name,
+            company_name=payload.company_name,
+            plan=payload.plan,
+            language=payload.language,
+            timezone=payload.timezone,
+            is_active=payload.is_active,
+            is_superuser=payload.is_superuser,
+        )
+    except ValueError as exc:
+        _raise_user_crud_error(exc)
+        raise
+
+
+@router.patch("/users/{user_id}/status")
+async def set_user_status(
+    user_id: UUID,
+    payload: AdminUserStatusRequest,
+    current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Activate/deactivate user with safety checks."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.set_user_active(
+            user_id,
+            is_active=payload.is_active,
+            actor_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        _raise_user_crud_error(exc)
+        raise
+
+
+@router.patch("/users/{user_id}/role")
+async def set_user_role(
+    user_id: UUID,
+    payload: AdminUserRoleRequest,
+    current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Grant or revoke superuser role."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.set_user_superuser(
+            user_id,
+            is_superuser=payload.is_superuser,
+            actor_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        _raise_user_crud_error(exc)
+        raise
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: UUID,
+    payload: AdminUserPasswordResetRequest,
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Reset user password from Users Management."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.reset_user_password(
+            user_id,
+            new_password=payload.new_password,
+            force_password_change=payload.force_password_change,
+        )
+    except ValueError as exc:
+        _raise_user_crud_error(exc)
+        raise
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: UUID,
+    current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Delete user from Users Management."""
+    service = ParsingAdminService(db)
+    try:
+        await service.delete_user(user_id, actor_user_id=current_user.id)
+    except ValueError as exc:
+        _raise_user_crud_error(exc)
+        raise
+    return {"deleted": True}
 
 
 @router.get("/marketplaces-detailed")

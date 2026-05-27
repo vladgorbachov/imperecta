@@ -153,7 +153,7 @@ _PRODUCT_LINK_HINTS = (
     "/sku/",
 )
 
-# CIS marketplace SKU-style patterns (Wildberries, Ozon, Kaspi, Rozetka, etc.)
+# CIS marketplace SKU-style patterns (Kaspi, Rozetka, etc.)
 _CIS_PRODUCT_PATH_RE = re.compile(
     r"/(?:catalog|detail)/\d{4,}"
     r"|/(?:product|tovar|sku)/[\w-]{4,}"
@@ -181,6 +181,14 @@ _CATEGORY_PATH_SEGMENTS = (
     "popular",
 )
 _MAX_REALISTIC_PRICE = 5_000_000.0
+# Minimum count of structurally-identical elements to classify as a product grid.
+REPEATED_STRUCTURE_MIN_COUNT = 6
+# Maximum number of sitemap sub-files to follow from a sitemap index.
+SITEMAP_MAX_SUBFILES = 15
+# Maximum product URLs to harvest from a single sitemap (memory guard).
+SITEMAP_MAX_URLS = 50_000
+# Maximum depth of BFS site crawl for category recon.
+CATEGORY_RECON_MAX_DEPTH = 3
 
 
 @dataclass
@@ -862,3 +870,212 @@ def detect_next_page(
             if m and int(m.group(2)) == current_page + 1:
                 return urljoin(current_url, href)
     return None
+
+
+def _compute_element_signature(element) -> tuple[str, frozenset[str]]:
+    """Return a structural signature for a BeautifulSoup element.
+
+    Signature = (tag_name, frozenset_of_css_classes). Language-agnostic:
+    CSS class names are treated as opaque tokens regardless of their meaning.
+    """
+    tag = getattr(element, "name", "") or ""
+    classes: list[str] = element.get("class", []) if hasattr(element, "get") else []
+    return (tag.lower(), frozenset(classes))
+
+
+def extract_links_from_repeated_structure(
+    soup: BeautifulSoup,
+    base_url: str,
+    source_url: str,
+) -> list[str]:
+    """Extract product URLs using DOM repeated-structure analysis.
+
+    Finds elements whose structural signature (tag + CSS classes) appears
+    >= REPEATED_STRUCTURE_MIN_COUNT times on the page. These are assumed to
+    be product cards in a listing grid. All <a href> inside them are returned
+    as candidate product URLs.
+
+    This algorithm is fully language-agnostic: it does not inspect URL path
+    segments, link text, or any human-readable content.
+    """
+    from collections import defaultdict
+
+    parsed_base = urlparse(base_url)
+    base_domain = parsed_base.netloc
+
+    signature_elements: dict[tuple, list] = defaultdict(list)
+    for element in soup.find_all(True):
+        sig = _compute_element_signature(element)
+        if sig[0] and sig[1]:
+            signature_elements[sig].append(element)
+
+    repeated_signatures = {
+        sig: elements
+        for sig, elements in signature_elements.items()
+        if len(elements) >= REPEATED_STRUCTURE_MIN_COUNT
+    }
+    if not repeated_signatures:
+        return []
+
+    primary_sig = max(repeated_signatures, key=lambda s: len(repeated_signatures[s]))
+    card_elements = repeated_signatures[primary_sig]
+
+    seen: set[str] = set()
+    results: list[str] = []
+
+    for card in card_elements:
+        for link_tag in card.find_all("a", href=True):
+            href = link_tag.get("href", "").strip()
+            if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                continue
+            full_url = urljoin(base_url, href)
+            parsed = urlparse(full_url)
+            if parsed.netloc != base_domain:
+                continue
+            path_lower = parsed.path.lower()
+            if any(
+                path_lower.startswith(prefix)
+                for prefix in (
+                    "/cart",
+                    "/checkout",
+                    "/login",
+                    "/auth",
+                    "/account",
+                    "/wishlist",
+                    "/compare",
+                    "/sitemap",
+                    "/robots",
+                )
+            ):
+                continue
+            clean_url = parsed._replace(fragment="", query="").geturl()
+            if clean_url not in seen and clean_url != base_url and clean_url != source_url:
+                seen.add(clean_url)
+                results.append(clean_url)
+    return results
+
+
+def classify_page_role(soup: BeautifulSoup, base_url: str) -> str:
+    """Classify a fetched page as 'listing', 'product', 'hub', or 'unknown'.
+
+    Uses three language-agnostic signals:
+    1. Schema.org JSON-LD @type annotation (most reliable).
+    2. Repeated DOM structure count (listing signal).
+    3. Price density - count of parseable prices on the page.
+
+    Returns one of: 'listing', 'product', 'hub', 'unknown'.
+    """
+    from collections import defaultdict
+
+    for script_tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script_tag.string or "")
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            page_type = data.get("@type", "")
+            if isinstance(page_type, list):
+                page_type = page_type[0] if page_type else ""
+            if page_type == "Product":
+                return "product"
+            if page_type in ("ItemList", "OfferCatalog", "CollectionPage"):
+                return "listing"
+            if page_type in ("WebSite", "Organization", "BreadcrumbList"):
+                pass
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            continue
+
+    signature_counts: dict[tuple, int] = defaultdict(int)
+    for element in soup.find_all(True):
+        sig = _compute_element_signature(element)
+        if sig[0] and sig[1]:
+            signature_counts[sig] += 1
+    max_repetition = max(signature_counts.values()) if signature_counts else 0
+    has_product_grid = max_repetition >= REPEATED_STRUCTURE_MIN_COUNT
+
+    price_count = 0
+    for text_node in soup.find_all(string=True):
+        text = str(text_node).strip()
+        if len(text) <= 1:
+            continue
+        parsed_price = parse_price_text(text)
+        if parsed_price is not None and 0 < parsed_price < 9_999_999:
+            price_count += 1
+
+    if has_product_grid and price_count >= REPEATED_STRUCTURE_MIN_COUNT:
+        return "listing"
+    if price_count == 0 and max_repetition < REPEATED_STRUCTURE_MIN_COUNT:
+        return "hub"
+    if 1 <= price_count <= 5 and not has_product_grid:
+        return "product"
+    if has_product_grid:
+        return "listing"
+    return "unknown"
+
+
+def extract_internal_links_all(soup: BeautifulSoup, base_url: str) -> list[str]:
+    """Extract all internal links from a page, deduplicated.
+
+    Language-agnostic. Used for hub-page navigation traversal.
+    Does not filter by URL pattern - returns all internal hrefs.
+    The caller is responsible for further filtering.
+    """
+    parsed_base = urlparse(base_url)
+    base_domain = parsed_base.netloc
+
+    seen: set[str] = set()
+    results: list[str] = []
+
+    for tag in soup.find_all("a", href=True):
+        href = tag.get("href", "").strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            continue
+        full_url = urljoin(base_url, href)
+        parsed = urlparse(full_url)
+        if parsed.netloc != base_domain:
+            continue
+        path = parsed.path
+        if not path or path == "/":
+            continue
+        clean_url = parsed._replace(fragment="", query="").geturl()
+        if clean_url not in seen:
+            seen.add(clean_url)
+            results.append(clean_url)
+    return results
+
+
+def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str]]:
+    """Parse a sitemap XML document.
+
+    Returns a dict with two keys:
+    - 'urls': list of <loc> URLs (product URLs in a regular sitemap)
+    - 'sitemaps': list of nested sitemap URLs (in a sitemap index)
+
+    Handles both sitemap index files and regular sitemaps.
+    Language-agnostic: XML standard.
+    """
+    import xml.etree.ElementTree as ET
+
+    _ = base_url
+    result: dict[str, list[str]] = {"urls": [], "sitemaps": []}
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError:
+        return result
+
+    def _strip_ns(tag: str) -> str:
+        return tag.split("}")[-1] if "}" in tag else tag
+
+    tag_name = _strip_ns(root.tag)
+    if tag_name == "sitemapindex":
+        for sitemap_el in root:
+            if _strip_ns(sitemap_el.tag) == "sitemap":
+                for child in sitemap_el:
+                    if _strip_ns(child.tag) == "loc" and child.text:
+                        result["sitemaps"].append(child.text.strip())
+    else:
+        for url_el in root:
+            if _strip_ns(url_el.tag) == "url":
+                for child in url_el:
+                    if _strip_ns(child.tag) == "loc" and child.text:
+                        result["urls"].append(child.text.strip())
+    return result

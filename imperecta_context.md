@@ -1,16 +1,26 @@
 # Imperecta Context (Current State)
 
-## 0) Snapshot (2026-05-21)
+## 0) Snapshot (2026-05-27)
 
-- **Parsing Administration (new complete track):**
-  - Backend: `/api/admin/parsing/*` endpoints, `ParsingAdminService`, Celery `run_full_pipeline_test`, metadata contract (`timings`, `summary`, `per_marketplace`, `current_stage`).
-  - Frontend: `AdminPage` now includes parsing tab with marketplaces table, run pipeline card (polling), runs history (sorted + paginated), and run details dialog.
-  - Frontend data/hooks: parsing contracts in `src/api/admin.ts`; parsing queries/mutations in `src/hooks/useAdmin.ts`.
-  - Frontend tests added: `src/pages/AdminPage.parsing.test.tsx`, `src/hooks/useAdmin.parsing.test.tsx`.
-  - Validation: `npm test` + `npm run build` passed.
+- **Data Collection observability (current admin focus):**
+  - Backend: `/api/admin/parsing/users-detailed`, `/api/admin/parsing/marketplaces-detailed`, `/api/admin/parsing/job-live-feed/{job_id}`, `/api/admin/parsing/active-job`.
+  - Frontend: `AdminPage` tabs reorganized to **Data Collection**, **Market Overview**, **Users Management** with live charts/logs and ETA forecast.
+  - Data Collection widgets are driven by live API data (`job-live-feed` + `job-status` + `test-runs`), not mock values.
 
-- **Git head:** `f50afca` — *Remove local dev code* (production-first config; локальные shell-скрипты и override compose удалены из репозитория).
-- Description docs aligned: `Imperecta_Cursor_Project_Description.md`, `Imperecta_Full_Development_Context.md`, `backend_full_audit_report.md`, `parsers_audit.md`, this file (Alembic head **009**, `scrape_logs.status` **VARCHAR(50)**).
+- **Pipeline stability hardening (latest):**
+  - `ParsingAdminService` now enforces single active `full_pipeline_test` run.
+  - Stale `running` full-pipeline jobs are auto-failed after inactivity timeout.
+  - Pipeline metadata tracks `last_activity_at`; live stage resolution now reflects real scrape activity.
+  - `run_full_pipeline_test` updates stage heartbeat during discovery/scrape/persist.
+  - Finalization now merges `scrape_logs` stats even if discovery seed metadata is incomplete.
+
+- **Discovery and extraction hardening (latest):**
+  - Discovery now tries fallback seed URLs (`/catalog`, `/products`, `/shop`, locale variants) when base seed fails.
+  - Price parser now rejects unrealistic huge numeric tokens (catalog IDs/barcodes) to reduce `price_overflow`.
+  - Failed scrape logs now always include non-empty `error_message` fallback.
+
+- **Git head:** `b0a0a55` — *Stabilize pipeline and discovery flow*.
+- Description docs aligned: `Imperecta_Full_Development_Context.md`, `parsers_audit.md`, `imperecta_context.md` (Alembic head **009**, `scrape_logs.status` **VARCHAR(50)**).
 - **Deploy target:** Railway (backend + celery-worker + celery-beat), Cloudflare Pages (frontend), Supabase (PostgreSQL), Upstash (Redis). Локальная разработка — только `docker compose up` + корневой `.env` (gitignored).
 - **Config (`backend/app/config.py`):** `DATABASE_URL` и `REDIS_URL` обязательны; `app_env=production`, `allowed_origins=https://imperecta.pages.dev`; Supabase URL `postgresql://` автоматически нормализуется в `postgresql+asyncpg://`.
 - **Legacy cleanup (v2-only):** удалены runtime `app/api/*`, `app/services/*`, legacy Celery tasks (`scrape_single`, `scrape_user_products`, `scrape_all`), admin endpoints `trigger-scrape`, `scrape-activity`, `error-distribution`, `clear-test-data`, `marketplaces/deduplicate`, `DELETE /api/pool/products/bulk`.
@@ -187,14 +197,12 @@ Key runtime expectation:
 
 ## 9) Current Source-of-Truth Files
 
-- Project overview:
-  - `Imperecta_Cursor_Project_Description.md`
 - Full development context (AI agent):
   - `Imperecta_Full_Development_Context.md`
-- Backend audit:
-  - `backend_full_audit_report.md`
 - Parser/scraper audit:
   - `parsers_audit.md`
+- Runtime snapshot:
+  - `imperecta_context.md`
 - Local DB restore (Windows / new machine):
   - `db/backups/imperecta_20260414_2040.sql.gz` — latest committed dump
   - `docker-compose.yml` — postgres + redis + backend + celery + frontend

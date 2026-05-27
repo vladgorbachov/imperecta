@@ -41,12 +41,16 @@ export const authApi = {
       plan: string;
       trial_ends_at: string | null;
       language: string;
+      timezone?: string | null;
       ai_tone?: string;
+      default_currency?: string | null;
       created_at: string;
       telegram_chat_id: number | null;
       avatar_url: string | null;
       is_superuser?: boolean;
+      is_active?: boolean;
       force_password_change?: boolean;
+      preferences?: Record<string, unknown> | null;
       entitlements?: {
         service_tier: string;
         features: Record<string, boolean>;
@@ -59,8 +63,10 @@ export const authApi = {
     name?: string;
     company_name?: string;
     language?: string;
+    timezone?: string;
     avatar_url?: string | null;
     ai_tone?: string;
+    preferences?: Record<string, unknown>;
   }) => apiClient.put("/auth/me", data),
   deleteAvatar: () => apiClient.delete<{ message: string }>("/auth/avatar"),
   getTelegramLink: () =>

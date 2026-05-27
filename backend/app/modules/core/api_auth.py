@@ -70,6 +70,7 @@ def _build_user_response(current_user: User) -> UserResponse:
         last_login_at=getattr(current_user, "last_login_at", None),
         telegram_chat_id=current_user.telegram_chat_id,
         avatar_url=getattr(current_user, "avatar_url", None),
+        preferences=getattr(current_user, "preferences", None),
         entitlements=get_entitlements_for_frontend(current_user.plan, trial_ends_at=current_user.trial_ends_at),
     )
 
