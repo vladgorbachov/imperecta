@@ -1,17 +1,20 @@
 # Parsers Audit — Imperecta
 
-## 0. Актуализация (2026-05-21)
+## 0. Актуализация (2026-05-27)
 
-- **Full test pipeline admin flow added (backend):**
-  - `/api/admin/parsing/run-full-test` creates full-pipeline test job.
-  - `run_full_pipeline_test` task now tracks and persists stage-aware metadata (`current_stage`, timings, summary, per_marketplace).
-  - `/api/admin/parsing/job-status/{job_id}` supports polling and returns normalized status + metadata.
-  - `/api/admin/parsing/test-runs` returns historical runs for admin UI history table.
-- **Parser observability upgrade:**
-  - Status pipeline aligned with frontend monitoring (running/completed/failed),
-  - timings breakdown for discovery/scrape/persist exposed in job metadata.
+- **Pipeline execution and observability hardening (backend):**
+  - `/api/admin/parsing/run-full-test` now enforces single active full-pipeline run.
+  - stale `running` full-pipeline jobs are auto-marked `failed` after inactivity timeout.
+  - metadata heartbeat `last_activity_at` added and propagated through status/live-feed payloads.
+  - stage resolution now reflects real activity (if logs exist, stage is no longer stuck as `queued`).
+  - final pipeline summary now includes marketplaces seen only in `scrape_logs` (not just discovery seed).
 
-- **Git head:** `f50afca` — local dev scripts removed; production-first config.
+- **Discovery and extraction hardening:**
+  - discovery retries alternative seed URLs (`/catalog`, `/products`, `/shop`, locale variants) when base seed fails.
+  - price parser rejects unrealistic huge numeric tokens (catalog/barcode-like values), reducing `price_overflow`.
+  - failed scrape log rows now always include non-empty `error_message` fallback.
+
+- **Git head:** `b0a0a55` — pipeline/discovery stabilization batch.
 - **Legacy admin endpoints removed:** `trigger-scrape`, `scrape-activity`, `error-distribution`, `clear-test-data`, `marketplaces/deduplicate`.
 - **Clear-pool:** `POST /api/admin/products/clear-pool` — hard reset pool data (see `api_admin.py`).
 

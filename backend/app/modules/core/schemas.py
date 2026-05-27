@@ -96,6 +96,7 @@ class UserResponse(BaseModel):
     last_login_at: datetime | None = None
     created_at: datetime
     telegram_chat_id: int | None = None
+    preferences: dict[str, Any] | None = None
     entitlements: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}

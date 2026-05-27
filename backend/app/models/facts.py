@@ -301,7 +301,7 @@ class FactSearchTrend(Base):
     __table_args__ = (
         CheckConstraint(
             "source IN ("
-            "'google_trends','ozon_trends','wb_trends','kaspi_trends','amazon_trends',"
+            "'google_trends','kaspi_trends','amazon_trends',"
             "'allegro_trends','custom'"
             ")",
             name="ck_fact_search_trend_source",

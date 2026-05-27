@@ -18,6 +18,19 @@ from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
 
+# Days before category recon is re-run for a marketplace.
+CATEGORY_RECON_STALE_DAYS = 7
+# Days before sitemap harvest is re-run.
+SITEMAP_STALE_DAYS = 3
+# Max category URLs to harvest products from per discovery run.
+MAX_CATEGORY_URLS_PER_RUN = 60
+# Max pages to paginate within a single category URL.
+MAX_PAGES_PER_CATEGORY = 50
+# Max BFS depth when exploring hub pages for category links.
+RECON_BFS_MAX_DEPTH = 3
+# Min URLs found via sitemap to consider sitemap harvest successful.
+SITEMAP_MIN_USEFUL_URLS = 10
+
 
 def _title_from_url(url: str) -> str:
     """Derive placeholder product title from URL path."""
@@ -145,6 +158,162 @@ class DiscoveryCrawler:
             await self.db.flush()
         return new_count
 
+    def _should_run_sitemap_harvest(self, marketplace: DimMarketplace) -> bool:
+        """Return True if sitemap harvest should run."""
+        if marketplace.last_sitemap_harvest_at is None:
+            return True
+        age = (datetime.now(tz=timezone.utc) - marketplace.last_sitemap_harvest_at).days
+        return age >= SITEMAP_STALE_DAYS
+
+    def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:
+        """Return True if category recon should run."""
+        if not marketplace.discovered_category_urls:
+            return True
+        if marketplace.last_category_recon_at is None:
+            return True
+        age = (datetime.now(tz=timezone.utc) - marketplace.last_category_recon_at).days
+        return age >= CATEGORY_RECON_STALE_DAYS
+
+    async def _phase0_sitemap_harvest(self, marketplace: DimMarketplace) -> list[str]:
+        """Phase 0: attempt to collect product URLs from XML sitemaps."""
+        logger.info(
+            "sitemap_harvest_start marketplace_id=%s url=%s",
+            marketplace.id,
+            marketplace.base_url,
+        )
+        urls = await self.pool.fetch_sitemap_candidates(marketplace.base_url)
+        marketplace.last_sitemap_harvest_at = datetime.now(tz=timezone.utc)
+        if urls:
+            marketplace.sitemap_url = f"{marketplace.base_url.rstrip('/')}/sitemap.xml"
+        await self.db.flush()
+        logger.info(
+            "sitemap_harvest_done marketplace_id=%s urls_found=%d",
+            marketplace.id,
+            len(urls),
+        )
+        return urls
+
+    async def _phase1_category_recon(self, marketplace: DimMarketplace) -> list[str]:
+        """Phase 1: BFS traversal to discover category/listing URLs."""
+        from collections import deque
+
+        from app.modules.scraper.extractors import classify_page_role, extract_internal_links_all
+
+        logger.info(
+            "category_recon_start marketplace_id=%s url=%s",
+            marketplace.id,
+            marketplace.base_url,
+        )
+        queue: deque[tuple[str, int]] = deque([(marketplace.base_url, 0)])
+        visited: set[str] = {marketplace.base_url}
+        listing_urls: list[str] = []
+        fallback_seeds = ["/catalog", "/categories", "/shop", "/store", "/all"]
+
+        while queue:
+            current_url, depth = queue.popleft()
+            if depth > RECON_BFS_MAX_DEPTH:
+                continue
+            _html, soup = await self.pool.scrape_page_for_analysis(
+                current_url,
+                requires_js=marketplace.requires_js,
+            )
+            if soup is None:
+                continue
+            role = classify_page_role(soup, marketplace.base_url)
+            logger.debug(
+                "recon_page marketplace_id=%s url=%s depth=%d role=%s",
+                marketplace.id,
+                current_url,
+                depth,
+                role,
+            )
+            if role == "listing":
+                if current_url != marketplace.base_url:
+                    listing_urls.append(current_url)
+                if depth < RECON_BFS_MAX_DEPTH:
+                    for link in extract_internal_links_all(soup, marketplace.base_url):
+                        if link not in visited:
+                            visited.add(link)
+                            queue.append((link, depth + 1))
+            elif role in ("hub", "unknown"):
+                for link in extract_internal_links_all(soup, marketplace.base_url):
+                    if link not in visited:
+                        visited.add(link)
+                        queue.append((link, depth + 1))
+
+        if not listing_urls:
+            for fallback in fallback_seeds:
+                fallback_url = f"{marketplace.base_url.rstrip('/')}{fallback}"
+                if fallback_url in visited:
+                    continue
+                _html, soup = await self.pool.scrape_page_for_analysis(
+                    fallback_url,
+                    requires_js=marketplace.requires_js,
+                )
+                if soup is None:
+                    continue
+                role = classify_page_role(soup, marketplace.base_url)
+                if role in ("listing", "hub"):
+                    listing_urls.append(fallback_url)
+
+        seen: set[str] = set()
+        unique: list[str] = []
+        for url in listing_urls:
+            if url not in seen:
+                seen.add(url)
+                unique.append(url)
+
+        marketplace.discovered_category_urls = unique
+        marketplace.last_category_recon_at = datetime.now(tz=timezone.utc)
+        await self.db.flush()
+        logger.info(
+            "category_recon_done marketplace_id=%s listing_urls_found=%d",
+            marketplace.id,
+            len(unique),
+        )
+        return unique
+
+    async def _phase2_product_harvest(
+        self,
+        marketplace: DimMarketplace,
+        category_urls: list[str],
+    ) -> int:
+        """Phase 2: crawl each category URL, extract product links, save to pool."""
+        from app.modules.scraper.extractors import (
+            detect_next_page,
+            extract_links_from_repeated_structure,
+            extract_product_links,
+        )
+
+        total_saved = 0
+        harvest_targets = category_urls[:MAX_CATEGORY_URLS_PER_RUN]
+
+        for category_url in harvest_targets:
+            current_url: str | None = category_url
+            page_num = 0
+            while current_url and page_num < MAX_PAGES_PER_CATEGORY:
+                _html, soup = await self.pool.scrape_page_for_analysis(
+                    current_url,
+                    requires_js=marketplace.requires_js,
+                )
+                if soup is None:
+                    break
+
+                product_urls = extract_links_from_repeated_structure(
+                    soup,
+                    marketplace.base_url,
+                    current_url,
+                )
+                if not product_urls:
+                    product_urls = extract_product_links(soup, marketplace.base_url)
+                if product_urls:
+                    total_saved += await self._save_product_urls(marketplace.id, product_urls)
+
+                next_page = detect_next_page(soup, current_url)
+                current_url = next_page
+                page_num += 1
+        return total_saved
+
     async def discover(self, marketplace: DimMarketplace) -> DiscoveryResult:
         """Run discovery for one marketplace (ScrapeJob + listing crawl)."""
         started_perf = time.perf_counter()
@@ -178,6 +347,8 @@ class DiscoveryCrawler:
             seed_url = (marketplace.base_url or f"https://{domain}").strip()
             if not seed_url.startswith("http"):
                 seed_url = f"https://{seed_url}"
+            if marketplace.base_url != seed_url:
+                marketplace.base_url = seed_url
 
             current = await self.db.scalar(
                 select(func.count(FactListing.id)).where(FactListing.marketplace_id == mp_id),
@@ -185,54 +356,45 @@ class DiscoveryCrawler:
             current_count = int(current or 0)
             quota = int(marketplace.product_quota or 0)
             no_quota_limit = max(int(settings.discovery_no_quota_limit or 200000), 1)
-            max_pages = max(int(settings.discovery_max_pages_per_run or 5000), 1)
             # quota 0 = no explicit cap (large ceiling); quota > 0 = remaining slots
             remaining = max(0, quota - current_count) if quota > 0 else no_quota_limit
 
-            seen_urls: set[str] = set()
-            seed_candidates = self._seed_candidates(seed_url)
-            page_url: str | None = seed_candidates.pop(0) if seed_candidates else seed_url
-            requires_js = bool(marketplace.requires_js)
+            sitemap_product_urls: list[str] = []
+            if self._should_run_sitemap_harvest(marketplace):
+                sitemap_product_urls = await self._phase0_sitemap_harvest(marketplace)
 
-            while page_url and remaining > 0 and pages_scanned < max_pages:
-                listing_res = await self.pool.scrape_listing(
-                    url=page_url,
-                    custom_link_selector=marketplace.custom_product_link_selector,
-                    custom_next_page_selector=marketplace.custom_next_page_selector,
-                    requires_js=requires_js,
+            products_found = 0
+            if len(sitemap_product_urls) >= SITEMAP_MIN_USEFUL_URLS:
+                logger.info(
+                    "discovery_using_sitemap marketplace_id=%s url_count=%d",
+                    marketplace.id,
+                    len(sitemap_product_urls),
                 )
-                pages_scanned += 1
-                if not listing_res.success:
-                    if candidate_urls_found == 0 and persisted_listings == 0 and seed_candidates:
-                        page_url = seed_candidates.pop(0)
-                        continue
-                    errors.append(listing_res.error or "listing_fetch_failed")
-                    break
+                candidate_urls_found = len(sitemap_product_urls)
+                batch = sitemap_product_urls[:remaining]
+                accepted_urls = len(batch)
+                rejected_urls = max(0, len(sitemap_product_urls) - len(batch))
+                products_found = await self._save_product_urls(marketplace.id, batch)
+                persisted_listings = products_found
+                duplicate_urls = max(0, len(batch) - products_found)
+                remaining = max(0, remaining - products_found)
+                pages_scanned = 1 if sitemap_product_urls else 0
+            else:
+                if self._should_run_category_recon(marketplace):
+                    await self._phase1_category_recon(marketplace)
 
-                candidate_batch = listing_res.product_urls
-                candidate_urls_found += len(candidate_batch)
-
-                deduped_batch = [u for u in candidate_batch if u not in seen_urls]
-                duplicate_urls += len(candidate_batch) - len(deduped_batch)
-
-                batch = deduped_batch[:remaining]
-                accepted_urls += len(batch)
-                rejected_urls += max(0, len(deduped_batch) - len(batch))
-                for u in batch:
-                    seen_urls.add(u)
-
-                if batch:
-                    saved = await self._save_product_urls(mp_id, batch)
-                    persisted_listings += saved
-                    duplicate_urls += max(0, len(batch) - saved)
-                    remaining -= saved
-
-                page_url = listing_res.next_page_url
-                if not batch and not page_url and candidate_urls_found == 0 and persisted_listings == 0 and seed_candidates:
-                    page_url = seed_candidates.pop(0)
-                    continue
-                if not batch and not page_url:
-                    break
+                harvest_urls = [marketplace.base_url] + (marketplace.discovered_category_urls or [])
+                candidate_urls_found = len(harvest_urls)
+                accepted_urls = min(len(harvest_urls), remaining)
+                rejected_urls = max(0, len(harvest_urls) - accepted_urls)
+                pages_scanned = accepted_urls
+                products_found = await self._phase2_product_harvest(
+                    marketplace,
+                    harvest_urls[:accepted_urls],
+                )
+                persisted_listings = products_found
+                duplicate_urls = max(0, accepted_urls - products_found)
+                remaining = max(0, remaining - products_found)
 
             if errors and persisted_listings > 0:
                 status = "partial"

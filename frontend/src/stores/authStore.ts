@@ -39,7 +39,9 @@ export interface User {
   telegram_chat_id?: number | null;
   avatar_url?: string | null;
   is_superuser?: boolean;
+  is_active?: boolean;
   force_password_change?: boolean;
+  preferences?: Record<string, unknown> | null;
   entitlements?: UserEntitlements;
 }
 

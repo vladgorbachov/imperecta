@@ -21,6 +21,12 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("GET", "/api/admin/parsing/test-runs"),
         ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/users-detailed"),
+        ("POST", "/api/admin/parsing/users"),
+        ("PATCH", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001"),
+        ("PATCH", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001/status"),
+        ("PATCH", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001/role"),
+        ("POST", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001/reset-password"),
+        ("DELETE", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/marketplaces-detailed"),
         ("GET", "/api/admin/parsing/job-live-feed/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/active-job"),
@@ -28,6 +34,12 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
     for method, path in paths:
         if method == "GET":
             resp = await client.get(path, headers=auth_headers)
+        elif method == "POST":
+            resp = await client.post(path, headers=auth_headers, json={})
+        elif method == "PATCH":
+            resp = await client.patch(path, headers=auth_headers, json={})
+        elif method == "DELETE":
+            resp = await client.delete(path, headers=auth_headers)
         else:
             resp = await client.post(path, headers=auth_headers)
         assert resp.status_code == 403

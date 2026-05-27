@@ -13,10 +13,13 @@ from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entitlements.plan import UserPlan
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.core import User, UserProduct
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
+from app.modules.core.auth.service import hash_password
+from app.modules.core.schemas import ALLOWED_LANGUAGE_CODES
 
 
 class ParsingAdminService:
@@ -285,6 +288,7 @@ class ParsingAdminService:
                 User.id,
                 User.email,
                 User.name,
+                User.company_name,
                 User.plan,
                 User.is_active,
                 User.is_superuser,
@@ -307,6 +311,7 @@ class ParsingAdminService:
                 "id": str(row["id"]),
                 "email": row["email"],
                 "name": row["name"],
+                "company_name": row["company_name"],
                 "plan": row["plan"],
                 "is_active": bool(row["is_active"]),
                 "is_superuser": bool(row["is_superuser"]),
@@ -319,6 +324,206 @@ class ParsingAdminService:
             }
             for row in rows
         ]
+
+    async def create_user(
+        self,
+        *,
+        email: str,
+        password: str,
+        name: str | None,
+        company_name: str | None,
+        plan: str,
+        language: str,
+        timezone: str | None,
+        is_active: bool,
+        is_superuser: bool,
+    ) -> dict[str, Any]:
+        """Create user from admin panel."""
+        normalized_email = email.strip().lower()
+        if not normalized_email:
+            raise ValueError("Email is required")
+        existing = await self.db.scalar(select(User.id).where(User.email == normalized_email))
+        if existing is not None:
+            raise ValueError("Email already registered")
+        validated_plan = self._validate_plan(plan)
+        validated_language = self._validate_language(language)
+        validated_timezone = self._normalize_timezone(timezone)
+        user = User(
+            email=normalized_email,
+            password_hash=hash_password(password),
+            name=self._normalize_optional_text(name),
+            company_name=self._normalize_optional_text(company_name),
+            plan=validated_plan,
+            language=validated_language,
+            timezone=validated_timezone,
+            is_active=is_active,
+            is_superuser=is_superuser,
+        )
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return await self.get_user_detailed(user.id)
+
+    async def get_user_detailed(self, user_id: UUID) -> dict[str, Any]:
+        """Return single user in Users Management contract."""
+        stmt = (
+            select(
+                User.id,
+                User.email,
+                User.name,
+                User.company_name,
+                User.plan,
+                User.is_active,
+                User.is_superuser,
+                User.language,
+                User.timezone,
+                User.login_count,
+                User.last_login_at,
+                User.created_at,
+                func.count(UserProduct.id).label("tracked_products"),
+            )
+            .outerjoin(UserProduct, UserProduct.user_id == User.id)
+            .where(User.id == user_id)
+            .group_by(User.id)
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        row = result.mappings().first()
+        if row is None:
+            raise ValueError(f"User not found: {user_id}")
+        return {
+            "id": str(row["id"]),
+            "email": row["email"],
+            "name": row["name"],
+            "company_name": row["company_name"],
+            "plan": row["plan"],
+            "is_active": bool(row["is_active"]),
+            "is_superuser": bool(row["is_superuser"]),
+            "language": row["language"],
+            "timezone": row["timezone"],
+            "login_count": int(row["login_count"] or 0),
+            "tracked_products": int(row["tracked_products"] or 0),
+            "last_login_at": self._to_iso(row["last_login_at"]),
+            "created_at": self._to_iso(row["created_at"]),
+        }
+
+    async def update_user(
+        self,
+        user_id: UUID,
+        *,
+        email: str | None = None,
+        name: str | None = None,
+        company_name: str | None = None,
+        plan: str | None = None,
+        language: str | None = None,
+        timezone: str | None = None,
+        is_active: bool | None = None,
+        is_superuser: bool | None = None,
+    ) -> dict[str, Any]:
+        """Update mutable user fields from admin panel."""
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise ValueError(f"User not found: {user_id}")
+        if email is not None:
+            normalized_email = email.strip().lower()
+            if not normalized_email:
+                raise ValueError("Email cannot be empty")
+            existing = await self.db.scalar(
+                select(User.id).where(User.email == normalized_email, User.id != user_id)
+            )
+            if existing is not None:
+                raise ValueError("Email already registered")
+            user.email = normalized_email
+        if name is not None:
+            user.name = self._normalize_optional_text(name)
+        if company_name is not None:
+            user.company_name = self._normalize_optional_text(company_name)
+        if plan is not None:
+            user.plan = self._validate_plan(plan)
+        if language is not None:
+            user.language = self._validate_language(language)
+        if timezone is not None:
+            user.timezone = self._normalize_timezone(timezone)
+        if is_active is not None:
+            user.is_active = bool(is_active)
+        if is_superuser is not None:
+            user.is_superuser = bool(is_superuser)
+        await self.db.commit()
+        return await self.get_user_detailed(user_id)
+
+    async def set_user_active(
+        self,
+        user_id: UUID,
+        *,
+        is_active: bool,
+        actor_user_id: UUID,
+    ) -> dict[str, Any]:
+        """Activate or deactivate user with safety checks."""
+        if not is_active and user_id == actor_user_id:
+            raise ValueError("You cannot deactivate your own account")
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise ValueError(f"User not found: {user_id}")
+        if not is_active and user.is_superuser:
+            superusers_count = await self.db.scalar(
+                select(func.count(User.id)).where(User.is_superuser.is_(True), User.is_active.is_(True))
+            )
+            if int(superusers_count or 0) <= 1:
+                raise ValueError("Cannot deactivate the last active superuser")
+        user.is_active = is_active
+        await self.db.commit()
+        return await self.get_user_detailed(user_id)
+
+    async def set_user_superuser(
+        self,
+        user_id: UUID,
+        *,
+        is_superuser: bool,
+        actor_user_id: UUID,
+    ) -> dict[str, Any]:
+        """Grant or revoke superuser role with safety checks."""
+        if not is_superuser and user_id == actor_user_id:
+            raise ValueError("You cannot remove your own superuser role")
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise ValueError(f"User not found: {user_id}")
+        if not is_superuser and user.is_superuser:
+            superusers_count = await self.db.scalar(select(func.count(User.id)).where(User.is_superuser.is_(True)))
+            if int(superusers_count or 0) <= 1:
+                raise ValueError("Cannot remove role from the last superuser")
+        user.is_superuser = is_superuser
+        await self.db.commit()
+        return await self.get_user_detailed(user_id)
+
+    async def reset_user_password(
+        self,
+        user_id: UUID,
+        *,
+        new_password: str,
+        force_password_change: bool,
+    ) -> dict[str, Any]:
+        """Admin password reset action."""
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise ValueError(f"User not found: {user_id}")
+        user.password_hash = hash_password(new_password)
+        user.force_password_change = force_password_change
+        await self.db.commit()
+        return await self.get_user_detailed(user_id)
+
+    async def delete_user(self, user_id: UUID, *, actor_user_id: UUID) -> None:
+        """Delete user with safety checks."""
+        if user_id == actor_user_id:
+            raise ValueError("You cannot delete your own account")
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise ValueError(f"User not found: {user_id}")
+        if user.is_superuser:
+            superusers_count = await self.db.scalar(select(func.count(User.id)).where(User.is_superuser.is_(True)))
+            if int(superusers_count or 0) <= 1:
+                raise ValueError("Cannot delete the last superuser")
+        await self.db.delete(user)
+        await self.db.commit()
 
     async def get_marketplaces_detailed(self, limit: int = 1000) -> list[dict[str, Any]]:
         """Detailed active marketplace list with scrape/discovery diagnostics."""
@@ -674,6 +879,41 @@ class ParsingAdminService:
             },
             "per_marketplace": [],
         }
+
+    @staticmethod
+    def _validate_plan(value: str) -> str:
+        normalized = (value or "").strip().lower()
+        try:
+            return UserPlan(normalized).value
+        except ValueError as exc:
+            raise ValueError(
+                "Invalid plan. Allowed: trial, starter, business, pro, enterprise"
+            ) from exc
+
+    @staticmethod
+    def _validate_language(value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in ALLOWED_LANGUAGE_CODES:
+            raise ValueError(
+                f"Invalid language. Allowed: {', '.join(sorted(ALLOWED_LANGUAGE_CODES))}"
+            )
+        return normalized
+
+    @staticmethod
+    def _normalize_timezone(value: str | None) -> str:
+        normalized = (value or "UTC").strip()
+        if not normalized:
+            return "UTC"
+        if len(normalized) > 50:
+            raise ValueError("Timezone exceeds maximum length (50)")
+        return normalized
+
+    @staticmethod
+    def _normalize_optional_text(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     @staticmethod
     def _extract_metadata(config: Any) -> dict[str, Any]:

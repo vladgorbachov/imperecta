@@ -258,6 +258,99 @@ class ScraperPool:
                 return html
         return None
 
+    async def _fetch_raw(self, url: str, requires_js: bool = False) -> str | None:
+        """Fetch and return raw HTML/text for a URL without extraction.
+
+        Tries fetch layers in priority order. Returns None on total failure.
+        """
+        layers = self._layer_order(requires_js=requires_js)
+        for layer_name in layers:
+            try:
+                html, _err = await self._fetch_layer_with_retries(layer_name, url)
+                if html:
+                    return html
+            except Exception:
+                continue
+        return None
+
+    async def fetch_sitemap_candidates(self, base_url: str) -> list[str]:
+        """Attempt to discover and harvest product URLs from sitemaps."""
+        from urllib.parse import urljoin
+
+        from app.modules.scraper.extractors import (
+            SITEMAP_MAX_SUBFILES,
+            SITEMAP_MAX_URLS,
+            parse_sitemap_xml,
+        )
+
+        sitemap_urls_to_try: list[str] = []
+
+        robots_url = urljoin(base_url, "/robots.txt")
+        try:
+            robots_text = await self._fetch_raw(robots_url, requires_js=False)
+            if robots_text:
+                for line in robots_text.splitlines():
+                    line = line.strip()
+                    if line.lower().startswith("sitemap:"):
+                        sitemap_ref = line.split(":", 1)[1].strip()
+                        if sitemap_ref:
+                            sitemap_urls_to_try.append(sitemap_ref)
+        except Exception:
+            pass
+
+        for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap/sitemap.xml"):
+            candidate = urljoin(base_url, path)
+            if candidate not in sitemap_urls_to_try:
+                sitemap_urls_to_try.append(candidate)
+
+        product_urls: list[str] = []
+        visited_sitemaps: set[str] = set()
+        pending_sitemaps: list[str] = list(sitemap_urls_to_try)
+
+        while pending_sitemaps and len(visited_sitemaps) < SITEMAP_MAX_SUBFILES:
+            sitemap_url = pending_sitemaps.pop(0)
+            if sitemap_url in visited_sitemaps:
+                continue
+            visited_sitemaps.add(sitemap_url)
+
+            try:
+                content = await self._fetch_raw(sitemap_url, requires_js=False)
+                if not content:
+                    continue
+            except Exception:
+                continue
+
+            parsed = parse_sitemap_xml(content, base_url)
+            for nested in parsed["sitemaps"]:
+                if nested not in visited_sitemaps:
+                    pending_sitemaps.append(nested)
+            for url in parsed["urls"]:
+                if len(product_urls) >= SITEMAP_MAX_URLS:
+                    break
+                product_urls.append(url)
+            if len(product_urls) >= SITEMAP_MAX_URLS:
+                break
+
+        return product_urls
+
+    async def scrape_page_for_analysis(
+        self,
+        url: str,
+        requires_js: bool = False,
+    ) -> tuple[str | None, BeautifulSoup | None]:
+        """Fetch a page and return (html, soup) for structural analysis.
+
+        Returns (None, None) on failure.
+        """
+        try:
+            html = await self._fetch_raw(url, requires_js=requires_js)
+            if not html:
+                return None, None
+            soup = BeautifulSoup(html, "html.parser")
+            return html, soup
+        except Exception:
+            return None, None
+
     async def scrape_listing(
         self,
         url: str,

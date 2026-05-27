@@ -163,6 +163,18 @@ class DimMarketplace(Base):
     discovery_error_count: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False, server_default=text("0")
     )
+    discovered_category_urls: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    last_category_recon_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    sitemap_url: Mapped[str | None] = mapped_column(
+        String(2048), nullable=True, default=None
+    )
+    last_sitemap_harvest_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

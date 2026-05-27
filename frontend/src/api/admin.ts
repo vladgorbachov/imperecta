@@ -221,6 +221,7 @@ export interface ParsingDetailedUser {
   id: string;
   email: string;
   name: string | null;
+  company_name?: string | null;
   plan: string;
   is_active: boolean;
   is_superuser: boolean;
@@ -319,6 +320,42 @@ export interface ParsingActiveJobResponse {
   } | null;
 }
 
+export interface AdminUserCreatePayload {
+  email: string;
+  password: string;
+  name?: string | null;
+  company_name?: string | null;
+  plan: string;
+  language: string;
+  timezone?: string | null;
+  is_active: boolean;
+  is_superuser: boolean;
+}
+
+export interface AdminUserUpdatePayload {
+  email?: string;
+  name?: string | null;
+  company_name?: string | null;
+  plan?: string;
+  language?: string;
+  timezone?: string | null;
+  is_active?: boolean;
+  is_superuser?: boolean;
+}
+
+export interface AdminUserStatusPayload {
+  is_active: boolean;
+}
+
+export interface AdminUserRolePayload {
+  is_superuser: boolean;
+}
+
+export interface AdminUserResetPasswordPayload {
+  new_password: string;
+  force_password_change: boolean;
+}
+
 export const getParsingTestMarketplaces = () =>
   apiClient.get<ParsingTestMarketplace[]>("/admin/parsing/test-marketplaces");
 
@@ -333,6 +370,26 @@ export const getParsingJobStatus = (jobId: string) =>
 
 export const getParsingUsersDetailed = (limit = 500) =>
   apiClient.get<ParsingDetailedUser[]>("/admin/parsing/users-detailed", { params: { limit } });
+
+export const createAdminUser = (payload: AdminUserCreatePayload) =>
+  apiClient.post<ParsingDetailedUser>("/admin/parsing/users", payload);
+
+export const updateAdminUser = (userId: string, payload: AdminUserUpdatePayload) =>
+  apiClient.patch<ParsingDetailedUser>(`/admin/parsing/users/${userId}`, payload);
+
+export const setAdminUserStatus = (userId: string, payload: AdminUserStatusPayload) =>
+  apiClient.patch<ParsingDetailedUser>(`/admin/parsing/users/${userId}/status`, payload);
+
+export const setAdminUserRole = (userId: string, payload: AdminUserRolePayload) =>
+  apiClient.patch<ParsingDetailedUser>(`/admin/parsing/users/${userId}/role`, payload);
+
+export const resetAdminUserPassword = (
+  userId: string,
+  payload: AdminUserResetPasswordPayload,
+) => apiClient.post<ParsingDetailedUser>(`/admin/parsing/users/${userId}/reset-password`, payload);
+
+export const deleteAdminUser = (userId: string) =>
+  apiClient.delete<{ deleted: boolean }>(`/admin/parsing/users/${userId}`);
 
 export const getParsingMarketplacesDetailed = (limit = 1000) =>
   apiClient.get<ParsingDetailedMarketplace[]>("/admin/parsing/marketplaces-detailed", { params: { limit } });
