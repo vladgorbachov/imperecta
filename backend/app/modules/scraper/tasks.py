@@ -20,7 +20,7 @@ from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
 from app.modules.scraper.discovery import DiscoveryCrawler
-from app.modules.scraper.pipeline.full_test_runner import FullPipelineTestRunner
+from app.modules.scraper.pipeline.finalize import finalize_full_pipeline_job as _finalize_full_pipeline_job
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
@@ -421,111 +421,6 @@ async def _discover_for_full_pipeline(
     return len(marketplaces), per_marketplace, errors
 
 
-async def _finalize_full_pipeline_job(
-    db: AsyncSession,
-    job: ScrapeJob,
-    *,
-    discovery_ms: int,
-    scrape_ms: int,
-    persist_ms: int,
-    per_marketplace_seed: dict[UUID, dict[str, Any]],
-    hard_error: str | None = None,
-) -> dict[str, Any]:
-    log_stats = await db.execute(
-        select(
-            ScrapeLog.marketplace_id,
-            func.sum(case((ScrapeLog.status == "success", 1), else_=0)).label("prices_saved"),
-            func.sum(case((ScrapeLog.status != "success", 1), else_=0)).label("errors_count"),
-        )
-        .where(ScrapeLog.scrape_job_id == job.id)
-        .group_by(ScrapeLog.marketplace_id)
-    )
-
-    stats_by_marketplace = {
-        row.marketplace_id: {
-            "prices_saved": int(row.prices_saved or 0),
-            "errors_count": int(row.errors_count or 0),
-        }
-        for row in log_stats
-    }
-
-    merged: list[dict[str, Any]] = []
-    for marketplace_id, seed in per_marketplace_seed.items():
-        merged_entry = dict(seed)
-        stats = stats_by_marketplace.get(marketplace_id, {})
-        merged_entry["prices_saved"] = int(stats.get("prices_saved", merged_entry["prices_saved"]))
-        merged_entry["errors_count"] = int(
-            merged_entry["errors_count"] + stats.get("errors_count", 0)
-        )
-        if merged_entry["errors_count"] > 0 and merged_entry["status"] != "running":
-            merged_entry["status"] = "failed"
-        merged.append(merged_entry)
-
-    # Include marketplaces that were scraped but absent in discovery seed.
-    missing_marketplace_ids = set(stats_by_marketplace) - set(per_marketplace_seed)
-    if missing_marketplace_ids:
-        domains_result = await db.execute(
-            select(DimMarketplace.id, DimMarketplace.domain).where(DimMarketplace.id.in_(missing_marketplace_ids))
-        )
-        domain_map = {row.id: row.domain for row in domains_result}
-        for marketplace_id in missing_marketplace_ids:
-            stats = stats_by_marketplace[marketplace_id]
-            merged.append(
-                {
-                    "marketplace_id": str(marketplace_id),
-                    "domain": domain_map.get(marketplace_id),
-                    "listings_created": 0,
-                    "prices_saved": int(stats.get("prices_saved", 0)),
-                    "errors_count": int(stats.get("errors_count", 0)),
-                    "duration_ms": 0,
-                    "status": "failed" if int(stats.get("errors_count", 0)) > 0 else "completed",
-                }
-            )
-
-    listings_created = int(sum(item["listings_created"] for item in merged))
-    prices_saved = int(sum(item["prices_saved"] for item in merged))
-    errors_count = int(sum(item["errors_count"] for item in merged))
-    total_ms = int(discovery_ms + scrape_ms + persist_ms)
-
-    metadata = _extract_pipeline_metadata(job.config)
-    _touch_pipeline_metadata(metadata)
-    metadata.update(
-        {
-            "current_stage": "failed" if hard_error else "completed",
-            "timings": {
-                "discovery_ms": int(discovery_ms),
-                "scrape_ms": int(scrape_ms),
-                "persist_ms": int(persist_ms),
-                "total_ms": int(total_ms),
-            },
-            "summary": {
-                "listings_created": listings_created,
-                "prices_saved": prices_saved,
-                "errors_count": errors_count,
-            },
-            "per_marketplace": merged,
-        }
-    )
-    if hard_error:
-        metadata["error"] = hard_error[:2000]
-
-    completed_at = datetime.now(timezone.utc)
-    job.completed_at = completed_at
-    job.duration_ms = total_ms
-    job.total_listings = listings_created
-    job.successful = prices_saved
-    job.failed = errors_count
-    job.status = "failed" if hard_error else "completed"
-    from copy import deepcopy
-
-    from sqlalchemy.orm.attributes import flag_modified
-
-    job.config = {"metadata": deepcopy(metadata)}
-    flag_modified(job, "config")
-    await db.commit()
-    return metadata
-
-
 @celery_app.task(
     bind=True,
     name="run_full_pipeline_test",
@@ -537,6 +432,8 @@ def run_full_pipeline_test(self, parent_job_id: str) -> dict:
     """Run discovery + scrape pipeline for parsing admin test flow."""
 
     async def _do() -> dict:
+        from app.modules.scraper.pipeline.full_test_runner import FullPipelineTestRunner
+
         engine, session_factory = _make_session_factory()
         try:
             runner = FullPipelineTestRunner(

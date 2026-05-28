@@ -12,11 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.app_tables import ScrapeJob
 from app.modules.scraper.pipeline.discovery_phase import run_discovery_phase
+from app.modules.scraper.pipeline.finalize import finalize_full_pipeline_job
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
-from app.modules.scraper.tasks import (
-    _finalize_full_pipeline_job,
-    _run_scrape_all_pool,
-)
 
 slog = structlog.get_logger(__name__)
 
@@ -71,7 +68,7 @@ class FullPipelineTestRunner:
                 async with self._session_factory() as db:
                     job = await db.get(ScrapeJob, parent_job_id)
                     if job is not None:
-                        metadata = await _finalize_full_pipeline_job(
+                        metadata = await finalize_full_pipeline_job(
                             db,
                             job,
                             discovery_ms=discovery_ms,
@@ -86,6 +83,8 @@ class FullPipelineTestRunner:
                             "summary": metadata.get("summary", {}),
                         }
                 return {"job_id": str(parent_job_id), "status": "failed", "error": hard_error}
+
+            from app.modules.scraper.tasks import _run_scrape_all_pool
 
             scrape_started = time.perf_counter()
             scrape_result = _run_scrape_all_pool(scrape_job_id=parent_job_id)
@@ -103,7 +102,7 @@ class FullPipelineTestRunner:
                 job = await db.get(ScrapeJob, parent_job_id)
                 if job is None:
                     return {"status": "not_found", "job_id": str(parent_job_id)}
-                metadata = await _finalize_full_pipeline_job(
+                metadata = await finalize_full_pipeline_job(
                     db,
                     job,
                     discovery_ms=discovery_ms,
@@ -125,7 +124,7 @@ class FullPipelineTestRunner:
                 async with self._session_factory() as db:
                     job = await db.get(ScrapeJob, parent_job_id)
                     if job is not None:
-                        await _finalize_full_pipeline_job(
+                        await finalize_full_pipeline_job(
                             db,
                             job,
                             discovery_ms=discovery_ms,
