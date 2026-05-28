@@ -1,4 +1,4 @@
-"""Analytics API endpoints (v2 migration stub)."""
+"""Analytics API endpoints."""
 
 from decimal import Decimal
 from uuid import UUID
@@ -17,9 +17,6 @@ from app.modules.dashboard.service import DashboardService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-_MIG = "Endpoint pending migration to v2 schema"
-
-
 @router.get("/products/{product_id}/price-history", response_model=PriceHistoryResponse)
 async def get_price_history(
     product_id: UUID,
@@ -30,7 +27,7 @@ async def get_price_history(
 ) -> PriceHistoryResponse:
     _ = db, period, competitor_product_id, product_id, current_user
     return PriceHistoryResponse(
-        product_name=_MIG,
+        product_name="N/A",
         my_price=Decimal("0"),
         competitors=[],
     )
@@ -93,4 +90,4 @@ async def get_dashboard_summary(current_user: CurrentUser, db: DbSession) -> dic
 @router.get("/dashboard/anomalies")
 async def get_dashboard_anomalies(current_user: CurrentUser, db: DbSession, limit: int = Query(10, ge=1, le=100)) -> dict:
     items = await DashboardService(db, current_user.id).get_anomalies(limit=limit)
-    return {"items": items, "message": _MIG}
+    return {"items": items}

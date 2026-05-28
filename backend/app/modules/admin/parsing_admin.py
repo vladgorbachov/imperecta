@@ -59,7 +59,8 @@ class ParsingAdminService:
     """
 
     TEST_PIPELINE_JOB_TYPE = "full_pipeline_test"
-    STALE_PIPELINE_TIMEOUT_MINUTES = 90
+    STALE_PIPELINE_TIMEOUT_MINUTES = 30
+    STALE_QUEUED_TIMEOUT_MINUTES = 5
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -966,6 +967,7 @@ class ParsingAdminService:
     async def _fail_stale_running_pipeline_jobs(self) -> None:
         """Mark stale running jobs as failed when no activity is observed."""
         timeout_s = max(int(self.STALE_PIPELINE_TIMEOUT_MINUTES), 1) * 60
+        queued_timeout_s = max(int(self.STALE_QUEUED_TIMEOUT_MINUTES), 1) * 60
         now = datetime.now(UTC)
         result = await self.db.execute(
             select(ScrapeJob)
@@ -991,7 +993,9 @@ class ParsingAdminService:
             if activity_dt is None:
                 continue
             idle_s = (now - activity_dt).total_seconds()
-            if idle_s < timeout_s:
+            current_stage = self._current_stage(metadata)
+            effective_timeout_s = queued_timeout_s if current_stage in {None, "queued"} else timeout_s
+            if idle_s < effective_timeout_s:
                 continue
 
             normalized = self._normalize_job_status(job.status)
@@ -1002,7 +1006,7 @@ class ParsingAdminService:
             stale_metadata["last_activity_at"] = self._to_iso(activity_dt)
             stale_metadata["error"] = (
                 f"stale_pipeline_timeout: idle_for_seconds={int(idle_s)} "
-                f"threshold_seconds={timeout_s}"
+                f"threshold_seconds={effective_timeout_s}"
             )
             job.status = "failed"
             job.completed_at = now

@@ -6,7 +6,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   LineChart,
@@ -24,23 +24,17 @@ import {
 import {
   ArrowLeft,
   RefreshCw,
-  Plus,
   ExternalLink,
-  Bell,
-  Mail,
-  Send,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { formatPrice, formatDate, formatRelativeTime, formatChartDate } from "@/lib/formatters";
 import { CHART_COLORS, CHART_PRIMARY } from "@/lib/design-tokens";
 import { analyticsApi } from "@/api/analytics";
 import { useProduct } from "@/hooks/useProducts";
-import { useAlerts } from "@/hooks/useAlerts";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -52,13 +46,10 @@ import {
 import { TrendBadge } from "@/components/ui-custom/TrendBadge";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { PromoBadge } from "@/components/ui-custom/PromoBadge";
-import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 type Period = "7d" | "30d" | "90d";
-type AlertType = "price_drop" | "price_increase" | "out_of_stock" | "new_promo";
-type AlertChannel = "email" | "telegram";
 
 interface ChartDataPoint {
   date: string;
@@ -67,26 +58,8 @@ interface ChartDataPoint {
   [key: string]: string | number | null;
 }
 
-const ALERT_TYPE_KEYS: Record<AlertType, string> = {
-  price_drop: "alerts.typePriceDrop",
-  price_increase: "alerts.typePriceIncrease",
-  out_of_stock: "alerts.typeOutOfStock",
-  new_promo: "alerts.typeNewPromo",
-};
-
-const CHANNEL_ICONS: Record<AlertChannel, typeof Mail> = {
-  email: Mail,
-  telegram: Send,
-};
-
-const CHANNEL_KEYS: Record<AlertChannel, string> = {
-  email: "alerts.channelEmail",
-  telegram: "alerts.channelTelegram",
-};
-
 export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
 
@@ -111,13 +84,6 @@ export function ProductDetailPage() {
     },
     enabled: !!id,
   });
-  const { alerts = [] } = useAlerts();
-
-  const productAlerts = useMemo(
-    () => alerts.filter((a) => a.product_id === id || !a.product_id),
-    [alerts, id]
-  );
-
   const forecastData = useMemo(() => {
     const days = 14;
     const data: Array<{ date: string; dateLabel: string; forecast: number; low: number; high: number }> = [];
@@ -321,7 +287,6 @@ export function ProductDetailPage() {
           <TabsTrigger value="chart">{t("productDetail.priceDynamics")}</TabsTrigger>
           <TabsTrigger value="competitors">{t("productDetail.competitors")}</TabsTrigger>
           <TabsTrigger value="forecast">{t("productDetail.salesForecast")}</TabsTrigger>
-          <TabsTrigger value="alerts">{t("productDetail.alerts")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="chart" className="mt-4 animate-in fade-in-0 duration-200">
@@ -475,10 +440,6 @@ export function ProductDetailPage() {
 
         <TabsContent value="competitors" className="mt-4 animate-in fade-in-0 duration-200">
           <div className="space-y-4">
-            <Button variant="outline" size="sm" onClick={() => navigate("/competitors")}>
-              <Plus className="mr-2 size-4" />
-              {t("competitors.addCompetitor")}
-            </Button>
             <div className="overflow-x-auto rounded-lg border border-border dark:border-border">
               {competitorProducts.length === 0 ? (
                 <p className="p-4 text-sm text-muted-foreground dark:text-muted-foreground">
@@ -571,28 +532,6 @@ export function ProductDetailPage() {
             </div>
           </div>
         </TabsContent>
-
-        <TabsContent value="alerts" className="mt-4 animate-in fade-in-0 duration-200">
-          <div className="space-y-4">
-            <Button size="sm" onClick={() => navigate("/alerts")}>
-              <Plus className="mr-2 size-4" />
-              {t("productDetail.createAlert")}
-            </Button>
-            {productAlerts.length === 0 ? (
-              <EmptyState
-                title="alerts.noAlerts"
-                description="alerts.noAlertsHint"
-                icon={Bell}
-              />
-            ) : (
-              <div className="space-y-3">
-                {productAlerts.map((a) => (
-                  <AlertItem key={a.id} alert={a} />
-                ))}
-              </div>
-            )}
-          </div>
-        </TabsContent>
       </Tabs>
     </div>
   );
@@ -631,22 +570,3 @@ function ChartTooltip(props: TooltipProps<number, string>) {
   );
 }
 
-function AlertItem({ alert }: { alert: { id: string; type: string; threshold_percent: number | null; channel: string; is_active: boolean } }) {
-  const { t } = useTranslation();
-  const [enabled, setEnabled] = useState(alert.is_active);
-  const Icon = CHANNEL_ICONS[alert.channel as AlertChannel] ?? Mail;
-  const typeKey = ALERT_TYPE_KEYS[alert.type as AlertType] ?? "alerts.typePriceDrop";
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-card p-4 dark:border-border dark:bg-card">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{t(typeKey)}</Badge>
-        <span className="text-sm text-muted-foreground dark:text-muted-foreground">
-          {t("alerts.threshold")}: {alert.threshold_percent ?? 0}%
-        </span>
-        <Icon className="size-4 text-muted-foreground dark:text-muted-foreground" />
-        <span className="text-sm">{t(CHANNEL_KEYS[alert.channel as AlertChannel] ?? "alerts.channelEmail")}</span>
-      </div>
-      <Switch checked={enabled} onCheckedChange={setEnabled} />
-    </div>
-  );
-}

@@ -10,8 +10,6 @@ import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   Package,
-  Users,
-  Bell,
   FileText,
   Upload,
   Shield,
@@ -332,15 +330,6 @@ export function Sidebar({
             onNavigate={onNavigate}
             isActive={isActive("/products")}
           />
-          <SidebarItem
-            icon={Users}
-            label={t("nav.competitors")}
-            to="/competitors"
-            collapsed={collapsed}
-            isMobile={isMobile}
-            onNavigate={onNavigate}
-            isActive={isActive("/competitors")}
-          />
         </SidebarSection>
 
         <SidebarSection label={t("nav.section.intelligence")} collapsed={collapsed}>
@@ -353,15 +342,6 @@ export function Sidebar({
             isMobile={isMobile}
             onNavigate={onNavigate}
             isActive={isActive("/analytics")}
-          />
-          <SidebarItem
-            icon={Bell}
-            label={t("nav.alerts")}
-            to="/alerts"
-            collapsed={collapsed}
-            isMobile={isMobile}
-            onNavigate={onNavigate}
-            isActive={isActive("/alerts")}
           />
           <SidebarItem
             icon={FileText}

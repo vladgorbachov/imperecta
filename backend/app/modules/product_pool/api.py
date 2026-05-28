@@ -1,4 +1,4 @@
-"""Public API for the global product pool (v2 migration stub)."""
+"""Public API for the global product pool."""
 
 from uuid import UUID
 
@@ -13,9 +13,6 @@ from app.modules.product_pool.schemas import (
 from app.modules.product_pool.service import ProductPoolService
 
 router = APIRouter(prefix="/pool", tags=["product-pool"])
-
-_MIG = "Endpoint pending migration to v2 schema"
-
 
 @router.get("/products", response_model=PoolProductsResponse)
 async def list_pool_products(
@@ -80,4 +77,4 @@ async def search_pool(
         limit=limit,
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
-    return {"items": items, "total": len(items), "message": _MIG}
+    return {"items": items, "total": len(items)}

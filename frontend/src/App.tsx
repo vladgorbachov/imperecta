@@ -80,8 +80,6 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
 import { ProductDetailPage } from "@/pages/ProductDetailPage";
-import { CompetitorsPage } from "@/pages/CompetitorsPage";
-import { AlertsPage } from "@/pages/AlertsPage";
 import { DigestsPage } from "@/pages/DigestsPage";
 import { ImportPage } from "@/pages/ImportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -157,8 +155,6 @@ export function App() {
                     <Route path="dashboard" element={<DashboardPage />} />
                     <Route path="products" element={<ProductsPage />} />
                     <Route path="products/:id" element={<ProductDetailPage />} />
-                    <Route path="competitors" element={<CompetitorsPage />} />
-                    <Route path="alerts" element={<AlertsPage />} />
                     <Route path="digests" element={<DigestsPage />} />
                     <Route path="import" element={<ImportPage />} />
                     <Route path="analytics" element={<AnalyticsPage />} />

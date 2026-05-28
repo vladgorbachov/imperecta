@@ -10,9 +10,8 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, BellPlus, Grid3X3, List, MoreHorizontal, Plus, Search } from "lucide-react";
+import { AlertTriangle, Grid3X3, List, MoreHorizontal, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
-import { alertsApi } from "@/api/alerts";
 import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
 import { productsApi } from "@/api/products";
 import { Sparkline } from "@/components/ui-custom/Sparkline";
@@ -132,11 +131,6 @@ export function MarketsOverviewSection() {
     staleTime: 60_000,
   });
 
-  const createAlertMutation = useMutation({
-    mutationFn: (productId?: string | null) => alertsApi.create({ product_id: productId ?? undefined, type: "price_drop", threshold_percent: 5, channel: "email" }),
-    onSuccess: () => toast.success(t("alerts.createSuccess")),
-    onError: () => toast.error(t("alerts.createError")),
-  });
   const addProductMutation = useMutation({
     mutationFn: (item: MarketsOverviewItem) => {
       if (item.current_price == null || !item.currency) {
@@ -153,7 +147,7 @@ export function MarketsOverviewSection() {
     onError: () => toast.error(t("market.overview.addToMyProductsFailed")),
   });
 
-  const rawItems = data?.items ?? [];
+  const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
   const filteredItems = useMemo(() => {
     return rawItems.filter((item) => {
       const inMarketplace = selectedMarketplaces.length === 0
@@ -271,10 +265,6 @@ export function MarketsOverviewSection() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => createAlertMutation.mutate(row.original.product_id)}>
-                  <BellPlus className="size-4" />
-                  {t("alerts.createAlert")}
-                </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={row.original.current_price == null || !row.original.currency}
                   onClick={() => addProductMutation.mutate(row.original)}
@@ -288,7 +278,7 @@ export function MarketsOverviewSection() {
         ),
       }),
     ],
-    [addProductMutation, columnHelper, createAlertMutation, locale, t],
+    [addProductMutation, columnHelper, locale, t],
   );
 
   const table = useReactTable({
@@ -466,9 +456,6 @@ export function MarketsOverviewSection() {
                     <Link to={`/products/${item.product_id ?? item.id}`}>{t("market.overview.details")}</Link>
                   </Button>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => createAlertMutation.mutate(item.product_id)}>
-                      {t("alerts.createAlert")}
-                    </Button>
                     <Button size="sm" variant="outline" disabled={item.current_price == null || !item.currency} onClick={() => addProductMutation.mutate(item)}>
                       {t("market.overview.addToMyProducts")}
                     </Button>
