@@ -730,12 +730,14 @@ export function AdminPage() {
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded border p-3">
                 <div className="text-sm text-muted-foreground">
-                  Показано {Math.min(marketOverviewVisibleCount, allMarketOverviewItems.length)} из{" "}
-                  {allMarketOverviewItems.length}
+                  {t("admin.marketOverview.showing", {
+                    count: Math.min(marketOverviewVisibleCount, allMarketOverviewItems.length),
+                    total: allMarketOverviewItems.length,
+                  })}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Старт</span>
+                    <span className="text-xs text-muted-foreground">{t("admin.marketOverview.start")}</span>
                     <Select
                       value={String(marketOverviewInitialVisible)}
                       onValueChange={async (value) => {
@@ -758,7 +760,7 @@ export function AdminPage() {
                     </Select>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Шаг</span>
+                    <span className="text-xs text-muted-foreground">{t("admin.marketOverview.step")}</span>
                     <Select
                       value={String(marketOverviewExpandStep)}
                       onValueChange={async (value) => {
@@ -789,7 +791,7 @@ export function AdminPage() {
                       }
                     >
                       <ChevronDown className="mr-2 size-4" />
-                      Развернуть (+{marketOverviewExpandStep})
+                      {t("admin.marketOverview.expandBy", { count: marketOverviewExpandStep })}
                     </Button>
                   ) : null}
                   {isSavingOverviewPreferences ? (
@@ -847,7 +849,7 @@ export function AdminPage() {
             <CardHeader className="space-y-3">
               <CardTitle>Data Collection</CardTitle>
               <CardDescription>
-                Полный live-контроль сбора данных: стадии, ошибки, темп, прогноз и шаги в реальном времени.
+                Full live monitoring of data collection: stages, errors, throughput, forecast, and real-time steps.
               </CardDescription>
               <div className="flex flex-wrap items-center gap-3">
                 <Button
@@ -901,7 +903,7 @@ export function AdminPage() {
                 <div className="flex flex-col gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
                   <div className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-300">
                     <AlertTriangle className="size-4" />
-                    Обнаружены риски качества данных
+                    {t("admin.dataCollection.riskFlags")}
                   </div>
                   {liveFeed.warning_flags.map((flag) => (
                     <span key={flag}>- {flag}</span>
@@ -912,7 +914,7 @@ export function AdminPage() {
                 <div className="flex flex-col gap-2 rounded border border-red-500/40 bg-red-500/5 p-3 text-sm">
                   <div className="flex items-center gap-2 font-medium text-red-700 dark:text-red-300">
                     <AlertTriangle className="size-4" />
-                    Аномалии процесса сбора данных
+                    {t("admin.dataCollection.anomalies")}
                   </div>
                   {qualityAlerts.map((alert) => (
                     <div key={alert.code} className="flex items-center gap-2">
@@ -969,7 +971,7 @@ export function AdminPage() {
           <Card>
             <CardHeader>
               <CardTitle>Forecast window</CardTitle>
-              <CardDescription>Прогноз завершения на основе фактической скорости обработки.</CardDescription>
+              <CardDescription>{t("admin.dataCollection.forecastDescription")}</CardDescription>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="rounded border p-3">
@@ -1072,7 +1074,7 @@ export function AdminPage() {
           <Card>
             <CardHeader>
               <CardTitle>Live process log</CardTitle>
-              <CardDescription>Каждая операция по листингу отображается в реальном времени.</CardDescription>
+              <CardDescription>{t("admin.dataCollection.liveLogDescription")}</CardDescription>
             </CardHeader>
             <CardContent>
               {liveFeedQuery.isLoading ? (
@@ -1225,9 +1227,7 @@ export function AdminPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>Users Management</CardTitle>
-                    <CardDescription>
-                      Расширенное управление пользователями: создание, редактирование, роли, статус, пароль, удаление.
-                    </CardDescription>
+                    <CardDescription>{t("admin.users.managementDescription")}</CardDescription>
                   </div>
                   <Button
                     onClick={() => {
@@ -1469,7 +1469,7 @@ export function AdminPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create user</DialogTitle>
-            <DialogDescription>Создание нового пользователя с настройкой роли и плана.</DialogDescription>
+            <DialogDescription>{t("admin.users.createDescription")}</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3">
             <Input
