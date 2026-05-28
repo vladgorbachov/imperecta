@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import asc, desc, func, nullslast, or_, select
+from sqlalchemy import asc, case, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimDate, DimMarketplace, DimProduct
@@ -270,19 +270,19 @@ class ProductPoolService:
                 DimMarketplace.name.label("marketplace_name"),
                 DimMarketplace.domain.label("marketplace_domain"),
                 DimMarketplace.country_code,
-                func.count(FactListing.id).label("listing_count"),
-                func.avg(FactListing.last_price_eur).label("avg_price_eur"),
+                func.sum(case((FactListing.is_active.is_(True), 1), else_=0)).label("listing_count"),
+                func.avg(FactListing.last_price_eur).filter(FactListing.is_active.is_(True)).label("avg_price_eur"),
             )
-            .select_from(FactListing)
-            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
-            .where(FactListing.is_active.is_(True))
+            .select_from(DimMarketplace)
+            .outerjoin(FactListing, FactListing.marketplace_id == DimMarketplace.id)
             .group_by(
                 DimMarketplace.id,
                 DimMarketplace.name,
                 DimMarketplace.domain,
                 DimMarketplace.country_code,
             )
-            .order_by(desc("listing_count"))
+            .where(DimMarketplace.is_active.is_(True))
+            .order_by(desc("listing_count"), asc(DimMarketplace.name))
         )
         stmt = self._apply_country_visibility_filter(
             stmt,

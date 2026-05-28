@@ -344,7 +344,7 @@ export function MarketsOverviewSection() {
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            {marketplaceStats.slice(0, 8).map((item) => (
+            {marketplaceStats.map((item) => (
               <button
                 key={item.marketplace_domain}
                 type="button"
