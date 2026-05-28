@@ -215,7 +215,7 @@ class DiscoveryCrawler:
                 continue
             _html, soup = await self.pool.scrape_page_for_analysis(
                 current_url,
-                requires_js=marketplace.requires_js,
+                static_fetch=True,
             )
             if soup is None:
                 continue
@@ -248,7 +248,7 @@ class DiscoveryCrawler:
                     continue
                 _html, soup = await self.pool.scrape_page_for_analysis(
                     fallback_url,
-                    requires_js=marketplace.requires_js,
+                    static_fetch=True,
                 )
                 if soup is None:
                     continue
@@ -294,7 +294,7 @@ class DiscoveryCrawler:
             while current_url and page_num < MAX_PAGES_PER_CATEGORY:
                 _html, soup = await self.pool.scrape_page_for_analysis(
                     current_url,
-                    requires_js=marketplace.requires_js,
+                    static_fetch=True,
                 )
                 if soup is None:
                     break

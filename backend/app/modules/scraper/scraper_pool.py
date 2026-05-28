@@ -273,6 +273,49 @@ class ScraperPool:
                 continue
         return None
 
+    async def _fetch_static(
+        self,
+        url: str,
+        *,
+        log_url_hint: str | None = None,
+    ) -> str | None:
+        """Lightweight fetch for static documents (sitemap, robots, category/listing pages).
+
+        Order: httpx (fast, free) -> decodo_static (anti-bot bypass without JS render).
+        Playwright is intentionally excluded: static content does not need a browser,
+        and if both httpx and Decodo proxy-bypass fail, the document is likely
+        unavailable rather than JS-gated.
+        """
+        started = time.perf_counter()
+        for layer_name in ("httpx", "decodo_static"):
+            layer_started = time.perf_counter()
+            html, layer_err = await self._fetch_layer_with_retries(layer_name, url)
+            layer_ms = int((time.perf_counter() - layer_started) * 1000)
+            logger.info(
+                "fetch_static_layer layer=%s duration_ms=%s ok=%s error=%s url=%s",
+                layer_name,
+                layer_ms,
+                bool(html),
+                (layer_err or "")[:300],
+                (log_url_hint or url)[:200],
+            )
+            if html:
+                total_ms = int((time.perf_counter() - started) * 1000)
+                logger.info(
+                    "fetch_static_done layer_won=%s duration_ms=%s url=%s",
+                    layer_name,
+                    total_ms,
+                    (log_url_hint or url)[:200],
+                )
+                return html
+        total_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "fetch_static_failed duration_ms=%s url=%s",
+            total_ms,
+            (log_url_hint or url)[:200],
+        )
+        return None
+
     async def fetch_sitemap_candidates(self, base_url: str) -> list[str]:
         """Attempt to discover and harvest product URLs from sitemaps."""
         from urllib.parse import urljoin
@@ -287,7 +330,10 @@ class ScraperPool:
 
         robots_url = urljoin(base_url, "/robots.txt")
         try:
-            robots_text = await self._fetch_raw(robots_url, requires_js=False)
+            robots_text = await self._fetch_static(
+                robots_url,
+                log_url_hint=f"{base_url} robots.txt",
+            )
             if robots_text:
                 for line in robots_text.splitlines():
                     line = line.strip()
@@ -314,7 +360,10 @@ class ScraperPool:
             visited_sitemaps.add(sitemap_url)
 
             try:
-                content = await self._fetch_raw(sitemap_url, requires_js=False)
+                content = await self._fetch_static(
+                    sitemap_url,
+                    log_url_hint=f"{base_url} sitemap",
+                )
                 if not content:
                     continue
             except Exception:
@@ -337,13 +386,18 @@ class ScraperPool:
         self,
         url: str,
         requires_js: bool = False,
+        *,
+        static_fetch: bool = False,
     ) -> tuple[str | None, BeautifulSoup | None]:
         """Fetch a page and return (html, soup) for structural analysis.
 
         Returns (None, None) on failure.
         """
         try:
-            html = await self._fetch_raw(url, requires_js=requires_js)
+            if static_fetch:
+                html = await self._fetch_static(url)
+            else:
+                html = await self._fetch_raw(url, requires_js=requires_js)
             if not html:
                 return None, None
             soup = BeautifulSoup(html, "html.parser")
@@ -419,6 +473,8 @@ class ScraperPool:
     async def _fetch_by_layer_once(self, layer_name: str, url: str) -> tuple[str | None, str | None]:
         if layer_name == "decodo":
             return await self._fetch_html_decodo(url)
+        if layer_name == "decodo_static":
+            return await self._fetch_html_decodo_static(url)
         if layer_name == "httpx":
             return await self._fetch_html_httpx(url)
         if layer_name == "playwright":
@@ -436,7 +492,15 @@ class ScraperPool:
             layers.insert(1, "playwright")
         return layers
 
-    async def _fetch_html_decodo(self, url: str) -> tuple[str | None, str | None]:
+    async def _fetch_html_decodo_static(self, url: str) -> tuple[str | None, str | None]:
+        return await self._fetch_html_decodo(url, render_js=False)
+
+    async def _fetch_html_decodo(
+        self,
+        url: str,
+        *,
+        render_js: bool = True,
+    ) -> tuple[str | None, str | None]:
         """Fetch via Decodo API. Skip if disabled or credentials missing."""
         if not settings.decodo_enabled:
             return None, "fetch_failed"
@@ -447,7 +511,9 @@ class ScraperPool:
             f"{settings.decodo_username}:{settings.decodo_password}".encode()
         ).decode()
         api_url = f"{settings.decodo_api_url.rstrip('/')}/scrape"
-        payload = {"url": url, "headless": "html"}
+        payload: dict[str, str] = {"url": url}
+        if render_js:
+            payload["headless"] = "html"
         timeout = httpx.Timeout(DECODO_TIMEOUT_SEC)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
