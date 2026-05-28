@@ -227,6 +227,8 @@
   "market.overview.loadFailed": "Не удалось загрузить обзор рынка",
   "market.overview.searchPlaceholder": "Улучшенный поиск по товарам",
   "market.overview.quickFilterGt5": "Быстрый фильтр: >5%",
+  "market.overview.expandBy": "Развернуть (+{{count}})",
+  "market.overview.collapse": "Свернуть",
   "market.overview.rangeAll": "Диапазон изменения: Все",
   "market.overview.rangeDown5": "Падение больше 5%",
   "market.overview.rangeFlat": "Флэт (-5%..5%)",

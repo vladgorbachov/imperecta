@@ -20,6 +20,7 @@ from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
 from app.modules.scraper.discovery import DiscoveryCrawler
+from app.modules.scraper.pipeline.full_test_runner import FullPipelineTestRunner
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
@@ -515,7 +516,12 @@ async def _finalize_full_pipeline_job(
     job.successful = prices_saved
     job.failed = errors_count
     job.status = "failed" if hard_error else "completed"
-    job.config = {"metadata": metadata}
+    from copy import deepcopy
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    job.config = {"metadata": deepcopy(metadata)}
+    flag_modified(job, "config")
     await db.commit()
     return metadata
 
@@ -532,103 +538,12 @@ def run_full_pipeline_test(self, parent_job_id: str) -> dict:
 
     async def _do() -> dict:
         engine, session_factory = _make_session_factory()
-        discovery_ms = 0
-        scrape_ms = 0
-        persist_ms = 0
-        hard_error: str | None = None
-        per_marketplace_seed: dict[UUID, dict[str, Any]] = {}
         try:
-            job_uuid = UUID(str(parent_job_id))
-            async with session_factory() as db:
-                parent = await db.get(ScrapeJob, job_uuid)
-                if parent is None:
-                    return {"status": "not_found", "job_id": str(job_uuid)}
-
-                metadata = _extract_pipeline_metadata(parent.config)
-                _touch_pipeline_metadata(metadata, stage="discovery")
-                metadata["celery_task_id"] = self.request.id
-                parent.status = "running"
-                parent.config = {"metadata": metadata}
-                await db.commit()
-
-                async def _pulse_discovery() -> None:
-                    parent_local = await db.get(ScrapeJob, job_uuid)
-                    if parent_local is None:
-                        return
-                    pulse_meta = _extract_pipeline_metadata(parent_local.config)
-                    _touch_pipeline_metadata(pulse_meta, stage="discovery")
-                    parent_local.config = {"metadata": pulse_meta}
-                    await db.commit()
-
-                discovery_started = time.perf_counter()
-                _seen, per_marketplace_seed, discovery_errors = await _discover_for_full_pipeline(
-                    db,
-                    on_progress=_pulse_discovery,
-                )
-                discovery_ms = int((time.perf_counter() - discovery_started) * 1000)
-
-                metadata = _extract_pipeline_metadata(parent.config)
-                _touch_pipeline_metadata(metadata, stage="scrape")
-                metadata["discovery_errors"] = discovery_errors[:20]
-                parent.config = {"metadata": metadata}
-                await db.commit()
-
-            scrape_started = time.perf_counter()
-            scrape_result = _run_scrape_all_pool(scrape_job_id=job_uuid)
-            scrape_ms = int((time.perf_counter() - scrape_started) * 1000)
-
-            persist_started = time.perf_counter()
-            async with session_factory() as db:
-                parent = await db.get(ScrapeJob, job_uuid)
-                if parent is None:
-                    return {"status": "not_found", "job_id": str(job_uuid)}
-                if scrape_result.get("error"):
-                    hard_error = str(scrape_result["error"])
-                persist_ms = int((time.perf_counter() - persist_started) * 1000)
-                metadata = _extract_pipeline_metadata(parent.config)
-                _touch_pipeline_metadata(metadata, stage="persist")
-                parent.config = {"metadata": metadata}
-                await db.commit()
-
-                metadata = await _finalize_full_pipeline_job(
-                    db,
-                    parent,
-                    discovery_ms=discovery_ms,
-                    scrape_ms=scrape_ms,
-                    persist_ms=persist_ms,
-                    per_marketplace_seed=per_marketplace_seed,
-                    hard_error=hard_error,
-                )
-                return {
-                    "job_id": str(parent.id),
-                    "status": parent.status,
-                    "summary": metadata.get("summary", {}),
-                }
-        except Exception:
-            tb = traceback.format_exc()
-            hard_error = tb
-            slog.exception("run_full_pipeline_test_failed", parent_job_id=parent_job_id)
-            try:
-                async with session_factory() as db:
-                    job_uuid = UUID(str(parent_job_id))
-                    parent = await db.get(ScrapeJob, job_uuid)
-                    if parent is not None:
-                        await _finalize_full_pipeline_job(
-                            db,
-                            parent,
-                            discovery_ms=discovery_ms,
-                            scrape_ms=scrape_ms,
-                            persist_ms=persist_ms,
-                            per_marketplace_seed=per_marketplace_seed,
-                            hard_error=hard_error,
-                        )
-            except Exception:
-                slog.exception("run_full_pipeline_test_mark_failed_error", parent_job_id=parent_job_id)
-            return {
-                "job_id": parent_job_id,
-                "status": "failed",
-                "error": "pipeline_execution_failed",
-            }
+            runner = FullPipelineTestRunner(
+                session_factory,
+                celery_task_id=str(self.request.id),
+            )
+            return await runner.run(UUID(str(parent_job_id)))
         finally:
             await engine.dispose()
 

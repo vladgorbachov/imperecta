@@ -61,6 +61,7 @@ class ParsingAdminService:
     TEST_PIPELINE_JOB_TYPE = "full_pipeline_test"
     STALE_PIPELINE_TIMEOUT_MINUTES = 30
     STALE_QUEUED_TIMEOUT_MINUTES = 5
+    STALE_DISPATCH_TIMEOUT_MINUTES = 10
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -159,7 +160,11 @@ class ParsingAdminService:
             )
         return out
 
-    async def trigger_full_pipeline_test(self) -> dict[str, Any]:
+    async def trigger_full_pipeline_test(
+        self,
+        *,
+        marketplace_codes: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         Create a parent scrape job for full pipeline checks.
 
@@ -178,7 +183,10 @@ class ParsingAdminService:
 
         started_at = datetime.now(UTC)
         metadata = self._build_initial_metadata()
+        metadata["current_stage"] = "dispatching"
         metadata["last_activity_at"] = self._to_iso(started_at)
+        if marketplace_codes:
+            metadata["marketplace_codes"] = [code.strip() for code in marketplace_codes if code.strip()]
         job = ScrapeJob(
             job_type=self.TEST_PIPELINE_JOB_TYPE,
             status="running",
@@ -941,8 +949,12 @@ class ParsingAdminService:
         stage = self._current_stage(metadata)
         if normalized_status != "running":
             return stage
+        if stage in {"queued", "dispatching", None} and metadata.get("celery_task_id"):
+            return "discovery"
         if stage in {"queued", None} and last_log_at is not None:
             return "scrape"
+        if stage == "dispatching":
+            return "discovery"
         return stage
 
     async def _job_last_log_at(self, job_id: UUID) -> datetime | None:
@@ -966,8 +978,11 @@ class ParsingAdminService:
 
     async def _fail_stale_running_pipeline_jobs(self) -> None:
         """Mark stale running jobs as failed when no activity is observed."""
+        from app.modules.scraper.pipeline.cancellation import revoke_celery_task
+
         timeout_s = max(int(self.STALE_PIPELINE_TIMEOUT_MINUTES), 1) * 60
         queued_timeout_s = max(int(self.STALE_QUEUED_TIMEOUT_MINUTES), 1) * 60
+        dispatch_timeout_s = max(int(self.STALE_DISPATCH_TIMEOUT_MINUTES), 1) * 60
         now = datetime.now(UTC)
         result = await self.db.execute(
             select(ScrapeJob)
@@ -994,13 +1009,24 @@ class ParsingAdminService:
                 continue
             idle_s = (now - activity_dt).total_seconds()
             current_stage = self._current_stage(metadata)
-            effective_timeout_s = queued_timeout_s if current_stage in {None, "queued"} else timeout_s
+            celery_task_id = metadata.get("celery_task_id")
+            if current_stage in {None, "queued"} and not celery_task_id:
+                effective_timeout_s = queued_timeout_s
+            elif current_stage == "dispatching" and not celery_task_id:
+                effective_timeout_s = dispatch_timeout_s
+            elif current_stage in {"discovery", "scrape", "persist"} or celery_task_id:
+                effective_timeout_s = timeout_s
+            else:
+                effective_timeout_s = dispatch_timeout_s
             if idle_s < effective_timeout_s:
                 continue
 
             normalized = self._normalize_job_status(job.status)
             if normalized != "running":
                 continue
+            revoke_celery_task(
+                str(celery_task_id) if isinstance(celery_task_id, str) else None
+            )
             stale_metadata = dict(metadata)
             stale_metadata["current_stage"] = "failed"
             stale_metadata["last_activity_at"] = self._to_iso(activity_dt)

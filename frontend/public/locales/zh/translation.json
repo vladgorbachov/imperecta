@@ -227,6 +227,8 @@
   "market.overview.loadFailed": "无法加载市场概览",
   "market.overview.searchPlaceholder": "增强商品搜索",
   "market.overview.quickFilterGt5": "快速筛选: >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "变化范围: 全部",
   "market.overview.rangeDown5": "下跌超过5%",
   "market.overview.rangeFlat": "平稳 (-5%..5%)",

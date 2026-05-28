@@ -230,6 +230,8 @@
   "market.overview.loadFailed": "Не вдалося завантажити огляд ринку",
   "market.overview.searchPlaceholder": "Покращений пошук товарів",
   "market.overview.quickFilterGt5": "Швидкий фільтр: >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "Діапазон змін: Усі",
   "market.overview.rangeDown5": "Падіння більше 5%",
   "market.overview.rangeFlat": "Флет (-5%..5%)",

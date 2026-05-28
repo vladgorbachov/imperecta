@@ -227,6 +227,8 @@
   "market.overview.loadFailed": "فشل تحميل نظرة السوق",
   "market.overview.searchPlaceholder": "بحث متقدم في المنتجات",
   "market.overview.quickFilterGt5": "فلتر سريع: >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "نطاق التغير: الكل",
   "market.overview.rangeDown5": "هبوط أكبر من 5%",
   "market.overview.rangeFlat": "ثابت (-5%..5%)",

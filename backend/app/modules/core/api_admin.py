@@ -58,69 +58,16 @@ async def admin_claude_status(_current_user: CurrentSuperuser) -> dict:
 
 @router.post("/products/clear-pool")
 async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
-    """Hard-clear marketplace/product pool data while preserving system dimensions/users."""
+    """Clear product pool data; keeps dim_marketplace and dimension seeds."""
+    from app.modules.core.pool_maintenance import clear_product_pool_preserve_marketplaces
+
     started = perf_counter()
-    deleted_marketplaces = int(
-        (await db.execute(text("SELECT COUNT(*) FROM dim_marketplace"))).scalar() or 0,
-    )
-    deleted_listings = int(
-        (await db.execute(text("SELECT COUNT(*) FROM fact_listing"))).scalar() or 0,
-    )
-    deleted_prices = int(
-        (await db.execute(text("SELECT COUNT(*) FROM fact_price"))).scalar() or 0,
-    )
-
-    # Keep system tables untouched by nullifying references from retained entities.
-    await db.execute(
-        text(
-            """
-            UPDATE alert_events
-            SET listing_id = NULL
-            WHERE listing_id IS NOT NULL
-            """
-        ),
-    )
-    await db.execute(
-        text(
-            """
-            UPDATE alerts
-            SET listing_id = NULL,
-                product_id = NULL,
-                marketplace_id = NULL
-            WHERE listing_id IS NOT NULL
-               OR product_id IS NOT NULL
-               OR marketplace_id IS NOT NULL
-            """
-        ),
-    )
-
-    # user_products is product-linked business data and should be cleared with the pool.
-    await db.execute(text("DELETE FROM user_products"))
-    await db.execute(text("UPDATE dim_marketplace SET products_in_pool = 0"))
-
-    await db.execute(
-        text(
-            """
-            TRUNCATE TABLE
-                fact_price,
-                fact_review,
-                fact_stock,
-                fact_promo,
-                fact_listing,
-                scrape_logs,
-                scrape_jobs,
-                dim_product,
-                dim_marketplace
-            RESTART IDENTITY
-            """
-        ),
-    )
-    await db.commit()
+    counts = await clear_product_pool_preserve_marketplaces(db)
     elapsed_ms = int((perf_counter() - started) * 1000)
     return {
         "status": "pool_cleared",
-        "deleted_marketplaces": deleted_marketplaces,
-        "deleted_listings": deleted_listings,
-        "deleted_prices": deleted_prices,
+        "deleted_listings": counts["deleted_listings"],
+        "deleted_products": counts["deleted_products"],
+        "deleted_prices": counts["deleted_prices"],
         "time_ms": elapsed_ms,
     }

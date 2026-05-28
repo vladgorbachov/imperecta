@@ -54,6 +54,16 @@ class AdminUserPasswordResetRequest(BaseModel):
     force_password_change: bool = True
 
 
+class RunFullPipelineTestRequest(BaseModel):
+    """Optional subset of dim_marketplace.marketplace_code values for this run."""
+
+    marketplace_codes: list[str] | None = Field(
+        default=None,
+        max_length=50,
+        description="If set, discovery/scrape only these marketplace_code values.",
+    )
+
+
 def _raise_user_crud_error(exc: ValueError) -> None:
     message = str(exc)
     if message.startswith("User not found:"):
@@ -75,11 +85,13 @@ async def get_test_marketplaces(
 async def run_full_test(
     _current_user: CurrentSuperuser,
     db: DbSession,
+    body: RunFullPipelineTestRequest | None = None,
 ) -> dict:
     """Frontend action: create parent job and enqueue full pipeline task."""
     service = ParsingAdminService(db)
+    codes = body.marketplace_codes if body is not None else None
     try:
-        created = await service.trigger_full_pipeline_test()
+        created = await service.trigger_full_pipeline_test(marketplace_codes=codes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

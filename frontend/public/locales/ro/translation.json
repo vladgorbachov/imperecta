@@ -230,6 +230,8 @@
   "market.overview.loadFailed": "Nu s-a putut încărca overview-ul pieței",
   "market.overview.searchPlaceholder": "Căutare avansată de produse",
   "market.overview.quickFilterGt5": "Filtru rapid: >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "Interval schimbare: Toate",
   "market.overview.rangeDown5": "Scădere mai mare de 5%",
   "market.overview.rangeFlat": "Plat (-5%..5%)",

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -30,6 +30,8 @@ type ViewMode = "table" | "cards";
 type PriceChangeRange = "all" | "up5" | "down5" | "flat";
 
 const PAGE_LIMIT = 200;
+const MARKET_OVERVIEW_INITIAL_VISIBLE = 10;
+const MARKET_OVERVIEW_EXPAND_STEP = 10;
 
 const TABS: Array<{ key: MarketsTab; labelKey: string }> = [
   { key: "volatile", labelKey: "dashboard.market.mostVolatile" },
@@ -102,6 +104,7 @@ export function MarketsOverviewSection() {
   const [selectedMarketplaces, setSelectedMarketplaces] = useState<string[]>([]);
   const [priceChangeRange, setPriceChangeRange] = useState<PriceChangeRange>("all");
   const [historyOnly, setHistoryOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(MARKET_OVERVIEW_INITIAL_VISIBLE);
   const debouncedSearch = useDebounce(searchRaw, 400);
 
   const overviewParams = useMemo(
@@ -189,6 +192,18 @@ export function MarketsOverviewSection() {
       lastUpdate: lastUpdate ? new Date(lastUpdate).toLocaleString(locale) : t("common.dash"),
     };
   }, [data?.total, filteredItems, locale, poolStats?.total_products, t]);
+
+  useEffect(() => {
+    setVisibleCount(MARKET_OVERVIEW_INITIAL_VISIBLE);
+  }, [activeTab, debouncedSearch, historyOnly, priceChangeRange, selectedMarketplaces, viewMode]);
+
+  const visibleItems = useMemo(
+    () => filteredItems.slice(0, visibleCount),
+    [filteredItems, visibleCount],
+  );
+  const hasMoreItems = visibleCount < filteredItems.length;
+  const canCollapse = filteredItems.length > MARKET_OVERVIEW_INITIAL_VISIBLE
+    && visibleCount > MARKET_OVERVIEW_INITIAL_VISIBLE;
 
   const columnHelper = createColumnHelper<MarketsOverviewItem>();
   const columns = useMemo(
@@ -423,7 +438,7 @@ export function MarketsOverviewSection() {
                 ))}
               </TableHeader>
               <TableBody>
-                {table.getRowModel().rows.map((row) => (
+                {table.getRowModel().rows.slice(0, visibleCount).map((row) => (
                   <TableRow key={row.id}>
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
@@ -435,7 +450,7 @@ export function MarketsOverviewSection() {
           </div>
         ) : (
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredItems.map((item) => (
+            {visibleItems.map((item) => (
               <article key={item.id} className="rounded-xl border border-border bg-background p-4">
                 <div className="flex items-start gap-3">
                   <div className="scale-150 origin-top-left">
@@ -465,6 +480,28 @@ export function MarketsOverviewSection() {
             ))}
           </div>
         )}
+        {filteredItems.length > MARKET_OVERVIEW_INITIAL_VISIBLE ? (
+          <div className="mt-4 flex items-center justify-center gap-2">
+            {hasMoreItems ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setVisibleCount((prev) => Math.min(filteredItems.length, prev + MARKET_OVERVIEW_EXPAND_STEP));
+                }}
+              >
+                {t("market.overview.expandBy", { count: MARKET_OVERVIEW_EXPAND_STEP })}
+              </Button>
+            ) : null}
+            {canCollapse ? (
+              <Button
+                variant="ghost"
+                onClick={() => setVisibleCount(MARKET_OVERVIEW_INITIAL_VISIBLE)}
+              >
+                {t("market.overview.collapse")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </section>
   );

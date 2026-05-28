@@ -316,6 +316,26 @@ class ScraperPool:
         )
         return None
 
+    @staticmethod
+    def _looks_like_sitemap_xml(content: str) -> bool:
+        """True when body is XML sitemap / index, not an HTML error page."""
+        head = (content or "").lstrip()[:800].lower()
+        return head.startswith("<?xml") or "<urlset" in head or "<sitemapindex" in head
+
+    async def _fetch_sitemap_document(self, sitemap_url: str, *, log_hint: str) -> str | None:
+        """Fetch sitemap XML via static layers, then Decodo HTML render as fallback."""
+        content = await self._fetch_static(sitemap_url, log_url_hint=log_hint)
+        if content and self._looks_like_sitemap_xml(content):
+            return content
+        html = await self._fetch_raw(sitemap_url, requires_js=True)
+        if html and self._looks_like_sitemap_xml(html):
+            logger.info(
+                "sitemap_fetch_rendered_fallback url=%s",
+                sitemap_url[:120],
+            )
+            return html
+        return None
+
     async def fetch_sitemap_candidates(self, base_url: str) -> list[str]:
         """Attempt to discover and harvest product URLs from sitemaps."""
         from urllib.parse import urljoin
@@ -360,9 +380,9 @@ class ScraperPool:
             visited_sitemaps.add(sitemap_url)
 
             try:
-                content = await self._fetch_static(
+                content = await self._fetch_sitemap_document(
                     sitemap_url,
-                    log_url_hint=f"{base_url} sitemap",
+                    log_hint=f"{base_url} sitemap",
                 )
                 if not content:
                     continue

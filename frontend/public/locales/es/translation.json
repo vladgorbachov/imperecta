@@ -227,6 +227,8 @@
   "market.overview.loadFailed": "No se pudo cargar el resumen del mercado",
   "market.overview.searchPlaceholder": "Búsqueda avanzada de productos",
   "market.overview.quickFilterGt5": "Filtro rápido: >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "Rango de cambio: Todos",
   "market.overview.rangeDown5": "Caída mayor a 5%",
   "market.overview.rangeFlat": "Plano (-5%..5%)",

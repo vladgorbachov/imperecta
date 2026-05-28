@@ -227,6 +227,8 @@
   "market.overview.loadFailed": "Échec du chargement de l'aperçu du marché",
   "market.overview.searchPlaceholder": "Recherche avancée de produits",
   "market.overview.quickFilterGt5": "Filtre rapide : >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "Plage de variation : Tous",
   "market.overview.rangeDown5": "Baisse supérieure à 5%",
   "market.overview.rangeFlat": "Stable (-5%..5%)",

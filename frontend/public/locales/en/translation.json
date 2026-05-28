@@ -230,6 +230,8 @@
   "market.overview.loadFailed": "Failed to load market overview",
   "market.overview.searchPlaceholder": "Enhanced product search",
   "market.overview.quickFilterGt5": "Quick filter: >5%",
+  "market.overview.expandBy": "Expand (+{{count}})",
+  "market.overview.collapse": "Collapse",
   "market.overview.rangeAll": "Change range: All",
   "market.overview.rangeDown5": "Drop more than 5%",
   "market.overview.rangeFlat": "Flat (-5%..5%)",
