@@ -89,7 +89,7 @@ import {
 } from "@/hooks/useAdmin";
 
 const RUNS_PAGE_SIZE = 20;
-const RUNS_LIMIT = 500;
+const RUNS_LIMIT = 200;
 const MARKET_OVERVIEW_COUNT_OPTIONS = [5, 10, 20, 50, 100, 1000] as const;
 const DEFAULT_MARKET_OVERVIEW_INITIAL_VISIBLE = 5;
 const DEFAULT_MARKET_OVERVIEW_EXPAND_STEP = 20;

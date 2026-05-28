@@ -8,7 +8,6 @@ import {
   Package,
   TrendingUp,
   Bot,
-  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +16,6 @@ const NAV_ITEMS = [
   { path: "/products", icon: Package, i18nKey: "nav.products" },
   { path: "/analytics", icon: TrendingUp, i18nKey: "nav.analytics" },
   { path: "/ai", icon: Bot, i18nKey: "nav.ai" },
-  { path: "/alerts", icon: Bell, i18nKey: "nav.alerts" },
 ] as const;
 
 /**

@@ -20,7 +20,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { productsApi } from "@/api/products";
-import { competitorsApi } from "@/api/competitors";
 import { analyticsApi } from "@/api/analytics";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -52,7 +51,6 @@ export function AnalyticsPage() {
 
   const [period, setPeriod] = useState<Period>("30d");
   const [category, setCategory] = useState<string>("all");
-  const [competitorFilter, setCompetitorFilter] = useState<string[]>([]);
 
   const days = getPeriodDays(period);
 
@@ -60,13 +58,6 @@ export function AnalyticsPage() {
     queryKey: ["products", "analytics"],
     queryFn: async () => {
       const { data } = await productsApi.list({ limit: 100 });
-      return data;
-    },
-  });
-  const { data: competitors = [] } = useQuery({
-    queryKey: ["competitors"],
-    queryFn: async () => {
-      const { data } = await competitorsApi.list();
       return data;
     },
   });
@@ -100,11 +91,8 @@ export function AnalyticsPage() {
       ? products.filter((p) => p.category === category)
       : products;
   const productList = filteredProducts.map((p) => ({ id: p.id, name: p.name }));
-  const competitorList = competitors.map((c) => ({ id: c.id, name: c.name }));
-
-  const filteredCompetitorIds = competitorFilter.length > 0
-    ? competitorFilter
-    : competitorList.map((c) => c.id);
+  const competitorList: Array<{ id: string; name: string }> = [];
+  const filteredCompetitorIds: string[] = [];
 
   const forecastData =
     trendData?.forecast_labels?.map((date, i) => ({
@@ -156,24 +144,6 @@ export function AnalyticsPage() {
                 {categories.map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={competitorFilter.length === 0 ? "all" : competitorFilter[0]}
-              onValueChange={(v) =>
-                setCompetitorFilter(v === "all" ? [] : [v])
-              }
-            >
-              <SelectTrigger className="w-full min-w-0 sm:w-48">
-                <SelectValue placeholder={t("analytics.competitorFilter")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("analytics.allCompetitors")}</SelectItem>
-                {competitors.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
                   </SelectItem>
                 ))}
               </SelectContent>
