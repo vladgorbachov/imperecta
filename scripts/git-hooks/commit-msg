@@ -1,4 +1,4 @@
 #!/bin/sh
-# Remove Cursor attribution before the commit message is finalized.
+# Second pass: Cursor may append trailers after prepare-commit-msg.
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 exec "$ROOT/scripts/git-hooks/strip-cursor-trailers.sh" "$1"

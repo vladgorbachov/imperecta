@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+# Project run-in
+Проект работает так - База данных это  Supabase
+Все переменные окружения , воркеры, само приложение - Railway
+НИКОГДА НЕ ПЫТАЙСЯ ЗАПУСТИТЬ ЕГО ЛОКАЛЬНО , ОН НЕ БУДЕТ РАБОТАТЬ! Всё тестирование , проверка работаспособности  - всё только через пуш в гит, после чего его оттуда поддтянет Railway и запустит у себя. Ты можешь иметь доступ к веб адресу приложения в Cloudflare. 
+
+# Commit message
+Commit message limited by 5 to 7 words
+
+# Commit trailers (forbidden)
+
+Never add `Co-authored-by: Cursor <cursoragent@cursor.com>`, `Made-with: Cursor`, or any Cursor/cursoragent trailer to commits or PRs.
+
+Before finishing work that includes a git commit, verify the message has no Cursor trailers. Repository hooks strip them automatically; still do not add them intentionally.

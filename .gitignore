@@ -24,7 +24,9 @@ backend_full_audit_report.md
 # IDE
 .idea/
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 *.swp
 *.swo
 

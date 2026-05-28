@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+# Git commits — no Cursor attribution
+
+Never add any of the following to git commits, commit messages, PR descriptions, or code comments:
+
+- `Co-authored-by: Cursor <cursoragent@cursor.com>`
+- `Made-with: Cursor`
+- `--trailer` flags that inject Cursor attribution
+- Any other Cursor / cursoragent commit trailer
+
+When creating commits, use plain messages only. Do not pass `--trailer` for Cursor attribution.
