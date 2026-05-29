@@ -18,7 +18,10 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
     paths = [
         ("GET", "/api/admin/parsing/test-marketplaces"),
         ("POST", "/api/admin/parsing/run-full-test"),
+        ("POST", "/api/admin/parsing/run-pipeline"),
         ("GET", "/api/admin/parsing/test-runs"),
+        ("GET", "/api/admin/parsing/pipeline-runs"),
+        ("POST", "/api/admin/parsing/cancel-active-job"),
         ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/users-detailed"),
         ("POST", "/api/admin/parsing/users"),

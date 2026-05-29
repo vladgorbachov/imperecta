@@ -1,4 +1,4 @@
-"""Finalize full pipeline test jobs (no import from tasks — avoids circular imports)."""
+"""Complete full-pipeline scrape jobs (isolated from tasks to avoid circular imports)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _touch_metadata(
     return metadata
 
 
-async def finalize_full_pipeline_job(
+async def complete_pipeline_job(
     db: AsyncSession,
     job: ScrapeJob,
     *,

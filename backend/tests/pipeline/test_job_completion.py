@@ -1,4 +1,4 @@
-"""Tests for full pipeline task metadata finalization."""
+"""Tests for production pipeline job completion."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from app.database import async_session_maker
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
-from app.modules.scraper.tasks import _extract_pipeline_metadata, _finalize_full_pipeline_job
+from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 
 
 @pytest.mark.asyncio
-async def test_finalize_full_pipeline_job_updates_metadata_and_duration():
-    """Finalizer writes timings/summary/per_marketplace and job status fields."""
+async def test_complete_pipeline_job_updates_metadata_and_duration():
+    """Completion writes timings/summary/per_marketplace and job status fields."""
     async with async_session_maker() as session:
         marketplace = await session.scalar(
             select(DimMarketplace)
@@ -72,7 +72,7 @@ async def test_finalize_full_pipeline_job_updates_metadata_and_duration():
         )
         await session.commit()
 
-        metadata = await _finalize_full_pipeline_job(
+        metadata = await complete_pipeline_job(
             session,
             job,
             discovery_ms=1200,
@@ -110,8 +110,8 @@ async def test_finalize_full_pipeline_job_updates_metadata_and_duration():
 
 
 @pytest.mark.asyncio
-async def test_finalize_full_pipeline_job_failed_sets_error_payload():
-    """Finalizer marks failed jobs and stores error details for polling diagnostics."""
+async def test_complete_pipeline_job_failed_sets_error_payload():
+    """Completion marks failed jobs and stores error details for polling diagnostics."""
     async with async_session_maker() as session:
         job = ScrapeJob(
             job_type="manual",
@@ -122,7 +122,7 @@ async def test_finalize_full_pipeline_job_failed_sets_error_payload():
         session.add(job)
         await session.commit()
 
-        metadata = await _finalize_full_pipeline_job(
+        metadata = await complete_pipeline_job(
             session,
             job,
             discovery_ms=100,
@@ -142,7 +142,7 @@ async def test_finalize_full_pipeline_job_failed_sets_error_payload():
 
 
 @pytest.mark.asyncio
-async def test_finalize_full_pipeline_job_includes_marketplaces_from_logs_when_seed_empty():
+async def test_complete_pipeline_job_includes_marketplaces_from_logs_when_seed_empty():
     """Summary uses scrape_logs even if discovery seed is empty."""
     async with async_session_maker() as session:
         marketplace = await session.scalar(
@@ -189,7 +189,7 @@ async def test_finalize_full_pipeline_job_includes_marketplaces_from_logs_when_s
         )
         await session.commit()
 
-        metadata = await _finalize_full_pipeline_job(
+        metadata = await complete_pipeline_job(
             session,
             job,
             discovery_ms=50,
@@ -202,15 +202,3 @@ async def test_finalize_full_pipeline_job_includes_marketplaces_from_logs_when_s
         assert metadata["summary"]["errors_count"] == 0
         assert len(metadata["per_marketplace"]) == 1
         assert metadata["per_marketplace"][0]["marketplace_id"] == str(marketplace.id)
-
-
-def test_extract_pipeline_metadata_handles_invalid_shapes():
-    """Metadata extractor always returns compatible defaults for malformed config."""
-    default_meta = _extract_pipeline_metadata(None)
-    assert default_meta["current_stage"] == "queued"
-    assert "timings" in default_meta
-    assert "summary" in default_meta
-    assert "per_marketplace" in default_meta
-
-    from_nested = _extract_pipeline_metadata({"metadata": {"current_stage": "scrape"}})
-    assert from_nested["current_stage"] == "scrape"

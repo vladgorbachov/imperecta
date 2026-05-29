@@ -48,21 +48,41 @@ export const useParsingTestMarketplaces = () =>
     queryFn: () => adminApi.getParsingTestMarketplaces().then((r) => r.data),
   });
 
-export const useRunParsingFullTest = () => {
+export const useRunParsingPipeline = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => adminApi.runParsingFullTest().then((r) => r.data),
+    mutationFn: (payload?: adminApi.RunPipelinePayload) =>
+      adminApi.runParsingPipeline(payload).then((r) => r.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin", "parsing", "test-runs"] });
+      qc.invalidateQueries({ queryKey: ["admin", "parsing", "pipeline-runs"] });
+      qc.invalidateQueries({ queryKey: ["admin", "parsing", "active-job"] });
     },
   });
 };
 
-export const useParsingTestRuns = (limit: number) =>
-  useQuery({
-    queryKey: ["admin", "parsing", "test-runs", limit],
-    queryFn: () => adminApi.getParsingTestRuns(limit).then((r) => r.data),
+/** @deprecated Use useRunParsingPipeline */
+export const useRunParsingFullTest = useRunParsingPipeline;
+
+export const useCancelParsingActiveJob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => adminApi.cancelParsingActiveJob().then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "parsing", "pipeline-runs"] });
+      qc.invalidateQueries({ queryKey: ["admin", "parsing", "active-job"] });
+    },
   });
+};
+
+export const useParsingPipelineRuns = (limit: number) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "pipeline-runs", limit],
+    queryFn: () => adminApi.getParsingPipelineRuns(limit).then((r) => r.data),
+    refetchInterval: 5000,
+  });
+
+/** @deprecated Use useParsingPipelineRuns */
+export const useParsingTestRuns = useParsingPipelineRuns;
 
 export const useParsingJobStatus = (
   jobId: string | null,

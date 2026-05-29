@@ -169,16 +169,23 @@ export interface ParsingRunCreateResponse {
   started_at: string;
 }
 
-export interface ParsingTestRun {
+export interface ParsingPipelineRun {
   job_id: string;
   started_at: string | null;
   completed_at: string | null;
   duration_seconds: number | null;
+  current_stage: string | null;
+  marketplace_codes: string[] | null;
   listings_created: number;
   prices_saved: number;
   errors_count: number;
   status: "running" | "completed" | "failed";
+  error_message: string | null;
+  summary_pending: boolean;
 }
+
+/** @deprecated Use ParsingPipelineRun */
+export type ParsingTestRun = ParsingPipelineRun;
 
 export interface ParsingMarketplaceBreakdown {
   marketplace_id: string;
@@ -192,6 +199,11 @@ export interface ParsingMarketplaceBreakdown {
 
 export interface ParsingJobMetadata {
   current_stage?: string;
+  last_activity_at?: string | null;
+  marketplace_codes?: string[];
+  discovery_marketplace_done?: number;
+  discovery_marketplace_total?: number;
+  discovery_current_domain?: string | null;
   timings?: {
     discovery_ms: number;
     scrape_ms: number;
@@ -207,6 +219,12 @@ export interface ParsingJobMetadata {
   error?: string;
 }
 
+export interface ParsingDiscoveryProgress {
+  done: number;
+  total: number;
+  current_domain: string | null;
+}
+
 export interface ParsingJobStatus {
   job_id: string;
   status: "running" | "completed" | "failed";
@@ -215,6 +233,7 @@ export interface ParsingJobStatus {
   completed_at: string | null;
   duration_seconds: number | null;
   metadata: ParsingJobMetadata | null;
+  discovery: ParsingDiscoveryProgress | null;
 }
 
 export interface ParsingDetailedUser {
@@ -359,11 +378,29 @@ export interface AdminUserResetPasswordPayload {
 export const getParsingTestMarketplaces = () =>
   apiClient.get<ParsingTestMarketplace[]>("/admin/parsing/test-marketplaces");
 
-export const runParsingFullTest = () =>
-  apiClient.post<ParsingRunCreateResponse>("/admin/parsing/run-full-test");
+export interface RunPipelinePayload {
+  marketplace_codes?: string[];
+}
 
-export const getParsingTestRuns = (limit = 50) =>
-  apiClient.get<ParsingTestRun[]>("/admin/parsing/test-runs", { params: { limit } });
+export const runParsingPipeline = (payload?: RunPipelinePayload) =>
+  apiClient.post<ParsingRunCreateResponse>("/admin/parsing/run-pipeline", payload ?? {});
+
+/** Full pool run (all active marketplaces). */
+export const runParsingFullCollection = () => runParsingPipeline();
+
+/** @deprecated Use runParsingPipeline */
+export const runParsingFullTest = runParsingFullCollection;
+
+export const getParsingPipelineRuns = (limit = 50) =>
+  apiClient.get<ParsingPipelineRun[]>("/admin/parsing/pipeline-runs", { params: { limit } });
+
+/** @deprecated Use getParsingPipelineRuns */
+export const getParsingTestRuns = getParsingPipelineRuns;
+
+export const cancelParsingActiveJob = () =>
+  apiClient.post<{ job_id: string; status: string; cancelled: boolean }>(
+    "/admin/parsing/cancel-active-job",
+  );
 
 export const getParsingJobStatus = (jobId: string) =>
   apiClient.get<ParsingJobStatus>(`/admin/parsing/job-status/${jobId}`);

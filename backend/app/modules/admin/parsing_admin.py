@@ -236,23 +236,37 @@ class ParsingAdminService:
         )
         jobs = result.scalars().all()
 
-        out: list[dict[str, Any]] = []
-        for job in jobs:
-            metadata = self._extract_metadata(job.config)
-            summary = metadata.get("summary", {}) if isinstance(metadata, dict) else {}
-            out.append(
-                {
-                    "job_id": str(job.id),
-                    "started_at": self._to_iso(job.started_at),
-                    "completed_at": self._to_iso(job.completed_at),
-                    "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
-                    "listings_created": int(summary.get("listings_created", job.total_listings or 0)),
-                    "prices_saved": int(summary.get("prices_saved", job.successful or 0)),
-                    "errors_count": int(summary.get("errors_count", job.failed or 0)),
-                    "status": self._normalize_job_status(job.status),
-                }
-            )
-        return out
+        return [self._pipeline_run_item(job) for job in jobs]
+
+    def _pipeline_run_item(self, job: ScrapeJob) -> dict[str, Any]:
+        metadata = self._extract_metadata(job.config)
+        summary = metadata.get("summary", {}) if isinstance(metadata, dict) else {}
+        normalized = self._normalize_job_status(job.status)
+        codes = metadata.get("marketplace_codes")
+        marketplace_codes = (
+            [str(code) for code in codes if str(code).strip()]
+            if isinstance(codes, list)
+            else None
+        )
+        summary_final = normalized in {"completed", "failed"} and bool(summary)
+        return {
+            "job_id": str(job.id),
+            "started_at": self._to_iso(job.started_at),
+            "completed_at": self._to_iso(job.completed_at),
+            "duration_seconds": self._duration_seconds(
+                job.started_at, job.completed_at, job.duration_ms
+            ),
+            "current_stage": metadata.get("current_stage"),
+            "marketplace_codes": marketplace_codes,
+            "listings_created": int(summary.get("listings_created", job.total_listings or 0)),
+            "prices_saved": int(summary.get("prices_saved", job.successful or 0)),
+            "errors_count": int(summary.get("errors_count", job.failed or 0)),
+            "status": normalized,
+            "error_message": (
+                str(metadata.get("error"))[:500] if metadata.get("error") else None
+            ),
+            "summary_pending": not summary_final and normalized == "failed",
+        }
 
     async def get_job_status(self, job_id: UUID) -> dict[str, Any]:
         """
@@ -279,14 +293,67 @@ class ParsingAdminService:
             last_log_at=last_log_at,
         )
         normalized = self._normalize_job_status(job.status)
+        current_stage = self._resolve_current_stage(metadata, normalized, last_log_at)
         return {
             "job_id": str(job.id),
             "status": normalized,
-            "current_stage": self._resolve_current_stage(metadata, normalized, last_log_at),
+            "current_stage": current_stage,
             "started_at": self._to_iso(job.started_at),
             "completed_at": self._to_iso(job.completed_at),
-            "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
+            "duration_seconds": self._duration_seconds(
+                job.started_at, job.completed_at, job.duration_ms
+            ),
             "metadata": metadata,
+            "discovery": self._discovery_progress(metadata),
+        }
+
+    async def cancel_active_pipeline_job(self) -> dict[str, Any]:
+        """Mark the running admin pipeline job as failed and revoke its Celery task."""
+        from app.modules.scraper.pipeline.cancellation import revoke_celery_task
+
+        await self._fail_stale_running_pipeline_jobs()
+        result = await self.db.execute(
+            select(ScrapeJob)
+            .where(
+                ScrapeJob.job_type == self.TEST_PIPELINE_JOB_TYPE,
+                ScrapeJob.status == "running",
+            )
+            .order_by(ScrapeJob.started_at.desc().nullslast())
+            .limit(1)
+        )
+        job = result.scalar_one_or_none()
+        if job is None:
+            raise ValueError("No active pipeline job to cancel")
+
+        metadata = self._extract_metadata(job.config)
+        celery_task_id = metadata.get("celery_task_id")
+        revoke_celery_task(str(celery_task_id) if isinstance(celery_task_id, str) else None)
+
+        now = datetime.now(UTC)
+        metadata = dict(metadata)
+        metadata["current_stage"] = "failed"
+        metadata["last_activity_at"] = self._to_iso(now)
+        metadata["error"] = "cancelled_by_admin"
+        job.status = "failed"
+        job.completed_at = now
+        if job.started_at is not None:
+            job.duration_ms = int((now - job.started_at).total_seconds() * 1000)
+        job.config = {"metadata": metadata}
+        await self.db.commit()
+        return {"job_id": str(job.id), "status": "failed", "cancelled": True}
+
+    @staticmethod
+    def _discovery_progress(metadata: dict[str, Any]) -> dict[str, Any]:
+        """Structured discovery progress for admin live UI."""
+        done_raw = metadata.get("discovery_marketplace_done")
+        total_raw = metadata.get("discovery_marketplace_total")
+        done = int(done_raw) if isinstance(done_raw, (int, float)) else 0
+        total = int(total_raw) if isinstance(total_raw, (int, float)) else 0
+        current_domain = metadata.get("discovery_current_domain")
+        return {
+            "done": max(done, 0),
+            "total": max(total, 0),
+            "current_domain": str(current_domain) if current_domain else None,
         }
 
     async def get_users_detailed(self, limit: int = 500) -> list[dict[str, Any]]:

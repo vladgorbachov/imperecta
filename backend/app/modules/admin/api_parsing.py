@@ -54,7 +54,7 @@ class AdminUserPasswordResetRequest(BaseModel):
     force_password_change: bool = True
 
 
-class RunFullPipelineTestRequest(BaseModel):
+class RunPipelineRequest(BaseModel):
     """Optional subset of dim_marketplace.marketplace_code values for this run."""
 
     marketplace_codes: list[str] | None = Field(
@@ -62,6 +62,9 @@ class RunFullPipelineTestRequest(BaseModel):
         max_length=50,
         description="If set, discovery/scrape only these marketplace_code values.",
     )
+
+
+RunFullPipelineTestRequest = RunPipelineRequest
 
 
 def _raise_user_crud_error(exc: ValueError) -> None:
@@ -81,13 +84,10 @@ async def get_test_marketplaces(
     return await service.get_test_marketplaces()
 
 
-@router.post("/run-full-test")
-async def run_full_test(
-    _current_user: CurrentSuperuser,
+async def _enqueue_pipeline_run(
     db: DbSession,
-    body: RunFullPipelineTestRequest | None = None,
+    body: RunPipelineRequest | None,
 ) -> dict:
-    """Frontend action: create parent job and enqueue full pipeline task."""
     service = ParsingAdminService(db)
     codes = body.marketplace_codes if body is not None else None
     try:
@@ -99,15 +99,59 @@ async def run_full_test(
     return created
 
 
+@router.post("/run-pipeline")
+async def run_pipeline(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+    body: RunPipelineRequest | None = None,
+) -> dict:
+    """Create parent job and enqueue full admin pipeline (manual data collection)."""
+    return await _enqueue_pipeline_run(db, body)
+
+
+@router.post("/run-full-test")
+async def run_full_test(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+    body: RunFullPipelineTestRequest | None = None,
+) -> dict:
+    """Deprecated alias for POST /run-pipeline."""
+    return await _enqueue_pipeline_run(db, body)
+
+
+@router.get("/pipeline-runs")
+async def get_pipeline_runs(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict]:
+    """Pipeline run history for admin Data Collection tab."""
+    service = ParsingAdminService(db)
+    return await service.get_test_runs(limit=limit)
+
+
 @router.get("/test-runs")
 async def get_test_runs(
     _current_user: CurrentSuperuser,
     db: DbSession,
     limit: int = Query(50, ge=1, le=200),
 ) -> list[dict]:
-    """Frontend run history list used below run button."""
+    """Deprecated alias for GET /pipeline-runs."""
     service = ParsingAdminService(db)
     return await service.get_test_runs(limit=limit)
+
+
+@router.post("/cancel-active-job")
+async def cancel_active_job(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Cancel the currently running admin pipeline job."""
+    service = ParsingAdminService(db)
+    try:
+        return await service.cancel_active_pipeline_job()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/job-status/{job_id}")

@@ -2,12 +2,12 @@
 
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
-__all__ = ["FullPipelineTestRunner", "PipelineMetadataStore"]
+__all__ = ["FullPipelineOrchestrator", "PipelineMetadataStore"]
 
 
 def __getattr__(name: str):
-    if name == "FullPipelineTestRunner":
-        from app.modules.scraper.pipeline.full_test_runner import FullPipelineTestRunner
+    if name == "FullPipelineOrchestrator":
+        from app.modules.scraper.pipeline.orchestrator import FullPipelineOrchestrator
 
-        return FullPipelineTestRunner
+        return FullPipelineOrchestrator
     raise AttributeError(name)

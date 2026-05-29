@@ -1,4 +1,4 @@
-"""Orchestrates admin full pipeline test (discovery → scrape → finalize)."""
+"""Production full-pipeline orchestration (discovery → scrape → completion)."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.app_tables import ScrapeJob
 from app.modules.scraper.pipeline.discovery_phase import run_discovery_phase
-from app.modules.scraper.pipeline.finalize import finalize_full_pipeline_job
+from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
 slog = structlog.get_logger(__name__)
 
 
-class FullPipelineTestRunner:
-    """Run a single full_pipeline_test parent job end-to-end."""
+class FullPipelineOrchestrator:
+    """Run a single full_pipeline_test parent job end-to-end (production Celery flow)."""
 
     def __init__(
         self,
@@ -68,7 +68,7 @@ class FullPipelineTestRunner:
                 async with self._session_factory() as db:
                     job = await db.get(ScrapeJob, parent_job_id)
                     if job is not None:
-                        metadata = await finalize_full_pipeline_job(
+                        metadata = await complete_pipeline_job(
                             db,
                             job,
                             discovery_ms=discovery_ms,
@@ -102,7 +102,7 @@ class FullPipelineTestRunner:
                 job = await db.get(ScrapeJob, parent_job_id)
                 if job is None:
                     return {"status": "not_found", "job_id": str(parent_job_id)}
-                metadata = await finalize_full_pipeline_job(
+                metadata = await complete_pipeline_job(
                     db,
                     job,
                     discovery_ms=discovery_ms,
@@ -119,12 +119,12 @@ class FullPipelineTestRunner:
         except Exception:
             tb = traceback.format_exc()
             hard_error = tb
-            slog.exception("run_full_pipeline_test_failed", parent_job_id=str(parent_job_id))
+            slog.exception("run_full_pipeline_failed", parent_job_id=str(parent_job_id))
             try:
                 async with self._session_factory() as db:
                     job = await db.get(ScrapeJob, parent_job_id)
                     if job is not None:
-                        await finalize_full_pipeline_job(
+                        await complete_pipeline_job(
                             db,
                             job,
                             discovery_ms=discovery_ms,
@@ -135,7 +135,7 @@ class FullPipelineTestRunner:
                         )
             except Exception:
                 slog.exception(
-                    "run_full_pipeline_test_mark_failed_error",
+                    "run_full_pipeline_mark_failed_error",
                     parent_job_id=str(parent_job_id),
                 )
             return {

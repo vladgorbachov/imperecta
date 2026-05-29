@@ -20,7 +20,7 @@ from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
 from app.modules.scraper.discovery import DiscoveryCrawler
-from app.modules.scraper.pipeline.finalize import finalize_full_pipeline_job as _finalize_full_pipeline_job
+from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as _finalize_full_pipeline_job
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
@@ -429,14 +429,14 @@ async def _discover_for_full_pipeline(
     retry_kwargs={"max_retries": 1},
 )
 def run_full_pipeline_test(self, parent_job_id: str) -> dict:
-    """Run discovery + scrape pipeline for parsing admin test flow."""
+    """Run discovery + scrape pipeline for admin parsing jobs."""
 
     async def _do() -> dict:
-        from app.modules.scraper.pipeline.full_test_runner import FullPipelineTestRunner
+        from app.modules.scraper.pipeline.orchestrator import FullPipelineOrchestrator
 
         engine, session_factory = _make_session_factory()
         try:
-            runner = FullPipelineTestRunner(
+            runner = FullPipelineOrchestrator(
                 session_factory,
                 celery_task_id=str(self.request.id),
             )

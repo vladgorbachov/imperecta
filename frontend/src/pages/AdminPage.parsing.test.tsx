@@ -2,28 +2,14 @@
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminPage } from "./AdminPage";
 
-const toastSuccess = vi.fn();
-const toastError = vi.fn();
-
-const runPipelineMutateAsync = vi.fn();
-
 const mockUseAuthStore = vi.fn();
 const mockUseAdminStats = vi.fn();
-const mockUseParsingTestMarketplaces = vi.fn();
-const mockUseParsingTestRuns = vi.fn();
-const mockUseRunParsingFullTest = vi.fn();
-const mockUseParsingJobStatus = vi.fn();
-
-vi.mock("sonner", () => ({
-  toast: {
-    success: (...args: unknown[]) => toastSuccess(...args),
-    error: (...args: unknown[]) => toastError(...args),
-  },
-}));
+const mockUseParsingMarketplacesDetailed = vi.fn();
+const mockUseParsingUsersDetailed = vi.fn();
 
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: (selector: (state: { user: { is_superuser?: boolean } | null }) => unknown) =>
@@ -43,12 +29,21 @@ vi.mock("@/components/ui-custom/EmptyState", () => ({
   ),
 }));
 
+vi.mock("@/components/admin/DataCollectionTab", () => ({
+  DataCollectionTab: () => <div data-testid="data-collection-tab">data-collection</div>,
+}));
+
 vi.mock("@/hooks/useAdmin", () => ({
   useAdminStats: () => mockUseAdminStats(),
-  useParsingTestMarketplaces: () => mockUseParsingTestMarketplaces(),
-  useParsingTestRuns: () => mockUseParsingTestRuns(),
-  useRunParsingFullTest: () => mockUseRunParsingFullTest(),
-  useParsingJobStatus: (jobId: string | null) => mockUseParsingJobStatus(jobId),
+  useParsingMarketplacesDetailed: () => mockUseParsingMarketplacesDetailed(),
+  useParsingUsersDetailed: () => mockUseParsingUsersDetailed(),
+  useParsingJobStatus: () => ({ isLoading: false, data: null }),
+  useCreateAdminUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateAdminUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetAdminUserStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetAdminUserRole: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useResetAdminUserPassword: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteAdminUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 function renderPage() {
@@ -74,118 +69,38 @@ describe("AdminPage parsing section", () => {
     mockUseAdminStats.mockReturnValue({
       data: { users_count: 12, marketplaces_count: 8, total_products_monitored: 55 },
     });
-    mockUseParsingTestMarketplaces.mockReturnValue({
+    mockUseParsingMarketplacesDetailed.mockReturnValue({
       isLoading: false,
       data: [
         {
+          id: "mp-1",
+          marketplace_code: "example_com",
           name: "Test Market",
-          url: "https://example.com",
-          products_in_pool: 120,
-          last_successful_scrape: "2026-05-21T10:00:00Z",
-          success_rate: 94.2,
-          last_run: "2026-05-21T11:00:00Z",
-          status: "completed",
+          domain: "example.com",
+          base_url: "https://example.com",
+          is_active: true,
+          products_in_pool: 10,
+          active_listings: 5,
+          last_scrape_at: null,
+          success_rate: 90,
+          last_discovery_at: null,
         },
       ],
     });
-    mockUseParsingTestRuns.mockReturnValue({
+    mockUseParsingUsersDetailed.mockReturnValue({
       isLoading: false,
-      data: [
-        {
-          job_id: "job-1-uuid",
-          started_at: "2026-05-21T11:00:00Z",
-          completed_at: "2026-05-21T11:02:00Z",
-          duration_seconds: 120,
-          listings_created: 22,
-          prices_saved: 20,
-          errors_count: 1,
-          status: "completed",
-        },
-      ],
-    });
-    mockUseRunParsingFullTest.mockReturnValue({
-      isPending: false,
-      mutateAsync: runPipelineMutateAsync.mockResolvedValue({
-        job_id: "pipeline-job-uuid",
-      }),
-    });
-    mockUseParsingJobStatus.mockImplementation((jobId: string | null) => {
-      if (jobId === "job-1-uuid") {
-        return {
-          isLoading: false,
-          data: {
-            job_id: "job-1-uuid",
-            status: "completed",
-            current_stage: "persist",
-            started_at: "2026-05-21T11:00:00Z",
-            completed_at: "2026-05-21T11:02:00Z",
-            duration_seconds: 120,
-            metadata: {
-              timings: {
-                discovery_ms: 1000,
-                scrape_ms: 2000,
-                persist_ms: 1500,
-                total_ms: 4500,
-              },
-              per_marketplace: [
-                {
-                  marketplace_id: "mp-1",
-                  domain: "example.com",
-                  listings_created: 22,
-                  prices_saved: 20,
-                  errors_count: 1,
-                  duration_ms: 900,
-                  status: "completed",
-                },
-              ],
-            },
-          },
-        };
-      }
-      return {
-        isLoading: false,
-        data: null,
-      };
+      data: [],
     });
   });
 
-  it("renders marketplace and run history blocks", () => {
+  it("renders data collection tab component", () => {
     renderPage();
+    expect(screen.getByTestId("data-collection-tab")).toBeInTheDocument();
+  });
 
-    expect(screen.getByText("admin.pool.marketplaces")).toBeInTheDocument();
+  it("renders market overview marketplace row", () => {
+    renderPage();
     expect(screen.getByText("Test Market")).toBeInTheDocument();
-    expect(screen.getByText("admin.pool.discoveryLogs")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /job-1-uu/i })).toBeInTheDocument();
-  });
-
-  it("calls run full pipeline mutation", async () => {
-    renderPage();
-
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "admin.pool.triggerScraping" })[0],
-    );
-
-    await waitFor(() => {
-      expect(runPipelineMutateAsync).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it("opens run details dialog from history row", async () => {
-    renderPage();
-
-    const jobButton = screen.getAllByRole("button", { name: /job-1-uu/i })[0];
-    const row = jobButton.closest("tr");
-    if (!row) {
-      throw new Error("Run history row is not found");
-    }
-    fireEvent.click(row);
-
-    await waitFor(() => {
-      expect(screen.getAllByText("admin.pool.diagnostics").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("admin.pool.diagnosticsResult").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("admin.pool.marketplaces").length).toBeGreaterThan(0);
-      expect(screen.getByText("example.com")).toBeInTheDocument();
-    });
   });
 
   it("shows access denied for non-superuser", () => {
