@@ -42,20 +42,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ParsingJobStatus, ParsingPipelineRun } from "@/api/admin";
+import type { ParsingJobStatus, ParsingLiveStep, ParsingMarketplaceBreakdown, ParsingPipelineRun } from "@/api/admin";
 import {
   useCancelParsingActiveJob,
   useParsingActiveJob,
   useParsingJobLiveFeed,
   useParsingJobStatus,
-  useParsingMarketplacesDetailed,
   useParsingPipelineRuns,
+  useParsingTestMarketplaces,
   useRunParsingPipeline,
 } from "@/hooks/useAdmin";
 
-const RUNS_PAGE_SIZE = 20;
-const RUNS_LIMIT = 200;
+const RUNS_LIMIT = 10;
 const STALE_ACTIVITY_SECONDS = 300;
+
+type CollectionStageStatus = "pending" | "in_progress" | "completed" | "failed";
+
+interface RunHistoryColumn {
+  key: string;
+  labelKey: string;
+  defaultWidth: number;
+  minWidth: number;
+}
+
+const RUN_HISTORY_COLUMNS: RunHistoryColumn[] = [
+  { key: "job", labelKey: "Job", defaultWidth: 120, minWidth: 90 },
+  { key: "date", labelKey: "alerts.date", defaultWidth: 160, minWidth: 120 },
+  { key: "scope", labelKey: "admin.dataCollection.scopeLabel", defaultWidth: 140, minWidth: 100 },
+  { key: "stage", labelKey: "admin.dataCollection.metric.stage", defaultWidth: 120, minWidth: 90 },
+  { key: "products", labelKey: "admin.marketplaces.products", defaultWidth: 90, minWidth: 70 },
+  { key: "prices", labelKey: "common.price", defaultWidth: 80, minWidth: 60 },
+  { key: "errors", labelKey: "admin.stats.errors", defaultWidth: 80, minWidth: 60 },
+  { key: "status", labelKey: "common.status", defaultWidth: 110, minWidth: 90 },
+  { key: "error", labelKey: "admin.dataCollection.errorColumn", defaultWidth: 200, minWidth: 120 },
+];
 
 function formatDateTime(value: string | null, locale: string, fallback: string): string {
   if (!value) return fallback;
@@ -86,15 +106,136 @@ function formatDuration(seconds: number | null, fallback: string): string {
 }
 
 function statusBadgeVariant(status: "running" | "completed" | "failed") {
-  if (status === "completed") return "default";
+  if (status === "completed") return "outline";
   if (status === "failed") return "destructive";
   return "secondary";
 }
 
+function statusBadgeClassName(status: "running" | "completed" | "failed"): string {
+  if (status === "completed") {
+    return "border-green-500/40 bg-green-500/15 text-green-700 dark:text-green-300";
+  }
+  if (status === "running") {
+    return "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200";
+  }
+  return "";
+}
+
+function collectionStageClassName(status: CollectionStageStatus): string {
+  if (status === "completed") {
+    return "border-green-500/40 bg-green-500/15 text-green-700 dark:text-green-300";
+  }
+  if (status === "failed") {
+    return "border-red-500/40 bg-red-500/15 text-red-700 dark:text-red-300";
+  }
+  if (status === "in_progress") {
+    return "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200";
+  }
+  return "border-muted bg-muted/40 text-muted-foreground";
+}
+
+function collectionStageLabelKey(status: CollectionStageStatus): string {
+  if (status === "completed") return "admin.dataCollection.stageStatus.completed";
+  if (status === "failed") return "admin.dataCollection.stageStatus.failed";
+  if (status === "in_progress") return "admin.dataCollection.stageStatus.inProgress";
+  return "admin.dataCollection.stageStatus.pending";
+}
+
+function collectionStageDescKey(
+  stage: "discovery" | "scrape" | "persist",
+  status: CollectionStageStatus,
+): string {
+  return `admin.dataCollection.stageDesc.${stage}.${status}`;
+}
+
+function normalizeRowStatus(status: ParsingMarketplaceBreakdown["status"]): CollectionStageStatus {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "running") return "in_progress";
+  return "pending";
+}
+
+function resolveMarketplaceStages(
+  row: ParsingMarketplaceBreakdown,
+  jobStatus: ParsingJobStatus | null | undefined,
+  currentStage: string | null,
+  discovery: ParsingJobStatus["discovery"],
+  liveSteps: ParsingLiveStep[],
+): { discovery: CollectionStageStatus; scrape: CollectionStageStatus; persist: CollectionStageStatus } {
+  const jobRunning = jobStatus?.status === "running";
+  const jobDone = jobStatus?.status === "completed";
+  const jobFailed = jobStatus?.status === "failed";
+  const rowStatus = normalizeRowStatus(row.status);
+
+  let discoveryStage: CollectionStageStatus = "pending";
+  if (
+    jobRunning &&
+    discovery?.current_domain === row.domain &&
+    (currentStage === "discovery" || currentStage === "dispatching")
+  ) {
+    discoveryStage = "in_progress";
+  } else if (rowStatus === "failed" && (currentStage === "discovery" || currentStage === "dispatching")) {
+    discoveryStage = "failed";
+  } else if (rowStatus === "in_progress") {
+    discoveryStage = "in_progress";
+  } else if (rowStatus === "completed" || rowStatus === "failed") {
+    discoveryStage = rowStatus;
+  }
+
+  if (
+    currentStage === "scrape" ||
+    currentStage === "persist" ||
+    currentStage === "completed" ||
+    jobDone ||
+    (jobFailed && currentStage !== "discovery" && currentStage !== "dispatching")
+  ) {
+    if (discoveryStage === "pending" || discoveryStage === "in_progress") {
+      discoveryStage = rowStatus === "failed" ? "failed" : "completed";
+    }
+  }
+
+  const domainSteps = liveSteps.filter(
+    (step) => step.marketplace_domain === row.domain && step.duration_ms != null,
+  );
+  let scrapeStage: CollectionStageStatus = "pending";
+  if (jobRunning && currentStage === "scrape") {
+    scrapeStage = domainSteps.length > 0 || discoveryStage === "completed" ? "in_progress" : "pending";
+  } else if (currentStage === "persist" || currentStage === "completed" || jobDone) {
+    scrapeStage = rowStatus === "failed" && jobFailed ? "failed" : "completed";
+  } else if (jobFailed && currentStage === "scrape") {
+    scrapeStage = "failed";
+  }
+
+  let persistStage: CollectionStageStatus = "pending";
+  if (jobRunning && currentStage === "persist") {
+    persistStage = "in_progress";
+  } else if (jobDone) {
+    persistStage = "completed";
+  } else if (jobFailed && currentStage === "persist") {
+    persistStage = "failed";
+  }
+
+  return { discovery: discoveryStage, scrape: scrapeStage, persist: persistStage };
+}
+
+function computeAvgLatencyMs(
+  row: ParsingMarketplaceBreakdown,
+  liveSteps: ParsingLiveStep[],
+): number {
+  const domainSteps = liveSteps.filter(
+    (step) => step.marketplace_domain === row.domain && step.duration_ms != null,
+  );
+  if (domainSteps.length > 0) {
+    const total = domainSteps.reduce((sum, step) => sum + (step.duration_ms ?? 0), 0);
+    return Math.round(total / domainSteps.length);
+  }
+  return row.duration_ms ?? 0;
+}
+
 function statusLabelKey(status: "running" | "completed" | "failed"): string {
-  if (status === "completed") return "admin.marketplaces.status.success";
-  if (status === "failed") return "admin.marketplaces.status.error";
-  return "common.loading";
+  if (status === "completed") return "admin.dataCollection.stageStatus.completed";
+  if (status === "failed") return "admin.dataCollection.stageStatus.failed";
+  return "admin.dataCollection.stageStatus.inProgress";
 }
 
 function stageLabelKey(stage: string | null | undefined): string {
@@ -168,12 +309,15 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
 
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [monitorJobId, setMonitorJobId] = useState<string | null>(null);
-  const [historyPage, setHistoryPage] = useState(1);
   const previousActiveStatus = useRef<"running" | "completed" | "failed" | null>(null);
   const marketplaceSelectionInitialized = useRef(false);
+  const [runHistoryColumnWidths, setRunHistoryColumnWidths] = useState<Record<string, number>>(() =>
+    Object.fromEntries(RUN_HISTORY_COLUMNS.map((col) => [col.key, col.defaultWidth])),
+  );
+  const resizingColumnRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
 
   const activeJobQuery = useParsingActiveJob(4000);
-  const marketplacesQuery = useParsingMarketplacesDetailed(500);
+  const marketplacesQuery = useParsingTestMarketplaces();
   const runsQuery = useParsingPipelineRuns(RUNS_LIMIT);
   const runPipeline = useRunParsingPipeline();
   const cancelJob = useCancelParsingActiveJob();
@@ -215,35 +359,50 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
     monitorStatus?.status === "running" && isActivityStale(lastActivityAt);
 
   const activeMarketplaces = useMemo(
-    () => (marketplacesQuery.data ?? []).filter((mp) => mp.is_active),
+    () =>
+      (marketplacesQuery.data ?? []).filter(
+        (mp) => mp.is_active !== false && Boolean(mp.marketplace_code),
+      ),
     [marketplacesQuery.data],
   );
 
   useEffect(() => {
     if (marketplaceSelectionInitialized.current || activeMarketplaces.length === 0) return;
     marketplaceSelectionInitialized.current = true;
-    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code)));
+    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code as string)));
   }, [activeMarketplaces]);
 
   const sortedRuns = useMemo(() => {
     const source = runsQuery.data ?? [];
-    return [...source].sort((a, b) => {
-      const aa = a.started_at ? new Date(a.started_at).getTime() : 0;
-      const bb = b.started_at ? new Date(b.started_at).getTime() : 0;
-      return bb - aa;
-    });
+    return [...source]
+      .sort((a, b) => {
+        const aa = a.started_at ? new Date(a.started_at).getTime() : 0;
+        const bb = b.started_at ? new Date(b.started_at).getTime() : 0;
+        return bb - aa;
+      })
+      .slice(0, RUNS_LIMIT);
   }, [runsQuery.data]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedRuns.length / RUNS_PAGE_SIZE));
-  const pagedRuns = useMemo(() => {
-    const safePage = Math.min(Math.max(historyPage, 1), totalPages);
-    const start = (safePage - 1) * RUNS_PAGE_SIZE;
-    return sortedRuns.slice(start, start + RUNS_PAGE_SIZE);
-  }, [historyPage, sortedRuns, totalPages]);
-
   useEffect(() => {
-    setHistoryPage((page) => Math.min(page, totalPages));
-  }, [totalPages]);
+    const onMouseMove = (event: MouseEvent) => {
+      const resizing = resizingColumnRef.current;
+      if (!resizing) return;
+      const delta = event.clientX - resizing.startX;
+      const column = RUN_HISTORY_COLUMNS.find((col) => col.key === resizing.key);
+      const minWidth = column?.minWidth ?? 60;
+      const nextWidth = Math.max(minWidth, resizing.startWidth + delta);
+      setRunHistoryColumnWidths((prev) => ({ ...prev, [resizing.key]: nextWidth }));
+    };
+    const onMouseUp = () => {
+      resizingColumnRef.current = null;
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     const status = monitorStatus?.status;
@@ -331,7 +490,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   };
 
   const selectAllMarketplaces = () => {
-    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code)));
+    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code as string)));
   };
 
   const clearMarketplaceSelection = () => {
@@ -494,7 +653,10 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle>{t("admin.dataCollection.liveMonitor")}</CardTitle>
               {monitorStatus ? (
-                <Badge variant={statusBadgeVariant(monitorStatus.status)}>
+                <Badge
+                  variant={statusBadgeVariant(monitorStatus.status)}
+                  className={statusBadgeClassName(monitorStatus.status)}
+                >
                   {t(statusLabelKey(monitorStatus.status))}
                 </Badge>
               ) : null}
@@ -628,7 +790,9 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                             <TableHead>{t("admin.marketplaces.products")}</TableHead>
                             <TableHead>{t("admin.stats.errors")}</TableHead>
                             <TableHead>{t("admin.claude.avgLatency")}</TableHead>
-                            <TableHead>{t("common.status")}</TableHead>
+                            <TableHead>{t("admin.dataCollection.stageDiscovery")}</TableHead>
+                            <TableHead>{t("admin.dataCollection.stageScrape")}</TableHead>
+                            <TableHead>{t("admin.dataCollection.stagePersist")}</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -640,22 +804,42 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                               <TableCell>{dash}</TableCell>
                               <TableCell>{dash}</TableCell>
                               <TableCell>{dash}</TableCell>
-                              <TableCell>
-                                <Badge variant="secondary">{t("common.loading")}</Badge>
+                              <TableCell colSpan={3}>
+                                <CollectionStageBadge
+                                  stage="discovery"
+                                  status="in_progress"
+                                  t={t}
+                                />
                               </TableCell>
                             </TableRow>
                           ) : null}
-                          {perMarketplaceRows.map((row) => (
-                            <TableRow key={row.marketplace_id}>
-                              <TableCell>{row.domain ?? row.marketplace_id.slice(0, 8)}</TableCell>
-                              <TableCell>{row.listings_created}</TableCell>
-                              <TableCell>{row.errors_count}</TableCell>
-                              <TableCell>{row.duration_ms} ms</TableCell>
-                              <TableCell>
-                                <Badge variant={statusBadgeVariant(row.status)}>{row.status}</Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {perMarketplaceRows.map((row) => {
+                            const stages = resolveMarketplaceStages(
+                              row,
+                              monitorStatus,
+                              currentStage,
+                              discovery,
+                              liveFeed?.steps ?? [],
+                            );
+                            const avgLatency = computeAvgLatencyMs(row, liveFeed?.steps ?? []);
+                            return (
+                              <TableRow key={row.marketplace_id}>
+                                <TableCell>{row.domain ?? row.marketplace_id.slice(0, 8)}</TableCell>
+                                <TableCell>{row.listings_created}</TableCell>
+                                <TableCell>{row.errors_count}</TableCell>
+                                <TableCell>{avgLatency} ms</TableCell>
+                                <TableCell>
+                                  <CollectionStageBadge stage="discovery" status={stages.discovery} t={t} />
+                                </TableCell>
+                                <TableCell>
+                                  <CollectionStageBadge stage="scrape" status={stages.scrape} t={t} />
+                                </TableCell>
+                                <TableCell>
+                                  <CollectionStageBadge stage="persist" status={stages.persist} t={t} />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     )}
@@ -805,98 +989,160 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
         <CardContent className="space-y-4">
           {runsQuery.isLoading ? (
             <Skeleton className="h-56 w-full" />
-          ) : pagedRuns.length === 0 ? (
+          ) : sortedRuns.length === 0 ? (
             <EmptyState title={t("common.noData")} description={t("admin.dataCollection.runHistory")} />
           ) : (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Job</TableHead>
-                    <TableHead>{t("alerts.date")}</TableHead>
-                    <TableHead>{t("admin.dataCollection.scopeLabel")}</TableHead>
-                    <TableHead>{t("admin.dataCollection.metric.stage")}</TableHead>
-                    <TableHead>{t("admin.marketplaces.products")}</TableHead>
-                    <TableHead>{t("common.price")}</TableHead>
-                    <TableHead>{t("admin.stats.errors")}</TableHead>
-                    <TableHead>{t("common.status")}</TableHead>
-                    <TableHead>{t("admin.dataCollection.errorColumn")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedRuns.map((run) => (
-                    <TableRow
-                      key={run.job_id}
-                      className="cursor-pointer"
-                      data-selected={monitorJobId === run.job_id}
-                      onClick={() => {
-                        setMonitorJobId(run.job_id);
-                        onOpenRunDetails(run.job_id);
-                      }}
-                    >
-                      <TableCell>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 text-primary hover:underline"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void navigator.clipboard.writeText(run.job_id);
-                            toast.success(t("common.copied"));
-                          }}
+              <div className="overflow-x-auto">
+                <Table style={{ tableLayout: "fixed", minWidth: "100%" }}>
+                  <TableHeader>
+                    <TableRow>
+                      {RUN_HISTORY_COLUMNS.map((column) => (
+                        <TableHead
+                          key={column.key}
+                          style={{ width: runHistoryColumnWidths[column.key], position: "relative" }}
+                          className="select-none"
                         >
-                          <Copy className="size-3.5" />
-                          {run.job_id.slice(0, 8)}…
-                        </button>
-                      </TableCell>
-                      <TableCell>{formatDateTime(run.started_at, locale, dash)}</TableCell>
-                      <TableCell className="max-w-40 truncate">
-                        {marketplaceScopeLabel(run, t)}
-                      </TableCell>
-                      <TableCell>{run.current_stage ? t(stageLabelKey(run.current_stage)) : dash}</TableCell>
-                      <TableCell>
-                        {run.summary_pending ? dash : run.listings_created}
-                      </TableCell>
-                      <TableCell>{run.summary_pending ? dash : run.prices_saved}</TableCell>
-                      <TableCell>{run.summary_pending ? dash : run.errors_count}</TableCell>
-                      <TableCell>
-                        <Badge variant={statusBadgeVariant(run.status)}>
-                          {t(statusLabelKey(run.status))}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                        {run.error_message ?? dash}
-                      </TableCell>
+                          <span className="block truncate pr-2">
+                            {column.labelKey.startsWith("admin.") || column.labelKey.startsWith("alerts.") || column.labelKey.startsWith("common.")
+                              ? t(column.labelKey)
+                              : column.labelKey}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={t("admin.dataCollection.resizeColumn")}
+                            className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize border-r border-border/60 hover:bg-primary/30"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              resizingColumnRef.current = {
+                                key: column.key,
+                                startX: event.clientX,
+                                startWidth: runHistoryColumnWidths[column.key] ?? column.defaultWidth,
+                              };
+                            }}
+                          />
+                        </TableHead>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  {historyPage}/{totalPages}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={historyPage <= 1}
-                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                  >
-                    {t("common.back")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={historyPage >= totalPages}
-                    onClick={() => setHistoryPage((p) => Math.min(totalPages, p + 1))}
-                  >
-                    {t("common.next")}
-                  </Button>
-                </div>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedRuns.map((run) => (
+                      <TableRow
+                        key={run.job_id}
+                        className="cursor-pointer"
+                        data-selected={monitorJobId === run.job_id}
+                        onClick={() => {
+                          setMonitorJobId(run.job_id);
+                          onOpenRunDetails(run.job_id);
+                        }}
+                      >
+                        {RUN_HISTORY_COLUMNS.map((column) => (
+                          <TableCell
+                            key={`${run.job_id}-${column.key}`}
+                            style={{ width: runHistoryColumnWidths[column.key] }}
+                            className="truncate"
+                          >
+                            {renderRunHistoryCell(run, column.key, { t, locale, dash, monitorJobId })}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
+              <p className="text-sm text-muted-foreground">
+                {t("admin.dataCollection.runHistoryCount", { count: sortedRuns.length, limit: RUNS_LIMIT })}
+              </p>
             </>
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function renderRunHistoryCell(
+  run: ParsingPipelineRun,
+  columnKey: string,
+  ctx: {
+    t: (key: string, opts?: Record<string, unknown>) => string;
+    locale: string;
+    dash: string;
+    monitorJobId: string | null;
+  },
+): ReactNode {
+  const { t, locale, dash } = ctx;
+  switch (columnKey) {
+    case "job":
+      return (
+        <button
+          type="button"
+          className="inline-flex max-w-full items-center gap-1 truncate text-primary hover:underline"
+          onClick={(event) => {
+            event.stopPropagation();
+            void navigator.clipboard.writeText(run.job_id);
+            toast.success(t("common.copied"));
+          }}
+        >
+          <Copy className="size-3.5 shrink-0" />
+          {run.job_id.slice(0, 8)}…
+        </button>
+      );
+    case "date":
+      return formatDateTime(run.started_at, locale, dash);
+    case "scope":
+      return marketplaceScopeLabel(run, t);
+    case "stage":
+      return run.current_stage ? t(stageLabelKey(run.current_stage)) : dash;
+    case "products":
+      return run.summary_pending ? dash : String(run.listings_created);
+    case "prices":
+      return run.summary_pending ? dash : String(run.prices_saved);
+    case "errors":
+      return run.summary_pending ? dash : String(run.errors_count);
+    case "status":
+      return (
+        <Badge
+          variant={statusBadgeVariant(run.status)}
+          className={statusBadgeClassName(run.status)}
+        >
+          {t(statusLabelKey(run.status))}
+        </Badge>
+      );
+    case "error":
+      return (
+        <span className="text-xs text-muted-foreground">{run.error_message ?? dash}</span>
+      );
+    default:
+      return dash;
+  }
+}
+
+function CollectionStageBadge({
+  stage,
+  status,
+  t,
+}: {
+  stage: "discovery" | "scrape" | "persist";
+  status: CollectionStageStatus;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+}) {
+  const stageTitle =
+    stage === "discovery"
+      ? t("admin.dataCollection.stageDiscovery")
+      : stage === "scrape"
+        ? t("admin.dataCollection.stageScrape")
+        : t("admin.dataCollection.stagePersist");
+  const statusLabel = t(collectionStageLabelKey(status));
+  const description = t(collectionStageDescKey(stage, status));
+  return (
+    <div className="space-y-1">
+      <Badge variant="outline" className={collectionStageClassName(status)} title={description}>
+        {statusLabel}
+      </Badge>
+      <p className="text-xs text-muted-foreground">
+        {stageTitle}: {description}
+      </p>
     </div>
   );
 }

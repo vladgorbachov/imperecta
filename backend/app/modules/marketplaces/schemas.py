@@ -40,6 +40,14 @@ class MarketplaceCreateByUrl(BaseModel):
     url: str
 
 
+class MarketplaceUpdate(BaseModel):
+    """Partial update for admin marketplace CRUD."""
+
+    name: str | None = Field(None, min_length=1, max_length=200)
+    url: str | None = Field(None, min_length=1, max_length=2048)
+    is_active: bool | None = None
+
+
 class MarketplaceListResponse(BaseModel):
     items: list[MarketplaceResponse]
     total: int

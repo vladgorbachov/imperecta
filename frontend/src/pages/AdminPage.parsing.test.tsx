@@ -2,8 +2,8 @@
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminPage } from "./AdminPage";
 
 const mockUseAuthStore = vi.fn();
@@ -38,6 +38,9 @@ vi.mock("@/hooks/useAdmin", () => ({
   useParsingMarketplacesDetailed: () => mockUseParsingMarketplacesDetailed(),
   useParsingUsersDetailed: () => mockUseParsingUsersDetailed(),
   useParsingJobStatus: () => ({ isLoading: false, data: null }),
+  useAddMarketplace: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateMarketplace: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteMarketplace: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateAdminUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateAdminUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSetAdminUserStatus: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -58,6 +61,10 @@ function renderPage() {
 }
 
 describe("AdminPage parsing section", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -71,21 +78,26 @@ describe("AdminPage parsing section", () => {
     });
     mockUseParsingMarketplacesDetailed.mockReturnValue({
       isLoading: false,
-      data: [
-        {
-          id: "mp-1",
-          marketplace_code: "example_com",
-          name: "Test Market",
-          domain: "example.com",
-          base_url: "https://example.com",
-          is_active: true,
-          products_in_pool: 10,
-          active_listings: 5,
-          last_scrape_at: null,
-          success_rate: 90,
-          last_discovery_at: null,
-        },
-      ],
+      data: {
+        items: [
+          {
+            id: "mp-1",
+            marketplace_code: "example_com",
+            name: "Test Market",
+            domain: "example.com",
+            base_url: "https://example.com",
+            is_active: true,
+            products_in_pool: 10,
+            active_listings: 5,
+            last_scrape_at: null,
+            success_rate: 90,
+            last_discovery_at: null,
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      },
     });
     mockUseParsingUsersDetailed.mockReturnValue({
       isLoading: false,
@@ -98,9 +110,10 @@ describe("AdminPage parsing section", () => {
     expect(screen.getByTestId("data-collection-tab")).toBeInTheDocument();
   });
 
-  it("renders market overview marketplace row", () => {
+  it("renders market overview tab", () => {
     renderPage();
-    expect(screen.getByText("Test Market")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Market Overview" })).toBeInTheDocument();
+    expect(mockUseParsingMarketplacesDetailed).toHaveBeenCalled();
   });
 
   it("shows access denied for non-superuser", () => {

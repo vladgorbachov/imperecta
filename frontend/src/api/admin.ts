@@ -73,6 +73,10 @@ export const getMarketplaceLogs = (id: string) =>
   apiClient.get<ScrapeLog[]>(`/admin/marketplaces/${id}/logs`);
 export const addMarketplace = (url: string) =>
   apiClient.post<AdminMarketplace>("/admin/marketplaces", { url });
+export const updateMarketplace = (
+  id: string,
+  payload: { name?: string; url?: string; is_active?: boolean },
+) => apiClient.patch<AdminMarketplace>(`/admin/marketplaces/${id}`, payload);
 export const deleteMarketplace = (id: string) =>
   apiClient.delete(`/admin/marketplaces/${id}`);
 
@@ -155,13 +159,24 @@ export interface RecalculateQuotasResponse {
 }
 
 export interface ParsingTestMarketplace {
+  id?: string;
+  marketplace_code?: string;
   name: string;
   url: string;
+  domain?: string;
+  is_active?: boolean;
   products_in_pool: number;
   last_successful_scrape: string | null;
   success_rate: number;
   last_run: string | null;
   status: "running" | "completed" | "failed";
+}
+
+export interface ParsingMarketplacesDetailedPage {
+  items: ParsingDetailedMarketplace[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface ParsingRunCreateResponse {
@@ -445,8 +460,10 @@ export const resetAdminUserPassword = (
 export const deleteAdminUser = (userId: string) =>
   apiClient.delete<{ deleted: boolean }>(`/admin/parsing/users/${userId}`);
 
-export const getParsingMarketplacesDetailed = (limit = 1000) =>
-  apiClient.get<ParsingDetailedMarketplace[]>("/admin/parsing/marketplaces-detailed", { params: { limit } });
+export const getParsingMarketplacesDetailed = (page = 1, pageSize = 20) =>
+  apiClient.get<ParsingMarketplacesDetailedPage>("/admin/parsing/marketplaces-detailed", {
+    params: { page, page_size: pageSize },
+  });
 
 export const getParsingJobLiveFeed = (jobId: string, limit = 200, offset = 0) =>
   apiClient.get<ParsingJobLiveFeed>(`/admin/parsing/job-live-feed/${jobId}`, {

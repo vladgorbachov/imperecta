@@ -97,6 +97,8 @@ class MarketplaceService:
             "is_active",
             "product_quota",
             "name",
+            "domain",
+            "base_url",
             "rate_limit_delay",
             "custom_product_link_selector",
             "custom_next_page_selector",
@@ -256,10 +258,27 @@ class MarketplaceService:
         self,
         marketplace_id: UUID,
         updates: dict,
+        *,
+        url: str | None = None,
     ) -> DimMarketplace | None:
         mp = await self.db.get(DimMarketplace, marketplace_id)
         if not mp:
             return None
+        if url is not None:
+            base = MarketplacePoolService._normalize_url(url.strip())
+            parsed = urlparse(base)
+            domain = (parsed.netloc or "").lower()
+            if not domain:
+                raise ValueError("Invalid URL: empty host")
+            duplicate = await self.db.scalar(
+                select(DimMarketplace.id).where(
+                    DimMarketplace.domain == domain,
+                    DimMarketplace.id != marketplace_id,
+                ),
+            )
+            if duplicate:
+                raise ValueError(f"Domain already in use: {domain}")
+            updates = {**updates, "base_url": base, "domain": domain[:255]}
         for key, value in updates.items():
             if key not in self._UPDATE_KEYS:
                 continue

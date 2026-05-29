@@ -23,6 +23,20 @@ export const useAddMarketplace = () => {
   });
 };
 
+export const useUpdateMarketplace = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: { name?: string; url?: string; is_active?: boolean };
+    }) => adminApi.updateMarketplace(id, payload).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+};
+
 export const useDeleteMarketplace = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -167,10 +181,10 @@ export const useDeleteAdminUser = () => {
   });
 };
 
-export const useParsingMarketplacesDetailed = (limit = 1000) =>
+export const useParsingMarketplacesDetailed = (page = 1, pageSize = 20) =>
   useQuery({
-    queryKey: ["admin", "parsing", "marketplaces-detailed", limit],
-    queryFn: () => adminApi.getParsingMarketplacesDetailed(limit).then((r) => r.data),
+    queryKey: ["admin", "parsing", "marketplaces-detailed", page, pageSize],
+    queryFn: () => adminApi.getParsingMarketplacesDetailed(page, pageSize).then((r) => r.data),
   });
 
 export const useParsingJobLiveFeed = (

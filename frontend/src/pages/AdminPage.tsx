@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronDown,
   KeyRound,
   Loader2,
   Pencil,
@@ -45,13 +44,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { authApi } from "@/api/auth";
 import { useAuthStore } from "@/stores/authStore";
-import type { ParsingDetailedUser } from "@/api/admin";
+import type { ParsingDetailedMarketplace, ParsingDetailedUser } from "@/api/admin";
 import {
+  useAddMarketplace,
   useAdminStats,
   useCreateAdminUser,
   useDeleteAdminUser,
+  useDeleteMarketplace,
   useParsingMarketplacesDetailed,
   useParsingJobStatus,
   useParsingUsersDetailed,
@@ -59,10 +59,9 @@ import {
   useSetAdminUserRole,
   useSetAdminUserStatus,
   useUpdateAdminUser,
+  useUpdateMarketplace,
 } from "@/hooks/useAdmin";
-const MARKET_OVERVIEW_COUNT_OPTIONS = [5, 10, 20, 50, 100, 1000] as const;
-const DEFAULT_MARKET_OVERVIEW_INITIAL_VISIBLE = 5;
-const DEFAULT_MARKET_OVERVIEW_EXPAND_STEP = 20;
+const MARKET_OVERVIEW_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const USER_PLAN_OPTIONS = ["trial", "starter", "business", "pro", "enterprise"] as const;
 const USER_LANGUAGE_OPTIONS = ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"] as const;
 
@@ -106,17 +105,6 @@ function extractErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function parsePreferredCount(
-  value: unknown,
-  fallback: (typeof MARKET_OVERVIEW_COUNT_OPTIONS)[number],
-): (typeof MARKET_OVERVIEW_COUNT_OPTIONS)[number] {
-  const numeric = typeof value === "number" ? value : Number(value);
-  if (Number.isInteger(numeric) && MARKET_OVERVIEW_COUNT_OPTIONS.includes(numeric as never)) {
-    return numeric as (typeof MARKET_OVERVIEW_COUNT_OPTIONS)[number];
-  }
-  return fallback;
-}
-
 function formatDateTime(value: string | null, locale: string, fallback: string): string {
   if (!value) return fallback;
   const date = new Date(value);
@@ -157,7 +145,6 @@ export function AdminPage() {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
-  const setUser = useAuthStore((state) => state.setUser);
   const [detailsJobId, setDetailsJobId] = useState<string | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -172,19 +159,20 @@ export function AdminPage() {
   const [editUserForm, setEditUserForm] = useState<UserFormState>(DEFAULT_USER_FORM);
   const [newPassword, setNewPassword] = useState("");
   const [forcePasswordChange, setForcePasswordChange] = useState(true);
-  const [marketOverviewInitialVisible, setMarketOverviewInitialVisible] = useState<number>(
-    DEFAULT_MARKET_OVERVIEW_INITIAL_VISIBLE,
-  );
-  const [marketOverviewExpandStep, setMarketOverviewExpandStep] = useState<number>(
-    DEFAULT_MARKET_OVERVIEW_EXPAND_STEP,
-  );
-  const [marketOverviewVisibleCount, setMarketOverviewVisibleCount] = useState<number>(
-    DEFAULT_MARKET_OVERVIEW_INITIAL_VISIBLE,
-  );
-  const [isSavingOverviewPreferences, setIsSavingOverviewPreferences] = useState(false);
+  const [marketplacePage, setMarketplacePage] = useState(1);
+  const [marketplacePageSize, setMarketplacePageSize] = useState<number>(20);
+  const [isAddMarketplaceOpen, setIsAddMarketplaceOpen] = useState(false);
+  const [isEditMarketplaceOpen, setIsEditMarketplaceOpen] = useState(false);
+  const [isDeleteMarketplaceOpen, setIsDeleteMarketplaceOpen] = useState(false);
+  const [selectedMarketplace, setSelectedMarketplace] = useState<ParsingDetailedMarketplace | null>(null);
+  const [newMarketplaceUrl, setNewMarketplaceUrl] = useState("");
+  const [editMarketplaceForm, setEditMarketplaceForm] = useState({ name: "", url: "" });
   const { data: stats } = useAdminStats();
   const usersDetailedQuery = useParsingUsersDetailed(1000);
-  const marketplacesDetailedQuery = useParsingMarketplacesDetailed(2000);
+  const marketplacesDetailedQuery = useParsingMarketplacesDetailed(marketplacePage, marketplacePageSize);
+  const addMarketplaceMutation = useAddMarketplace();
+  const updateMarketplaceMutation = useUpdateMarketplace();
+  const deleteMarketplaceMutation = useDeleteMarketplace();
   const createUserMutation = useCreateAdminUser();
   const updateUserMutation = useUpdateAdminUser();
   const setUserStatusMutation = useSetAdminUserStatus();
@@ -199,81 +187,9 @@ export function AdminPage() {
 
   const detailsStatus = detailsStatusQuery.data;
 
-  useEffect(() => {
-    const preferences =
-      user && typeof user.preferences === "object" && user.preferences
-        ? (user.preferences as Record<string, unknown>)
-        : null;
-    const adminUi =
-      preferences && typeof preferences.admin_ui === "object" && preferences.admin_ui
-        ? (preferences.admin_ui as Record<string, unknown>)
-        : null;
-    const marketOverview =
-      adminUi && typeof adminUi.market_overview === "object" && adminUi.market_overview
-        ? (adminUi.market_overview as Record<string, unknown>)
-        : null;
-
-    const initialVisible = parsePreferredCount(
-      marketOverview?.initial_visible_count,
-      DEFAULT_MARKET_OVERVIEW_INITIAL_VISIBLE,
-    );
-    const expandStep = parsePreferredCount(
-      marketOverview?.expand_step_count,
-      DEFAULT_MARKET_OVERVIEW_EXPAND_STEP,
-    );
-
-    setMarketOverviewInitialVisible(initialVisible);
-    setMarketOverviewExpandStep(expandStep);
-    setMarketOverviewVisibleCount(initialVisible);
-  }, [user]);
-
-  const persistMarketOverviewPreferences = async (patch: {
-    initial_visible_count?: number;
-    expand_step_count?: number;
-  }) => {
-    if (!user) return;
-    const basePreferences =
-      user.preferences && typeof user.preferences === "object"
-        ? (user.preferences as Record<string, unknown>)
-        : {};
-    const baseAdminUi =
-      basePreferences.admin_ui && typeof basePreferences.admin_ui === "object"
-        ? (basePreferences.admin_ui as Record<string, unknown>)
-        : {};
-    const baseMarketOverview =
-      baseAdminUi.market_overview && typeof baseAdminUi.market_overview === "object"
-        ? (baseAdminUi.market_overview as Record<string, unknown>)
-        : {};
-
-    const nextPreferences: Record<string, unknown> = {
-      ...basePreferences,
-      admin_ui: {
-        ...baseAdminUi,
-        market_overview: {
-          ...baseMarketOverview,
-          ...patch,
-        },
-      },
-    };
-
-    setIsSavingOverviewPreferences(true);
-    try {
-      const { data } = await authApi.updateMe({ preferences: nextPreferences });
-      setUser(data);
-      queryClient.invalidateQueries({ queryKey: ["user", "me"] });
-    } catch (error) {
-      toast.error(extractErrorMessage(error, "Failed to save Market Overview preferences"));
-    } finally {
-      setIsSavingOverviewPreferences(false);
-    }
-  };
-
-  const allMarketOverviewItems = useMemo(() => marketplacesDetailedQuery.data ?? [], [marketplacesDetailedQuery.data]);
-  const visibleMarketOverviewItems = useMemo(
-    () => allMarketOverviewItems.slice(0, marketOverviewVisibleCount),
-    [allMarketOverviewItems, marketOverviewVisibleCount],
-  );
-  const hasMoreMarketOverviewItems = marketOverviewVisibleCount < allMarketOverviewItems.length;
+  const marketOverviewItems = marketplacesDetailedQuery.data?.items ?? [];
+  const marketOverviewTotal = marketplacesDetailedQuery.data?.total ?? 0;
+  const marketOverviewTotalPages = Math.max(1, Math.ceil(marketOverviewTotal / marketplacePageSize));
 
   const usersRows = useMemo(() => usersDetailedQuery.data ?? [], [usersDetailedQuery.data]);
   const usersSummary = useMemo(() => {
@@ -443,85 +359,68 @@ export function AdminPage() {
                 <CardTitle>{t("admin.pool.marketplaces")}</CardTitle>
                 <CardDescription>{t("admin.marketplaces.successRate")}</CardDescription>
               </div>
+              <Button onClick={() => setIsAddMarketplaceOpen(true)}>
+                <Plus className="mr-2 size-4" />
+                {t("admin.marketOverview.addMarketplace")}
+              </Button>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded border p-3">
                 <div className="text-sm text-muted-foreground">
                   {t("admin.marketOverview.showing", {
-                    count: Math.min(marketOverviewVisibleCount, allMarketOverviewItems.length),
-                    total: allMarketOverviewItems.length,
+                    count: marketOverviewItems.length,
+                    total: marketOverviewTotal,
                   })}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{t("admin.marketOverview.start")}</span>
-                    <Select
-                      value={String(marketOverviewInitialVisible)}
-                      onValueChange={async (value) => {
-                        const count = Number(value);
-                        setMarketOverviewInitialVisible(count);
-                        setMarketOverviewVisibleCount(count);
-                        await persistMarketOverviewPreferences({ initial_visible_count: count });
-                      }}
-                    >
-                      <SelectTrigger className="w-[92px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MARKET_OVERVIEW_COUNT_OPTIONS.map((count) => (
-                          <SelectItem key={`overview-initial-${count}`} value={String(count)}>
-                            {count}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{t("admin.marketOverview.step")}</span>
-                    <Select
-                      value={String(marketOverviewExpandStep)}
-                      onValueChange={async (value) => {
-                        const count = Number(value);
-                        setMarketOverviewExpandStep(count);
-                        await persistMarketOverviewPreferences({ expand_step_count: count });
-                      }}
-                    >
-                      <SelectTrigger className="w-[92px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {MARKET_OVERVIEW_COUNT_OPTIONS.map((count) => (
-                          <SelectItem key={`overview-step-${count}`} value={String(count)}>
-                            {count}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {hasMoreMarketOverviewItems ? (
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        setMarketOverviewVisibleCount((prev) =>
-                          Math.min(allMarketOverviewItems.length, prev + marketOverviewExpandStep),
-                        )
-                      }
-                    >
-                      <ChevronDown className="mr-2 size-4" />
-                      {t("admin.marketOverview.expandBy", { count: marketOverviewExpandStep })}
-                    </Button>
-                  ) : null}
-                  {isSavingOverviewPreferences ? (
-                    <Badge variant="secondary">
-                      <Loader2 className="mr-1 size-3 animate-spin" />
-                      saving
-                    </Badge>
-                  ) : null}
+                  <span className="text-xs text-muted-foreground">{t("admin.marketOverview.pageSize")}</span>
+                  <Select
+                    value={String(marketplacePageSize)}
+                    onValueChange={(value) => {
+                      setMarketplacePageSize(Number(value));
+                      setMarketplacePage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-[92px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MARKET_OVERVIEW_PAGE_SIZE_OPTIONS.map((count) => (
+                        <SelectItem key={`overview-page-size-${count}`} value={String(count)}>
+                          {count}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-sm text-muted-foreground">
+                    {t("admin.marketOverview.page", {
+                      page: marketplacePage,
+                      total: marketOverviewTotalPages,
+                    })}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={marketplacePage <= 1}
+                    onClick={() => setMarketplacePage((page) => Math.max(1, page - 1))}
+                  >
+                    {t("common.back")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={marketplacePage >= marketOverviewTotalPages}
+                    onClick={() =>
+                      setMarketplacePage((page) => Math.min(marketOverviewTotalPages, page + 1))
+                    }
+                  >
+                    {t("common.next")}
+                  </Button>
                 </div>
               </div>
               {marketplacesDetailedQuery.isLoading ? (
                 <Skeleton className="h-40 w-full" />
-              ) : (marketplacesDetailedQuery.data?.length ?? 0) === 0 ? (
+              ) : marketOverviewItems.length === 0 ? (
                 <EmptyState title={t("common.noData")} description={t("admin.pool.marketplaces")} />
               ) : (
                 <Table>
@@ -535,10 +434,11 @@ export function AdminPage() {
                       <TableHead>{t("admin.marketplaces.successRate")}</TableHead>
                       <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
                       <TableHead>{t("common.status")}</TableHead>
+                      <TableHead className="text-right">{t("common.actions")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {visibleMarketOverviewItems.map((item) => (
+                    {marketOverviewItems.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell className="max-w-60 truncate">{item.base_url}</TableCell>
@@ -551,6 +451,35 @@ export function AdminPage() {
                           <Badge variant={item.is_active ? "default" : "destructive"}>
                             {item.is_active ? "active" : "inactive"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label={t("common.edit")}
+                              onClick={() => {
+                                setSelectedMarketplace(item);
+                                setEditMarketplaceForm({ name: item.name, url: item.base_url });
+                                setIsEditMarketplaceOpen(true);
+                              }}
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label={t("common.delete")}
+                              onClick={() => {
+                                setSelectedMarketplace(item);
+                                setIsDeleteMarketplaceOpen(true);
+                              }}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1226,6 +1155,156 @@ export function AdminPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
               {t("common.close")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddMarketplaceOpen} onOpenChange={setIsAddMarketplaceOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("admin.marketOverview.addMarketplace")}</DialogTitle>
+            <DialogDescription>{t("admin.marketOverview.addMarketplaceHint")}</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={newMarketplaceUrl}
+            onChange={(event) => setNewMarketplaceUrl(event.target.value)}
+            placeholder="https://example.com"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddMarketplaceOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={addMarketplaceMutation.isPending || !newMarketplaceUrl.trim()}
+              onClick={() => {
+                void (async () => {
+                  try {
+                    await addMarketplaceMutation.mutateAsync(newMarketplaceUrl.trim());
+                    toast.success(t("admin.marketOverview.added"));
+                    setNewMarketplaceUrl("");
+                    setIsAddMarketplaceOpen(false);
+                    await queryClient.invalidateQueries({
+                      queryKey: ["admin", "parsing", "marketplaces-detailed"],
+                    });
+                  } catch (error) {
+                    toast.error(extractErrorMessage(error, t("admin.marketOverview.addFailed")));
+                  }
+                })();
+              }}
+            >
+              {addMarketplaceMutation.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : null}
+              {t("common.add")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditMarketplaceOpen} onOpenChange={setIsEditMarketplaceOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("admin.marketOverview.editMarketplace")}</DialogTitle>
+            <DialogDescription>{selectedMarketplace?.domain}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("products.marketplace")}</label>
+              <Input
+                value={editMarketplaceForm.name}
+                onChange={(event) =>
+                  setEditMarketplaceForm((prev) => ({ ...prev, name: event.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("competitors.tableUrl")}</label>
+              <Input
+                value={editMarketplaceForm.url}
+                onChange={(event) =>
+                  setEditMarketplaceForm((prev) => ({ ...prev, url: event.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditMarketplaceOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={updateMarketplaceMutation.isPending || !selectedMarketplace}
+              onClick={() => {
+                if (!selectedMarketplace) return;
+                void (async () => {
+                  try {
+                    await updateMarketplaceMutation.mutateAsync({
+                      id: selectedMarketplace.id,
+                      payload: {
+                        name: editMarketplaceForm.name.trim(),
+                        url: editMarketplaceForm.url.trim(),
+                      },
+                    });
+                    toast.success(t("admin.marketOverview.updated"));
+                    setIsEditMarketplaceOpen(false);
+                    await queryClient.invalidateQueries({
+                      queryKey: ["admin", "parsing", "marketplaces-detailed"],
+                    });
+                  } catch (error) {
+                    toast.error(extractErrorMessage(error, t("admin.marketOverview.updateFailed")));
+                  }
+                })();
+              }}
+            >
+              {updateMarketplaceMutation.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : null}
+              {t("common.save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDeleteMarketplaceOpen} onOpenChange={setIsDeleteMarketplaceOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("admin.marketOverview.deleteMarketplace")}</DialogTitle>
+            <DialogDescription>
+              {t("admin.marketOverview.deleteConfirm", {
+                name: selectedMarketplace?.name ?? "",
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteMarketplaceOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMarketplaceMutation.isPending || !selectedMarketplace}
+              onClick={() => {
+                if (!selectedMarketplace) return;
+                void (async () => {
+                  try {
+                    await deleteMarketplaceMutation.mutateAsync(selectedMarketplace.id);
+                    toast.success(t("admin.marketOverview.deleted"));
+                    setIsDeleteMarketplaceOpen(false);
+                    if (marketOverviewItems.length === 1 && marketplacePage > 1) {
+                      setMarketplacePage((page) => page - 1);
+                    }
+                    await queryClient.invalidateQueries({
+                      queryKey: ["admin", "parsing", "marketplaces-detailed"],
+                    });
+                  } catch (error) {
+                    toast.error(extractErrorMessage(error, t("admin.marketOverview.deleteFailed")));
+                  }
+                })();
+              }}
+            >
+              {deleteMarketplaceMutation.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : null}
+              {t("common.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

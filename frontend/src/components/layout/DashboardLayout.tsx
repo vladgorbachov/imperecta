@@ -48,7 +48,7 @@ export function DashboardLayout() {
           />
         </div>
 
-        <div className="relative z-[1] mx-auto w-full max-w-[1440px]">
+        <div className="relative z-[1] mx-auto w-full max-w-[1584px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

@@ -123,9 +123,9 @@ async def run_full_test(
 async def get_pipeline_runs(
     _current_user: CurrentSuperuser,
     db: DbSession,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(10, ge=1, le=200),
 ) -> list[dict]:
-    """Pipeline run history for admin Data Collection tab."""
+    """Pipeline run history for admin Data Collection tab (latest runs)."""
     service = ParsingAdminService(db)
     return await service.get_test_runs(limit=limit)
 
@@ -330,11 +330,12 @@ async def delete_user(
 async def get_marketplaces_detailed(
     _current_user: CurrentSuperuser,
     db: DbSession,
-    limit: int = Query(1000, ge=1, le=5000),
-) -> list[dict]:
-    """Detailed active marketplaces list for admin diagnostics UI."""
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> dict:
+    """Paginated marketplace list for admin Market Overview."""
     service = ParsingAdminService(db)
-    return await service.get_marketplaces_detailed(limit=limit)
+    return await service.get_marketplaces_detailed(page=page, page_size=page_size)
 
 
 @router.get("/job-live-feed/{job_id}")

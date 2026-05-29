@@ -121,9 +121,12 @@ class ParsingAdminService:
         stmt = (
             select(
                 DimMarketplace.id,
+                DimMarketplace.marketplace_code,
                 DimMarketplace.name,
+                DimMarketplace.domain,
                 DimMarketplace.base_url,
                 DimMarketplace.products_in_pool,
+                DimMarketplace.is_active,
                 DimMarketplace.last_scrape_status,
                 log_stats_sq.c.total_runs,
                 log_stats_sq.c.success_runs,
@@ -146,8 +149,12 @@ class ParsingAdminService:
             success_rate = float((success_runs / total_runs) * 100) if total_runs > 0 else 0.0
             out.append(
                 {
+                    "id": str(row["id"]),
+                    "marketplace_code": row["marketplace_code"],
                     "name": row["name"],
                     "url": row["base_url"],
+                    "domain": row["domain"],
+                    "is_active": bool(row["is_active"]),
                     "products_in_pool": int(row["products_in_pool"] or 0),
                     "last_successful_scrape": self._to_iso(row["last_successful_scrape"]),
                     "success_rate": round(success_rate, 2),
@@ -608,9 +615,19 @@ class ParsingAdminService:
         await self.db.delete(user)
         await self.db.commit()
 
-    async def get_marketplaces_detailed(self, limit: int = 1000) -> list[dict[str, Any]]:
-        """Detailed active marketplace list with scrape/discovery diagnostics."""
-        safe_limit = max(1, min(limit, 5000))
+    async def get_marketplaces_detailed(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """Paginated marketplace list with scrape/discovery diagnostics (admin UI)."""
+        safe_page = max(1, page)
+        safe_page_size = max(1, min(page_size, 100))
+        offset = (safe_page - 1) * safe_page_size
+
+        total = await self.db.scalar(select(func.count()).select_from(DimMarketplace)) or 0
+
         scrape_stats_sq = (
             select(
                 ScrapeLog.marketplace_id.label("marketplace_id"),
@@ -678,9 +695,9 @@ class ParsingAdminService:
                 (latest_error_sq.c.marketplace_id == DimMarketplace.id)
                 & (latest_error_sq.c.row_idx == 1),
             )
-            .where(DimMarketplace.is_active.is_(True))
             .order_by(DimMarketplace.name.asc())
-            .limit(safe_limit)
+            .offset(offset)
+            .limit(safe_page_size)
         )
         result = await self.db.execute(stmt)
         rows = result.mappings().all()
@@ -719,7 +736,12 @@ class ParsingAdminService:
                     "last_error_message": row["last_error_message"],
                 }
             )
-        return out
+        return {
+            "items": out,
+            "total": int(total),
+            "page": safe_page,
+            "page_size": safe_page_size,
+        }
 
     async def get_job_live_feed(
         self,

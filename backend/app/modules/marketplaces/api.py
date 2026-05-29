@@ -14,6 +14,7 @@ from app.models.dimensions import DimCountry, DimMarketplace
 from app.modules.marketplaces.schemas import (
     AdminMarketplaceListItem,
     MarketplaceCreateByUrl,
+    MarketplaceUpdate,
 )
 from app.modules.marketplaces.service import MarketplaceService
 
@@ -99,6 +100,27 @@ async def add_marketplace_root(
         mp, _is_new = await svc.add_by_url(url)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    regions = await _regions_for_marketplaces(db, [mp])
+    return _to_admin_row(mp, regions.get(mp.country_code, ""))
+
+
+@router.patch("/{marketplace_id}", response_model=AdminMarketplaceListItem)
+async def update_marketplace(
+    marketplace_id: UUID,
+    body: MarketplaceUpdate,
+    db: DbSession,
+    _current_user: CurrentSuperuser,
+) -> AdminMarketplaceListItem:
+    """Update marketplace name, URL, or active flag."""
+    svc = MarketplaceService(db)
+    payload = body.model_dump(exclude_unset=True)
+    url = payload.pop("url", None)
+    try:
+        mp = await svc.update_marketplace(marketplace_id, payload, url=url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if mp is None:
+        raise HTTPException(status_code=404, detail="Marketplace not found")
     regions = await _regions_for_marketplaces(db, [mp])
     return _to_admin_row(mp, regions.get(mp.country_code, ""))
 
