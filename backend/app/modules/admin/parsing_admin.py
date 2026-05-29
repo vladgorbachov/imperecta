@@ -882,16 +882,15 @@ class ParsingAdminService:
             metadata=metadata,
             last_log_at=last_log_at,
         )
+        normalized = self._normalize_job_status(job.status)
+        current_stage = self._resolve_current_stage(metadata, normalized, last_log_at)
         return {
             "job_id": str(job.id),
-            "status": self._normalize_job_status(job.status),
-            "current_stage": self._resolve_current_stage(
-                metadata,
-                self._normalize_job_status(job.status),
-                last_log_at,
-            ),
+            "status": normalized,
+            "current_stage": current_stage,
             "started_at": self._to_iso(job.started_at),
             "metadata": metadata,
+            "discovery": self._discovery_progress(metadata),
         }
 
     @staticmethod

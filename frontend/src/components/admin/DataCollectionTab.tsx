@@ -169,6 +169,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   const [monitorJobId, setMonitorJobId] = useState<string | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const previousActiveStatus = useRef<"running" | "completed" | "failed" | null>(null);
+  const marketplaceSelectionInitialized = useRef(false);
 
   const activeJobQuery = useParsingActiveJob(4000);
   const marketplacesQuery = useParsingMarketplacesDetailed(500);
@@ -180,7 +181,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
 
   useEffect(() => {
     if (activeJobId) {
-      setMonitorJobId((prev) => prev ?? activeJobId);
+      setMonitorJobId(activeJobId);
     }
   }, [activeJobId]);
 
@@ -218,9 +219,10 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   );
 
   useEffect(() => {
-    if (selectedCodes.size > 0 || activeMarketplaces.length === 0) return;
+    if (marketplaceSelectionInitialized.current || activeMarketplaces.length === 0) return;
+    marketplaceSelectionInitialized.current = true;
     setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code)));
-  }, [activeMarketplaces, selectedCodes.size]);
+  }, [activeMarketplaces]);
 
   const sortedRuns = useMemo(() => {
     const source = runsQuery.data ?? [];
@@ -371,6 +373,17 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   };
 
   const perMarketplaceRows = monitorStatus?.metadata?.per_marketplace ?? [];
+  const scopedMarketplaceCodes = monitorStatus?.metadata?.marketplace_codes ?? [];
+  const discoveryErrors = Array.isArray(monitorStatus?.metadata?.discovery_errors)
+    ? (monitorStatus?.metadata?.discovery_errors as string[])
+    : [];
+  const celeryTaskId =
+    typeof monitorStatus?.metadata?.celery_task_id === "string"
+      ? monitorStatus.metadata.celery_task_id
+      : null;
+  const discoveryInProgress =
+    monitorStatus?.status === "running" &&
+    (currentStage === "discovery" || currentStage === "dispatching");
 
   return (
     <div className="space-y-6">
@@ -465,8 +478,17 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
         </CardContent>
       </Card>
 
+      {activeJobId && !monitorJobId ? (
+        <Card className="border-primary/40">
+          <CardContent className="flex items-center gap-3 pt-6 text-sm">
+            <Loader2 className="size-5 animate-spin text-primary" />
+            {t("admin.dataCollection.loadingActiveJob")}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {monitorJobId ? (
-        <Card>
+        <Card id="pipeline-live-monitor" className={activeJobId ? "border-primary/50" : undefined}>
           <CardHeader className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle>{t("admin.dataCollection.liveMonitor")}</CardTitle>
@@ -542,7 +564,53 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                   </TabsList>
 
                   <TabsContent value="discovery" className="space-y-3">
-                    {perMarketplaceRows.length === 0 ? (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="rounded-md border p-3 text-sm">
+                        <p className="text-muted-foreground">{t("admin.dataCollection.scopeLabel")}</p>
+                        <p className="font-medium">
+                          {scopedMarketplaceCodes.length
+                            ? scopedMarketplaceCodes.join(", ")
+                            : t("admin.dataCollection.scopeAll")}
+                        </p>
+                      </div>
+                      <div className="rounded-md border p-3 text-sm">
+                        <p className="text-muted-foreground">{t("admin.dataCollection.lastActivity")}</p>
+                        <p className="font-medium">
+                          {formatDateTime(lastActivityAt ?? null, locale, dash)}
+                        </p>
+                      </div>
+                      {celeryTaskId ? (
+                        <div className="rounded-md border p-3 text-sm md:col-span-2">
+                          <p className="text-muted-foreground">Celery task</p>
+                          <p className="font-mono text-xs">{celeryTaskId}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                    {discoveryInProgress && discovery?.current_domain ? (
+                      <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+                        <Loader2 className="size-4 animate-spin text-primary" />
+                        {t("admin.dataCollection.discoveryInProgress", {
+                          domain: discovery.current_domain,
+                          done: discovery.done,
+                          total: discovery.total,
+                        })}
+                      </div>
+                    ) : null}
+                    {discoveryErrors.length > 0 ? (
+                      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                        <p className="mb-2 font-medium text-amber-800 dark:text-amber-200">
+                          {t("admin.dataCollection.discoveryErrors")}
+                        </p>
+                        <ul className="list-inside list-disc space-y-1 text-amber-900/90 dark:text-amber-100/90">
+                          {discoveryErrors.slice(0, 10).map((err) => (
+                            <li key={err} className="break-all">
+                              {err}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {perMarketplaceRows.length === 0 && !discoveryInProgress ? (
                       <EmptyState
                         title={t("common.noData")}
                         description={t("admin.dataCollection.discoveryEmpty")}
@@ -559,6 +627,19 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                           </TableRow>
                         </TableHeader>
                         <TableBody>
+                          {discoveryInProgress &&
+                          discovery?.current_domain &&
+                          !perMarketplaceRows.some((row) => row.domain === discovery.current_domain) ? (
+                            <TableRow className="bg-primary/5">
+                              <TableCell>{discovery.current_domain}</TableCell>
+                              <TableCell>{dash}</TableCell>
+                              <TableCell>{dash}</TableCell>
+                              <TableCell>{dash}</TableCell>
+                              <TableCell>
+                                <Badge variant="secondary">{t("common.loading")}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          ) : null}
                           {perMarketplaceRows.map((row) => (
                             <TableRow key={row.marketplace_id}>
                               <TableCell>{row.domain ?? row.marketplace_id.slice(0, 8)}</TableCell>

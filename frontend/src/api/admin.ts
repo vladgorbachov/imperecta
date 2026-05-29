@@ -216,6 +216,8 @@ export interface ParsingJobMetadata {
     errors_count: number;
   };
   per_marketplace?: ParsingMarketplaceBreakdown[];
+  discovery_errors?: string[];
+  celery_task_id?: string;
   error?: string;
 }
 
