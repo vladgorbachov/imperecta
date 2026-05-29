@@ -1,0 +1,50 @@
+---
+description: Frontend conventions for React + TypeScript + Tailwind + shadcn/ui projects
+globs: frontend/src/**/*.{ts,tsx,css}
+alwaysApply: false
+---
+
+# Frontend Conventions
+
+## Stack
+- Vite + React 19 + TypeScript (strict mode).
+- Tailwind CSS 4 + shadcn/ui (Radix UI primitives).
+- TanStack Query v5 for server state. Zustand v5 for client state.
+- React Router 7 for routing. Axios for HTTP.
+- react-i18next for localization. Sonner for toasts.
+- next-themes for dark/light theme switching (default: dark).
+
+## Component Structure
+- Pages in `src/pages/`. Reusable components in `src/components/`.
+- Domain components grouped: `components/dashboard/`, `components/products/`, etc.
+- shadcn/ui primitives in `components/ui/`. Custom composed components in `components/ui-custom/`.
+- Hooks in `src/hooks/`. API clients in `src/api/`. Utilities in `src/lib/`.
+
+## State Management
+- Server state: TanStack Query (useQuery, useMutation, invalidateQueries).
+- Client state: Zustand stores in `src/stores/`.
+- Derived state: compute inline — do not store in state what can be computed.
+- No useEffect for derived state — use useMemo or inline computation.
+- useEffect only for: API calls, DOM manipulation, subscriptions.
+
+## Styling
+- Use Tailwind utility classes. No inline `style={}` except for dynamic values.
+- Both light and dark themes must be supported for every UI element.
+- Use CSS variables from `design-tokens.ts` for consistent theming.
+- Glassmorphism effects via `styles/glass.css`.
+
+## Data Fetching
+- All API calls go through `src/api/client.ts` (Axios instance with interceptors).
+- Use TanStack Query hooks in `src/hooks/` — one hook per API domain.
+- Never fetch directly in components — always through hooks.
+
+## Localization
+- All user-facing text must use `t()` from react-i18next.
+- Translation files in `public/locales/{lang}/translation.json`.
+- Supported: en, ru, ar, zh, es, fr, uk, ro.
+- Language selector is in Settings page only.
+
+## Security
+- Sanitize HTML with DOMPurify before dangerouslySetInnerHTML.
+- Auth tokens managed via authStore (Zustand) with storage persistence.
+- Protected routes via ProtectedRoute/SuperuserRoute/PublicAuthRoute components.

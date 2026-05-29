@@ -1,0 +1,42 @@
+---
+description: Testing conventions for backend and frontend
+globs: backend/tests/**/*.py, e2e/**/*.ts, frontend/src/**/*.test.ts
+alwaysApply: false
+---
+
+# Testing Conventions
+
+## Backend Tests
+- Framework: pytest with `asyncio_mode=auto`.
+- Test DB: real PostgreSQL (`imperecta_test`), not SQLite.
+- Test client: `httpx.AsyncClient` + `ASGITransport(app=app)`.
+- Fixtures in `backend/tests/conftest.py`: `client`, `auth_headers`, `superuser_headers`.
+
+## Test Organization
+- Contract tests: `test_*_contract.py` in `backend/tests/` root — verify API response shapes.
+- Scraper unit tests: `backend/tests/test_scraper_unit/` — mock DB, pool, extractors.
+- Scraper integration tests: `backend/tests/test_scraper_integration/` — requires real DB/network.
+- Shared fixtures: `backend/tests/fixtures/scraper_fixtures.py`.
+- Security tests: `test_security.py` — SQL injection, XSS, auth bypass.
+
+## Writing Tests
+- Name pattern: `test_<what>_<condition>_<expected>` (e.g., `test_login_invalid_password_returns_401`).
+- Use `MagicMock` and `monkeypatch` for unit tests — mock DB sessions, external APIs.
+- For scraper tests, mock `ScraperPool`, `_run_coro_in_worker`, `_today_date_id`.
+- Test both success and failure paths. Test edge cases explicitly.
+- Never use real API keys or external services in unit tests.
+
+## Frontend Tests
+- Framework: Vitest 4.
+- Focus: utility functions, sanitization, security helpers.
+- Files: colocated as `*.test.ts` next to source files.
+
+## E2E Tests
+- Framework: Playwright.
+- Config: `e2e/playwright.config.ts`.
+- Specs: `e2e/tests/` — auth, dashboard, products, security, smoke.
+
+## What NOT to Test
+- Do not write tests for simple getters/setters or trivial wrappers.
+- Do not test third-party library internals.
+- Do not create mock data factories that generate fake business data.

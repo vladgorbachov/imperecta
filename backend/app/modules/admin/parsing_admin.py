@@ -307,6 +307,13 @@ class ParsingAdminService:
             "discovery": self._discovery_progress(metadata),
         }
 
+    @staticmethod
+    def get_worker_log_relay(*, after: int = 0, limit: int = 50) -> dict[str, Any]:
+        """Return tail of celery worker deploy log relay from Redis."""
+        from app.modules.scraper.pipeline.worker_log_relay import fetch_relay_lines
+
+        return fetch_relay_lines(after=after, limit=limit)
+
     async def cancel_active_pipeline_job(self) -> dict[str, Any]:
         """Mark the running admin pipeline job as failed and revoke its Celery task."""
         from app.modules.scraper.pipeline.cancellation import revoke_celery_task
@@ -1036,10 +1043,19 @@ class ParsingAdminService:
         last_log_at: datetime | None,
     ) -> dict[str, Any]:
         out = dict(metadata)
-        if out.get("last_activity_at"):
-            return out
-        fallback = last_log_at or job.started_at
-        out["last_activity_at"] = self._to_iso(fallback)
+        activity_iso = out.get("last_activity_at")
+        activity_dt: datetime | None = None
+        if isinstance(activity_iso, str) and activity_iso.strip():
+            try:
+                activity_dt = datetime.fromisoformat(activity_iso)
+            except ValueError:
+                activity_dt = None
+        candidates = [dt for dt in (activity_dt, last_log_at, job.started_at) if dt is not None]
+        freshest = max(candidates) if candidates else None
+        if freshest is not None:
+            out["last_activity_at"] = self._to_iso(freshest)
+        elif not out.get("last_activity_at"):
+            out["last_activity_at"] = self._to_iso(job.started_at)
         return out
 
     async def _fail_stale_running_pipeline_jobs(self) -> None:
@@ -1070,7 +1086,10 @@ class ParsingAdminService:
                     activity_dt = datetime.fromisoformat(activity_iso)
                 except ValueError:
                     activity_dt = None
-            activity_dt = activity_dt or last_log_at or job.started_at
+            activity_candidates = [
+                dt for dt in (activity_dt, last_log_at, job.started_at) if dt is not None
+            ]
+            activity_dt = max(activity_candidates) if activity_candidates else None
             if activity_dt is None:
                 continue
             idle_s = (now - activity_dt).total_seconds()

@@ -1,0 +1,67 @@
+---
+description: Scraper and parser pipeline conventions
+globs: backend/app/modules/scraper/**/*.py
+alwaysApply: false
+---
+
+# Scraper Pipeline Conventions
+
+## Runtime Path
+Canonical flow: `tasks.py` → `discovery.py` / `service.py` → `scraper_pool.py` → `extractors.py`.
+There is no `engine.py` — it was removed. Do not create or reference it.
+
+## Fetch Layer (scraper_pool.py)
+Priority order: Decodo API → httpx → Playwright.
+If `requires_js=True` on marketplace, Playwright moves above httpx.
+`ScraperPool` is the ONLY fetch+extract facade. All scraping goes through it.
+Price overflow guard: `MAX_VALID_PRICE = 9_999_999_999.99`. Prices above this or ≤ 0 are discarded (set to None).
+
+## Extraction Layer (extractors.py)
+Priority: JSON-LD → meta tags → custom selectors → auto-detect heuristics → merge.
+No marketplace-specific hardcoding — extraction is universal.
+`extract_product_links` has strict URL filtering: excludes /list/, /category/, /catalog/, /search.
+`parse_price_text` supports locale formats with `,` and `.` separators.
+
+## Persistence (service.py)
+`GlobalScrapeService.scrape_product` is SYNCHRONOUS (sync Session for Celery workers).
+Only `ScraperPool.scrape_product` runs async via `_run_coro_in_worker()`.
+
+On `result.success`:
+- Clear `listing.last_error` and `listing.consecutive_errors` immediately.
+- Write `fact_price` only when: product_name or title present, price > 0, currency non-empty.
+- Update `dim_product.name` from title if product_name is empty.
+
+On `not result.success`:
+- Increment `consecutive_errors`, set `last_error`.
+
+`_today_date_id`: SELECT → INSERT ON CONFLICT DO NOTHING → flush → SELECT (deadlock-safe).
+`last_in_stock`: chain `result.in_stock` → `data.in_stock` → `False` (never NULL).
+
+## Logging Pattern
+- `EXTRACTED →` — raw extractor fields.
+- `FINAL PERSIST` — values before commit.
+- `SCRAPE COMPLETE listing_id=… status=… price=…` — after successful commit.
+- `pool_scrape done` — task completion.
+
+## scrape_logs Status Values
+`success`, `error`, `timeout`, `blocked`, `captcha`, `not_found`, `price_not_found`, `parse_error`, `missing_critical_data`, `technical_error`.
+Status column is VARCHAR(50) with CHECK constraint (migrations 005–006); canonical tuple: `errors.SCRAPE_LOG_STATUSES`.
+
+## Discovery (discovery.py)
+- Level 1: find category URLs from homepage/sitemap.
+- Level 2: extract product URLs from each category.
+- Each product URL creates `DimProduct` (placeholder) + `FactListing` (url_hash dedupe).
+- Batch commit every 50 records with rollback recovery.
+- Updates `marketplace.last_discovery_*` and `products_in_pool`.
+
+## Celery Tasks
+- Pool scrape tasks use `sync_session_factory` — no async session.
+- Discovery tasks use local async engine + `_run_async`.
+- `scrape_pool_product`: soft_time_limit=120, time_limit=150.
+- Unhandled exceptions → `_persist_technical_error_log` with status `technical_error`.
+- Beat schedule is currently empty (`{}`). Do not enable without explicit permission.
+
+## Contracts
+- `PoolScrapeResult`: success, url, data, scraper_layer, duration_ms, error, is_partial, is_empty, fields_extracted, fields_missing.
+- `DiscoveryResult`: marketplace_id, status, timing, counters, errors, discovery_method.
+- `ExtractedProduct`: title, price, currency (NO `in_stock` field — use safe getattr).

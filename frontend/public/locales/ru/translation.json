@@ -744,6 +744,8 @@
   "admin.dataCollection.liveMonitor": "Мониторинг",
   "admin.dataCollection.discoveryProgress": "Discovery {{done}}/{{total}}",
   "admin.dataCollection.staleActivity": "Нет активности с {{at}} — возможно зависание",
+  "admin.dataCollection.workerLogRelay": "Лог воркера (live)",
+  "admin.dataCollection.workerLogRelayWaiting": "Ожидание вывода воркера…",
   "admin.dataCollection.metric.stage": "Стадия",
   "admin.dataCollection.metric.elapsed": "Прошло",
   "admin.dataCollection.metric.scrapeSteps": "Шагов scrape",

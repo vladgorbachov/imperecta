@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
 from app.modules.scraper.discovery import DiscoveryCrawler
+from app.modules.scraper.pipeline.activity_pulse import discovery_activity_callback
 from app.modules.scraper.pipeline.cancellation import is_pipeline_job_cancelled
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 from app.modules.scraper.scraper_pool import ScraperPool
@@ -48,7 +49,10 @@ async def run_discovery_phase(
         metadata["discovery_current_domain"] = None
         await store.touch(job, metadata, stage="discovery")
 
-    crawler = DiscoveryCrawler(db, ScraperPool())
+    async def _on_discovery_activity(line: str) -> None:
+        await discovery_activity_callback(db, parent_job_id, line)
+
+    crawler = DiscoveryCrawler(db, ScraperPool(), on_activity=_on_discovery_activity)
     errors: list[str] = []
     per_marketplace: dict[UUID, dict[str, Any]] = {}
 

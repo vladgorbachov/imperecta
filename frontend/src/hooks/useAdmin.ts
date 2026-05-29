@@ -199,6 +199,23 @@ export const useParsingJobLiveFeed = (
     refetchInterval: options?.refetchInterval,
   });
 
+export const useParsingWorkerLogRelay = (
+  after: number,
+  jobId: string | null,
+  options?: {
+    enabled?: boolean;
+    refetchInterval?: number | false;
+  },
+) =>
+  useQuery({
+    queryKey: ["admin", "parsing", "worker-log-relay", jobId, after],
+    queryFn: () =>
+      adminApi.getParsingWorkerLogRelay(after, jobId, 50).then((r) => r.data),
+    enabled: options?.enabled ?? true,
+    refetchInterval: options?.refetchInterval,
+    staleTime: 0,
+  });
+
 export const useParsingActiveJob = (refetchInterval: number | false = 5000) =>
   useQuery({
     queryKey: ["admin", "parsing", "active-job"],

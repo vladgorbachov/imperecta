@@ -21,6 +21,7 @@ from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
 from app.modules.scraper.discovery import DiscoveryCrawler
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as _finalize_full_pipeline_job
+from app.modules.scraper.pipeline.activity_pulse import pulse_job_activity_sync
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
@@ -297,8 +298,15 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
                 queued_total=queued_total,
                 max_listings_per_run=max_listings_per_run,
             )
+            if scrape_job_id is not None:
+                pulse_job_activity_sync(
+                    scrape_job_id,
+                    f"scrape batch {len(stale_ids)} listings (queued {queued_total})",
+                    stage="scrape",
+                    force_db=True,
+                )
 
-            for lid in stale_ids:
+            for index, lid in enumerate(stale_ids):
                 try:
                     listing_row = db.get(FactListing, lid)
                     url_hint = (listing_row.external_url if listing_row else "")[:160]
@@ -310,6 +318,14 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
                         success=r.success,
                         err=(r.error or "")[:120],
                     )
+                    if scrape_job_id is not None:
+                        status_label = "ok" if r.success else "fail"
+                        pulse_job_activity_sync(
+                            scrape_job_id,
+                            f"scrape {status_label} {url_hint}",
+                            stage="scrape",
+                            force_db=index % 10 == 0,
+                        )
                     if r.success:
                         ok += 1
                     else:
@@ -328,6 +344,13 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
                     except Exception:
                         slog.exception("rollback_after_listing_failure", listing_id=str(lid))
                     _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
+                    if scrape_job_id is not None:
+                        pulse_job_activity_sync(
+                            scrape_job_id,
+                            f"scrape error {str(lid)[:8]}",
+                            stage="scrape",
+                            force_db=True,
+                        )
                     failed += 1
     finally:
         db.close()

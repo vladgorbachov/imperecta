@@ -168,6 +168,26 @@ async def get_job_status(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/worker-log-relay")
+async def get_worker_log_relay(
+    _current_user: CurrentSuperuser,
+    after: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    job_id: UUID | None = Query(default=None),
+) -> dict:
+    """Pollable relay of celery worker deploy log lines (Redis buffer)."""
+    payload = ParsingAdminService.get_worker_log_relay(after=after, limit=limit)
+    if job_id is not None:
+        job_key = str(job_id)
+        payload["lines"] = [
+            line for line in payload.get("lines", []) if line.get("job_id") in {job_key, None}
+        ]
+        if payload["lines"]:
+            payload["next_cursor"] = int(payload["lines"][-1]["seq"])
+    payload["visible_lines"] = 3
+    return payload
+
+
 @router.get("/users-detailed")
 async def get_users_detailed(
     _current_user: CurrentSuperuser,

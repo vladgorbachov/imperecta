@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -77,9 +78,21 @@ class DiscoveryResult:
 class DiscoveryCrawler:
     """Crawl marketplace listing pages and persist discovered product URLs."""
 
-    def __init__(self, db: AsyncSession, scraper_pool: ScraperPool):
+    def __init__(
+        self,
+        db: AsyncSession,
+        scraper_pool: ScraperPool,
+        *,
+        on_activity: Callable[[str], Awaitable[None]] | None = None,
+    ):
         self.db = db
         self.pool = scraper_pool
+        self._on_activity = on_activity
+
+    async def _emit_activity(self, line: str) -> None:
+        if self._on_activity is None:
+            return
+        await self._on_activity(line)
 
     @staticmethod
     def _seed_candidates(seed_url: str) -> list[str]:
@@ -298,6 +311,10 @@ class DiscoveryCrawler:
                 )
                 if soup is None:
                     break
+
+                await self._emit_activity(
+                    f"discovery GET {current_url[:140]} page={page_num + 1}",
+                )
 
                 product_urls = extract_links_from_repeated_structure(
                     soup,

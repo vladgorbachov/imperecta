@@ -26,6 +26,7 @@ import {
   YAxis,
 } from "recharts";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
+import { WorkerLogRelayPanel } from "@/components/admin/WorkerLogRelayPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -517,6 +518,10 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
             ) : (
               <>
                 <Progress value={progress} max={100} />
+                <WorkerLogRelayPanel
+                  jobId={monitorJobId}
+                  enabled={monitorStatus?.status === "running"}
+                />
                 {activityStale ? (
                   <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="size-4 shrink-0" />

@@ -1,0 +1,40 @@
+---
+description: Database schema and Alembic migration conventions
+globs: backend/alembic/**/*.py, backend/app/models/**/*.py
+alwaysApply: false
+---
+
+# Database & Migration Conventions
+
+## Schema Architecture
+- Star schema: dimension tables (`dim_*`), fact tables (`fact_*`), app tables.
+- Alembic version table lives in `alembic_meta` schema (not `public`) — survives `DROP SCHEMA public CASCADE`.
+- `fact_price` is partitioned by `date_id` (YYYYMMDD integer). Partitions must exist before writes.
+- Materialized views: `mv_daily_price_summary`, `mv_marketplace_health` (refreshed concurrently).
+
+## Migration Rules
+- Current chain: 001 → … → 008 → **009** (head: `009_full_v2_schema_rebuild` — idempotent full v2 DDL; **`008`** widens `alembic_meta.alembic_version.version_num`).
+- New migrations extend the chain — never modify existing migration files.
+- asyncpg constraint: ONE SQL statement per `op.execute()` call. Use `_split_sql_statements()` for batches.
+- Always test migrations against real PostgreSQL (not SQLite).
+- Use `IF NOT EXISTS` / `IF EXISTS` guards for additive/repair migrations.
+- Supabase does not support `DROP SCHEMA public CASCADE` — use individual `DROP TABLE`.
+
+## ORM Conventions
+- Models split by domain: `core.py`, `dimensions.py`, `facts.py`, `app_tables.py`.
+- All models re-exported in `models/__init__.py` for Alembic metadata discovery.
+- Use UUID primary keys. Use `server_default=text("gen_random_uuid()")` for auto-generation.
+- CHECK constraints for status/enum-like columns (e.g., `scrape_logs.status`).
+- VARCHAR with explicit length for status fields — not PostgreSQL ENUM types.
+
+## Data Integrity
+- No fake defaults: no fallback "USD" currency, no `in_stock=True` hardcode, no `price=0` substitution.
+- `fact_price` writes require: non-empty product name or title, price > 0, non-empty currency.
+- Use `ON CONFLICT ... DO NOTHING` for idempotent inserts (e.g., `dim_date`).
+- `url_hash` (SHA256) on `fact_listing` for URL deduplication.
+
+## Seeds
+- `dim_date`: 2024-01-01 → 2030-12-31.
+- `dim_currency`: 30 currencies with `is_active` flag.
+- `dim_country`: 44 countries (Europe + CIS) with `is_active` flag.
+- Seeds are applied in migrations (001 historical; **009** repeats idempotent `ON CONFLICT DO NOTHING` for drift repair) — not separate seed files.

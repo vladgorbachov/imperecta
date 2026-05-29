@@ -1,0 +1,36 @@
+---
+description: Git workflow, CI pipeline, and deployment conventions
+globs: .github/**/*.yml, docker-compose*.yml, backend/Dockerfile, frontend/Dockerfile*
+alwaysApply: false
+---
+
+# Git, CI & Deployment
+
+## Git
+- Commit messages: English only, max 5 words.
+- Never add `--trailer "Made-with: Cursor"` or any AI attribution trailers.
+- Never commit without explicit user permission.
+- Branch strategy: determined per project.
+
+## CI Pipeline (.github/workflows/)
+- `ci.yml`: ruff (Python lint), pytest, eslint, vitest, build checks.
+- `test.yml`: test suite execution.
+- Security: Snyk, Bandit, pip-audit, Safety, Gitleaks, eslint-plugin-security.
+
+## Docker
+- Backend: `python:3.12-slim` base, Playwright chromium installed.
+- CMD: `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` (chain ends at **`009_full_v2_schema_rebuild`**; `app/main.py` lifespan also runs `alembic upgrade head` before bootstrap — idempotent).
+- Local dev: `docker-compose.yml` (postgres, redis, backend, celery-worker, celery-beat, frontend).
+- Production: `docker-compose.prod.yml`.
+
+## Deployment
+- Backend: Railway (3 services: backend, celery-worker, celery-beat).
+- Frontend: Cloudflare Pages.
+- Database: Supabase PostgreSQL.
+- Cache/Broker: Upstash Redis.
+- Deploy trigger: git push → Railway auto-build.
+
+## Environment Variables
+- Use only `.env` file — no `.env.local`, `.env.sample`, `.env.example` variations.
+- All secrets via environment variables. Never commit secrets.
+- Key variables: DATABASE_URL, REDIS_URL, JWT_SECRET, CLAUDE_API_KEY, DECODO_USERNAME, DECODO_PASSWORD, DECODO_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, RESEND_API_KEY.

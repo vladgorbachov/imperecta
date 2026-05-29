@@ -1,0 +1,47 @@
+---
+description: Python backend conventions for FastAPI + SQLAlchemy + Celery projects
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend Conventions
+
+## Architecture
+- Modular structure: all domain logic lives in `backend/app/modules/<domain>/`.
+- Each module contains: `api.py`, `service.py`, `schemas.py`, `models.py`, `tasks.py` (as needed).
+- No flat `app/api/`, `app/services/`, `app/schemas/` directories — these are legacy and deleted.
+- All API routers mount under prefix `/api` in `main.py`.
+- ORM models are defined in `backend/app/models/` with re-export in `__init__.py` for Alembic metadata.
+
+## API Layer (`api.py`)
+- Use FastAPI dependency injection for DB sessions (`get_db`), auth (`get_current_user`, `get_current_superuser`).
+- Return Pydantic response models — never return raw ORM objects.
+- Admin endpoints require `get_current_superuser` dependency.
+- Keep route handlers thin — delegate business logic to service layer.
+
+## Service Layer (`service.py`)
+- Contains all business logic. Services receive a DB session (async or sync) as constructor argument.
+- Services do not import FastAPI — they are framework-agnostic.
+- Raise domain-specific exceptions that API layer catches and translates to HTTP responses.
+
+## Database
+- API code uses `AsyncSession` via `get_db()` dependency.
+- Celery workers use `sync_session_factory` from `database.py` (psycopg2).
+- For async operations inside Celery workers, use `_run_coro_in_worker()` pattern with a dedicated event loop per call.
+- Discovery tasks use a local async engine + `_run_async` pattern.
+- Always commit inside try/except with rollback on failure.
+
+## Celery Tasks (`tasks.py`)
+- Task names must be explicit strings: `@celery_app.task(name="task_name")`.
+- Use `bind=True` for tasks that need `self` (retries).
+- Set appropriate `soft_time_limit` and `time_limit`.
+- At unhandled exceptions in pool tasks, persist `technical_error` to `scrape_logs`.
+
+## Imports
+- Order: stdlib → third-party → app modules (ruff `I` rule enforces this).
+- Use absolute imports from `app.` prefix.
+
+## Error Handling
+- Use structured logging (`logger.info/warning/error`) — no print().
+- Include context in log messages: IDs, counts, durations.
+- Custom exceptions in `common/exceptions.py`.

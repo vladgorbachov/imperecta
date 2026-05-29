@@ -218,7 +218,22 @@ export interface ParsingJobMetadata {
   per_marketplace?: ParsingMarketplaceBreakdown[];
   discovery_errors?: string[];
   celery_task_id?: string;
+  worker_log_tail?: string[];
   error?: string;
+}
+
+export interface ParsingWorkerLogRelayLine {
+  seq: number;
+  at: string | null;
+  line: string;
+  job_id: string | null;
+}
+
+export interface ParsingWorkerLogRelayResponse {
+  lines: ParsingWorkerLogRelayLine[];
+  next_cursor: number;
+  total_buffered: number;
+  visible_lines: number;
 }
 
 export interface ParsingDiscoveryProgress {
@@ -436,6 +451,19 @@ export const getParsingMarketplacesDetailed = (limit = 1000) =>
 export const getParsingJobLiveFeed = (jobId: string, limit = 200, offset = 0) =>
   apiClient.get<ParsingJobLiveFeed>(`/admin/parsing/job-live-feed/${jobId}`, {
     params: { limit, offset },
+  });
+
+export const getParsingWorkerLogRelay = (
+  after: number,
+  jobId?: string | null,
+  limit = 50,
+) =>
+  apiClient.get<ParsingWorkerLogRelayResponse>("/admin/parsing/worker-log-relay", {
+    params: {
+      after,
+      limit,
+      ...(jobId ? { job_id: jobId } : {}),
+    },
   });
 
 export const getParsingActiveJob = () =>

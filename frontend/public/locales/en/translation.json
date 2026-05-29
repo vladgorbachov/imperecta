@@ -753,6 +753,8 @@
   "admin.dataCollection.liveMonitor": "Live monitor",
   "admin.dataCollection.discoveryProgress": "Discovery {{done}}/{{total}}",
   "admin.dataCollection.staleActivity": "No activity since {{at}} — job may be stuck",
+  "admin.dataCollection.workerLogRelay": "Worker log (live)",
+  "admin.dataCollection.workerLogRelayWaiting": "Waiting for worker output…",
   "admin.dataCollection.metric.stage": "Stage",
   "admin.dataCollection.metric.elapsed": "Elapsed",
   "admin.dataCollection.metric.scrapeSteps": "Scrape steps",
