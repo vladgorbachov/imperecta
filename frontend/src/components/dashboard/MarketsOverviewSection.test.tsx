@@ -79,8 +79,8 @@ describe("MarketsOverviewSection", () => {
             id: "listing-1",
             product_id: "product-1",
             marketplace_id: "market-1",
-            marketplace_name: "Rozetka",
-            marketplace_domain: "rozetka.com.ua",
+            marketplace_name: "Store Alpha",
+            marketplace_domain: "store-alpha.example",
             url: "https://example.com/1",
             title: "Смартфон X",
             image_url: null,
@@ -99,8 +99,8 @@ describe("MarketsOverviewSection", () => {
             id: "listing-2",
             product_id: "product-2",
             marketplace_id: "market-2",
-            marketplace_name: "Prom",
-            marketplace_domain: "prom.ua",
+            marketplace_name: "Store Beta",
+            marketplace_domain: "store-beta.example",
             url: "https://example.com/2",
             title: "Ноутбук Y",
             image_url: null,
@@ -122,8 +122,8 @@ describe("MarketsOverviewSection", () => {
     });
     getPoolMarketplaceStatsMock.mockResolvedValue({
       data: [
-        { marketplace_domain: "rozetka.com.ua", marketplace_name: "Rozetka", product_count: 50 },
-        { marketplace_domain: "prom.ua", marketplace_name: "Prom", product_count: 40 },
+        { marketplace_domain: "store-alpha.example", marketplace_name: "Store Alpha", product_count: 50 },
+        { marketplace_domain: "store-beta.example", marketplace_name: "Store Beta", product_count: 40 },
       ],
     });
     getPoolStatsMock.mockResolvedValue({

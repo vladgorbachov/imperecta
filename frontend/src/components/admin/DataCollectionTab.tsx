@@ -310,7 +310,6 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [monitorJobId, setMonitorJobId] = useState<string | null>(null);
   const previousActiveStatus = useRef<"running" | "completed" | "failed" | null>(null);
-  const marketplaceSelectionInitialized = useRef(false);
   const [runHistoryColumnWidths, setRunHistoryColumnWidths] = useState<Record<string, number>>(() =>
     Object.fromEntries(RUN_HISTORY_COLUMNS.map((col) => [col.key, col.defaultWidth])),
   );
@@ -365,12 +364,6 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
       ),
     [marketplacesQuery.data],
   );
-
-  useEffect(() => {
-    if (marketplaceSelectionInitialized.current || activeMarketplaces.length === 0) return;
-    marketplaceSelectionInitialized.current = true;
-    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code as string)));
-  }, [activeMarketplaces]);
 
   const sortedRuns = useMemo(() => {
     const source = runsQuery.data ?? [];

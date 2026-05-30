@@ -153,8 +153,7 @@ _PRODUCT_LINK_HINTS = (
     "/sku/",
 )
 
-# CIS marketplace SKU-style patterns (Kaspi, Rozetka, etc.)
-_CIS_PRODUCT_PATH_RE = re.compile(
+_CATALOG_NUMERIC_PRODUCT_PATH_RE = re.compile(
     r"/(?:catalog|detail)/\d{4,}"
     r"|/(?:product|tovar|sku)/[\w-]{4,}"
     r"|/p/\d+",
@@ -735,7 +734,7 @@ def _looks_like_product_url(path: str) -> bool:
     lowered = path.lower()
     if any(hint in lowered for hint in _PRODUCT_LINK_HINTS):
         return True
-    if _CIS_PRODUCT_PATH_RE.search(lowered):
+    if _CATALOG_NUMERIC_PRODUCT_PATH_RE.search(lowered):
         return True
     if re.search(r"/\d{4,}", lowered):
         return True

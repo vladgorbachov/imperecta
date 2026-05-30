@@ -33,8 +33,8 @@ def test_extract_links_from_repeated_structure_rejects_catalog_category_urls():
     soup = BeautifulSoup(html, "html.parser")
     links = extract_links_from_repeated_structure(
         soup,
-        "https://musicshop.md",
-        "https://musicshop.md/catalog",
+        "https://shop.example",
+        "https://shop.example/catalog",
     )
     assert "/catalog/chitare-bass" not in " ".join(links)
     assert "/catalog/brand/" not in " ".join(links)

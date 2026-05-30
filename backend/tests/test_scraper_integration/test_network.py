@@ -1,7 +1,6 @@
-"""Integration tests: real HTTP fetches (network) and pool failover."""
+"""Integration tests: HTTP fetch (network) and pool failover."""
 
 import pytest
-import httpx
 from bs4 import BeautifulSoup
 
 from app.modules.scraper.extractors import (
@@ -13,8 +12,39 @@ from app.modules.scraper.extractors import (
 from app.modules.scraper.scraper_pool import ScraperPool
 import app.modules.scraper.scraper_pool as scraper_pool_module
 
+_ECOMMERCE_CATEGORY_URL = (
+    "https://webscraper.io/test-sites/e-commerce/static/computers/laptops"
+)
+_ECOMMERCE_PRODUCT_URL = "https://webscraper.io/test-sites/e-commerce/static/product/1"
+
+_JSONLD_FIXTURE = """
+<html><head>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"Sample Item",
+ "offers":{"@type":"Offer","price":"19.99","priceCurrency":"USD"}}
+</script>
+</head><body><h1>Sample Item</h1></body></html>
+"""
+
+_META_FIXTURE = """
+<html><head>
+<meta property="og:title" content="Sample Item" />
+<meta property="og:image" content="https://cdn.example/item.jpg" />
+<meta property="product:price:amount" content="19.99" />
+</head><body></body></html>
+"""
+
+_AUTO_DETECT_FIXTURE = """
+<html><body>
+<p class="price">£51.77</p>
+<h1>Sample Book</h1>
+</body></html>
+"""
+
 
 async def _fetch_html(urls: list[str]) -> tuple[str, str] | tuple[None, None]:
+    import httpx
+
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         for url in urls:
             try:
@@ -28,53 +58,27 @@ async def _fetch_html(urls: list[str]) -> tuple[str, str] | tuple[None, None]:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_extract_jsonld_real_page():
-    """Fetch real product page and validate JSON-LD extraction."""
-    url, html = await _fetch_html(
-        [
-            "https://www.allbirds.com/products/mens-tree-runners",
-            "https://www.lego.com/en-us/product/tuxedo-cat-21349",
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        ]
-    )
-    if not url or not html:
-        pytest.skip("No reachable product page for integration test")
-    result = extract_from_jsonld(BeautifulSoup(html, "html.parser"))
-    if result.price is None or result.title is None:
-        pytest.skip(f"JSON-LD not available in selected page: {url}")
-    assert result.title is not None
+async def test_extract_jsonld_from_fixture():
+    """JSON-LD extraction on representative product markup."""
+    result = extract_from_jsonld(BeautifulSoup(_JSONLD_FIXTURE, "html.parser"))
+    assert result.title == "Sample Item"
     assert result.price is not None
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_extract_meta_real_page():
-    """Fetch real page and validate meta tags extraction."""
-    url, html = await _fetch_html(
-        [
-            "https://www.allbirds.com/products/mens-tree-runners",
-            "https://www.lego.com/en-us/product/tuxedo-cat-21349",
-            "https://www.apple.com/shop/buy-iphone/iphone-16",
-        ]
-    )
-    if not url or not html:
-        pytest.skip("No reachable page for integration test")
-    result = extract_from_meta_tags(BeautifulSoup(html, "html.parser"))
-    if result.title is None and result.image_url is None and result.price is None:
-        pytest.skip(f"Meta extraction unavailable for selected page: {url}")
-    assert result.title is not None or result.image_url is not None or result.price is not None
+async def test_extract_meta_from_fixture():
+    """Meta tag extraction on representative product markup."""
+    result = extract_from_meta_tags(BeautifulSoup(_META_FIXTURE, "html.parser"))
+    assert result.title == "Sample Item"
+    assert result.image_url is not None
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_extract_auto_detect():
+async def test_extract_auto_detect_from_fixture():
     """Auto-detect should find price on page without strict structured tags."""
-    _, html = await _fetch_html(
-        ["https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"]
-    )
-    if not html:
-        pytest.skip("books.toscrape.com is not reachable")
-    result = extract_auto_detect(BeautifulSoup(html, "html.parser"))
+    result = extract_auto_detect(BeautifulSoup(_AUTO_DETECT_FIXTURE, "html.parser"))
     assert result.price is not None
 
 
@@ -82,12 +86,11 @@ async def test_extract_auto_detect():
 @pytest.mark.asyncio
 async def test_extract_product_links():
     """Category page should produce product URLs."""
-    url = "https://webscraper.io/test-sites/e-commerce/static/computers/laptops"
-    _, html = await _fetch_html([url])
+    _, html = await _fetch_html([_ECOMMERCE_CATEGORY_URL])
     if not html:
-        pytest.skip("webscraper.io is not reachable")
+        pytest.skip("E-commerce test site is not reachable")
     soup = BeautifulSoup(html, "html.parser")
-    links = extract_product_links(soup, url)
+    links = extract_product_links(soup, _ECOMMERCE_CATEGORY_URL)
     assert isinstance(links, list)
     assert len(links) > 0
 
@@ -100,9 +103,7 @@ async def test_scraper_pool_failover():
     scraper_pool_module.settings.decodo_enabled = False
     try:
         pool = ScraperPool()
-        result = await pool.scrape_product(
-            "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
-        )
+        result = await pool.scrape_product(_ECOMMERCE_PRODUCT_URL)
         if not result.success:
             pytest.skip("Fallback layers could not scrape integration page")
         assert result.scraper_layer in {"httpx", "playwright"}
