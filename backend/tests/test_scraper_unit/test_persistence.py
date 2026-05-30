@@ -117,7 +117,7 @@ def test_scrape_product_full_success(monkeypatch):
     assert any(isinstance(x, FactPrice) for x in added)
     fp = next(x for x in added if isinstance(x, FactPrice))
     assert float(fp.price) == pytest.approx(19.99)
-    assert fp.in_stock is False
+    assert fp.in_stock is None
     assert product.name == "Widget A"
     assert session.commit.called
 

@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.app_tables import ScrapeLog
-from app.models.dimensions import DimMarketplace, DimProduct
+from app.models.dimensions import DimCountry, DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 
@@ -40,6 +40,9 @@ _MAX_ABS_PRICE_CHANGE_PCT = 9_999.9999
 # Number of consecutive scrape failures before a listing is deactivated.
 # Deactivated listings are excluded from the scrape pool.
 LISTING_DEACTIVATE_AFTER_ERRORS = 15
+# Currency text longer than this is almost certainly glued header/footer text caught
+# by merge_and_finalize's fallback currency detection, not a real price label.
+MAX_CURRENCY_RAW_LEN = 50
 
 
 def _run_coro_in_worker(coro: Awaitable[_CORO_RESULT]) -> _CORO_RESULT:
@@ -108,6 +111,17 @@ def _repair_scrape_logs_status_constraint(db: Session) -> bool:
     except Exception:
         db.rollback()
         return False
+
+
+def _resolve_in_stock(result: object | None, data: object | None) -> bool | None:
+    """Return in_stock as bool when extractor explicitly provided a value, else None."""
+    for source in (result, data):
+        if source is None:
+            continue
+        val = getattr(source, "in_stock", None)
+        if val is not None:
+            return bool(val)
+    return None
 
 
 def _optional_in_stock(extracted: object | None) -> bool | None:
@@ -237,13 +251,14 @@ class GlobalScrapeService:
         self.db = db
         self.pool = scraper_pool
         self.scrape_job_id = scrape_job_id
+        self._currency_whitelist_cache: dict[UUID, frozenset[str]] = {}
 
     @staticmethod
     def _should_skip_price_record(
         listing: FactListing,
         new_price: float | None,
         new_currency: str | None,
-        new_in_stock: bool,
+        new_in_stock: bool | None,
     ) -> bool:
         """Return True when extracted values are identical to the last known state.
 
@@ -266,8 +281,66 @@ class GlobalScrapeService:
         currency_same = (
             new_currency.strip().upper() == listing.last_currency_code.strip().upper()
         )
-        stock_same = new_in_stock == bool(listing.last_in_stock)
+        if new_in_stock is None and listing.last_in_stock is None:
+            stock_same = True
+        elif new_in_stock is None or listing.last_in_stock is None:
+            stock_same = False
+        else:
+            stock_same = bool(new_in_stock) == bool(listing.last_in_stock)
         return price_same and currency_same and stock_same
+
+    def _marketplace_currency_whitelist(self, marketplace_id: UUID) -> frozenset[str]:
+        """Allowed ISO-3 currencies for a marketplace (memoized per instance)."""
+        cached = self._currency_whitelist_cache.get(marketplace_id)
+        if cached is not None:
+            return cached
+
+        marketplace = self.db.get(DimMarketplace, marketplace_id)
+        if marketplace is None:
+            self._currency_whitelist_cache[marketplace_id] = frozenset()
+            return frozenset()
+
+        allowed: set[str] = set()
+        country_code = (marketplace.country_code or "").strip().upper()
+        if country_code:
+            country = self.db.execute(
+                select(DimCountry).where(DimCountry.country_code == country_code)
+            ).scalar_one_or_none()
+            if country is not None:
+                country_currency = getattr(country, "currency_code", None) or getattr(
+                    country, "main_currency_code", None
+                )
+                if isinstance(country_currency, str) and len(country_currency.strip()) == 3:
+                    allowed.add(country_currency.strip().upper())
+
+        allowed.update({"EUR", "USD"})
+        mp_currency = getattr(marketplace, "currency_code", None)
+        if isinstance(mp_currency, str) and len(mp_currency.strip()) == 3:
+            allowed.add(mp_currency.strip().upper())
+
+        config = getattr(marketplace, "scraper_config", None) or {}
+        extra = config.get("allowed_currencies") if isinstance(config, dict) else None
+        if isinstance(extra, list):
+            for code in extra:
+                if isinstance(code, str) and len(code.strip()) == 3:
+                    allowed.add(code.strip().upper())
+
+        result = frozenset(allowed)
+        self._currency_whitelist_cache[marketplace_id] = result
+        return result
+
+    def _currency_matches_marketplace(
+        self,
+        marketplace_id: UUID,
+        currency: str | None,
+    ) -> bool:
+        """Check detected currency against marketplace whitelist."""
+        whitelist = self._marketplace_currency_whitelist(marketplace_id)
+        if not whitelist:
+            return True
+        if not currency:
+            return False
+        return currency.strip().upper() in whitelist
 
     def _build_scrape_log_entry(
         self,
@@ -412,11 +485,7 @@ class GlobalScrapeService:
             listing.last_error = None
             listing.consecutive_errors = 0
 
-        last_in_stock = (
-            getattr(result, "in_stock", None)
-            or getattr(data, "in_stock", None)
-            or False
-        )
+        last_in_stock = _resolve_in_stock(result, data)
         slog.info(
             "EXTRACTED_DATA",
             line="EXTRACTED DATA → product_name/title/price/currency/in_stock",
@@ -486,21 +555,32 @@ class GlobalScrapeService:
 
             # fact_price: product_name_ok, price > 0, currency present (non-empty string)
             curr_raw = getattr(data, "currency", None)
+            currency_raw_text = getattr(data, "currency_raw", None) or ""
             currency_ok = curr_raw is not None and str(curr_raw).strip() != ""
             price_ok = data.price is not None and data.price > 0
+            currency_raw_sane_ok = len(currency_raw_text) < MAX_CURRENCY_RAW_LEN
+            currency_country_match_ok = self._currency_matches_marketplace(
+                listing.marketplace_id,
+                curr_raw,
+            )
             should_write_price_snapshot = (
                 product_name_ok
                 and price_ok
                 and currency_ok
+                and currency_raw_sane_ok
+                and currency_country_match_ok
             )
             slog.info(
                 "PERSISTENCE_GATE",
-                line="PERSISTENCE GATE → product_name_ok / price_ok / currency_ok",
+                line="PERSISTENCE GATE → product_name_ok / price_ok / currency_ok / sane / country",
                 product_name_ok=product_name_ok,
                 price_ok=price_ok,
                 currency_ok=currency_ok,
+                currency_raw_sane_ok=currency_raw_sane_ok,
+                currency_country_match_ok=currency_country_match_ok,
                 price_raw_text=getattr(data, "price_raw_text", None),
-                currency_raw=getattr(data, "currency_raw", None),
+                currency_raw=currency_raw_text[:200] if currency_raw_text else None,
+                detected_currency=curr_raw,
             )
             if not should_write_price_snapshot:
                 if not product_name_ok or not currency_ok:
@@ -508,12 +588,23 @@ class GlobalScrapeService:
                         "fact_price skipped: missing product_name or currency (listing_id=%s)",
                         listing_id,
                     )
+                elif not currency_raw_sane_ok:
+                    logger.info(
+                        "fact_price skipped: currency_raw too long (likely glued text) "
+                        "listing_id=%s len=%d",
+                        listing_id,
+                        len(currency_raw_text),
+                    )
+                    forced_log_status = "parse_error"
+                elif not currency_country_match_ok:
+                    logger.info(
+                        "fact_price skipped: currency=%s not allowed for marketplace_id=%s",
+                        curr_raw,
+                        listing.marketplace_id,
+                    )
+                    forced_log_status = "parse_error"
             if should_write_price_snapshot:
-                new_in_stock = (
-                    getattr(result, "in_stock", None)
-                    or getattr(data, "in_stock", None)
-                    or False
-                )
+                new_in_stock = _resolve_in_stock(result, data)
                 if self._should_skip_price_record(listing, data.price, data.currency, new_in_stock):
                     listing.last_checked_at = datetime.now(tz=timezone.utc)
                     listing.last_price = data.price

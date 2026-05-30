@@ -147,7 +147,7 @@ class FactPrice(Base):
     price_eur: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     discount_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     price_change_pct: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
-    in_stock: Mapped[bool | None] = mapped_column(Boolean, default=True, nullable=True)
+    in_stock: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     delivery_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     delivery_cost: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     seller_name: Mapped[str | None] = mapped_column(String(300), nullable=True)

@@ -698,6 +698,15 @@ def merge_and_finalize(
     *results: ExtractedProduct,
 ) -> ExtractedProduct:
     """Merge extractor outputs and ensure title fallback from the full DOM."""
+    page_role = classify_page_role(soup, page_url)
+    if page_role in ("listing", "hub"):
+        logger.info(
+            "merge_skipped_non_pdp_page page_url=%s page_role=%s",
+            page_url[:200],
+            page_role,
+        )
+        return ExtractedProduct()
+
     merged = merge_results(*results)
     if merged.currency is None:
         if merged.price_raw_text:
@@ -952,7 +961,30 @@ def extract_links_from_repeated_structure(
             if clean_url not in seen and clean_url != base_url and clean_url != source_url:
                 seen.add(clean_url)
                 results.append(clean_url)
-    return results
+
+    filtered: list[str] = []
+    for url in results:
+        parsed = urlparse(url)
+        path = parsed.path
+        if _is_excluded_link(url):
+            continue
+        if _is_category_url(path):
+            continue
+        if not _looks_like_product_url(path):
+            continue
+        path_lower = path.lower()
+        if "/list/" in path_lower:
+            continue
+        if "/category/" in path_lower and not re.search(r"/\d{4,}", path_lower):
+            continue
+        if "/catalog/" in path_lower and not re.search(r"/\d{4,}", path_lower):
+            continue
+        if "/search" in path_lower:
+            continue
+        if path_lower.endswith("/") and path_lower.count("/") <= 3:
+            continue
+        filtered.append(url)
+    return filtered
 
 
 def classify_page_role(soup: BeautifulSoup, base_url: str) -> str:
