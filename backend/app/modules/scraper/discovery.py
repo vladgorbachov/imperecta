@@ -1,10 +1,12 @@
 """Discovery crawler: DimMarketplace → listing pages → DimProduct + FactListing."""
 
+import asyncio
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -15,6 +17,7 @@ from app.config import Settings
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
+from app.modules.scraper.extractors import classify_page_role
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,24 @@ MAX_PAGES_PER_CATEGORY = 50
 RECON_BFS_MAX_DEPTH = 3
 # Min URLs found via sitemap to consider sitemap harvest successful.
 SITEMAP_MIN_USEFUL_URLS = 10
+# Sampling strategy for content-aware sitemap classification.
+# If sitemap returns <= SITEMAP_FULL_CLASSIFY_LIMIT URLs, classify all of them.
+# Otherwise classify only a random sample to decide whether to trust the sitemap.
+SITEMAP_FULL_CLASSIFY_LIMIT = 100
+# Size of random sample taken from large sitemaps for trust assessment.
+SITEMAP_SAMPLE_SIZE = 50
+# If at least this fraction of the sample classifies as 'product',
+# accept the entire sitemap without further per-URL classification.
+SITEMAP_TRUST_THRESHOLD = 0.80
+# If less than this fraction of the sample classifies as 'product',
+# reject the entire sitemap and fall back to category recon.
+SITEMAP_REJECT_THRESHOLD = 0.20
+# Max concurrent classification fetches (HTTP throttle).
+SITEMAP_CLASSIFY_CONCURRENCY = 8
+# After a sitemap harvest that produced too few useful product URLs,
+# treat the result as unsuccessful and retry shortly instead of caching
+# for SITEMAP_STALE_DAYS.
+SITEMAP_BAD_HARVEST_RETRY_HOURS = 1
 
 
 def _title_from_url(url: str) -> str:
@@ -178,6 +199,174 @@ class DiscoveryCrawler:
         age = (datetime.now(tz=timezone.utc) - marketplace.last_sitemap_harvest_at).days
         return age >= SITEMAP_STALE_DAYS
 
+    async def _classify_url(self, url: str) -> str:
+        """Fetch a URL statically and return its page-role classification.
+
+        Returns one of:
+        - 'product' — page is a single product detail page (PDP).
+        - 'listing' — page lists multiple products (category, search results, etc.).
+        - 'hub'     — navigational page with no products (homepage, about, etc.).
+        - 'unknown' — fetch failed or signals were inconclusive.
+
+        Pure content-based classification: no URL pattern matching, no language-specific
+        keywords. Works for any marketplace in any language.
+        """
+        try:
+            _html, soup = await self.pool.scrape_page_for_analysis(
+                url,
+                static_fetch=True,
+            )
+        except Exception:
+            return "unknown"
+        if soup is None:
+            return "unknown"
+        try:
+            return classify_page_role(soup, url)
+        except Exception:
+            return "unknown"
+
+    async def _filter_urls_by_role(
+        self,
+        urls: list[str],
+    ) -> tuple[list[str], dict[str, int | float | str | None]]:
+        """Classify a list of URLs concurrently and return only product PDPs.
+
+        Strategy:
+        - For small lists (<= SITEMAP_FULL_CLASSIFY_LIMIT) classify everything.
+        - For larger lists, classify a random sample first:
+          - If >= SITEMAP_TRUST_THRESHOLD of the sample are products → trust
+            the entire input as product URLs (avoids classifying tens of thousands).
+          - If < SITEMAP_REJECT_THRESHOLD are products → reject the entire input
+            (the source is not product-oriented), but keep PDPs found in sample.
+          - Otherwise → fall back to full classification.
+
+        Concurrency is bounded by SITEMAP_CLASSIFY_CONCURRENCY via asyncio.Semaphore
+        to avoid overloading the target server.
+
+        Returns (accepted_urls, stats_dict) where stats_dict contains:
+            total, sampled, sample_product_ratio, classified, accepted, mode.
+        In 'full' and 'trust_sample' modes, 'sampled' is None to distinguish
+        from 'sampled=0' which would mean an empty sample.
+        """
+        stats: dict[str, int | float | str | None] = {
+            "total": len(urls),
+            "sampled": None,
+            "sample_product_ratio": None,
+            "classified": 0,
+            "accepted": 0,
+            "mode": "none",
+        }
+        if not urls:
+            stats["mode"] = "empty"
+            return [], stats
+
+        semaphore = asyncio.Semaphore(SITEMAP_CLASSIFY_CONCURRENCY)
+
+        async def classify_one(target_url: str) -> tuple[str, str]:
+            async with semaphore:
+                role = await self._classify_url(target_url)
+                return target_url, role
+
+        # Small input: classify everything.
+        if len(urls) <= SITEMAP_FULL_CLASSIFY_LIMIT:
+            stats["mode"] = "full"
+            results = await asyncio.gather(*(classify_one(u) for u in urls))
+            stats["classified"] = len(results)
+            accepted = [u for u, role in results if role == "product"]
+            stats["accepted"] = len(accepted)
+            return accepted, stats
+
+        # Large input: sample first.
+        sample_size = min(SITEMAP_SAMPLE_SIZE, len(urls))
+        sample = random.sample(urls, sample_size)
+        sample_results = await asyncio.gather(*(classify_one(u) for u in sample))
+        stats["sampled"] = len(sample_results)
+        product_in_sample = sum(1 for _u, role in sample_results if role == "product")
+        ratio = product_in_sample / len(sample_results) if sample_results else 0.0
+        stats["sample_product_ratio"] = round(ratio, 3)
+
+        if ratio >= SITEMAP_TRUST_THRESHOLD:
+            # Sample statistically vouches for the source; accept all input URLs.
+            stats["mode"] = "trust_sample"
+            stats["accepted"] = len(urls)
+            return list(urls), stats
+
+        if ratio < SITEMAP_REJECT_THRESHOLD:
+            # Source is not product-oriented; reject everything except the actual
+            # product URLs we already discovered in the sample (those are real PDPs).
+            stats["mode"] = "reject_sample"
+            sample_products = [u for u, role in sample_results if role == "product"]
+            stats["accepted"] = len(sample_products)
+            return sample_products, stats
+
+        # Borderline ratio (20-80%): fall through to full classification.
+        # Reuse already-classified sample results, classify only the rest.
+        stats["mode"] = "full_fallback"
+        sample_urls_set = {u for u, _r in sample_results}
+        remaining = [u for u in urls if u not in sample_urls_set]
+        remaining_results = await asyncio.gather(*(classify_one(u) for u in remaining))
+        all_results = list(sample_results) + list(remaining_results)
+        stats["classified"] = len(all_results)
+        accepted = [u for u, role in all_results if role == "product"]
+        stats["accepted"] = len(accepted)
+        return accepted, stats
+
+    async def _phase0_sitemap_harvest(self, marketplace: DimMarketplace) -> list[str]:
+        """Phase 0: collect product URLs from XML sitemaps with content-aware filtering.
+
+        Pipeline:
+        1. Fetch raw URLs from sitemap (delegated to ScraperPool.fetch_sitemap_candidates).
+        2. Classify each URL (or a sample) via classify_page_role to keep only PDPs.
+        3. Decide cooldown adaptively:
+           - useful harvest → mark fresh, full SITEMAP_STALE_DAYS cooldown.
+           - bad harvest    → shift last_sitemap_harvest_at so the marketplace
+                              becomes stale again after SITEMAP_BAD_HARVEST_RETRY_HOURS.
+
+        Returns only the URLs classified as 'product'.
+        """
+        logger.info(
+            "sitemap_harvest_start marketplace_id=%s url=%s",
+            marketplace.id,
+            marketplace.base_url,
+        )
+        raw_urls = await self.pool.fetch_sitemap_candidates(marketplace.base_url)
+
+        filtered_urls, classify_stats = await self._filter_urls_by_role(raw_urls)
+        rejected_count = len(raw_urls) - len(filtered_urls)
+        useful = len(filtered_urls) >= SITEMAP_MIN_USEFUL_URLS
+
+        now = datetime.now(tz=timezone.utc)
+        if useful:
+            marketplace.last_sitemap_harvest_at = now
+            # Approximation — actual sitemap location is resolved by
+            # fetch_sitemap_candidates via robots.txt + common paths.
+            marketplace.sitemap_url = f"{marketplace.base_url.rstrip('/')}/sitemap.xml"
+        else:
+            # Treat as bad harvest: pretend it happened just before the stale
+            # threshold so the next discovery cycle retries after
+            # SITEMAP_BAD_HARVEST_RETRY_HOURS instead of SITEMAP_STALE_DAYS.
+            # sitemap_url is NOT updated on bad harvest — keep prior value.
+            retry_offset = timedelta(
+                days=SITEMAP_STALE_DAYS,
+                hours=-SITEMAP_BAD_HARVEST_RETRY_HOURS,
+            )
+            marketplace.last_sitemap_harvest_at = now - retry_offset
+
+        await self.db.flush()
+        logger.info(
+            "sitemap_harvest_done marketplace_id=%s raw=%d filtered=%d rejected=%d "
+            "useful=%s classify_mode=%s sampled=%s sample_product_ratio=%s",
+            marketplace.id,
+            len(raw_urls),
+            len(filtered_urls),
+            rejected_count,
+            useful,
+            classify_stats.get("mode"),
+            classify_stats.get("sampled"),
+            classify_stats.get("sample_product_ratio"),
+        )
+        return filtered_urls
+
     def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:
         """Return True if category recon should run."""
         if not marketplace.discovered_category_urls:
@@ -186,25 +375,6 @@ class DiscoveryCrawler:
             return True
         age = (datetime.now(tz=timezone.utc) - marketplace.last_category_recon_at).days
         return age >= CATEGORY_RECON_STALE_DAYS
-
-    async def _phase0_sitemap_harvest(self, marketplace: DimMarketplace) -> list[str]:
-        """Phase 0: attempt to collect product URLs from XML sitemaps."""
-        logger.info(
-            "sitemap_harvest_start marketplace_id=%s url=%s",
-            marketplace.id,
-            marketplace.base_url,
-        )
-        urls = await self.pool.fetch_sitemap_candidates(marketplace.base_url)
-        marketplace.last_sitemap_harvest_at = datetime.now(tz=timezone.utc)
-        if urls:
-            marketplace.sitemap_url = f"{marketplace.base_url.rstrip('/')}/sitemap.xml"
-        await self.db.flush()
-        logger.info(
-            "sitemap_harvest_done marketplace_id=%s urls_found=%d",
-            marketplace.id,
-            len(urls),
-        )
-        return urls
 
     async def _phase1_category_recon(self, marketplace: DimMarketplace) -> list[str]:
         """Phase 1: BFS traversal to discover category/listing URLs."""
@@ -392,6 +562,16 @@ class DiscoveryCrawler:
                 accepted_urls = len(batch)
                 rejected_urls = max(0, len(sitemap_product_urls) - len(batch))
                 products_found = await self._save_product_urls(marketplace.id, batch)
+                logger.info(
+                    "discovery_sitemap_path marketplace_id=%s candidate=%d accepted=%d "
+                    "saved=%d rejected=%d remaining=%d",
+                    marketplace.id,
+                    candidate_urls_found,
+                    accepted_urls,
+                    products_found,
+                    rejected_urls,
+                    remaining,
+                )
                 persisted_listings = products_found
                 duplicate_urls = max(0, len(batch) - products_found)
                 remaining = max(0, remaining - products_found)
@@ -408,6 +588,16 @@ class DiscoveryCrawler:
                 products_found = await self._phase2_product_harvest(
                     marketplace,
                     harvest_urls[:accepted_urls],
+                )
+                logger.info(
+                    "discovery_category_path marketplace_id=%s candidate=%d accepted=%d "
+                    "saved=%d rejected=%d remaining=%d",
+                    marketplace.id,
+                    candidate_urls_found,
+                    accepted_urls,
+                    products_found,
+                    rejected_urls,
+                    remaining,
                 )
                 persisted_listings = products_found
                 duplicate_urls = max(0, accepted_urls - products_found)
