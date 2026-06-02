@@ -41,6 +41,29 @@ PLAYWRIGHT_WAIT_MS = 2_500
 # Cap raw HTML attached to PoolScrapeResult when Decodo is off (debug only).
 _MAX_DEBUG_RAW_HTML_CHARS = 200_000
 _NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit"}
+# Tiered scrape strategy: which fetch layers are eligible for each tier.
+# Layer order within a tier is determined by _layer_order() based on requires_js
+# (kept as a fine-grained hint inside a tier).
+#
+# Tier 1: server-rendered shops. Default for newly-added marketplaces.
+#   Uses the existing decodo / httpx / playwright cascade with current logic.
+#
+# Tier 2: modern SPA shops (placeholder — not implemented yet, see _layer_order).
+#   When activated, this tier will add a "playwright_intercept" layer that
+#   listens to XHR/fetch responses and extracts price from intercepted JSON
+#   payloads, falling back to DOM if interception yields no result.
+#
+# Tier 3: hostile marketplaces (placeholder — not implemented yet).
+#   Will add "playwright_stealth" with anti-fingerprinting init scripts,
+#   sticky residential proxy sessions per marketplace, and an LLM-extraction
+#   fallback layer for pages where structured signals are absent.
+#
+# Activating tier 2 or 3 requires (a) implementing the corresponding layer
+# functions in ScraperPool and (b) updating _layer_order to include them.
+# Until then, requesting tier > 1 raises NotImplementedError so that misconfigured
+# marketplaces fail loudly rather than silently falling back to tier 1 behavior.
+_SUPPORTED_SCRAPE_TIERS = frozenset({1})
+_KNOWN_SCRAPE_TIERS = frozenset({1, 2, 3})
 
 
 @dataclass
@@ -98,13 +121,15 @@ class ScraperPool:
         url: str,
         custom_selectors: dict | None = None,
         requires_js: bool = False,
+        *,
+        scrape_tier: int = 1,
     ) -> PoolScrapeResult:
         """
         Fetch HTML once (Decodo -> httpx -> Playwright), extract once.
         Do NOT re-fetch via Playwright after Decodo returns HTML.
         """
         started = time.perf_counter()
-        layers = self._layer_order(requires_js=requires_js)
+        layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
 
         html = None
         used_layer = None
@@ -249,21 +274,25 @@ class ScraperPool:
             raw_html=raw_debug,
         )
 
-    async def fetch_html(self, url: str, requires_js: bool = False) -> str | None:
+    async def fetch_html(
+        self, url: str, requires_js: bool = False, *, scrape_tier: int = 1
+    ) -> str | None:
         """Fetch raw HTML via Decodo (primary) -> httpx -> Playwright. Used by Discovery."""
-        layers = self._layer_order(requires_js=requires_js)
+        layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
         for layer_name in layers:
             html, _err = await self._fetch_layer_with_retries(layer_name, url)
             if html:
                 return html
         return None
 
-    async def _fetch_raw(self, url: str, requires_js: bool = False) -> str | None:
+    async def _fetch_raw(
+        self, url: str, requires_js: bool = False, *, scrape_tier: int = 1
+    ) -> str | None:
         """Fetch and return raw HTML/text for a URL without extraction.
 
         Tries fetch layers in priority order. Returns None on total failure.
         """
-        layers = self._layer_order(requires_js=requires_js)
+        layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
         for layer_name in layers:
             try:
                 html, _err = await self._fetch_layer_with_retries(layer_name, url)
@@ -408,6 +437,7 @@ class ScraperPool:
         requires_js: bool = False,
         *,
         static_fetch: bool = False,
+        scrape_tier: int = 1,
     ) -> tuple[str | None, BeautifulSoup | None]:
         """Fetch a page and return (html, soup) for structural analysis.
 
@@ -417,7 +447,7 @@ class ScraperPool:
             if static_fetch:
                 html = await self._fetch_static(url)
             else:
-                html = await self._fetch_raw(url, requires_js=requires_js)
+                html = await self._fetch_raw(url, requires_js=requires_js, scrape_tier=scrape_tier)
             if not html:
                 return None, None
             soup = BeautifulSoup(html, "html.parser")
@@ -501,7 +531,38 @@ class ScraperPool:
             return await self._fetch_html_playwright(url)
         return None, "fetch_failed"
 
-    def _layer_order(self, requires_js: bool) -> list[str]:
+    def _layer_order(self, requires_js: bool, scrape_tier: int = 1) -> list[str]:
+        """Return the ordered list of fetch-layer names to try for one scrape attempt.
+
+        Layer order is determined by two inputs:
+        - scrape_tier: strategic policy choice (1/2/3) tied to marketplace category.
+        - requires_js: fine-grained hint inside a tier (affects layer order, not set).
+
+        Tier 1 (current default): decodo (if configured) -> httpx -> playwright.
+                                  When requires_js=True, playwright moves up
+                                  to position 2 (right after decodo).
+
+        Tier 2 / Tier 3: layers are documented in _SUPPORTED_SCRAPE_TIERS and are
+                         not yet implemented. They will be added when the platform
+                         onboards marketplaces requiring them.
+
+        Raises NotImplementedError when an unsupported tier is requested, so that
+        operational misconfigurations surface immediately rather than silently
+        degrading to Tier 1 behavior. Raises ValueError for unknown tier values
+        (out of {1, 2, 3}) — this is a defensive API contract, separate from the
+        DB CHECK constraint, and guards against programming errors in callers.
+        """
+        if scrape_tier not in _KNOWN_SCRAPE_TIERS:
+            raise ValueError(
+                f"Unknown scrape_tier={scrape_tier}; expected one of {sorted(_KNOWN_SCRAPE_TIERS)}"
+            )
+        if scrape_tier not in _SUPPORTED_SCRAPE_TIERS:
+            raise NotImplementedError(
+                f"scrape_tier={scrape_tier} layers not implemented yet; "
+                f"currently supported tiers: {sorted(_SUPPORTED_SCRAPE_TIERS)}"
+            )
+
+        # Tier 1 layer composition (current behavior, unchanged).
         layers: list[str] = []
         if settings.decodo_enabled and settings.decodo_username and settings.decodo_password:
             layers.append("decodo")

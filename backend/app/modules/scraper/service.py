@@ -442,6 +442,7 @@ class GlobalScrapeService:
 
         mp = self.db.get(DimMarketplace, listing.marketplace_id)
         requires_js = bool(mp.requires_js) if mp else False
+        scrape_tier = int(getattr(mp, "scrape_tier", 1)) if mp else 1
 
         cfg = listing.scraper_config if isinstance(listing.scraper_config, dict) else {}
         custom_selectors = {
@@ -466,6 +467,7 @@ class GlobalScrapeService:
                     url=listing.external_url,
                     custom_selectors=custom_selectors if custom_selectors else None,
                     requires_js=requires_js,
+                    scrape_tier=scrape_tier,
                 ),
             )
         except Exception as exc:
