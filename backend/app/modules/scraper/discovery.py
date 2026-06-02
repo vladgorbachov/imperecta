@@ -17,7 +17,7 @@ from app.config import Settings
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
-from app.modules.scraper.extractors import classify_page_role
+from app.modules.scraper.extractors import classify_page_role_for_discovery
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -221,7 +221,7 @@ class DiscoveryCrawler:
         if soup is None:
             return "unknown"
         try:
-            return classify_page_role(soup, url)
+            return classify_page_role_for_discovery(soup, url)
         except Exception:
             return "unknown"
 
@@ -380,7 +380,10 @@ class DiscoveryCrawler:
         """Phase 1: BFS traversal to discover category/listing URLs."""
         from collections import deque
 
-        from app.modules.scraper.extractors import classify_page_role, extract_internal_links_all
+        from app.modules.scraper.extractors import (
+            classify_page_role_for_discovery,
+            extract_internal_links_all,
+        )
 
         logger.info(
             "category_recon_start marketplace_id=%s url=%s",
@@ -402,7 +405,7 @@ class DiscoveryCrawler:
             )
             if soup is None:
                 continue
-            role = classify_page_role(soup, marketplace.base_url)
+            role = classify_page_role_for_discovery(soup, marketplace.base_url)
             logger.debug(
                 "recon_page marketplace_id=%s url=%s depth=%d role=%s",
                 marketplace.id,
@@ -435,7 +438,7 @@ class DiscoveryCrawler:
                 )
                 if soup is None:
                     continue
-                role = classify_page_role(soup, marketplace.base_url)
+                role = classify_page_role_for_discovery(soup, marketplace.base_url)
                 if role in ("listing", "hub"):
                     listing_urls.append(fallback_url)
 

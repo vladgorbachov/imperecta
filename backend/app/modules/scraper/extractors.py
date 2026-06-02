@@ -182,6 +182,26 @@ _CATEGORY_PATH_SEGMENTS = (
 _MAX_REALISTIC_PRICE = 5_000_000.0
 # Minimum count of structurally-identical elements to classify as a product grid.
 REPEATED_STRUCTURE_MIN_COUNT = 6
+# Open Graph og:type values that indicate a single product detail page.
+# Reference: https://ogp.me/ + product-specific extensions used by Shopify,
+# WooCommerce, Magento, Facebook Catalog.
+_OG_TYPES_PRODUCT = frozenset({"product", "product.group", "product.item"})
+# Open Graph og:type values that indicate a non-product content page.
+# 'website' maps to 'hub' downstream; the rest map to 'listing'.
+# Rare/ambiguous og:types (profile, book, music, video) are intentionally
+# excluded here — they fall through to JSON-LD layer and then to the
+# structural fallback rather than being force-classified.
+_OG_TYPES_LISTING = frozenset({"article", "blog", "news"})
+_OG_TYPES_HUB = frozenset({"website"})
+# JSON-LD @type values from schema.org that indicate a single product detail page.
+_JSONLD_TYPES_PRODUCT = frozenset({"Product", "IndividualProduct", "ProductModel"})
+# JSON-LD @type values that indicate a listing/results page.
+_JSONLD_TYPES_LISTING = frozenset({
+    "CollectionPage", "ItemList", "SearchResultsPage",
+    "Article", "NewsArticle", "BlogPosting",
+})
+# JSON-LD @type values that indicate a navigational/informational page (hub).
+_JSONLD_TYPES_HUB = frozenset({"WebPage", "AboutPage", "ContactPage", "FAQPage"})
 # Maximum number of sitemap sub-files to follow from a sitemap index.
 SITEMAP_MAX_SUBFILES = 15
 # Maximum product URLs to harvest from a single sitemap (memory guard).
@@ -746,8 +766,48 @@ def _looks_like_product_url(path: str) -> bool:
     return False
 
 
+def _looks_like_product_slug(segment: str) -> bool:
+    """Strong heuristic: does this single URL path segment look like a PDP slug?
+
+    Three positive signals (any one is sufficient):
+    1. Segment ends with .html or .htm — universal PDP convention on legacy
+       and CMS-driven sites.
+    2. Segment contains a dash-prefixed run of 6+ digits — common pattern
+       like `iphone-15-pro-12345678` or `product-name-11000225`. The dash
+       before the digits distinguishes a product ID embedded in a slug from
+       a year suffix on a category name (e.g. `summer-2024`, which is 4 digits
+       and not 6+).
+    3. Segment is a standalone run of 6+ digits — common pattern for
+       numeric-id PDPs like `/p/12345678` or `/dp/12345678`.
+
+    The 6-digit minimum is chosen to exclude common year-suffixes (4 digits)
+    and short numeric category IDs (e.g. `c80004` has 5 digits without a dash
+    separator, correctly classified as NOT a product slug).
+    """
+    if not segment:
+        return False
+    lowered = segment.lower()
+    if lowered.endswith(".html") or lowered.endswith(".htm"):
+        return True
+    if re.search(r"-\d{6,}(?:[-/_.]|$)", lowered):
+        return True
+    if re.fullmatch(r"\d{6,}", lowered):
+        return True
+    return False
+
+
 def _is_category_url(path: str) -> bool:
-    """Exclude category/listing URLs. Product pages have more specific paths."""
+    """Exclude category/listing URLs. Product pages have more specific paths.
+
+    Improved logic (defence-in-depth, complements schema-aware classifier):
+    - Single-segment paths default to category (homepage / `/catalog` / `/sale`)
+      unless the segment itself looks like a long product slug.
+    - For multi-segment paths, the LAST path segment is inspected first:
+      if it looks like a product slug (see _looks_like_product_slug), this
+      is a PDP-inside-category URL (e.g. `/catalog/electronics/iphone-12345678`),
+      NOT a category, even when path contains a category-word like `catalog`.
+    - Otherwise, presence of a category-word segment is the deciding signal.
+    """
     lowered = path.lower()
     segments = [s for s in lowered.split("/") if s]
     if len(segments) <= 1:
@@ -756,6 +816,14 @@ def _is_category_url(path: str) -> bool:
             if len(single) >= 16 and ("-" in single or any(ch.isdigit() for ch in single)):
                 return False
         return True
+
+    # Strong PDP signal in the last segment overrides category-word presence
+    # elsewhere in path. This fixes the false-positive on `/catalog/{cat}/{slug}`
+    # schemes where the product slug carries a 6+ digit product ID.
+    last = segments[-1]
+    if _looks_like_product_slug(last):
+        return False
+
     if any(seg in _CATEGORY_PATH_SEGMENTS for seg in segments):
         return True
     if ".html" in lowered:
@@ -1041,6 +1109,117 @@ def classify_page_role(soup: BeautifulSoup, base_url: str) -> str:
     if has_product_grid:
         return "listing"
     return "unknown"
+
+
+def _get_og_type(soup: BeautifulSoup) -> str | None:
+    """Return lowercased Open Graph og:type from the page, or None if absent.
+
+    Open Graph is a single-value page-level meta tag set by site authors for
+    social-network preview, e.g. <meta property="og:type" content="product">.
+    """
+    meta = soup.find("meta", attrs={"property": "og:type"})
+    if meta is None:
+        return None
+    content = meta.get("content")
+    if not isinstance(content, str):
+        return None
+    cleaned = content.strip().lower()
+    return cleaned or None
+
+
+def _get_jsonld_root_types(soup: BeautifulSoup) -> set[str]:
+    """Return the set of top-level @type values from all JSON-LD scripts on the page.
+
+    Handles three structural cases:
+    - JSON-LD root is a dict with @type: string or list of strings.
+    - JSON-LD root is a list of such dicts.
+    - JSON-LD is malformed → silently skip that script tag.
+
+    Nested @types (e.g. inside `offers`, `aggregateRating`) are intentionally
+    NOT collected: they describe sub-entities of a parent object, not the
+    page as a whole.
+    """
+    types: set[str] = set()
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        raw = script.string or ""
+        if not raw.strip():
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        items = parsed if isinstance(parsed, list) else [parsed]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            type_value = item.get("@type")
+            if isinstance(type_value, str):
+                types.add(type_value)
+            elif isinstance(type_value, list):
+                for sub in type_value:
+                    if isinstance(sub, str):
+                        types.add(sub)
+    return types
+
+
+def classify_page_role_for_discovery(soup: BeautifulSoup, base_url: str) -> str:
+    """Discovery-targeted page role classification using structured-data signals.
+
+    Returns one of: 'product', 'listing', 'hub', 'unknown'.
+
+    Strategy — three layers, from most to least reliable:
+
+    Layer 1: Open Graph og:type. A single-value page-level meta tag explicitly
+    set by site authors for social-network previews. Strong, unambiguous signal:
+      - og:type in _OG_TYPES_PRODUCT  → 'product'
+      - og:type in _OG_TYPES_HUB      → 'hub'
+      - og:type in _OG_TYPES_LISTING  → 'listing'  (article/blog/news grouped
+        with listing because they are non-product content pages; this is a
+        deliberate design choice, not a bug)
+      - any other og:type value       → fall through to Layer 2
+
+    Layer 2: JSON-LD top-level @type. The site author's schema.org declaration
+    of what the page represents. If multiple types appear, Product wins over
+    listing-coexisting types (a PDP can include a Breadcrumb in JSON-LD without
+    being a listing). Otherwise, listing/hub mapping is taken from the
+    corresponding _JSONLD_TYPES_* sets.
+
+    Layer 3: Fallback to existing classify_page_role(). Handles sites that emit
+    no structured data — rare on modern e-commerce but possible on small/legacy
+    shops. The existing function is more conservative (tuned for extractor use),
+    but its 'unknown' result is preserved as 'unknown' here, not silently
+    promoted to 'listing'.
+
+    This function intentionally ignores repeated-DOM-structure signals on layers
+    1 and 2: related-product blocks on a real PDP would trigger them, leading
+    to false 'listing' classification (which is exactly the bug this function
+    fixes for discovery).
+    """
+    # Layer 1: Open Graph
+    og_type = _get_og_type(soup)
+    if og_type is not None:
+        if og_type in _OG_TYPES_PRODUCT:
+            return "product"
+        if og_type in _OG_TYPES_HUB:
+            return "hub"
+        if og_type in _OG_TYPES_LISTING:
+            return "listing"
+        # Other og:type values (profile, book, music, video) → fall through.
+
+    # Layer 2: JSON-LD
+    ld_types = _get_jsonld_root_types(soup)
+    if ld_types:
+        if ld_types & _JSONLD_TYPES_PRODUCT:
+            # Product wins over coexisting listing-like types (PDP + Breadcrumb).
+            return "product"
+        if ld_types & _JSONLD_TYPES_LISTING:
+            return "listing"
+        if ld_types & _JSONLD_TYPES_HUB:
+            return "hub"
+        # Other JSON-LD types → fall through to structural fallback.
+
+    # Layer 3: structural fallback
+    return classify_page_role(soup, base_url)
 
 
 def extract_internal_links_all(soup: BeautifulSoup, base_url: str) -> list[str]:
