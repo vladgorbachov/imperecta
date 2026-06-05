@@ -178,6 +178,13 @@ export function App() {
           richColors
           closeButton
           toastOptions={{
+            classNames: {
+              toast: "imperecta-sonner-toast",
+              content: "imperecta-sonner-content",
+              title: "imperecta-sonner-title",
+              icon: "imperecta-sonner-icon",
+              closeButton: "imperecta-sonner-close",
+            },
             style: {
               background: "var(--background-elevated)",
               border: "1px solid var(--glass-border)",
