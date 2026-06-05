@@ -717,7 +717,7 @@ def merge_and_finalize(
     *results: ExtractedProduct,
 ) -> ExtractedProduct:
     """Merge extractor outputs and ensure title fallback from the full DOM."""
-    page_role = classify_page_role(soup, page_url)
+    page_role = classify_page_role_for_discovery(soup, page_url)
     if page_role in ("listing", "hub"):
         logger.info(
             "merge_skipped_non_pdp_page page_url=%s page_role=%s",

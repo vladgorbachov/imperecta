@@ -235,10 +235,22 @@ def discover_single_marketplace(self, marketplace_id: str):
     return _run_async(_do())
 
 
-def _run_scrape_all_pool(scrape_job_id: UUID | None = None) -> dict:
-    """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers)."""
+def _run_scrape_all_pool(
+    scrape_job_id: UUID | None = None,
+    *,
+    marketplace_codes: list[str] | None = None,
+) -> dict:
+    """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers).
+
+    When marketplace_codes is provided, restricts the scrape to listings whose
+    marketplace.marketplace_code is in the list. When None (default), processes
+    the entire active pool — required for the standalone scheduled task.
+    """
     try:
-        return _run_scrape_all_pool_impl(scrape_job_id=scrape_job_id)
+        return _run_scrape_all_pool_impl(
+            scrape_job_id=scrape_job_id,
+            marketplace_codes=marketplace_codes,
+        )
     except Exception:
         tb = traceback.format_exc()
         slog.exception("scrape_all_pool_fatal", traceback=tb)
@@ -251,7 +263,11 @@ def _run_scrape_all_pool(scrape_job_id: UUID | None = None) -> dict:
         }
 
 
-def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
+def _run_scrape_all_pool_impl(
+    scrape_job_id: UUID | None = None,
+    *,
+    marketplace_codes: list[str] | None = None,
+) -> dict:
     scraper_pool = ScraperPool()
     settings = Settings()
     threshold = datetime.now(timezone.utc) - timedelta(hours=6)
@@ -265,7 +281,7 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
     try:
         svc = GlobalScrapeService(db, scraper_pool, scrape_job_id=scrape_job_id)
         while queued_total < max_listings_per_run:
-            result = db.execute(
+            stmt = (
                 select(FactListing.id)
                 .where(FactListing.is_active.is_(True))
                 .where(
@@ -274,8 +290,16 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
                         FactListing.last_checked_at < threshold,
                     ),
                 )
-                .limit(batch_size),
             )
+            if marketplace_codes:
+                stmt = (
+                    stmt.join(
+                        DimMarketplace,
+                        DimMarketplace.id == FactListing.marketplace_id,
+                    )
+                    .where(DimMarketplace.marketplace_code.in_(marketplace_codes))
+                )
+            result = db.execute(stmt.limit(batch_size))
             batch_ids = [r[0] for r in result.all()]
             if not batch_ids:
                 break
@@ -297,6 +321,7 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
                 batch_size=len(stale_ids),
                 queued_total=queued_total,
                 max_listings_per_run=max_listings_per_run,
+                marketplace_codes=marketplace_codes,
             )
             if scrape_job_id is not None:
                 pulse_job_activity_sync(
@@ -360,6 +385,7 @@ def _run_scrape_all_pool_impl(scrape_job_id: UUID | None = None) -> dict:
         eligible=queued_total,
         ok=ok,
         failed=failed,
+        marketplace_codes=marketplace_codes,
     )
     return {
         "queued": queued_total,

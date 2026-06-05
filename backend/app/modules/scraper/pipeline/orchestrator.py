@@ -37,6 +37,7 @@ class FullPipelineOrchestrator:
         persist_ms = 0
         hard_error: str | None = None
         per_marketplace_seed: dict[UUID, dict[str, Any]] = {}
+        marketplace_codes: list[str] | None = None
 
         try:
             with pipeline_worker_log_relay(parent_job_id):
@@ -93,8 +94,16 @@ class FullPipelineOrchestrator:
 
                 from app.modules.scraper.tasks import _run_scrape_all_pool
 
+                slog.info(
+                    "orchestrator_starting_scrape",
+                    parent_job_id=str(parent_job_id),
+                    marketplace_codes=marketplace_codes,
+                )
                 scrape_started = time.perf_counter()
-                scrape_result = _run_scrape_all_pool(scrape_job_id=parent_job_id)
+                scrape_result = _run_scrape_all_pool(
+                    scrape_job_id=parent_job_id,
+                    marketplace_codes=marketplace_codes,
+                )
                 scrape_ms = int((time.perf_counter() - scrape_started) * 1000)
                 if scrape_result.get("error"):
                     hard_error = str(scrape_result["error"])
