@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { formatChartDate } from "@/lib/formatters";
+import { formatChartDate, formatPriceNumber } from "@/lib/formatters";
 import {
   Area,
   AreaChart,
@@ -188,7 +188,7 @@ export function AnalyticsPage() {
                       <YAxis
                         tick={{ fontSize: 10 }}
                         stroke="hsl(var(--muted-foreground))"
-                        tickFormatter={(v) => new Intl.NumberFormat(locale).format(v)}
+                        tickFormatter={(v) => formatPriceNumber(v, locale)}
                       />
                       <Tooltip
                         content={({ active, payload }) => {
@@ -198,7 +198,7 @@ export function AnalyticsPage() {
                             <div className="rounded-md border border-border bg-card px-3 py-2 shadow-md">
                               <p className="mb-1 font-medium">{p?.dateLabel}</p>
                               <p className="text-xs">
-                                {t("analytics.forecast")}: {p?.forecast != null ? new Intl.NumberFormat(locale).format(p.forecast) : "—"}
+                                {t("analytics.forecast")}: {p?.forecast != null ? formatPriceNumber(p.forecast, locale) : "—"}
                               </p>
                             </div>
                           );

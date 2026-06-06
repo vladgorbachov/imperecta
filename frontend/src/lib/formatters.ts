@@ -5,7 +5,9 @@
 
 /**
  * Formats a price amount using Intl.NumberFormat.
- * @example formatPrice(12450, "RUB", "ru") → "12 450 ₽"
+ * Always renders two fraction digits so values align in lists
+ * (e.g. 6.9 → "6.90", 1980 → "1,980.00").
+ * @example formatPrice(12450, "RUB", "ru") → "12 450,00 ₽"
  * @example formatPrice(12450, "RUB", "en") → "RUB 12,450.00"
  */
 export function formatPrice(amount: number, currency: string, locale: string): string {
@@ -14,16 +16,26 @@ export function formatPrice(amount: number, currency: string, locale: string): s
     return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: normalizedCurrency,
-      minimumFractionDigits: 0,
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    const formattedAmount = new Intl.NumberFormat(locale, {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(amount);
-    return normalizedCurrency ? `${formattedAmount} ${normalizedCurrency}` : formattedAmount;
+    return `${formatPriceNumber(amount, locale)}${normalizedCurrency ? ` ${normalizedCurrency}` : ""}`;
   }
+}
+
+/**
+ * Formats a price-like number without a currency symbol.
+ * Used for aggregate price charts where the currency is implicit.
+ * Always renders two fraction digits with locale-aware grouping.
+ * @example formatPriceNumber(6.9, "en") → "6.90"
+ * @example formatPriceNumber(1980, "en") → "1,980.00"
+ */
+export function formatPriceNumber(amount: number, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 /**

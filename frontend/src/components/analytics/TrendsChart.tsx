@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi } from "@/api/analytics";
-import { formatChartDate } from "@/lib/formatters";
+import { formatChartDate, formatPriceNumber } from "@/lib/formatters";
 
 type Period = "7d" | "30d" | "90d";
 
@@ -89,7 +89,7 @@ export function TrendsChart({ period }: TrendsChartProps) {
           <YAxis
             tick={{ fontSize: 11 }}
             stroke="hsl(var(--muted-foreground))"
-            tickFormatter={(v) => new Intl.NumberFormat(locale).format(v)}
+            tickFormatter={(v) => formatPriceNumber(v, locale)}
           />
           <Tooltip
             content={({ active, payload }) => {
@@ -103,7 +103,7 @@ export function TrendsChart({ period }: TrendsChartProps) {
                   <div className="space-y-1 text-xs">
                     {payload.map((item, idx) => (
                       <p key={idx}>
-                        {item.name}: {item.value != null ? new Intl.NumberFormat(locale).format(Number(item.value)) : "—"}
+                        {item.name}: {item.value != null ? formatPriceNumber(Number(item.value), locale) : "—"}
                       </p>
                     ))}
                   </div>
