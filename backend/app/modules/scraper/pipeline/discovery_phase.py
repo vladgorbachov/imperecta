@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
@@ -11,7 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
-from app.modules.scraper.discovery import DiscoveryCrawler
+from app.modules.scraper.discovery import (
+    DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
+    SITEMAP_STALE_DAYS,
+    SITEMAP_TIMEOUT_COOLDOWN_HOURS,
+    DiscoveryCrawler,
+)
 from app.modules.scraper.pipeline.activity_pulse import discovery_activity_callback
 from app.modules.scraper.pipeline.cancellation import is_pipeline_job_cancelled
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
@@ -74,7 +81,10 @@ async def run_discovery_phase(
 
         started = time.perf_counter()
         try:
-            discovered = await crawler.discover(marketplace)
+            discovered = await asyncio.wait_for(
+                crawler.discover(marketplace),
+                timeout=DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
+            )
             per_marketplace[marketplace.id] = {
                 "marketplace_id": str(marketplace.id),
                 "domain": marketplace.domain,
@@ -90,6 +100,47 @@ async def run_discovery_phase(
                 "status": "failed" if discovered.status == "error" else "completed",
             }
             errors.extend(discovered.errors)
+        except asyncio.TimeoutError:
+            # Circuit breaker (Level 3): per-marketplace discovery budget exceeded.
+            # crawler.discover() was cancelled mid-flight via CancelledError, so
+            # we record the timeout_skipped state ourselves from the caller side
+            # and continue with the next marketplace.
+            slog.warning(
+                "discovery_marketplace_skipped",
+                marketplace_id=str(marketplace.id),
+                marketplace_code=marketplace.marketplace_code,
+                reason="timeout_budget",
+                budget_s=DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
+            )
+            errors.append(f"marketplace_{marketplace.id}_timeout")
+            now = datetime.now(tz=timezone.utc)
+            marketplace.last_discovery_status = "timeout_skipped"
+            marketplace.last_discovery_at = now
+            # Apply 24-hour cooldown to sitemap retry (same rationale as
+            # SITEMAP_TIMEOUT_COOLDOWN_HOURS in _phase0_sitemap_harvest).
+            retry_offset = timedelta(
+                days=SITEMAP_STALE_DAYS,
+                hours=-SITEMAP_TIMEOUT_COOLDOWN_HOURS,
+            )
+            marketplace.last_sitemap_harvest_at = now - retry_offset
+            try:
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                slog.exception(
+                    "discovery_marketplace_skipped_commit_failed",
+                    marketplace_id=str(marketplace.id),
+                )
+            per_marketplace[marketplace.id] = {
+                "marketplace_id": str(marketplace.id),
+                "domain": marketplace.domain,
+                "marketplace_code": marketplace.marketplace_code,
+                "listings_created": 0,
+                "prices_saved": 0,
+                "errors_count": 1,
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+                "status": "timeout_skipped",
+            }
         except Exception as exc:
             slog.exception(
                 "full_pipeline_discovery_failed",

@@ -53,6 +53,32 @@ SITEMAP_CLASSIFY_CONCURRENCY = 8
 # for SITEMAP_STALE_DAYS.
 SITEMAP_BAD_HARVEST_RETRY_HOURS = 1
 
+# ---------------------------------------------------------------------------
+# Universal timeout policy: three-level defence against slow/broken marketplaces.
+# ---------------------------------------------------------------------------
+# These budgets bound how long discovery can spend per marketplace, ensuring
+# one slow or unreachable site cannot stall the entire pipeline. Values are
+# intentionally permissive to keep correctness as the priority — fast retries
+# would risk losing slow-but-valid marketplaces. Tuning happens via these
+# constants only; no per-marketplace overrides.
+
+# Per sitemap-phase budget. If _phase0_sitemap_harvest does not produce URLs
+# within this window, the sitemap path is abandoned and discovery falls back
+# to category-recon path for this marketplace.
+SITEMAP_PHASE_BUDGET_SECONDS = 300  # 5 minutes
+
+# Per-marketplace total discovery budget (sitemap + category recon together).
+# If the full discover() call exceeds this, the marketplace is marked as
+# timeout_skipped with 24-hour cooldown and the pipeline continues with the
+# next marketplace.
+DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS = 900  # 15 minutes
+
+# Cooldown applied to sitemap_harvest when sitemap times out (asyncio.TimeoutError).
+# Longer than SITEMAP_BAD_HARVEST_RETRY_HOURS because a timeout signals a
+# persistent issue (very slow server, anti-bot, network partition) — retrying
+# in an hour would just burn another budget cycle.
+SITEMAP_TIMEOUT_COOLDOWN_HOURS = 24
+
 
 def _title_from_url(url: str) -> str:
     """Derive placeholder product title from URL path."""
@@ -551,7 +577,34 @@ class DiscoveryCrawler:
 
             sitemap_product_urls: list[str] = []
             if self._should_run_sitemap_harvest(marketplace):
-                sitemap_product_urls = await self._phase0_sitemap_harvest(marketplace)
+                try:
+                    sitemap_product_urls = await asyncio.wait_for(
+                        self._phase0_sitemap_harvest(marketplace),
+                        timeout=SITEMAP_PHASE_BUDGET_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    # Sitemap phase exhausted its budget. Treat as unavailable for
+                    # this run, apply long cooldown, and fall through to category
+                    # recon. We do NOT mark the whole discovery as failed — the
+                    # marketplace may still be reachable via category crawl.
+                    logger.warning(
+                        "sitemap_harvest_timeout marketplace_id=%s budget_s=%s",
+                        marketplace.id,
+                        SITEMAP_PHASE_BUDGET_SECONDS,
+                    )
+                    errors.append("sitemap_phase_timeout")
+                    now = datetime.now(tz=timezone.utc)
+                    # Apply 24h cooldown by shifting last_sitemap_harvest_at into
+                    # the past such that age < SITEMAP_STALE_DAYS but next retry
+                    # waits SITEMAP_TIMEOUT_COOLDOWN_HOURS, not the normal
+                    # SITEMAP_BAD_HARVEST_RETRY_HOURS.
+                    retry_offset = timedelta(
+                        days=SITEMAP_STALE_DAYS,
+                        hours=-SITEMAP_TIMEOUT_COOLDOWN_HOURS,
+                    )
+                    marketplace.last_sitemap_harvest_at = now - retry_offset
+                    await self.db.flush()
+                    sitemap_product_urls = []
 
             products_found = 0
             if len(sitemap_product_urls) >= SITEMAP_MIN_USEFUL_URLS:
