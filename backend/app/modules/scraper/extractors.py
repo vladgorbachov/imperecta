@@ -636,7 +636,7 @@ def parse_price_text(text: str) -> float | None:
             return None
 
     candidates: list[tuple[float, int]] = []
-    token_pattern = re.compile(r"\d{1,3}(?:[ \u00a0\u2009\u202f.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?")
+    token_pattern = re.compile(r"\d{1,3}(?:[ \u00a0\u2009\u202f.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?")
     for match in token_pattern.finditer(raw):
         token = match.group(0)
         parsed = _parse_number_token(token)
