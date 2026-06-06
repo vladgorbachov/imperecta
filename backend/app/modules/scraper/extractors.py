@@ -202,6 +202,20 @@ _JSONLD_TYPES_LISTING = frozenset({
 })
 # JSON-LD @type values that indicate a navigational/informational page (hub).
 _JSONLD_TYPES_HUB = frozenset({"WebPage", "AboutPage", "ContactPage", "FAQPage"})
+# HTML5 Microdata itemtype values (schema.org). Both http:// and https://
+# prefixes are valid per schema.org docs and appear in the wild.
+_MICRODATA_TYPES_PRODUCT = frozenset({
+    "http://schema.org/Product",
+    "https://schema.org/Product",
+})
+_MICRODATA_TYPES_LISTING = frozenset({
+    "http://schema.org/ItemList",
+    "https://schema.org/ItemList",
+    "http://schema.org/OfferCatalog",
+    "https://schema.org/OfferCatalog",
+    "http://schema.org/CollectionPage",
+    "https://schema.org/CollectionPage",
+})
 # Maximum number of sitemap sub-files to follow from a sitemap index.
 SITEMAP_MAX_SUBFILES = 15
 # Maximum product URLs to harvest from a single sitemap (memory guard).
@@ -1162,6 +1176,36 @@ def _get_jsonld_root_types(soup: BeautifulSoup) -> set[str]:
     return types
 
 
+def _get_microdata_toplevel_types(soup: BeautifulSoup) -> set[str]:
+    """Return itemtype values from top-level itemscope elements only.
+
+    "Top-level" means the element has no ancestor with `itemscope` attribute.
+    This excludes nested Product cards inside an ItemList (category page),
+    or nested ListItem inside a BreadcrumbList. Such nested types describe
+    components of the page, not the page's role itself.
+
+    Returns the itemtype URL set (e.g., {"http://schema.org/Product"}).
+    Values are returned as-is, without case normalization, since schema.org
+    URLs are always lowercase by convention and our constant sets follow
+    the same convention.
+    """
+    result: set[str] = set()
+    for tag in soup.find_all(attrs={"itemtype": True}):
+        has_outer_itemscope = False
+        parent = tag.parent
+        while parent is not None:
+            if getattr(parent, "attrs", None) is not None and "itemscope" in parent.attrs:
+                has_outer_itemscope = True
+                break
+            parent = parent.parent
+        if has_outer_itemscope:
+            continue
+        itemtype_value = (tag.get("itemtype") or "").strip()
+        if itemtype_value:
+            result.add(itemtype_value)
+    return result
+
+
 def classify_page_role_for_discovery(soup: BeautifulSoup, base_url: str) -> str:
     """Discovery-targeted page role classification using structured-data signals.
 
@@ -1217,6 +1261,21 @@ def classify_page_role_for_discovery(soup: BeautifulSoup, base_url: str) -> str:
         if ld_types & _JSONLD_TYPES_HUB:
             return "hub"
         # Other JSON-LD types → fall through to structural fallback.
+
+    # Layer 2.5: HTML5 Microdata via itemscope/itemtype attributes.
+    # Some sites emit schema.org via Microdata only, without og:type or JSON-LD.
+    # We look at top-level itemtype only (not nested) so that:
+    #   - A PDP with a "Related products" ItemList block remains 'product'
+    #     (Product on top-level + ItemList for related → Product wins).
+    #   - A pure category page (only ItemList/OfferCatalog top-level, with
+    #     nested Product cards) is 'listing'.
+    md_top_types = _get_microdata_toplevel_types(soup)
+    if md_top_types:
+        if md_top_types & _MICRODATA_TYPES_PRODUCT:
+            return "product"
+        if md_top_types & _MICRODATA_TYPES_LISTING:
+            return "listing"
+        # Other Microdata top-level types → fall through to Layer 3.
 
     # Layer 3: structural fallback
     return classify_page_role(soup, base_url)
