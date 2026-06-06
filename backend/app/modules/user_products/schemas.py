@@ -47,6 +47,11 @@ class ProductResponse(BaseModel):
 class ProductListItem(ProductResponse):
     min_competitor_price: Decimal | None = None
     max_competitor_price: Decimal | None = None
+    display_price: float | None = None
+    display_currency: str | None = None
+    conversion_available: bool = False
+    min_competitor_display_price: float | None = None
+    max_competitor_display_price: float | None = None
     last_checked_at: datetime | None = None
 
 

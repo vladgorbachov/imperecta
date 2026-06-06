@@ -27,8 +27,12 @@ class PoolProductItem(BaseModel):
     marketplace_code: str | None = None
     country_code: str | None = None
     price: float | None = None
+    current_price: float | None = None
     currency: str | None = None
     price_eur: float | None = None
+    display_price: float | None = None
+    display_currency: str | None = None
+    conversion_available: bool = False
     price_change_pct: float | None = None
     in_stock: bool | None = None
     last_checked_at: datetime | None = None

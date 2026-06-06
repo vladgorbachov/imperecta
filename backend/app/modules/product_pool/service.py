@@ -6,6 +6,12 @@ from uuid import UUID
 from sqlalchemy import asc, case, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.currency import (
+    DISPLAY_LOCAL,
+    CurrencyConverter,
+    display_price_fields,
+    normalize_display_currency,
+)
 from app.models.dimensions import DimDate, DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 
@@ -138,6 +144,7 @@ class ProductPoolService:
         limit: int = 20,
         offset: int = 0,
         include_blocked_countries: bool = False,
+        display_currency: str = DISPLAY_LOCAL,
     ) -> tuple[list[dict[str, Any]], int]:
         latest_pc = _latest_price_change_subquery()
         stmt = self._base_listing_stmt(latest_pc)
@@ -175,7 +182,29 @@ class ProductPoolService:
         recent_prices_by_listing = await self._get_recent_prices_map(listing_ids)
         for item in items:
             item["recent_prices"] = recent_prices_by_listing.get(item["id"], [])
+        await self._apply_display_currency(items, display_currency)
         return items, int(total)
+
+    async def _apply_display_currency(
+        self,
+        items: list[dict[str, Any]],
+        display_currency: str,
+    ) -> None:
+        """Populate display_price/display_currency/conversion_available on items."""
+        target = normalize_display_currency(display_currency)
+        if target == DISPLAY_LOCAL or not items:
+            return
+        converter = await CurrencyConverter.load_latest(self.db)
+        for item in items:
+            display_value, display_code, available = display_price_fields(
+                item.get("current_price"),
+                item.get("currency"),
+                target,
+                converter,
+            )
+            item["display_price"] = display_value
+            item["display_currency"] = display_code
+            item["conversion_available"] = available
 
     async def _get_recent_prices_map(
         self,
@@ -366,6 +395,9 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "price_change_pct": float(pct) if pct is not None else None,
         "current_price": float(row["price"]) if row.get("price") is not None else None,
         "original_price": None,
+        "display_price": None,
+        "display_currency": None,
+        "conversion_available": False,
         "price_change_pct_24h": float(pct) if pct is not None else None,
         "price_change_pct_7d": None,
         "price_change_pct_30d": None,

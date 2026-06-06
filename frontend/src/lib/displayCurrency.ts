@@ -14,8 +14,8 @@ export const DISPLAY_CURRENCY_BACKEND_SUPPORT: Record<
   Exclude<DisplayCurrency, "local">,
   boolean
 > = {
-  EUR: false,
-  USD: false,
+  EUR: true,
+  USD: true,
 };
 
 export interface DisplayCurrencyOption {

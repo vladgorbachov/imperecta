@@ -10,6 +10,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 
+from app.common.currency import (
+    DISPLAY_LOCAL,
+    CurrencyConverter,
+    display_price_fields,
+    normalize_display_currency,
+)
 from app.common.deps import CurrentUser, DbSession
 from app.models.core import UserProduct
 from app.models.dimensions import DimProduct
@@ -60,6 +66,7 @@ async def list_products(
     ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    display_currency: str = Query("local", description="local|EUR|USD"),
 ) -> ProductListResponse:
     listing_stats_sq = (
         select(
@@ -132,6 +139,14 @@ async def list_products(
 
     offset = max(page - 1, 0) * limit
     rows = (await db.execute(base_stmt.offset(offset).limit(limit))).mappings().all()
+
+    target_currency = normalize_display_currency(display_currency)
+    converter = (
+        await CurrencyConverter.load_latest(db)
+        if target_currency != DISPLAY_LOCAL
+        else None
+    )
+
     items: list[ProductListItem] = []
     for row in rows:
         current_price = row["target_price"] or row["min_comp_price"] or row["max_comp_price"]
@@ -139,6 +154,16 @@ async def list_products(
             # Do not mask missing prices with defaults; skip invalid entries.
             continue
         currency = row["target_currency"] or row["listing_currency"] or "EUR"
+        listing_currency = row["listing_currency"] or currency
+        display_value, display_code, conversion_available = display_price_fields(
+            current_price, currency, target_currency, converter
+        )
+        min_display, _, _ = display_price_fields(
+            row["min_comp_price"], listing_currency, target_currency, converter
+        )
+        max_display, _, _ = display_price_fields(
+            row["max_comp_price"], listing_currency, target_currency, converter
+        )
         items.append(
             ProductListItem(
                 id=row["id"],
@@ -159,6 +184,11 @@ async def list_products(
                 max_competitor_price=(
                     Decimal(str(row["max_comp_price"])) if row["max_comp_price"] is not None else None
                 ),
+                display_price=display_value,
+                display_currency=display_code,
+                conversion_available=conversion_available,
+                min_competitor_display_price=min_display,
+                max_competitor_display_price=max_display,
                 last_checked_at=row["last_checked_at"],
             )
         )

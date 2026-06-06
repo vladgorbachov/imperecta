@@ -56,6 +56,7 @@ async def get_overview(
     marketplace_id: UUID | None = Query(None),
     limit: int = Query(50, ge=1, le=500, description="Max items per page"),
     offset: int = Query(0, ge=0),
+    display_currency: str = Query("local", description="local|EUR|USD"),
 ) -> dict:
     if sort not in OVERVIEW_SORT:
         sort = "volatile"
@@ -67,6 +68,7 @@ async def get_overview(
         limit=limit,
         offset=offset,
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
+        display_currency=display_currency,
     )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
