@@ -52,23 +52,72 @@ class CurrencyConverter:
 
     @classmethod
     async def load_latest(cls, db: AsyncSession) -> "CurrencyConverter":
-        """Load the newest available FX snapshot from ``fact_currency_rate``."""
+        """Load FX rates from the same source the markets banner uses.
+
+        Mirrors the ``/markets/forex`` precedence: the persisted snapshot in
+        ``fact_currency_rate`` first, falling back to the live forex feed when
+        the table has not been ingested yet.
+        """
+        rates = await cls._load_from_db(db)
+        if not rates:
+            rates = await cls._load_from_live()
+        return cls(rates, cls._derive_usd_per_eur(rates))
+
+    @staticmethod
+    async def _load_from_db(db: AsyncSession) -> dict[str, _Rate]:
+        """Newest snapshot from ``fact_currency_rate`` (value of 1 unit)."""
         latest_date = await db.scalar(select(func.max(FactCurrencyRate.date_id)))
         rates: dict[str, _Rate] = {}
-        if latest_date is not None:
-            result = await db.execute(
-                select(
-                    FactCurrencyRate.currency_code,
-                    FactCurrencyRate.rate_to_eur,
-                    FactCurrencyRate.rate_to_usd,
-                ).where(FactCurrencyRate.date_id == latest_date)
-            )
-            for code, to_eur, to_usd in result.all():
-                key = (code or "").strip().upper()
-                if not key or key in rates:
-                    continue
-                rates[key] = _Rate(to_eur=float(to_eur), to_usd=float(to_usd))
-        return cls(rates, cls._derive_usd_per_eur(rates))
+        if latest_date is None:
+            return rates
+        result = await db.execute(
+            select(
+                FactCurrencyRate.currency_code,
+                FactCurrencyRate.rate_to_eur,
+                FactCurrencyRate.rate_to_usd,
+            ).where(FactCurrencyRate.date_id == latest_date)
+        )
+        for code, to_eur, to_usd in result.all():
+            key = (code or "").strip().upper()
+            if not key or key in rates:
+                continue
+            rates[key] = _Rate(to_eur=float(to_eur), to_usd=float(to_usd))
+        return rates
+
+    @staticmethod
+    async def _load_from_live() -> dict[str, _Rate]:
+        """Live EUR-based feed (same call as the banner fallback).
+
+        Each pair is ``EUR/<quote>`` with ``rate`` = quote units per 1 EUR, so
+        one unit of the quote currency is worth ``1 / rate`` EUR.
+        """
+        from app.modules.market_data.service import fetch_forex_rates
+
+        try:
+            raw = await fetch_forex_rates("EUR")
+        except Exception:  # noqa: BLE001 - missing rates must not break price listing
+            return {}
+
+        pairs: dict[str, float] = {}
+        for row in raw or []:
+            pair = str(row.get("pair", "")).strip()
+            if "/" not in pair:
+                continue
+            quote = pair.split("/")[-1].strip().upper()
+            try:
+                rate = float(row.get("rate", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if len(quote) == 3 and rate > 0:
+                pairs[quote] = rate
+
+        usd_per_eur = pairs.get(DISPLAY_USD)
+        rates: dict[str, _Rate] = {}
+        for quote, rate in pairs.items():
+            to_eur = 1.0 / rate
+            to_usd = (usd_per_eur / rate) if usd_per_eur else to_eur
+            rates[quote] = _Rate(to_eur=to_eur, to_usd=to_usd)
+        return rates
 
     @staticmethod
     def _derive_usd_per_eur(rates: dict[str, _Rate]) -> float | None:
