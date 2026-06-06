@@ -235,6 +235,31 @@ def _compute_price_change_pct(prev_price: float | None, current_price: float) ->
     return pct
 
 
+def _calculate_discount_pct(
+    current_price: float | None,
+    original_price: float | None,
+) -> float | None:
+    """Compute discount percentage from original to current price.
+
+    Returns the discount as a percentage (e.g., 25.50 for 25.5% off), rounded
+    to 2 decimal places. Returns None when:
+      - either price is missing or non-positive
+      - original_price <= current_price (no discount — possibly a price increase,
+        which is not a "discount" semantically)
+
+    No fallback values, no mock data: a None result means "discount cannot be
+    determined" and must be persisted as NULL, never as 0.
+    """
+    if current_price is None or original_price is None:
+        return None
+    if current_price <= 0 or original_price <= 0:
+        return None
+    if original_price <= current_price:
+        return None
+    discount = (original_price - current_price) / original_price * 100
+    return round(discount, 2)
+
+
 class GlobalScrapeService:
     """Scrape pool listings and persist FactPrice + listing denormalized fields.
 
@@ -637,12 +662,20 @@ class GlobalScrapeService:
                             float(data.price),
                         )
 
+                    current_price_value = float(data.price)
+                    original_price_value = (
+                        float(data.original_price) if data.original_price else None
+                    )
+                    discount_pct_value = _calculate_discount_pct(
+                        current_price_value, original_price_value
+                    )
                     price_record = FactPrice(
                         listing_id=listing.id,
                         date_id=date_id,
-                        price=float(data.price),
+                        price=current_price_value,
                         currency_code=data.currency[:3],
-                        original_price=float(data.original_price) if data.original_price else None,
+                        original_price=original_price_value,
+                        discount_pct=discount_pct_value,
                         in_stock=new_in_stock,
                         scraped_at=now,
                         price_change_pct=price_change_pct,
