@@ -22,7 +22,9 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { cn } from "@/lib/utils";
 
 type MarketsTab = "volatile" | "trending" | "gainers" | "losers" | "recent";
@@ -40,17 +42,6 @@ const TABS: Array<{ key: MarketsTab; labelKey: string }> = [
   { key: "losers", labelKey: "dashboard.market.topLosers" },
   { key: "recent", labelKey: "dashboard.market.recentlyUpdated" },
 ];
-
-function formatPrice(value: number | null | undefined, currency: string | null | undefined, locale: string): string {
-  if (value == null) {
-    return "—";
-  }
-  const formatted = new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(value);
-  return `${formatted} ${currency ?? ""}`.trim();
-}
 
 function formatPercent(value?: number | null): string {
   if (value == null) {
@@ -97,6 +88,7 @@ function KpiCard({ label, value }: { label: string; value: string }) {
 export function MarketsOverviewSection() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "en";
+  const { apiParam: displayCurrency } = useDisplayCurrency();
   const [activeTab, setActiveTab] = useState<MarketsTab>("volatile");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchRaw, setSearchRaw] = useState("");
@@ -113,8 +105,9 @@ export function MarketsOverviewSection() {
       limit: PAGE_LIMIT,
       offset: 0,
       search: debouncedSearch.length >= 2 ? debouncedSearch : undefined,
+      display_currency: displayCurrency,
     }),
-    [activeTab, debouncedSearch],
+    [activeTab, debouncedSearch, displayCurrency],
   );
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -226,7 +219,16 @@ export function MarketsOverviewSection() {
       columnHelper.accessor((row) => row.current_price ?? null, {
         id: "current_price",
         header: t("dashboard.market.price"),
-        cell: ({ row }) => <span className="font-mono">{formatPrice(row.original.current_price, row.original.currency, locale)}</span>,
+        cell: ({ row }) => (
+          <PriceDisplay
+            className="font-mono"
+            localAmount={row.original.current_price}
+            localCurrency={row.original.currency}
+            displayAmount={row.original.display_price}
+            displayCurrency={row.original.display_currency}
+            conversionAvailable={row.original.conversion_available}
+          />
+        ),
       }),
       columnHelper.accessor((row) => row.price_change_pct_24h ?? null, {
         id: "price_change_pct_24h",
@@ -243,7 +245,12 @@ export function MarketsOverviewSection() {
         cell: ({ row }) => (
           <Sparkline
             className="w-36"
-            points={(row.original.recent_prices ?? []).map((point) => ({ date: point.date, price: point.price }))}
+            currency={row.original.currency}
+            points={(row.original.recent_prices ?? []).map((point) => ({
+              date: point.date,
+              price: point.price,
+              currency: point.currency,
+            }))}
           />
         ),
       }),
@@ -461,11 +468,26 @@ export function MarketsOverviewSection() {
                     <p className="text-xs text-muted-foreground">
                       {item.marketplace_name ?? item.marketplace_domain ?? t("dashboard.market.marketplace")}
                     </p>
-                    <p className="mt-2 font-mono">{formatPrice(item.current_price, item.currency, locale)}</p>
+                    <PriceDisplay
+                      className="mt-2 font-mono"
+                      localAmount={item.current_price}
+                      localCurrency={item.currency}
+                      displayAmount={item.display_price}
+                      displayCurrency={item.display_currency}
+                      conversionAvailable={item.conversion_available}
+                    />
                     <p className={cn("text-xs", (item.price_change_pct_24h ?? 0) >= 0 ? "text-[var(--color-price-down)]" : "text-[var(--color-price-up)]")}>{formatPercent(item.price_change_pct_24h)}</p>
                   </div>
                 </div>
-                <Sparkline className="mt-3" points={(item.recent_prices ?? []).map((point) => ({ date: point.date, price: point.price }))} />
+                <Sparkline
+                  className="mt-3"
+                  currency={item.currency}
+                  points={(item.recent_prices ?? []).map((point) => ({
+                    date: point.date,
+                    price: point.price,
+                    currency: point.currency,
+                  }))}
+                />
                 <div className="mt-4 flex items-center justify-between gap-2">
                   <Button size="sm" asChild>
                     <Link to={`/products/${item.product_id ?? item.id}`}>{t("market.overview.details")}</Link>

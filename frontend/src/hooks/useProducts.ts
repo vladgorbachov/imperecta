@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { productsApi } from "@/api/products";
+import { useDisplayCurrencyStore } from "@/stores/displayCurrencyStore";
 
 interface UseProductsParams {
   search?: string;
@@ -12,9 +13,10 @@ interface UseProductsParams {
 export function useProducts(params: UseProductsParams = {}) {
   const { search, category, sort, page = 1, limit = 20 } = params;
   const queryClient = useQueryClient();
+  const displayCurrency = useDisplayCurrencyStore((state) => state.displayCurrency);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["products", search, category, sort, page, limit],
+    queryKey: ["products", search, category, sort, page, limit, displayCurrency],
     queryFn: async () => {
       const { data: res } = await productsApi.list({
         search: search || undefined,
@@ -22,6 +24,7 @@ export function useProducts(params: UseProductsParams = {}) {
         sort: sort || undefined,
         page,
         limit,
+        display_currency: displayCurrency,
       });
       return res;
     },

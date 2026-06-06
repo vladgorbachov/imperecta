@@ -1,334 +1,301 @@
-# Imperecta — Frontend (детальное описание)
+# Imperecta — Frontend
 
-**Актуально на:** 2026-05-28  
-**Стек:** React 19, TypeScript (strict), Vite 6, React Router 7, TanStack Query 5, Tailwind CSS 4, shadcn/ui (Radix), Zustand, i18next, axios, framer-motion, recharts.
+**Актуально на:** 2026-06-03 (head `6701bba`; backend scoped scrape aligned with UI)  
+**Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 ---
 
-## 1. Структура проекта
+## 1. Структура
 
 ```
-frontend/
-├── public/locales/{en,ar,es,zh,ru,fr,ro,uk}/translation.json
-├── src/
-│   ├── main.tsx              # AppWithInit, i18n, setupAuth
-│   ├── App.tsx               # routes, providers
-│   ├── api/                  # HTTP clients per domain
-│   ├── hooks/                # React Query wrappers
-│   ├── stores/               # authStore (Zustand)
-│   ├── components/           # UI by feature
-│   ├── pages/                # route pages
-│   ├── i18n/                 # init, guard, audit
-│   └── lib/                  # routes, utils, entitlements helpers
-├── package.json
-└── vite.config.ts
+frontend/src/
+├── main.tsx           # setupAuth, i18n, AppWithInit
+├── App.tsx            # routes, providers
+├── api/               # axios clients
+├── hooks/             # React Query
+├── stores/authStore.ts
+├── components/        # feature + ui
+├── pages/
+├── i18n/
+└── lib/routes.ts
 ```
 
-**Сборка:** `npm run build` → статика для Cloudflare Pages.  
-**Env:** `VITE_API_URL` — обязательный базовый URL backend (без `/api` suffix в env; клиент добавляет `/api`).
+**Env:** `VITE_API_URL` (обязателен) → `apiBaseUrl = ${url}/api`.
+
+**Деплой:** Cloudflare Pages, `npm run build`.
 
 ---
 
-## 2. Bootstrap и провайдеры
+## 2. Bootstrap
 
-**`main.tsx`:**
+**`main.tsx`:** `setupAuth` → `i18n` → `AppWithInit` (session restore) → `App`.
 
-1. Импорт `@/api/setupAuth` (interceptors).
-2. Импорт `@/i18n`.
-3. `AppWithInit` — восстановление сессии из storage до рендера защищённых маршрутов.
-4. `App` — роутинг.
-
-**`App.tsx` провайдеры (снаружи внутрь):**
-
-- `QueryClientProvider` — default staleTime, retry policy.
-- `AuthProvider` — контекст поверх Zustand.
-- `ThemeProvider` (next-themes) — default dark.
-- `TooltipProvider`
-- `Suspense` + `BrowserRouter`
-- `Toaster` (sonner)
+**Providers:** QueryClient → AuthProvider → ThemeProvider (dark default) → Tooltip → Suspense → Router → Toaster (sonner: glass + `imperecta-sonner-*` classes; centered layout overrides in `styles/components.css`).
 
 ---
 
-## 3. Маршрутизация
+## 3. Маршруты (`App.tsx`)
 
-**Файл:** `src/App.tsx`  
-**Политика путей:** `src/lib/routes.ts` (`PUBLIC_ROUTES`, `LANDING_PATH`, `getLoginUrl`).
-
-### 3.1 Публичные маршруты
+### Публичные
 
 | Path | Guard | Page |
 |------|-------|------|
 | `/ai.market.intelligence.agent` | `LandingRoute` | `LandingPage` |
-| `/login`, `/register`, `/forgot-password` | `PublicAuthRoute` | auth pages |
-| `/change-password` | `ChangePasswordRoute` | `ForcePasswordChangePage` |
+| `/login`, `/register`, `/forgot-password` | `PublicAuthRoute` | auth |
+| `/change-password` | `ChangePasswordRoute` | force password |
 | `*` | — | `NotFoundPage` |
 
-`LandingRoute`: если есть токен → redirect `/dashboard`.
-
-### 3.2 Защищённое приложение
-
-`ProtectedRoute` + `DashboardLayout` (`<Outlet />`):
+### Protected + `DashboardLayout`
 
 | Path | Page |
 |------|------|
-| `/` | redirect → `/dashboard` |
+| `/` → `/dashboard` | redirect |
 | `/dashboard` | `DashboardPage` |
-| `/products`, `/products/:id` | `ProductsPage`, `ProductDetailPage` |
+| `/products`, `/products/:id` | products |
 | `/digests` | `DigestsPage` |
 | `/import` | `ImportPage` |
 | `/analytics` | `AnalyticsPage` |
 | `/ai` | `AIAnalystRoute` → `AIAnalystPage` |
 | `/settings` | `SettingsPage` |
 
-### 3.3 Admin
+### Admin (superuser)
 
-| Path | Guard | Page |
-|------|-------|------|
-| `/admin` | `SuperuserRoute` + `DashboardLayout` | `AdminPage` |
+| Path | Page |
+|------|------|
+| `/admin` | `AdminPage` (index) |
 
-### 3.4 Страницы без маршрута (WIP / legacy)
+### Без route (legacy / WIP)
 
-- `CompetitorsPage.tsx` — API client есть, route **нет**.
-- `AlertsPage.tsx` — аналогично.
+- `CompetitorsPage.tsx`, `AlertsPage.tsx` — clients есть, routes нет.
 - `AiPage.tsx` — заменён `AIAnalystPage`.
 
 ---
 
-## 4. Layout и навигация
+## 4. Layout
 
-### `DashboardLayout`
+**`DashboardLayout`:** sidebar + header + scroll `main` + `Outlet`; motion on path change; `MobileSidebar`, `BottomNavigation`, `SessionExpiryWarning`.
 
-- Grid: sidebar + header + scrollable `main`.
-- `framer-motion` — анимация при смене pathname.
-- `MobileSidebar`, `BottomNavigation` — responsive.
-- `SessionExpiryWarning` — предупреждение об истечении refresh.
+**Навигация:** Dashboard, Products, Digests, Import, Analytics, AI (entitlement), Admin (superuser). Settings — из Header.
 
-### Sidebar / Header
-
-- Основные пункты: Dashboard, Products, Digests, Import, Analytics, AI (с entitlement), Admin (superuser).
-- Settings — из `Header`, не в sidebar.
-- Collapse state: `useSidebar` → localStorage `imperecta_sidebar_collapsed`.
+**Sidebar collapse:** `useSidebar` → `localStorage` `imperecta_sidebar_collapsed`.
 
 ---
 
-## 5. API layer (`src/api/`)
+## 5. API layer
 
-### 5.1 `client.ts`
+### `client.ts`
 
-```typescript
-apiBaseUrl = `${normalizedViteApiUrl}/api`
-```
+- HTTPS page → force `https://` API URL.
+- `apiClient` axios, `baseURL: apiBaseUrl`.
 
-- На HTTPS-странице `http://` API URL принудительно → `https://`.
-- `apiClient` — axios instance.
+### `setupAuth.ts`
 
-### 5.2 `setupAuth.ts`
+- Bearer from `authStore` / `authStorage`.
+- 401 → single refresh attempt → retry or logout.
 
-- Request: `Authorization: Bearer ${accessToken}` из `authStore` / `authStorage`.
-- Response 401: один coordinated refresh, retry original request или logout.
+### Модули
 
-### 5.3 Модули
-
-| Файл | Endpoints (relative to `/api`) |
-|------|--------------------------------|
+| File | Paths |
+|------|-------|
 | `auth.ts` | `/auth/*` |
 | `products.ts` | `/products`, `/pool/*` |
 | `markets.ts` | `/markets/*`, ingest |
-| `competitors.ts` | `/competitors/*` |
-| `alerts.ts` | `/alerts`, `/alerts/events` |
-| `analytics.ts` | `/analytics/*` |
-| `digests.ts` | `/digests` |
-| `import.ts` | `/import/products/*` |
-| `ai.ts` | `/ai/*` |
+| `competitors.ts`, `alerts.ts` | есть; backend alerts router off |
+| `analytics.ts`, `digests.ts`, `import.ts`, `ai.ts` | domain APIs |
 | `admin.ts` | `/admin/*`, `/admin/parsing/*` |
 
-### 5.4 Admin parsing API (`admin.ts`)
+### Admin parsing types (`admin.ts`)
 
-Типы и функции для:
-
-- `getParsingTestMarketplaces`
-- `runParsingPipeline` → `POST /admin/parsing/run-pipeline`
-- `cancelParsingActiveJob`
-- `getParsingPipelineRuns`, `getParsingJobStatus`, `getParsingJobLiveFeed`
+- `RunPipelinePayload`: optional `marketplace_codes[]`
+- `ParsingJobStatus`, `ParsingLiveStep`, `ParsingPipelineRun`
 - `getParsingWorkerLogRelay(after, jobId, limit)`
-- `getParsingActiveJob`
-- Users CRUD under `/admin/parsing/users*`
-- `getParsingMarketplacesDetailed`
+- User CRUD request/response types
 
 ---
 
-## 6. Hooks (React Query)
+## 6. Hooks (`useAdmin.ts` и др.)
 
-**Паттерн:** один hook = query/mutation + cache keys `["domain", "sub", ...]`.
+### Parsing / Data Collection
 
-### `useAdmin.ts` (ключевой для admin)
-
-| Hook | Poll / notes |
-|------|----------------|
-| `useAdminStats` | admin overview |
-| `useClaudeStatus` | 60s |
+| Hook | Interval / notes |
+|------|------------------|
 | `useRunParsingPipeline` | mutation |
 | `useCancelParsingActiveJob` | mutation |
-| `useParsingPipelineRuns` | 5s when monitoring |
-| `useParsingJobStatus(jobId)` | 2s when active |
-| `useParsingJobLiveFeed(jobId)` | 3s during scrape |
+| `useParsingActiveJob` | ~4–5s |
+| `useParsingJobStatus` | 2s when monitoring |
+| `useParsingJobLiveFeed` | 3s during scrape |
 | `useParsingWorkerLogRelay` | 2s, cursor `after` |
-| `useParsingActiveJob` | 4–5s |
-| `useParsingUsersDetailed` + mutations | user admin |
-| `useParsingMarketplacesDetailed` | marketplace picker |
-| `useParsingTestMarketplaces` | test cards |
+| `useParsingPipelineRuns(limit)` | 5s; default limit **10** в UI |
+| `useParsingTestMarketplaces` | marketplace cards |
 
-Другие hooks: `useAuth`, `useProducts`, `usePoolProducts`, `useCompetitors`, `useAlerts`, `useAnalytics`, `useEntitlements`, `usePlanLimits`, `useDebounce`, `useRowSelection`.
+### Users Management
+
+| Hook | Notes |
+|------|-------|
+| `useParsingUsersDetailed(limit)` | default 500 |
+| `useCreateAdminUser` | POST |
+| `useUpdateAdminUser` | PATCH profile/plan |
+| `useSetAdminUserStatus` | active flag |
+| `useSetAdminUserRole` | superuser |
+| `useResetAdminUserPassword` | POST |
+| `useDeleteAdminUser` | DELETE |
+
+### Market Overview
+
+| Hook | Notes |
+|------|-------|
+| `useAdminStats`, `useClaudeStatus` | 60s poll Claude |
+| `useAddMarketplace`, `useUpdateMarketplace`, `useDeleteMarketplace` | |
+| `useMarketsIngest` | trigger ingestion |
+| `useParsingMarketplacesDetailed` | paginated API |
+
+Другие: `useAuth`, `useProducts`, `usePoolProducts`, `useEntitlements`, `usePlanLimits`.
 
 ---
 
-## 7. State management
+## 7. State
 
-| Тип | Реализация |
-|-----|------------|
-| Auth | **Zustand** `stores/authStore.ts` — user, tokens, login/logout/refresh, language policy |
-| Server state | TanStack Query |
-| UI local | `useState` в компонентах |
+| Concern | Solution |
+|---------|----------|
+| Auth | Zustand `authStore` — tokens, user, login/logout/refresh, language policy |
+| Server | TanStack Query keys `["admin", "parsing", …]` |
 | Theme | next-themes |
-| Sidebar | localStorage via `useSidebar` |
-
-**Нет** глобального store для products/parsing — только Query cache.
+| UI local | `useState` in pages |
 
 ---
 
 ## 8. i18n
 
-**Инициализация:** `src/i18n/index.ts`
-
-- i18next + react-i18next + http-backend + languageDetector (отключены в Vitest).
-- Файлы: `public/locales/{lng}/translation.json`.
-- Storage key: `imperecta_language`.
-- **8 языков:** en, ar, es, zh, ru, fr, ro, uk.
-- **Русский:** доступен только superuser (`enforceLanguagePolicy`, `getAvailableLanguages`).
-- **RTL:** `ar` → `document.documentElement.dir = 'rtl'`.
-- **Guard:** `translationGuard.ts`, dev audit `runTranslationCoverageAudit`.
-
-UI: `LanguageSelector`, `useTranslation()` повсеместно.
+- **8 locales:** en, ar, es, zh, ru, fr, ro, uk — `public/locales/{lng}/translation.json`
+- **Storage:** `imperecta_language`
+- **Russian:** только superuser (`enforceLanguagePolicy`)
+- **RTL:** `ar`
+- **Guard/audit:** `translationGuard.ts`, dev coverage audit
+- **`App.tsx`:** большой comment-index ключей по namespace
 
 ---
 
-## 9. Admin UI
+## 9. Admin UI (`AdminPage.tsx`)
 
-### 9.1 `AdminPage.tsx`
+Монолит ~1300 строк с тремя табами.
 
-Tabs:
+### Tab: Market Overview
 
-1. **Market Overview** — stats, Claude status, marketplaces ingest.
-2. **Data Collection** — `DataCollectionTab`.
-3. **Users Management** — parsing users table + dialogs.
+- Admin stats cards, Claude status.
+- Marketplaces table: search, pagination **20 / 50 / 100** (`MARKET_OVERVIEW_PAGE_SIZE_OPTIONS`).
+- Add/update/delete marketplace, trigger markets ingest.
 
-Диалог деталей pipeline run — открывается из Data Collection (`onOpenRunDetails`).
+### Tab: Data Collection
 
-### 9.2 `DataCollectionTab.tsx`
+Компонент **`DataCollectionTab.tsx`** (redesign):
 
-**Запуск pipeline:**
+**Запуск:**
 
-- Full pool: `runPipeline.mutateAsync(undefined)`.
-- Scoped: `{ marketplace_codes: [...] }` из чекбоксов active marketplaces.
-- Блокировка при `activeJobId`; cancel через `useCancelParsingActiveJob`.
+- Full pipeline — все active marketplaces.
+- Scoped — чекбоксы + `marketplace_codes` в payload; backend применяет тот же filter на **discovery и scrape** (не только discovery).
+- Кнопки disabled при active job; **Cancel** → `useCancelParsingActiveJob`.
+- **Clear selection** для marketplace picker.
 
-**Live monitor** (когда есть active/running job):
+**Live monitor** (running job):
 
-| Элемент | Источник |
-|---------|----------|
-| Progress bar | `job-status` → stage |
-| Stale warning | `last_activity_at` > 300s |
-| Metrics | listings, prices, errors, elapsed, scrape steps |
-| Tab Discovery | scope, celery_task_id, per-marketplace table |
-| Tab Scrape | pie по статусам, bar chart, throughput timeline |
-| Tab Summary | timings, error, link to details |
-| WorkerLogRelayPanel | только `status === "running"` |
+| UI | Data |
+|----|------|
+| Stage progress | dispatching → discovery → scrape → persist |
+| Stale badge | `last_activity_at` > **300s** (`STALE_ACTIVITY_SECONDS`) |
+| Metrics cards | listings, prices, errors, elapsed |
+| Tabs Discovery / Scrape / Summary | status, per-MP table, recharts pie/bar/timeline |
+| `WorkerLogRelayPanel` | только `status === "running"` |
 
-**История:** до 200 runs, pagination 20, click → monitor + details dialog.
+**History:**
 
-### 9.3 `WorkerLogRelayPanel.tsx`
+- `RUNS_LIMIT = 10` pipeline runs (не 200).
+- Resizable columns (`RUN_HISTORY_COLUMNS`: job, date, scope, stage, products, prices, errors, status, error).
+- Row click → monitor + details dialog (`onOpenRunDetails`).
 
-- `useParsingWorkerLogRelay({ jobId, after, enabled })` — refetch 2s.
-- Cursor pagination: `after` / `next_cursor`.
-- Buffer до 120 строк, display 3 (terminal mono emerald).
-- Reset при `!enabled || !jobId`.
+### Tab: Users Management
+
+- Table + search/filter.
+- Dialogs: create user, edit profile, reset password, toggle active/superuser, delete.
+- **Plans:** trial, starter, business, pro, enterprise.
+- **Languages:** все 8 кодов в форме (superuser может назначить ru).
+
+---
+
+## 10. `WorkerLogRelayPanel.tsx`
+
+- `useParsingWorkerLogRelay({ jobId, after, enabled })` — refetch **2s**.
+- Cursor: `after` / `next_cursor` from API.
+- Client buffer до **120** строк; API returns `visible_lines: 3`.
+- Mono terminal style (emerald on dark).
 - `aria-live="polite"`.
+- Reset when `!enabled || !jobId`.
 
 ---
 
-## 10. Компоненты по доменам
+## 11. Products UI
 
-```
-components/
-├── admin/           DataCollectionTab, WorkerLogRelayPanel
-├── ai/              ChatInput, ChatMessage, PresetQuestions, TypingIndicator
-├── analytics/       TrendsChart, MarketComparisonSection
-├── auth/            AuthProvider, AuthLayout, authContext
-├── competitors/     ComparisonMatrix, PriceSparkline
-├── dashboard/       MarketsTickerBar, Overview, Analytics sections
-├── layout/          DashboardLayout, Sidebar, Header, Mobile, BottomNav
-├── products/        MyProductsTab, PoolProductsTab, selection dialogs
-├── ui/              shadcn primitives (button, card, table, dialog, …)
-├── ui-custom/       PageHeader, StatCard, EmptyState, PlanLimitBanner, …
-└── guards/          ProtectedRoute, SuperuserRoute, AIAnalystRoute, …
-```
+- **`MyProductsTab` / `PoolProductsTab`:** pagination 20/50/100, row selection, bulk delete.
+- **`ProductDetailPage`:** charts, run parsing action.
+- Plan limits: `PlanLimitBanner`, `usePlanLimits`.
 
 ---
 
-## 11. Entitlements и планы
+## 12. Entitlements (client)
 
-- `useEntitlements` / `usePlanLimits` — лимиты products, AI route guard.
-- `AIAnalystRoute` — редирект или upgrade prompt без entitlement.
-- `PlanLimitBanner` — предупреждения в UI.
-
----
-
-## 12. Безопасность (client)
-
-- JWT в memory/storage через `authStorage` abstraction.
-- DOMPurify для AI markdown render.
-- HTTPS enforcement для API URL.
-- ESLint security plugin (`lint:security`).
-- Не хранить secrets во frontend env (только `VITE_*` public).
+- `useEntitlements` — feature flags from user/plan.
+- `AIAnalystRoute` — блок без PAID_FULL + AI feature.
+- Trial: full platform кроме AI (соответствует backend `ServiceTier.TRIAL`).
 
 ---
 
-## 13. Тестирование
+## 13. Безопасность
 
-- **Unit:** Vitest (`npm test`).
-- **E2E:** Playwright (отдельная конфигурация).
-- **Admin parsing:** `AdminPage.parsing.test.tsx`.
-- **i18n:** `src/i18n/__tests__/`.
-
----
-
-## 14. Сборка и деплой
-
-1. Push → Cloudflare Pages build `vite build`.
-2. Env в Cloudflare: `VITE_API_URL` → Railway backend URL.
-3. CORS на backend должен включать Pages origin.
+- JWT storage abstraction (`authStorage`).
+- DOMPurify для AI markdown.
+- ESLint security plugin.
+- No secrets in `VITE_*` except public API URL.
 
 ---
 
-## 15. Расхождения и TODO (зафиксировано)
+## 14. Тесты
+
+- Vitest: `npm test`
+- `AdminPage.parsing.test.tsx` — parsing tab behaviors
+- i18n tests under `src/i18n/__tests__/`
+- Playwright E2E (отдельный config)
+
+---
+
+## 15. Универсальность UI
+
+- Нет store-specific labels в i18n (удалены named marketplace strings в `1f024b1`).
+- Data Collection и Market Overview работают с любыми `dim_marketplace` по `code` / URL, без hardcoded доменов во фронте.
+- Pipeline test: scoped run через `marketplace_codes[]` — без привязки к конкретному ритейлеру в UI.
+
+**`scrape_tier`:** поле есть в БД и backend (`e286053`), **UI для редактирования tier пока нет** — назначение tier через SQL/admin API в будущем.
+
+---
+
+## 16. Известные расхождения
 
 | Тема | Состояние |
 |------|-----------|
-| `/competitors`, `/alerts` routes | Страницы и API clients есть, routes нет |
-| Backend `/api/alerts` | Router не в main.py |
-| `scraper/api.py` | Не подключён; admin parsing — основной путь |
+| `/competitors`, `/alerts` | Pages + API clients; no routes |
+| Backend `/api/alerts` | Router not in main |
+| Sidebar i18n keys for competitors/alerts | Legacy comments in App.tsx |
 
 ---
 
-## 16. Файлы-источники
+## 17. Источники
 
 | Область | Путь |
 |---------|------|
 | Routes | `frontend/src/App.tsx` |
-| API client | `frontend/src/api/client.ts`, `admin.ts` |
-| Admin UI | `frontend/src/components/admin/*` |
 | Admin page | `frontend/src/pages/AdminPage.tsx` |
-| Auth store | `frontend/src/stores/authStore.ts` |
-| i18n | `frontend/src/i18n/index.ts` |
+| Data Collection | `frontend/src/components/admin/DataCollectionTab.tsx` |
+| Worker logs | `frontend/src/components/admin/WorkerLogRelayPanel.tsx` |
+| Admin API | `frontend/src/api/admin.ts` |
+| Hooks | `frontend/src/hooks/useAdmin.ts` |
+| Auth | `frontend/src/stores/authStore.ts` |
 
 Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Backend.md`, `Imperecta_Parsing.md`.

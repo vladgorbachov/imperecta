@@ -27,6 +27,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
+import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { formatPrice, formatDate, formatRelativeTime, formatChartDate } from "@/lib/formatters";
 import { CHART_COLORS, CHART_PRIMARY } from "@/lib/design-tokens";
 import { analyticsApi } from "@/api/analytics";
@@ -62,24 +64,25 @@ export function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
+  const { apiParam: displayCurrency, resolveDisplayPrice } = useDisplayCurrency();
 
   const [period, setPeriod] = useState<Period>("7d");
 
   const { data: product, isLoading: productLoading } = useProduct(id);
   const { data: priceHistory, isLoading: historyLoading } = useQuery({
-    queryKey: ["products", id, "price-history", period],
+    queryKey: ["products", id, "price-history", period, displayCurrency],
     queryFn: async () => {
       if (!id) return null;
-      const { data } = await analyticsApi.getPriceHistory(id, period);
+      const { data } = await analyticsApi.getPriceHistory(id, period, displayCurrency);
       return data;
     },
     enabled: !!id,
   });
   const { data: comparison } = useQuery({
-    queryKey: ["products", id, "comparison"],
+    queryKey: ["products", id, "comparison", displayCurrency],
     queryFn: async () => {
       if (!id) return null;
-      const { data } = await analyticsApi.getComparison(id);
+      const { data } = await analyticsApi.getComparison(id, displayCurrency);
       return data;
     },
     enabled: !!id,
@@ -198,6 +201,14 @@ export function ProductDetailPage() {
   }
 
   const myPrice = product.current_price;
+  const chartCurrency =
+    resolveDisplayPrice({
+      localAmount: product.current_price,
+      localCurrency: product.currency,
+      displayAmount: priceHistory?.my_display_price,
+      displayCurrency: priceHistory?.my_display_currency,
+      conversionAvailable: priceHistory?.my_conversion_available,
+    }).currency ?? product.currency;
 
   // TODO: GET /api/products/{id}/ai-recommendation
   const minComp = displayCompetitors
@@ -246,7 +257,13 @@ export function ProductDetailPage() {
               {t("productDetail.myPrice")}
             </p>
             <p className="text-2xl font-bold text-primary dark:text-primary">
-              {formatPrice(myPrice, "RUB", locale)}
+              <PriceDisplay
+                localAmount={myPrice}
+                localCurrency={product.currency}
+                displayAmount={priceHistory?.my_display_price}
+                displayCurrency={priceHistory?.my_display_currency}
+                conversionAvailable={priceHistory?.my_conversion_available}
+              />
             </p>
           </div>
           <Badge
@@ -334,9 +351,11 @@ export function ProductDetailPage() {
                     <YAxis
                       tick={{ fontSize: 12, fill: "var(--foreground-muted)" }}
                       stroke="var(--foreground-muted)"
-                      tickFormatter={(v) => formatPrice(v, "RUB", locale)}
+                      tickFormatter={(v) =>
+                        chartCurrency ? formatPrice(v, chartCurrency, locale) : String(v)
+                      }
                     />
-                    <Tooltip content={<ChartTooltip />} />
+                    <Tooltip content={<ChartTooltip chartCurrency={chartCurrency} />} />
                     <Line
                       type="monotone"
                       dataKey="myPrice"
@@ -485,7 +504,22 @@ export function ProductDetailPage() {
                             <MarketplaceBadge marketplace={marketplace} size="sm" />
                           </TableCell>
                           <TableCell>
-                            {price != null ? formatPrice(Number(price), "RUB", locale) : t("common.dash")}
+                            <PriceDisplay
+                              localAmount={price}
+                              localCurrency={product.currency}
+                              displayAmount={
+                                comparisonCompetitors.find((cc) => cc.name === c.competitor_name)
+                                  ?.display_price
+                              }
+                              displayCurrency={
+                                comparisonCompetitors.find((cc) => cc.name === c.competitor_name)
+                                  ?.display_currency
+                              }
+                              conversionAvailable={
+                                comparisonCompetitors.find((cc) => cc.name === c.competitor_name)
+                                  ?.conversion_available
+                              }
+                            />
                           </TableCell>
                           <TableCell>
                             {diffPercent != null ? (
@@ -537,12 +571,26 @@ export function ProductDetailPage() {
   );
 }
 
-function ChartTooltip(props: TooltipProps<number, string>) {
+function ChartTooltip({
+  chartCurrency,
+  ...props
+}: TooltipProps<number, string> & { chartCurrency: string | null }) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
   const { active, payload, label } = props;
   if (!active || !payload?.length) return null;
   const item = payload[0]?.payload as ChartDataPoint;
+
+  const formatChartValue = (value: number | null | undefined) => {
+    if (value == null) {
+      return t("common.dash");
+    }
+    if (!chartCurrency) {
+      return String(value);
+    }
+    return formatPrice(value, chartCurrency, locale);
+  };
+
   return (
     <div
       className="rounded-md px-3 py-2 shadow-md"
@@ -555,13 +603,13 @@ function ChartTooltip(props: TooltipProps<number, string>) {
       <p className="mb-2 font-medium">{item ? formatDate(item.date, locale) : label}</p>
       <div className="space-y-1 text-sm">
         <p>
-          {t("productDetail.myPriceLegend")}: {item?.myPrice != null ? formatPrice(item.myPrice, "RUB", locale) : t("common.dash")}
+          {t("productDetail.myPriceLegend")}: {formatChartValue(item?.myPrice)}
         </p>
         {payload.map((p) => {
           if (p.dataKey === "myPrice") return null;
           return (
             <p key={String(p.dataKey)}>
-              {p.name}: {p.value != null ? formatPrice(p.value as number, "RUB", locale) : t("common.dash")}
+              {p.name}: {formatChartValue(p.value as number | null | undefined)}
             </p>
           );
         })}

@@ -23,7 +23,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { formatPrice } from "@/lib/formatters";
+import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useProducts, useProductCategories } from "@/hooks/useProducts";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
@@ -72,7 +72,7 @@ const SORT_OPTIONS = [
   { value: "price_desc", labelKey: "products.sort.priceDesc" },
 ] as const;
 
-export function MyProductsTab({ locale }: { locale: string }) {
+export function MyProductsTab({ locale: _locale }: { locale: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -354,12 +354,22 @@ export function MyProductsTab({ locale }: { locale: string }) {
                         <span className="font-medium">{p.name}</span>
                       </TableCell>
                       <TableCell>
-                        {formatPrice(p.current_price, p.currency, locale)}
+                        <PriceDisplay
+                          localAmount={p.current_price}
+                          localCurrency={p.currency}
+                          displayAmount={p.display_price}
+                          displayCurrency={p.display_currency}
+                          conversionAvailable={p.conversion_available}
+                        />
                       </TableCell>
                       <TableCell>
-                        {p.min_competitor_price != null
-                          ? formatPrice(p.min_competitor_price, p.currency, locale)
-                          : "—"}
+                        <PriceDisplay
+                          localAmount={p.min_competitor_price}
+                          localCurrency={p.currency}
+                          displayAmount={p.min_competitor_display_price}
+                          displayCurrency={p.display_currency}
+                          conversionAvailable={p.conversion_available}
+                        />
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>

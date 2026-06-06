@@ -2,6 +2,7 @@
  * Markets API. Typed contracts for new Markets page.
  */
 
+import type { DisplayCurrency } from "@/lib/displayCurrency";
 import { apiClient } from "./client";
 
 // --- Preferences ---
@@ -137,6 +138,9 @@ export interface MarketsOverviewItem {
   current_price?: number | null;
   original_price?: number | null;
   currency: string;
+  display_price?: number | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
   price_change_pct_24h?: number | null;
   price_change_pct_7d?: number | null;
   price_change_pct_30d?: number | null;
@@ -147,6 +151,9 @@ export interface MarketsOverviewItem {
     date: string;
     price: number;
     currency: string;
+    display_price?: number | null;
+    display_currency?: string | null;
+    conversion_available?: boolean;
   }>;
 }
 
@@ -249,6 +256,7 @@ export const marketsApi = {
     marketplace_id?: number;
     limit?: number;
     offset?: number;
+    display_currency?: DisplayCurrency;
   }) =>
     apiClient.get<MarketsOverviewResponse>("/markets/overview", {
       params: {
@@ -257,6 +265,7 @@ export const marketsApi = {
         marketplace_id: params?.marketplace_id,
         limit: params?.limit ?? 50,
         offset: params?.offset ?? 0,
+        display_currency: params?.display_currency ?? "local",
       },
     }),
 
@@ -297,6 +306,7 @@ export const marketsQueryKeys = {
     marketplace_id?: number;
     limit?: number;
     offset?: number;
+    display_currency?: DisplayCurrency;
   }) =>
     [
       ...marketsQueryKeys.all,
@@ -306,6 +316,7 @@ export const marketsQueryKeys = {
       params?.marketplace_id ?? null,
       params?.limit ?? 50,
       params?.offset ?? 0,
+      params?.display_currency ?? "local",
     ] as const,
   poolMarketplaceStats: () => [...marketsQueryKeys.all, "pool-marketplace-stats"] as const,
   poolStats: () => [...marketsQueryKeys.all, "pool-stats"] as const,

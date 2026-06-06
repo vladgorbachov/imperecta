@@ -538,9 +538,14 @@ class ScraperPool:
         - scrape_tier: strategic policy choice (1/2/3) tied to marketplace category.
         - requires_js: fine-grained hint inside a tier (affects layer order, not set).
 
-        Tier 1 (current default): decodo (if configured) -> httpx -> playwright.
+        Tier 1 (current default): httpx -> decodo (if configured) -> playwright.
+                                  httpx-first saves Decodo quota on server-rendered
+                                  shops (the majority of Tier 1 marketplaces).
+                                  When httpx fails (timeout, blocked, JS-only page),
+                                  Decodo and Playwright are tried in order.
                                   When requires_js=True, playwright moves up
-                                  to position 2 (right after decodo).
+                                  to position 2 (right after httpx) since Decodo
+                                  with JS rendering is more expensive than Playwright.
 
         Tier 2 / Tier 3: layers are documented in _SUPPORTED_SCRAPE_TIERS and are
                          not yet implemented. They will be added when the platform
@@ -562,13 +567,17 @@ class ScraperPool:
                 f"currently supported tiers: {sorted(_SUPPORTED_SCRAPE_TIERS)}"
             )
 
-        # Tier 1 layer composition (current behavior, unchanged).
-        layers: list[str] = []
+        # Tier 1 layer composition: httpx-first to save Decodo quota.
+        # httpx is free, fast (~400ms on server-rendered shops), and sufficient
+        # for the majority of Tier 1 marketplaces. Decodo is tried only when
+        # httpx fails (timeout, blocked, or JS-only page).
+        layers: list[str] = ["httpx"]
         if settings.decodo_enabled and settings.decodo_username and settings.decodo_password:
             layers.append("decodo")
-        layers.append("httpx")
         layers.append("playwright")
         if requires_js and "playwright" in layers:
+            # JS required: move playwright right after httpx (before Decodo),
+            # so we use the cheaper JS-capable transport first.
             layers = [layer for layer in layers if layer != "playwright"]
             layers.insert(1, "playwright")
         return layers

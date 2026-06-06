@@ -1,3 +1,4 @@
+import type { DisplayCurrency } from "@/lib/displayCurrency";
 import { apiClient } from "./client";
 
 export interface Competitor {
@@ -19,6 +20,10 @@ export interface CompetitorProduct {
   url: string;
   name: string | null;
   last_price: number | null;
+  currency?: string | null;
+  display_price?: number | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
   last_promo_label: string | null;
   last_in_stock: boolean | null;
   last_checked_at: string | null;
@@ -50,8 +55,10 @@ export const competitorsApi = {
     marketplace: string;
     notes?: string;
   }) => apiClient.post<Competitor>("/competitors", data),
-  getProducts: (competitorId: string) =>
-    apiClient.get<CompetitorProduct[]>(`/competitors/${competitorId}/products`),
+  getProducts: (competitorId: string, displayCurrency?: DisplayCurrency) =>
+    apiClient.get<CompetitorProduct[]>(`/competitors/${competitorId}/products`, {
+      params: { display_currency: displayCurrency ?? "local" },
+    }),
   addProduct: (data: {
     product_id: string;
     competitor_id: string;

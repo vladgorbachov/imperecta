@@ -1,13 +1,16 @@
 import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 import { useTranslation } from "react-i18next";
+import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 
 export interface SparklinePoint {
   date?: string;
   price: number;
+  currency?: string | null;
 }
 
 interface SparklineProps {
   points: SparklinePoint[];
+  currency?: string | null;
   className?: string;
 }
 
@@ -25,16 +28,10 @@ function formatSparklineDate(value: string | undefined, locale: string): string 
   });
 }
 
-function formatSparklinePrice(value: number, locale: string): string {
-  return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-export function Sparkline({ points, className }: SparklineProps) {
+export function Sparkline({ points, currency, className }: SparklineProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "en";
+  const { formatDisplayPrice } = useDisplayCurrency();
 
   if (points.length < 2) {
     return (
@@ -56,7 +53,13 @@ export function Sparkline({ points, className }: SparklineProps) {
       <ResponsiveContainer width="100%" height={48}>
         <LineChart data={points} margin={{ top: 6, right: 4, left: 4, bottom: 6 }}>
           <Tooltip
-            formatter={(value: number) => `${formatSparklinePrice(value, locale)} ${t("common.currency")}`}
+            formatter={(value: number, _name: string, item: { payload?: SparklinePoint }) => {
+              const pointCurrency = item.payload?.currency ?? currency;
+              return formatDisplayPrice({
+                localAmount: value,
+                localCurrency: pointCurrency,
+              });
+            }}
             labelFormatter={(label: string) => formatSparklineDate(label, locale)}
             contentStyle={{
               background: "var(--background-elevated)",

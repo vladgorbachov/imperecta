@@ -22,7 +22,9 @@ import {
   ChevronDown as ChevronDownIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDate, formatPrice } from "@/lib/formatters";
+import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
+import { formatDate } from "@/lib/formatters";
+import { useDisplayCurrencyStore } from "@/stores/displayCurrencyStore";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi } from "@/api/competitors";
@@ -61,7 +63,6 @@ import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { PriceSparkline } from "@/components/competitors/PriceSparkline";
 import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/stores/authStore";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
 
 type ScraperType = "auto" | "universal";
@@ -196,6 +197,7 @@ export function CompetitorsPage() {
   });
 
   const search = useDebounce(searchRaw, 300);
+  const displayCurrency = useDisplayCurrencyStore((state) => state.displayCurrency);
 
   const { data: competitors = [], isLoading } = useQuery({
     queryKey: ["competitors"],
@@ -239,7 +241,7 @@ export function CompetitorsPage() {
   );
 
   const getCompetitorProducts = async (competitorId: string): Promise<CompetitorProduct[]> => {
-    const { data } = await competitorsApi.getProducts(competitorId);
+    const { data } = await competitorsApi.getProducts(competitorId, displayCurrency);
     if (Array.isArray(data)) return data;
     if (data && typeof data === "object" && "items" in data) {
       const items = (data as { items?: unknown }).items;
@@ -648,15 +650,16 @@ function LinkedProductRow({
   isScrapePending,
 }: {
   cp: CompetitorProduct;
-  products: { id: string; name: string; sku: string | null }[];
+  products: { id: string; name: string; sku: string | null; currency?: string }[];
   locale: string;
   onManualScrape: () => void;
   isScrapePending: boolean;
 }) {
   const { t } = useTranslation();
-  const defaultCurrency = useAuthStore((s) => s.user?.default_currency ?? null);
-  const productName =
-    products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
+  void locale;
+  const linkedProduct = products.find((p) => p.id === cp.product_id);
+  const productName = linkedProduct?.name ?? cp.name ?? t("common.dash");
+  const localCurrency = cp.currency ?? linkedProduct?.currency ?? null;
   const trend =
     cp.price_diff != null
       ? cp.price_diff > 0
@@ -680,8 +683,15 @@ function LinkedProductRow({
         </a>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {cp.last_price != null && defaultCurrency && (
-          <span className="text-sm">{formatPrice(cp.last_price, defaultCurrency, locale)}</span>
+        {cp.last_price != null && (
+          <PriceDisplay
+            className="text-sm"
+            localAmount={cp.last_price}
+            localCurrency={localCurrency}
+            displayAmount={cp.display_price}
+            displayCurrency={cp.display_currency}
+            conversionAvailable={cp.conversion_available}
+          />
         )}
         {trend && (
           <TrendBadge
@@ -835,15 +845,16 @@ function TableLinkedProductRow({
   isScrapePending,
 }: {
   cp: CompetitorProduct;
-  products: { id: string; name: string; sku: string | null }[];
+  products: { id: string; name: string; sku: string | null; currency?: string }[];
   locale: string;
   onManualScrape: () => void;
   isScrapePending: boolean;
 }) {
   const { t } = useTranslation();
-  const defaultCurrency = useAuthStore((s) => s.user?.default_currency ?? null);
-  const productName =
-    products.find((p) => p.id === cp.product_id)?.name ?? cp.name ?? t("common.dash");
+  void locale;
+  const linkedProduct = products.find((p) => p.id === cp.product_id);
+  const productName = linkedProduct?.name ?? cp.name ?? t("common.dash");
+  const localCurrency = cp.currency ?? linkedProduct?.currency ?? null;
   const trend =
     cp.price_diff != null
       ? cp.price_diff > 0
@@ -862,9 +873,13 @@ function TableLinkedProductRow({
         </a>
       </TableCell>
       <TableCell>
-        {cp.last_price != null && defaultCurrency
-          ? formatPrice(cp.last_price, defaultCurrency, locale)
-          : t("common.dash")}
+        <PriceDisplay
+          localAmount={cp.last_price}
+          localCurrency={localCurrency}
+          displayAmount={cp.display_price}
+          displayCurrency={cp.display_currency}
+          conversionAvailable={cp.conversion_available}
+        />
       </TableCell>
       <TableCell>
         {trend && (

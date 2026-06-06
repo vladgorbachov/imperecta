@@ -1,3 +1,4 @@
+import type { DisplayCurrency } from "@/lib/displayCurrency";
 import { apiClient } from "./client";
 
 // --- Pool products (global marketplace pool) ---
@@ -20,6 +21,7 @@ export interface PoolProductsParams {
   sort?: PoolProductsSort;
   limit?: number;
   offset?: number;
+  display_currency?: DisplayCurrency;
 }
 
 export interface PoolProductItem {
@@ -35,6 +37,9 @@ export interface PoolProductItem {
   current_price?: number | null;
   original_price?: number | null;
   currency: string;
+  display_price?: number | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
   price_change_pct_24h?: number | null;
   price_change_pct_7d?: number | null;
   price_change_pct_30d?: number | null;
@@ -69,6 +74,9 @@ export interface Product {
   sku: string | null;
   current_price: number;
   currency: string;
+  display_price?: number | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
   url: string | null;
   category: string | null;
   is_active: boolean;
@@ -80,6 +88,8 @@ export interface Product {
 export interface ProductListItem extends Product {
   min_competitor_price: number | null;
   max_competitor_price: number | null;
+  min_competitor_display_price?: number | null;
+  max_competitor_display_price?: number | null;
   last_checked_at: string | null;
 }
 
@@ -116,6 +126,7 @@ export const productsApi = {
     sort?: string;
     page?: number;
     limit?: number;
+    display_currency?: DisplayCurrency;
   }) => apiClient.get<ProductListResponse>("/products", { params }),
 
   fetchPoolProducts: (params: PoolProductsParams) =>

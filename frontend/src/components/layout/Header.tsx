@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { DisplayCurrencySelector } from "@/components/ui/DisplayCurrencySelector";
 import { cn } from "@/lib/utils";
 
 interface HeaderProps {
@@ -67,6 +68,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <DisplayCurrencySelector />
         <Button
           variant="ghost"
           size="icon"

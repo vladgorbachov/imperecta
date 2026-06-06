@@ -1,348 +1,301 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-05-28  
-**Источники истины:** `backend/app/models/`, `backend/alembic/versions/`, live schema в Supabase.
+**Актуально на:** 2026-06-03 (head `015`; app `6701bba` + scoped scrape по `marketplace_code`)  
+**Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 ---
 
 ## 1. Обзор
 
-- **СУБД:** PostgreSQL 15+ (Supabase managed).
-- **Паттерн:** star schema для аналитики + операционные таблицы приложения.
-- **Доступ backend:** прямое подключение по `DATABASE_URL` (asyncpg / psycopg2) — **table owner**, RLS не применяется к backend-роли.
-- **Supabase REST:** PostgREST `/rest/v1/` — RLS включён (migration `012`) как defense in depth при утечке anon/service keys.
-- **Версионирование схемы:** Alembic; таблица версий в схеме **`alembic_meta.alembic_version`** (переживает `DROP SCHEMA public` в repair-миграциях).
+| Аспект | Значение |
+|--------|----------|
+| СУБД | PostgreSQL (Supabase) |
+| Паттерн | Star schema + operational tables |
+| Backend access | Direct URL, table owner — **RLS bypass** |
+| Supabase REST | RLS enabled (migration 012) |
+| Alembic version | Schema `alembic_meta.alembic_version` |
+| Head revision | `015_fact_price_default_partition` |
+
+При старте API: `alembic upgrade head` (subprocess).
 
 ---
 
 ## 2. Цепочка миграций
 
-| Rev | ID | Суть |
-|-----|-----|------|
-| 001 | `v2_schema` | Базовая v2 star schema + seeds |
-| 002 | `v2_additions` | Дополнительные объекты |
-| 003 | `fix_users_columns` | Колонки users |
-| 004 | `fix_real_state` | Repair production drift |
-| 005 | `scrape_logs_technical_error` | Статус `technical_error` |
-| 006 | `scrape_logs_status_length` | VARCHAR(50) для status |
-| 007 | `fix_migration_deadlock_and_meta` | alembic_meta schema |
-| 008 | `fix_alembic_version_length` | Widen `version_num` |
-| 009 | `full_v2_schema_rebuild` | Идемпотный полный rebuild v2 |
-| 010 | `discovery_universal_columns` | Universal discovery на `dim_marketplace` |
+| # | Revision | Суть |
+|---|----------|------|
+| 001 | `v2_schema` | Base v2 + seeds |
+| 002 | `v2_additions` | Additions |
+| 003 | `fix_users_columns` | users columns |
+| 004 | `fix_real_state` | Production repair |
+| 005 | `scrape_logs_technical_error` | Status `technical_error` |
+| 006 | `scrape_logs_status_length` | VARCHAR(50) |
+| 007 | `fix_migration_deadlock_and_meta` | `alembic_meta` schema |
+| 008 | `fix_alembic_version_length` | Wider `version_num` |
+| 009 | `full_v2_schema_rebuild` | Idempotent full v2 DDL |
+| 010 | `discovery_universal_columns` | Universal discovery on marketplace |
 | 011 | `dedup_and_listing_lifecycle` | `is_active`, `last_price_changed_at`, `no_change` |
-| 012 | `enable_rls_public_tables` | RLS на public tables (**head**) |
+| 012 | `enable_rls_public_tables` | RLS policies |
+| 013 | `search_trend_source_generic` | Generic `fact_search_trend.source` CHECK |
+| 014 | `marketplace_scrape_tier` | `dim_marketplace.scrape_tier` 1–3 |
+| 015 | `fact_price_default_partition` | `fact_price_202606`–`202612` + `fact_price_default` (**head**) |
 
-**Head:** `012_enable_rls_public_tables`
-
-### Правила миграций
-
-- Не изменять уже применённые файлы — только новые revisions.
-- **asyncpg:** один SQL statement на `op.execute()`; батчи через `_split_sql_statements()`.
-- Использовать `IF NOT EXISTS` / `IF EXISTS` для repair.
-- Supabase: избегать `DROP SCHEMA public CASCADE` — только точечные `DROP TABLE`.
-
-### Alembic runtime
-
-`backend/alembic/env.py` — явный **commit** после `connection.run_sync()` чтобы async context manager не откатывал DDL.
-
-При старте приложения: `main.py` → `alembic upgrade head` (subprocess).
+**Правила:** не редактировать старые revisions; один statement per `op.execute()` для asyncpg; `IF NOT EXISTS` для repair.
 
 ---
 
-## 3. Схемы и namespaces
+## 3. Таблицы
 
-| Schema | Содержание |
-|--------|------------|
-| `public` | Все business tables, MVs, indexes |
-| `alembic_meta` | `alembic_version` |
+### 3.1 Core (`models/core.py`)
 
----
+| Table | ORM | Назначение |
+|-------|-----|------------|
+| `users` | User | Auth, plan, superuser, language |
+| `user_subscriptions` | UserSubscription | Billing period |
+| `user_products` | UserProduct | User catalog links |
 
-## 4. Таблицы по группам
+**Plan CHECK:** `trial`, `starter`, `business`, `pro`, `enterprise` (см. entitlements).
 
-### 4.1 Core (`models/core.py`)
+### 3.2 Dimensions (`models/dimensions.py`)
 
-| ORM | Table | Назначение |
-|-----|-------|------------|
-| `User` | `users` | Аккаунты, JWT, superuser flag, language |
-| `UserSubscription` | `user_subscriptions` | План, лимиты, период |
-| `UserProduct` | `user_products` | Товары пользователя, ссылки на dim_product |
+| Table | ORM |
+|-------|-----|
+| `dim_date` | DimDate |
+| `dim_currency` | DimCurrency |
+| `dim_country` | DimCountry |
+| `dim_marketplace` | DimMarketplace |
+| `dim_category` | DimCategory |
+| `dim_brand` | DimBrand |
+| `dim_product` | DimProduct |
+| `dim_seller` | DimSeller |
 
-### 4.2 Dimensions (`models/dimensions.py`)
+**`dim_marketplace` (parsing + scrape):** **`marketplace_code`** (unique, used in scoped pipeline filter), `code`, `base_url`, `is_active`, `requires_js`, **`scrape_tier`** (INTEGER 1–3, default 1, indexed), `scraper_config` JSONB, custom selectors (010), `product_quota`, `products_in_pool`, `last_discovery_*`, `discovery_error_count`, `discovered_category_urls` (JSONB), `last_category_recon_at`, `sitemap_url`, `last_sitemap_harvest_at`.
 
-| ORM | Table |
-|-----|-------|
-| `DimDate` | `dim_date` |
-| `DimCurrency` | `dim_currency` |
-| `DimCountry` | `dim_country` |
-| `DimMarketplace` | `dim_marketplace` |
-| `DimCategory` | `dim_category` |
-| `DimBrand` | `dim_brand` |
-| `DimProduct` | `dim_product` |
-| `DimSeller` | `dim_seller` |
+**Scoped pipeline:** `POST run-pipeline { marketplace_codes }` → orchestrator фильтрует listings через `dim_marketplace.marketplace_code IN (...)`.
 
-**`dim_marketplace` (ключевые поля для parsing):**
+**`scrape_tier` semantics:**
 
-- `code`, `name`, `base_url`, `is_active`
-- `requires_js`, `scraper_config` (JSONB)
-- Discovery: universal columns (migration `010`) — selectors, sitemap, category patterns
-- `last_discovery_at`, `products_in_pool`, discovery stats
+| Value | Intended use | App support |
+|-------|--------------|-------------|
+| 1 | SSR shops: Decodo + httpx + Playwright | Implemented |
+| 2 | SPA + network intercept + stealth | DB only → `NotImplementedError` |
+| 3 | Hostile + residential + LLM fallback | DB only → `NotImplementedError` |
 
-**Seeds (в миграциях):**
+Existing rows get `DEFAULT 1` — behavior unchanged until tier is raised and layers implemented.
 
-- `dim_date`: 2024-01-01 … 2030-12-31
-- `dim_currency`: ~30 валют
-- `dim_country`: ~44 страны (Europe + CIS)
+**Seeds в миграциях:** dates 2024–2030, ~30 currencies, ~44 countries — `ON CONFLICT DO NOTHING`.
 
-### 4.3 Facts (`models/facts.py`)
+### 3.3 Facts (`models/facts.py`)
 
-| ORM | Table | Примечание |
-|-----|-------|------------|
-| `FactListing` | `fact_listing` | URL-level identity, denormalized last_* |
-| `FactPrice` | `fact_price` | **Partitioned** by `date_id` |
-| `FactReview` | `fact_review` | |
-| `FactStock` | `fact_stock` | |
-| `FactSearchTrend` | `fact_search_trend` | |
-| `FactCurrencyRate` | `fact_currency_rate` | Market data |
-| `FactTariff` | `fact_tariff` | |
-| `FactPromo` | `fact_promo` | |
-| `FactCryptoPrice` | `fact_crypto_price` | |
-| `FactCommodityPrice` | `fact_commodity_price` | |
-| `FactFuelPrice` | `fact_fuel_price` | |
+| Table | ORM | Notes |
+|-------|-----|-------|
+| `fact_listing` | FactListing | URL identity, denormalized `last_*` |
+| `fact_price` | FactPrice | **Partitioned** by `date_id` |
+| `fact_review` | FactReview | |
+| `fact_stock` | FactStock | |
+| `fact_search_trend` | FactSearchTrend | `source`: google_trends, amazon_trends, custom (013) |
+| `fact_currency_rate` | FactCurrencyRate | Market data |
+| `fact_tariff` | FactTariff | |
+| `fact_promo` | FactPromo | |
+| `fact_crypto_price` | FactCryptoPrice | |
+| `fact_commodity_price` | FactCommodityPrice | |
+| `fact_fuel_price` | FactFuelPrice | |
 
-#### `fact_listing` — центральная сущность пула
+#### `fact_listing`
 
-| Поле | Роль |
-|------|------|
-| `external_url` | Канонический URL |
-| `url_hash` | SHA256, **unique**, dedup при discovery |
-| `product_id`, `marketplace_id`, `seller_id` | FK |
-| `last_price`, `last_currency_code`, `last_in_stock`, … | Denormalized текущее состояние |
-| `consecutive_errors`, `last_error` | Health scrape |
-| `is_active` | Lifecycle (011) |
-| `last_price_changed_at` | Когда цена реально изменилась (011) |
-| `scrape_interval_minutes` | Интервал повторного scrape |
-| `scraper_config` | JSONB overrides |
+| Column | Role |
+|--------|------|
+| `external_url` | Canonical URL |
+| `url_hash` | SHA256, **UNIQUE** dedup |
+| `last_price`, `last_currency_code`, `last_in_stock` | Current snapshot |
+| `consecutive_errors`, `last_error` | Scrape health |
+| `is_active` | Lifecycle; false after 15 errors (app logic) |
+| `last_price_changed_at` | Last real price change |
+| `scrape_interval_minutes` | Reschedule hint |
 
-**Constraints:**
+Indexes: `idx_listing_url_hash` UNIQUE, `idx_listing_active` partial, marketplace/product FK indexes.
 
-- `uq_fact_listing_product_marketplace_seller_url`
-- `idx_listing_url_hash` UNIQUE
-- `idx_listing_active` partial WHERE `is_active = true`
+#### `fact_price`
 
-#### `fact_price` — история
+- PK includes `listing_id`, `date_id` (YYYYMMDD int).
+- **Parent table** `fact_price` — RANGE partition by `date_id` (from migration `009`).
+- **Monthly children:** `fact_price_YYYYMM` — bounds `FROM (YYYYMM01) TO (next month 01)`.
+- **DEFAULT child:** `fact_price_default` — catch-all если месячной партиции нет (migration `015`); строки следует периодически переносить в явные месячные партиции.
+- **015 (2026-06-03):** добавлены `fact_price_202606` … `fact_price_202612` (idempotent `IF NOT EXISTS`).
+- **Rolling maintenance:** Celery `ensure_fact_price_partitions` — создаёт партиции на +1…+3 месяца вперёд.
+- **One snapshot per listing per day:** app deletes existing row for `(listing_id, date_id)` before insert.
+- `price_change_pct` capped at ±9_999.9999% in app logic.
 
-- FK: `listing_id`, `date_id` → `dim_date`
-- Поля: `price`, `original_price`, `currency_code`, `product_name`, `title`, `in_stock`, …
-- **Partition key:** `date_id` (integer YYYYMMDD)
-- Партиции: `fact_price_YYYYMM` — создаются задачей `ensure_fact_price_partitions` на 3 месяца вперёд
+**Операционная ошибка без партиции:** `no partition of relation "fact_price" found for row` — лечится `alembic upgrade head` и/или `ensure_fact_price_partitions`.
 
-### 4.4 App tables (`models/app_tables.py`)
+### 3.4 App tables (`models/app_tables.py`)
 
-| ORM | Table |
-|-----|-------|
-| `Alert` | `alerts` |
-| `AlertEvent` | `alert_events` |
-| `Digest` | `digests` |
-| `AIChatSession` | `ai_chat_sessions` |
-| `AIChatMessage` | `ai_chat_messages` |
-| `ScrapeJob` | `scrape_jobs` |
-| `ScrapeLog` | `scrape_logs` |
-| `ApiLog` | `api_logs` |
-| `DataExport` | `data_exports` |
+| Table | ORM |
+|-------|-----|
+| `alerts` | Alert |
+| `alert_events` | AlertEvent |
+| `digests` | Digest |
+| `ai_chat_sessions` | AIChatSession |
+| `ai_chat_messages` | AIChatMessage |
+| `scrape_jobs` | ScrapeJob |
+| `scrape_logs` | ScrapeLog |
+| `api_logs` | ApiLog |
+| `data_exports` | DataExport |
 
 #### `scrape_jobs`
 
-- Parent jobs для pipeline (`job_type = full_pipeline_test`)
-- `status`, `started_at`, `completed_at`
-- `config` JSONB: metadata store (stage, counters, celery_task_id, marketplace filter)
+- `job_type`: e.g. `full_pipeline_test`
+- `status`: queued, running, completed, failed, cancelled
+- `config` JSONB: metadata (stage, timings, per_marketplace, celery_task_id)
 
 #### `scrape_logs`
 
-- Одна запись ≈ одна попытка scrape listing
-- `status` VARCHAR(50) + CHECK constraint
-- `technical_error` TEXT (migration 005)
-- `duration_ms`, `scraper_layer`, extracted fields snapshot
+| Column | Notes |
+|--------|-------|
+| `status` | VARCHAR(50) + CHECK |
+| `technical_error` | TEXT (005) |
+| `duration_ms`, `scraper_layer` | Diagnostics |
+| `listing_id`, `scrape_job_id` | FK |
 
-**Допустимые статусы (canonical):**
+**Statuses:** `success`, `no_change`, `error`, `timeout`, `blocked`, `captcha`, `not_found`, `price_not_found`, `parse_error`, `missing_critical_data`, `technical_error`.
 
-`success`, `error`, `timeout`, `blocked`, `captcha`, `not_found`, `price_not_found`, `parse_error`, `missing_critical_data`, `technical_error`, **`no_change`** (011).
-
----
-
-## 5. Materialized views
-
-| View | Назначение |
-|------|------------|
-| `mv_daily_price_summary` | Агрегаты цен по дням |
-| `mv_marketplace_health` | Health маркетплейсов для admin |
-
-Обновление: Celery `refresh_materialized_views` (concurrent refresh где поддерживается).
+**Runtime repair:** если БД на старом CHECK/VARCHAR(20) — `GlobalScrapeService` может выполнить `ALTER` при первой ошибке вставки.
 
 ---
 
-## 6. Правила целостности данных (код)
+## 4. Materialized views
 
-Эти правила **не** только CHECK в БД — enforced в `GlobalScrapeService` / persistence layer.
+| View | Purpose |
+|------|---------|
+| `mv_daily_price_summary` | Daily aggregates |
+| `mv_marketplace_health` | Marketplace health for admin |
 
-### 6.1 Запись `fact_price`
+Refresh: Celery `refresh_materialized_views` (concurrent where supported).
 
-Запись **только если:**
+---
 
-1. `product_name` OR `title` — non-empty
+## 5. Integrity rules (application layer)
+
+### 5.1 `fact_price` write gate
+
+Все условия одновременно:
+
+1. `product_name` OR non-empty `title`
 2. `price > 0`
-3. `currency` — non-empty string
+3. `currency` non-empty
+4. `len(currency_raw) < 50`
+5. `currency.upper()` ∈ marketplace whitelist (country currency + EUR + USD + `scraper_config.allowed_currencies`)
 
-**Запрещено:** silent fallback `USD`, `price = 0`, подстановка fake name.
+Иначе: skip insert; `scrape_logs` → `parse_error` или `missing_critical_data`.
 
-### 6.2 `no_change`
+### 5.2 `no_change`
 
-Если scrape успешен, но цена/ключевые поля не изменились → `scrape_logs.status = no_change`, `fact_price` может не писаться.
+Если price/currency/stock совпадают с `listing.last_*` (tolerance 0.001 on price):
 
-### 6.3 Listing dedup
+- No new `fact_price` row
+- Update `last_checked_at`
+- `scrape_logs.status = no_change`
 
-- Discovery: `FactListing.compute_url_hash(url)` → upsert by `url_hash`
-- Unique index на `url_hash`
+### 5.3 Listing deactivation
 
-### 6.4 `dim_date` в воркере
+`consecutive_errors >= 15` on failed scrape → `is_active = false` (excluded from pool batch).
 
-Паттерн deadlock-safe:
+### 5.4 No fake defaults
 
-```text
-SELECT date_id → INSERT ON CONFLICT DO NOTHING → flush → SELECT
-```
+- No USD fallback
+- No `price = 0` substitute
+- `last_in_stock` chain ends at `False`, not NULL
 
-### 6.5 `last_in_stock`
+### 5.5 `dim_date`
 
-Цепочка: `result.in_stock` → `data.in_stock` → `False` (никогда NULL в persist).
+Deadlock-safe: SELECT → INSERT ON CONFLICT DO NOTHING → SELECT.
 
-### 6.6 Price overflow
+### 5.6 URL dedup
 
-`MAX_VALID_PRICE = 9_999_999_999.99` — выше или ≤0 отбрасывается в scraper layer.
-
----
-
-## 7. RLS (migration 012)
-
-**Цель:** если anon/authenticated Supabase keys попадут в REST, строки не читаются без policy.
-
-**Таблицы с ENABLE ROW LEVEL SECURITY** (выборка):
-
-`users`, `user_products`, `user_subscriptions`, все `dim_*`, все `fact_*`, `alerts`, `alert_events`, `digests`, `ai_chat_*`, `scrape_jobs`, `scrape_logs`, `api_logs`, `data_exports`, …
-
-**Backend:** подключается ролью с правами owner → RLS bypass.
-
-**Policies:** по умолчанию restrictive; детали в `012_enable_rls_public_tables.py`.
+`FactListing.compute_url_hash(normalized_url)` — unique index.
 
 ---
 
-## 8. Индексы и производительность
+## 6. RLS (012)
 
-- FK columns indexed (`product_id`, `marketplace_id`, `listing_id`, `date_id`).
-- Partial index на active listings.
-- `url_hash` unique — быстрый dedup.
-- `fact_price` partition pruning по `date_id`.
-- Рекомендация Supabase: `pg_stat_statements`, регулярный VACUUM/ANALYZE на `scrape_logs`, `fact_price` partitions.
+**Цель:** restrict PostgREST if keys leak.
 
----
-
-## 9. Retention и cleanup
-
-**Celery `cleanup_old_data`:**
-
-- Старые `scrape_logs` (по retention policy в task)
-- `api_logs`, AI chat messages, `alert_events`
-
-Точные интервалы — в `workers/cleanup_tasks.py`.
+- `ENABLE ROW LEVEL SECURITY` on public business tables.
+- Backend service role bypasses as owner.
+- Policies defined in `012_enable_rls_public_tables.py`.
 
 ---
 
-## 10. URL normalization
+## 7. Retention
 
-`FactListing.compute_url_hash`:
-
-- Нормализация URL (lowercase host, strip tracking params — см. implementation в `facts.py`)
-- SHA256 hex → 64 char `url_hash`
+`cleanup_old_data` (Celery): aged `scrape_logs`, `api_logs`, chat messages, `alert_events` — см. `workers/cleanup_tasks.py`.
 
 ---
 
-## 11. Связь ORM ↔ Alembic
+## 8. Stale pipeline jobs (DB effect)
 
-`backend/app/models/__init__.py` — re-export всех моделей для `Base.metadata`.
+`ParsingAdminService._fail_stale_running_pipeline_jobs`:
 
-**Важно:** docstring в `__init__.py` может отставать от реального head — ориентир: **migration files**, не комментарий.
+- Updates `scrape_jobs.status` → failed
+- Sets metadata `error = stale_pipeline_timeout: …`
+- Invoked on admin reads (active job, status, runs)
 
 ---
 
-## 12. Проверочные SQL
+## 9. Verification SQL
 
 ```sql
--- Head migration
 SELECT version_num FROM alembic_meta.alembic_version;
 
--- Объёмы
-SELECT COUNT(*) FROM fact_listing;
+SELECT COUNT(*) FROM fact_listing WHERE is_active = true;
 SELECT COUNT(*) FROM fact_price;
-SELECT COUNT(*) FROM scrape_logs;
-SELECT COUNT(*) FROM dim_product;
+SELECT status, COUNT(*) FROM scrape_logs GROUP BY 1 ORDER BY 2 DESC;
 
--- RLS status
 SELECT tablename, rowsecurity
 FROM pg_tables
-WHERE schemaname = 'public' AND rowsecurity = true
-ORDER BY tablename;
+WHERE schemaname = 'public' AND rowsecurity
+ORDER BY 1;
+```
 
--- Партиции fact_price
+```sql
 SELECT inhrelid::regclass AS partition
 FROM pg_inherits
-JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
+JOIN pg_class parent ON inhparent = parent.oid
 WHERE parent.relname = 'fact_price';
 ```
 
-```sql
--- Схема колонок (обзор)
-SELECT table_name, column_name, data_type, is_nullable
-FROM information_schema.columns
-WHERE table_schema = 'public'
-ORDER BY table_name, ordinal_position;
-```
+---
+
+## 10. Connection strings
+
+| Consumer | Driver |
+|----------|--------|
+| FastAPI | `postgresql+asyncpg://` |
+| Celery / sync scrape | psycopg2 via `sync_session_factory` |
+
+Normalizer in `Settings.validate_database_url`.
 
 ---
 
-## 13. Supabase REST snapshot
+## 11. ORM metadata note
 
-При обращении к `/rest/v1/` ожидаемые entity (имена таблиц):
+**Migration 013:** перенос legacy `kaspi_trends`, `allegro_trends` → `custom`; CHECK только `google_trends`, `amazon_trends`, `custom`.
 
-- Dimensions: `dim_marketplace`, `dim_product`, …
-- Facts: `fact_listing`, `fact_price`, market data facts
-- Ops: `users`, `scrape_jobs`, `scrape_logs`, `alerts`, `digests`, `ai_chat_sessions`, …
-- MVs: `mv_daily_price_summary`, `mv_marketplace_health`
+**Migration 014:** `scrape_tier` on `dim_marketplace`.  
+**Migration 015:** monthly partitions Jun–Dec 2026 + `fact_price_default`.
 
-Row counts динамичны — для аудита использовать COUNT на prod read-replica или Supabase SQL editor.
+`models/__init__.py` docstring may reference older head — **trust migration files** (`015_*`) over comments.
 
 ---
 
-## 14. Конфигурация подключения
+## 12. Источники
 
-`backend/app/config.py`:
-
-```text
-postgresql://user:pass@host:5432/db   →  postgresql+asyncpg://...  (API)
-postgresql://...                       →  psycopg2 (Celery sync)
-```
-
-SSL: параметры Supabase pooler — в connection string Railway env.
-
----
-
-## 15. Файлы-источники
-
-| Область | Путь |
-|---------|------|
-| Models | `backend/app/models/core.py`, `dimensions.py`, `facts.py`, `app_tables.py` |
-| Migrations | `backend/alembic/versions/*.py` |
-| Alembic env | `backend/alembic/env.py` |
-| Partition task | `backend/app/workers/maintenance_tasks.py` |
+| Area | Path |
+|------|------|
+| Models | `backend/app/models/*.py` |
+| Migrations | `backend/alembic/versions/` |
 | Persist rules | `backend/app/modules/scraper/service.py` |
+| Partitions | `backend/app/workers/maintenance_tasks.py`, `015_fact_price_default_partition.py` |
+| Admin stale | `backend/app/modules/admin/parsing_admin.py` |
 
 Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Parsing.md`, `.cursor/rules/database.mdc`.

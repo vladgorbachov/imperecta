@@ -13,7 +13,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
-import { formatPrice } from "@/lib/formatters";
+import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePoolProducts, usePoolCategories } from "@/hooks/usePoolProducts";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
@@ -86,7 +86,7 @@ function ProductThumbnail({ item }: { item: PoolProductItem }) {
   );
 }
 
-export function PoolProductsTab({ locale }: { locale: string }) {
+export function PoolProductsTab({ locale: _locale }: { locale: string }) {
   const { t } = useTranslation();
   const isSuperuser = useAuthStore((s) => s.user?.is_superuser);
   const queryClient = useQueryClient();
@@ -320,9 +320,13 @@ export function PoolProductsTab({ locale }: { locale: string }) {
                         />
                       </TableCell>
                       <TableCell>
-                        {item.current_price != null && item.currency
-                          ? formatPrice(item.current_price, item.currency, locale)
-                          : t("common.dash")}
+                        <PriceDisplay
+                          localAmount={item.current_price}
+                          localCurrency={item.currency}
+                          displayAmount={item.display_price}
+                          displayCurrency={item.display_currency}
+                          conversionAvailable={item.conversion_available}
+                        />
                       </TableCell>
                       <TableCell>
                         {item.price_change_pct_24h != null ? (

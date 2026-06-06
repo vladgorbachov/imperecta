@@ -19,6 +19,7 @@ build/
 # Project
 Imperecta_MVP_Plan.md
 backend_full_audit_report.md
+*.md
 
 # IDE
 .idea/

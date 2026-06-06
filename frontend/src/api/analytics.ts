@@ -1,3 +1,4 @@
+import type { DisplayCurrency } from "@/lib/displayCurrency";
 import { apiClient } from "./client";
 
 export interface DashboardSummary {
@@ -28,6 +29,10 @@ export interface ActivePromo {
 export interface PriceHistoryDataPoint {
   date: string;
   price: number;
+  currency?: string | null;
+  display_price?: number | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
   promo_label: string | null;
   in_stock: boolean;
 }
@@ -41,12 +46,20 @@ export interface PriceHistoryCompetitor {
 export interface PriceHistoryResponse {
   product_name: string;
   my_price: number;
+  my_currency?: string | null;
+  my_display_price?: number | null;
+  my_display_currency?: string | null;
+  my_conversion_available?: boolean;
   competitors: PriceHistoryCompetitor[];
 }
 
 export interface ComparisonCompetitor {
   name: string;
   price: number | null;
+  currency?: string | null;
+  display_price?: number | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
   diff_amount: number | null;
   diff_percent: number | null;
   promo_label: string | null;
@@ -56,6 +69,10 @@ export interface ComparisonCompetitor {
 
 export interface ComparisonResponse {
   my_price: number;
+  my_currency?: string | null;
+  my_display_price?: number | null;
+  my_display_currency?: string | null;
+  my_conversion_available?: boolean;
   competitors: ComparisonCompetitor[];
 }
 
@@ -83,14 +100,19 @@ export const analyticsApi = {
     }>("/dashboard/aggregate-trend", {
       params: { period: period ?? 30, forecast: forecast ?? 7 },
     }),
-  getPriceHistory: (productId: string, period: "7d" | "30d" | "90d") =>
+  getPriceHistory: (
+    productId: string,
+    period: "7d" | "30d" | "90d",
+    displayCurrency?: DisplayCurrency
+  ) =>
     apiClient.get<PriceHistoryResponse>(
       `/analytics/products/${productId}/price-history`,
-      { params: { period } }
+      { params: { period, display_currency: displayCurrency ?? "local" } }
     ),
-  getComparison: (productId: string) =>
+  getComparison: (productId: string, displayCurrency?: DisplayCurrency) =>
     apiClient.get<ComparisonResponse>(
-      `/analytics/products/${productId}/comparison`
+      `/analytics/products/${productId}/comparison`,
+      { params: { display_currency: displayCurrency ?? "local" } }
     ),
   getComparisonMatrix: () =>
     apiClient.get<{
