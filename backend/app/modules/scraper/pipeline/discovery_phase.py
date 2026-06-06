@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
@@ -114,6 +114,28 @@ async def run_discovery_phase(
             )
             errors.append(f"marketplace_{marketplace.id}_timeout")
             now = datetime.now(tz=timezone.utc)
+            # Mark orphaned inner discovery job(s) for this marketplace as failed.
+            # asyncio.wait_for cancels DiscoveryCrawler.discover() mid-flight via
+            # CancelledError, so the finalization block inside discover() that
+            # would otherwise set status='completed'/'failed' never runs. The
+            # inner ScrapeJob created at the start of discover() therefore stays
+            # in status='running' indefinitely. Reap it here from the caller side
+            # while we still hold the outer session — this UPDATE rides on the
+            # same transaction as the marketplace status update below.
+            await db.execute(
+                text(
+                    """
+                    UPDATE scrape_jobs
+                    SET status = 'failed',
+                        completed_at = :now,
+                        duration_ms = EXTRACT(EPOCH FROM (:now - started_at))::int * 1000
+                    WHERE job_type = 'discovery'
+                      AND marketplace_id = :mp_id
+                      AND status = 'running'
+                    """
+                ),
+                {"now": now, "mp_id": marketplace.id},
+            )
             marketplace.last_discovery_status = "timeout_skipped"
             marketplace.last_discovery_at = now
             # Apply 24-hour cooldown to sitemap retry (same rationale as
