@@ -1,6 +1,6 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-06-03 (head `015`; app `6701bba` + scoped scrape по `marketplace_code`)  
+**Актуально на:** 2026-06-05 (head `015`; app `3d1eb66`)  
 **Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 ---
@@ -94,7 +94,7 @@ Existing rows get `DEFAULT 1` — behavior unchanged until tier is raised and la
 | `fact_review` | FactReview | |
 | `fact_stock` | FactStock | |
 | `fact_search_trend` | FactSearchTrend | `source`: google_trends, amazon_trends, custom (013) |
-| `fact_currency_rate` | FactCurrencyRate | Market data |
+| `fact_currency_rate` | FactCurrencyRate | Market data; **display currency** (`rate_to_eur`, `rate_to_usd` per unit) |
 | `fact_tariff` | FactTariff | |
 | `fact_promo` | FactPromo | |
 | `fact_crypto_price` | FactCryptoPrice | |
@@ -283,6 +283,8 @@ Normalizer in `Settings.validate_database_url`.
 
 **Migration 014:** `scrape_tier` on `dim_marketplace`.  
 **Migration 015:** monthly partitions Jun–Dec 2026 + `fact_price_default`.
+
+**Display currency (runtime, no migration):** `CurrencyConverter` читает `fact_currency_rate` (`currency_code`, `rate_to_eur`, `rate_to_usd`, `date_id`); при пустой таблице — live forex feed (`3d1eb66`).
 
 `models/__init__.py` docstring may reference older head — **trust migration files** (`015_*`) over comments.
 

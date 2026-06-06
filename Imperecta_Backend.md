@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-03 (head `6701bba` + scoped scrape / extractor classifier fixes)  
+**Актуально на:** 2026-06-05 (head `3d1eb66`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 ---
@@ -184,7 +184,7 @@ Standalone `scrape_all_pool_products` вызывает `_run_scrape_all_pool()` 
 ### 4.4 Остальные модули
 
 - **marketplaces** — CRUD, `requires_js`, discovery config JSONB.
-- **product_pool** — search, stats, MV health.
+- **product_pool** — search, stats, MV health; `display_currency` query → `CurrencyConverter`.
 - **user_products** — products + import; competitors API не в main.
 - **market_data** — providers + `ingest_market_data`.
 - **dashboard / analytics** — read aggregations.
@@ -227,7 +227,25 @@ celery_app.conf.beat_schedule = {}
 
 ---
 
-## 6. Tiered scrape (`scraper_pool.py` + `service.py`)
+## 6. Display currency (`app/common/currency.py`)
+
+| Компонент | Роль |
+|-----------|------|
+| `CurrencyConverter.load_latest` | Курсы из `fact_currency_rate` (max `date_id`); fallback — live `fetch_forex_rates("EUR")` |
+| `normalize_display_currency` | `local` \| `EUR` \| `USD` |
+| `apply_display_price_fields` | `(display_price, display_currency, conversion_available)` |
+
+**Принцип:** нет mock/fallback курсов — при отсутствии rate `conversion_available=false`, UI показывает local.
+
+**API с `display_currency` query:**
+
+- `GET /api/products` (`user_products/api_products.py`)
+- `GET /api/pool/*` (`product_pool/api.py`, `service._apply_display_currency`)
+- `GET /api/dashboard/...` / markets overview (`dashboard/api.py`)
+
+---
+
+## 7. Tiered scrape (`scraper_pool.py` + `service.py`)
 
 **Migration 014:** `dim_marketplace.scrape_tier INTEGER NOT NULL DEFAULT 1`, CHECK `(1,2,3)`, index `idx_marketplace_scrape_tier`.
 
@@ -246,10 +264,12 @@ GlobalScrapeService.scrape_product(listing_id)
 | `_SUPPORTED_SCRAPE_TIERS` | `{1}` — только tier 1 в проде |
 | `_KNOWN_SCRAPE_TIERS` | `{1, 2, 3}` — контракт БД |
 
-**Tier 1 layer order:**
+**Tier 1 layer order (httpx-first, `b6610ea`):**
 
-- `requires_js=False`: decodo (if configured) → httpx → playwright  
-- `requires_js=True`: decodo → **playwright** → httpx  
+- `requires_js=False`: **httpx** → decodo (if configured) → playwright  
+- `requires_js=True`: httpx → **playwright** → decodo  
+
+Экономия Decodo quota на SSR-магазинах; Decodo — после неудачи httpx.
 
 **Tier 2/3:** `NotImplementedError` с явным сообщением (misconfiguration не маскируется).
 
@@ -259,7 +279,7 @@ GlobalScrapeService.scrape_product(listing_id)
 
 ---
 
-## 7. `GlobalScrapeService` (ключевые константы)
+## 8. `GlobalScrapeService` (ключевые константы)
 
 | Константа | Значение |
 |-----------|----------|
@@ -281,7 +301,7 @@ GlobalScrapeService.scrape_product(listing_id)
 
 ---
 
-## 8. Entitlements API surface
+## 9. Entitlements API surface
 
 `UserPlan`: trial, starter, business, pro, enterprise.  
 `Feature.AI_ANALYST` — только PAID_FULL tier.  
@@ -289,7 +309,7 @@ GlobalScrapeService.scrape_product(listing_id)
 
 ---
 
-## 9. Исключения и ошибки
+## 10. Исключения и ошибки
 
 - `app/common/exceptions.py` — доменные типы.
 - Scrape: статусы `scrape_logs` — см. Parsing doc.
@@ -297,7 +317,7 @@ GlobalScrapeService.scrape_product(listing_id)
 
 ---
 
-## 10. Maintenance: `fact_price` partitions
+## 11. Maintenance: `fact_price` partitions
 
 **Проблема (prod, 2026-06-02):** migration `009` создала RANGE `fact_price`, но не все месяцы 2026 были покрыты → scrape INSERT падал.
 
@@ -307,14 +327,14 @@ GlobalScrapeService.scrape_product(listing_id)
 
 ---
 
-## 11. Тесты
+## 12. Тесты
 
 `backend/tests/` — API, scraper contracts, parsing admin.  
 Запуск в CI / локально с test DB (не Supabase prod).
 
 ---
 
-## 12. Источники истины
+## 13. Источники истины
 
 | Область | Путь |
 |---------|------|
@@ -328,6 +348,7 @@ GlobalScrapeService.scrape_product(listing_id)
 | Celery | `backend/app/workers/celery_app.py` |
 | Partitions task | `backend/app/workers/maintenance_tasks.py` |
 | Migration 015 | `backend/alembic/versions/015_fact_price_default_partition.py` |
+| Display currency | `backend/app/common/currency.py` |
 | Entitlements | `backend/app/entitlements/plan.py` |
 
 Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Database.md`, `Imperecta_Parsing.md`.

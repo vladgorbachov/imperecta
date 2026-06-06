@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-03 (ветка `main`, head `6701bba` + рабочие правки scraper/orchestrator)  
+**Актуально на:** 2026-06-05 (ветка `main`, head `3d1eb66`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 ---
@@ -15,7 +15,8 @@
 | Каталог пользователя | `user_products`, импорт CSV/XLS |
 | Глобальный пул | `product_pool`, поиск по `dim_product` / `fact_listing` |
 | Рыночные виджеты | Forex, crypto, commodities, fuel |
-| Дашборд и аналитика | KPI, сравнения, прогнозы |
+| Display currency | `local` / `EUR` / `USD` — конвертация цен через `fact_currency_rate` + live forex fallback |
+| Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`), сравнения, прогнозы |
 | Алерты и дайджесты | Celery (часть задач — stubs) |
 | AI-аналитик | Claude; entitlement по плану (`business` / `pro` / `enterprise`) |
 | Админка | Superuser: Market Overview, **Data Collection**, **Users Management** |
@@ -160,7 +161,7 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 
 | Tier | Назначение (план) | Статус в коде |
 |------|-------------------|---------------|
-| 1 | Server-rendered: Decodo → httpx → Playwright | **Реализован** (`_layer_order`) |
+| 1 | Server-rendered: **httpx → Decodo → Playwright** (httpx-first) | **Реализован** (`_layer_order`) |
 | 2 | SPA: network interception + basic stealth | `NotImplementedError` |
 | 3 | Hostile: full stealth + residential sticky + LLM | `NotImplementedError` |
 
@@ -168,7 +169,15 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 
 Подробно: `Imperecta_Parsing.md`, `Imperecta_Database.md`.
 
-### 7.5 Качество scrape (P0)
+### 7.5 Display currency (EUR/USD)
+
+1. Frontend: `display_currency` в query (`local` \| `EUR` \| `USD`).  
+2. Backend: `CurrencyConverter.load_latest` — `fact_currency_rate` → fallback live forex.  
+3. Ответ: `display_price`, `display_currency`, `conversion_available`; без rate — local + `conversion_available=false`.
+
+Модули: `app/common/currency.py`, products/pool/dashboard API.
+
+### 7.6 Качество scrape (P0)
 
 `GlobalScrapeService` перед `fact_price`:
 
@@ -206,9 +215,9 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 
 ## 10. Frontend (кратко)
 
-- React 19, Router 7, TanStack Query, Zustand (только auth).  
-- Admin: три таба; Data Collection с live monitor и worker log terminal.  
-- Users Management: полный CRUD (create/edit/role/status/password/delete).  
+- React 19, Router 7, TanStack Query, Zustand (`authStore`, **`displayCurrencyStore`**).  
+- **Dashboard:** `MarketsOverviewSection` — каталог товаров пула (поиск, сортировка, `DisplayCurrencySelector`, `PriceDisplay`).  
+- **Admin:** три таба; Data Collection с live monitor; Users Management CRUD.  
 - i18n: 8 языков; русский только superuser.
 
 Подробно: `Imperecta_Frontend.md`.
@@ -252,8 +261,12 @@ sequenceDiagram
 
 | Коммит / область | Суть |
 |------------------|------|
-| *(рабочее дерево)* Scoped scrape + classifier | `marketplace_codes` в orchestrator → scrape SELECT; `merge_and_finalize` → `classify_page_role_for_discovery` |
-| `6701bba` fact_price partitions | `015`: Jun–Dec 2026 monthly + `fact_price_default` (fix prod INSERT failures) |
+| `3d1eb66` Live forex fallback | `CurrencyConverter`: `fact_currency_rate` → live `fetch_forex_rates` |
+| `fced191` Display currency API | `display_currency` query на products/pool/dashboard; `app/common/currency.py` |
+| `7f16333` Markets catalog UI | Redesign `MarketsOverviewSection` — product catalog на dashboard |
+| `b6610ea` Display currency UI + httpx-first | `PriceDisplay`, Zustand store; Tier 1 httpx → decodo → playwright |
+| `a3100e5` Scoped scrape + classifier | `marketplace_codes` в scrape; `merge_and_finalize` → schema-aware classifier |
+| `6701bba` fact_price partitions | `015`: Jun–Dec 2026 monthly + `fact_price_default` |
 | `e286053` Tiered scrape | `dim_marketplace.scrape_tier`; `ScraperPool._layer_order`; tier 1 only |
 | `5c1324b` Schema-aware classifier | `classify_page_role_for_discovery`: og:type + JSON-LD layers, DOM fallback |
 | `7fa0d0b` Sitemap filter | Content-aware sample/trust/reject для sitemap URLs |

@@ -1,6 +1,6 @@
 # Imperecta — Парсинг и сбор данных
 
-**Актуально на:** 2026-06-03 (head `6701bba`; scoped scrape + extractor classifier в рабочем дереве)  
+**Актуально на:** 2026-06-05 (head `3d1eb66`)  
 **Область:** discovery, scrape, extraction, pipeline, admin control plane, persistence.
 
 ---
@@ -246,7 +246,7 @@ only role == 'product' → save path
 
 | Tier | Layers (planned) | Runtime |
 |------|------------------|---------|
-| **1** | decodo → httpx → playwright (`requires_js` поднимает playwright) | Active |
+| **1** | **httpx → decodo → playwright** (`requires_js`: httpx → playwright → decodo) | Active |
 | **2** | + network interception, basic stealth | `NotImplementedError` |
 | **3** | + full stealth, residential sticky, LLM fallback | `NotImplementedError` |
 
@@ -258,12 +258,14 @@ only role == 'product' → save path
 
 **Миграция:** `014_marketplace_scrape_tier` — column + CHECK + index на `dim_marketplace`.
 
-### 8.2 Tier 1 layer order (текущее поведение)
+### 8.2 Tier 1 layer order (httpx-first, `b6610ea`)
 
-| `requires_js` | Order (with Decodo) |
-|---------------|---------------------|
-| false | decodo → httpx → playwright |
-| true | decodo → playwright → httpx |
+| `requires_js` | Order |
+|---------------|-------|
+| false | httpx → decodo → playwright |
+| true | httpx → playwright → decodo |
+
+httpx-first снижает расход Decodo на SSR-страницах; Decodo — после неудачи httpx.
 
 ### 8.3 Guards
 

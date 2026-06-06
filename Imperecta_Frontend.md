@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-03 (head `6701bba`; backend scoped scrape aligned with UI)  
+**Актуально на:** 2026-06-05 (head `3d1eb66`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 ---
@@ -149,22 +149,53 @@ frontend/src/
 | `useMarketsIngest` | trigger ingestion |
 | `useParsingMarketplacesDetailed` | paginated API |
 
-Другие: `useAuth`, `useProducts`, `usePoolProducts`, `useEntitlements`, `usePlanLimits`.
+Другие: `useAuth`, `useProducts`, `usePoolProducts` (передают `display_currency`), `useDisplayCurrency`, `useEntitlements`, `usePlanLimits`.
 
 ---
 
-## 7. State
+## 7. Display currency
+
+| Файл | Роль |
+|------|------|
+| `lib/displayCurrency.ts` | Modes `local` \| `EUR` \| `USD`; `resolvePriceForDisplay`; storage key |
+| `stores/displayCurrencyStore.ts` | Zustand — выбранная валюта |
+| `hooks/useDisplayCurrency.ts` | Форматирование, `apiParam` для запросов |
+| `components/ui/DisplayCurrencySelector.tsx` | Переключатель в Header / Markets |
+| `components/ui-custom/PriceDisplay.tsx` | Цена + badge `noRate` при отсутствии курса |
+
+**Поток:** UI → `?display_currency=EUR|USD|local` → backend `CurrencyConverter` → поля `display_price`, `conversion_available`. Конвертация **только на backend**; frontend форматирует.
+
+**Используется в:** `MyProductsTab`, `PoolProductsTab`, `ProductDetailPage`, `CompetitorsPage`, `MarketsOverviewSection`, analytics hooks.
+
+---
+
+## 8. Dashboard — Markets product catalog (`7f16333`)
+
+**`MarketsOverviewSection.tsx`** на `/dashboard`:
+
+- Каталог товаров из `/markets/overview` (не admin marketplaces table).
+- Поиск, фильтры, сортировка: recent, gainers, losers, volatile, trending.
+- Пагинация: `PAGE_LIMIT=200`, progressive expand (+20).
+- `DisplayCurrencySelector` + `PriceDisplay` с converted prices.
+- Добавление в user products (`productsApi`).
+
+Отдельно: **Admin → Market Overview** — CRUD marketplaces, ingest (см. §9).
+
+---
+
+## 9. State
 
 | Concern | Solution |
 |---------|----------|
-| Auth | Zustand `authStore` — tokens, user, login/logout/refresh, language policy |
-| Server | TanStack Query keys `["admin", "parsing", …]` |
+| Auth | Zustand `authStore` |
+| Display currency | Zustand `displayCurrencyStore` |
+| Server | TanStack Query |
 | Theme | next-themes |
 | UI local | `useState` in pages |
 
 ---
 
-## 8. i18n
+## 10. i18n
 
 - **8 locales:** en, ar, es, zh, ru, fr, ro, uk — `public/locales/{lng}/translation.json`
 - **Storage:** `imperecta_language`
@@ -175,7 +206,7 @@ frontend/src/
 
 ---
 
-## 9. Admin UI (`AdminPage.tsx`)
+## 11. Admin UI (`AdminPage.tsx`)
 
 Монолит ~1300 строк с тремя табами.
 
@@ -221,7 +252,7 @@ frontend/src/
 
 ---
 
-## 10. `WorkerLogRelayPanel.tsx`
+## 12. `WorkerLogRelayPanel.tsx`
 
 - `useParsingWorkerLogRelay({ jobId, after, enabled })` — refetch **2s**.
 - Cursor: `after` / `next_cursor` from API.
@@ -232,7 +263,7 @@ frontend/src/
 
 ---
 
-## 11. Products UI
+## 13. Products UI
 
 - **`MyProductsTab` / `PoolProductsTab`:** pagination 20/50/100, row selection, bulk delete.
 - **`ProductDetailPage`:** charts, run parsing action.
@@ -240,7 +271,7 @@ frontend/src/
 
 ---
 
-## 12. Entitlements (client)
+## 14. Entitlements (client)
 
 - `useEntitlements` — feature flags from user/plan.
 - `AIAnalystRoute` — блок без PAID_FULL + AI feature.
@@ -248,7 +279,7 @@ frontend/src/
 
 ---
 
-## 13. Безопасность
+## 15. Безопасность
 
 - JWT storage abstraction (`authStorage`).
 - DOMPurify для AI markdown.
@@ -257,7 +288,7 @@ frontend/src/
 
 ---
 
-## 14. Тесты
+## 16. Тесты
 
 - Vitest: `npm test`
 - `AdminPage.parsing.test.tsx` — parsing tab behaviors
@@ -266,7 +297,7 @@ frontend/src/
 
 ---
 
-## 15. Универсальность UI
+## 17. Универсальность UI
 
 - Нет store-specific labels в i18n (удалены named marketplace strings в `1f024b1`).
 - Data Collection и Market Overview работают с любыми `dim_marketplace` по `code` / URL, без hardcoded доменов во фронте.
@@ -276,7 +307,7 @@ frontend/src/
 
 ---
 
-## 16. Известные расхождения
+## 18. Известные расхождения
 
 | Тема | Состояние |
 |------|-----------|
@@ -286,7 +317,7 @@ frontend/src/
 
 ---
 
-## 17. Источники
+## 19. Источники
 
 | Область | Путь |
 |---------|------|
