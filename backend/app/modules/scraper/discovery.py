@@ -30,6 +30,12 @@ SITEMAP_STALE_DAYS = 3
 MAX_CATEGORY_URLS_PER_RUN = 60
 # Max pages to paginate within a single category URL.
 MAX_PAGES_PER_CATEGORY = 50
+# Convergence detection for _phase2_product_harvest:
+# If this many consecutive category iterations yield zero NEW persisted PDP,
+# discovery for this marketplace is considered converged and exits early.
+# This is a universal mechanism, not tuned to any specific marketplace —
+# small/exhausted shops converge quickly, large shops continue iterating.
+CATEGORY_CONVERGENCE_STREAK = 3
 # Max BFS depth when exploring hub pages for category links.
 RECON_BFS_MAX_DEPTH = 3
 # Min URLs found via sitemap to consider sitemap harvest successful.
@@ -490,7 +496,17 @@ class DiscoveryCrawler:
         marketplace: DimMarketplace,
         category_urls: list[str],
     ) -> int:
-        """Phase 2: crawl each category URL, extract product links, save to pool."""
+        """Phase 2: crawl each category URL, extract product links, save to pool.
+
+        Convergence detection: if CATEGORY_CONVERGENCE_STREAK consecutive
+        categories yield zero NEW persisted PDP, discovery exits early. This
+        treats small/exhausted marketplaces gracefully (converges in minutes)
+        without affecting large marketplaces (continues iterating until either
+        new PDPs stop arriving or MAX_CATEGORY_URLS_PER_RUN is exhausted).
+
+        A "category" here is one entry in category_urls (pagination of one
+        category counts as part of that single category's contribution).
+        """
         from app.modules.scraper.extractors import (
             detect_next_page,
             extract_links_from_repeated_structure,
@@ -498,9 +514,11 @@ class DiscoveryCrawler:
         )
 
         total_saved = 0
+        empty_streak = 0
         harvest_targets = category_urls[:MAX_CATEGORY_URLS_PER_RUN]
 
-        for category_url in harvest_targets:
+        for category_idx, category_url in enumerate(harvest_targets):
+            saved_for_this_category = 0
             current_url: str | None = category_url
             page_num = 0
             while current_url and page_num < MAX_PAGES_PER_CATEGORY:
@@ -523,11 +541,34 @@ class DiscoveryCrawler:
                 if not product_urls:
                     product_urls = extract_product_links(soup, marketplace.base_url)
                 if product_urls:
-                    total_saved += await self._save_product_urls(marketplace.id, product_urls)
+                    saved_this_call = await self._save_product_urls(
+                        marketplace.id, product_urls
+                    )
+                    saved_for_this_category += saved_this_call
+                    total_saved += saved_this_call
 
                 next_page = detect_next_page(soup, current_url)
                 current_url = next_page
                 page_num += 1
+
+            if saved_for_this_category == 0:
+                empty_streak += 1
+            else:
+                empty_streak = 0
+
+            if empty_streak >= CATEGORY_CONVERGENCE_STREAK:
+                logger.info(
+                    "discovery_phase2_converged marketplace_id=%s "
+                    "categories_processed=%d categories_total=%d total_saved=%d "
+                    "empty_streak=%d",
+                    marketplace.id,
+                    category_idx + 1,
+                    len(harvest_targets),
+                    total_saved,
+                    empty_streak,
+                )
+                break
+
         return total_saved
 
     async def discover(self, marketplace: DimMarketplace) -> DiscoveryResult:
