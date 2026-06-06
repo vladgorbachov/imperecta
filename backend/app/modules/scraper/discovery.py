@@ -36,6 +36,15 @@ MAX_PAGES_PER_CATEGORY = 50
 # This is a universal mechanism, not tuned to any specific marketplace —
 # small/exhausted shops converge quickly, large shops continue iterating.
 CATEGORY_CONVERGENCE_STREAK = 3
+# Persist batch size for _save_product_urls. Large sitemaps (e.g., 20k+ URLs)
+# cannot be saved in a single transaction within DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS —
+# the monolithic flush takes >14 minutes and gets cancelled by the circuit breaker,
+# losing all work. Batched commits ensure progress survives cancel: each committed
+# batch is durable, and the next run sees its URLs via existing_hashes lookup.
+#
+# 500 is a balance between round-trip overhead (smaller batches = more flushes)
+# and lost-work-on-cancel (larger batches = bigger loss when cancel hits mid-batch).
+SAVE_PRODUCT_URLS_BATCH_SIZE = 500
 # Max BFS depth when exploring hub pages for category links.
 RECON_BFS_MAX_DEPTH = 3
 # Min URLs found via sitemap to consider sitemap harvest successful.
@@ -182,7 +191,19 @@ class DiscoveryCrawler:
         return out
 
     async def _save_product_urls(self, marketplace_id: UUID, urls: list[str]) -> int:
-        """Save discovered URLs. Creates DimProduct + FactListing per new URL."""
+        """Save discovered URLs. Creates DimProduct + FactListing per new URL.
+
+        Persists in batches of SAVE_PRODUCT_URLS_BATCH_SIZE with a commit after each
+        batch. This makes progress durable: if discover() is cancelled mid-flight by
+        the circuit breaker, batches committed before cancel-point survive, and the
+        next discovery run skips them via existing_hashes deduplication.
+
+        Note on transactional semantics: each batch commit is independent. Other
+        pending changes in the same session at call-time will also be flushed by
+        these intermediate commits. This is an acceptable trade-off — the alternative
+        (one monolithic transaction) loses ALL work on cancel, which is far worse
+        than partial loss of atomicity with other operations.
+        """
         if not urls:
             return 0
 
@@ -194,6 +215,7 @@ class DiscoveryCrawler:
         existing_hashes = {row[0] for row in existing_hashes_result.all() if row[0]}
 
         new_count = 0
+        pending_in_batch = 0
         for url in normalized_urls:
             url_hash = hash_by_url[url]
             if url_hash in existing_hashes:
@@ -219,9 +241,14 @@ class DiscoveryCrawler:
             self.db.add(listing)
             existing_hashes.add(url_hash)
             new_count += 1
+            pending_in_batch += 1
 
-        if new_count > 0:
-            await self.db.flush()
+            if pending_in_batch >= SAVE_PRODUCT_URLS_BATCH_SIZE:
+                await self.db.commit()
+                pending_in_batch = 0
+
+        if pending_in_batch > 0:
+            await self.db.commit()
         return new_count
 
     def _should_run_sitemap_harvest(self, marketplace: DimMarketplace) -> bool:
