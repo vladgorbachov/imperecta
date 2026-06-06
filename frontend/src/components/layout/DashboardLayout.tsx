@@ -35,7 +35,7 @@ export function DashboardLayout() {
         <Sidebar collapsed={isCollapsed} onToggle={toggle} />
       </aside>
       <Header onMenuClick={() => setMobileSheetOpen(true)} />
-      <main className="relative z-10 col-span-1 min-h-0 overflow-auto px-3 pb-16 pt-3 safe-area-bottom-margin sm:px-4 sm:pb-4 md:px-4 md:pb-4 lg:px-5">
+      <main className="relative z-10 col-span-1 min-h-0 overflow-auto p-2.5 pb-16 safe-area-bottom-margin sm:pb-2.5">
         {/* Ambient background — decorative only */}
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <div
@@ -48,7 +48,7 @@ export function DashboardLayout() {
           />
         </div>
 
-        <div className="relative z-[1] mx-auto w-full max-w-[1584px]">
+        <div className="relative z-[1] w-full">
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

@@ -7,7 +7,6 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketsOverviewSection } from "./MarketsOverviewSection";
 
-const createAlertMock = vi.fn();
 const createProductMock = vi.fn();
 const getOverviewMock = vi.fn();
 const getPoolMarketplaceStatsMock = vi.fn();
@@ -17,12 +16,6 @@ vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
-  },
-}));
-
-vi.mock("@/api/alerts", () => ({
-  alertsApi: {
-    create: (...args: unknown[]) => createAlertMock(...args),
   },
 }));
 
@@ -43,10 +36,6 @@ vi.mock("@/api/markets", () => ({
     poolMarketplaceStats: () => ["markets", "pool-marketplace-stats"],
     poolStats: () => ["markets", "pool-stats"],
   },
-}));
-
-vi.mock("@/components/ui-custom/Sparkline", () => ({
-  Sparkline: () => <div data-testid="sparkline-mock" />,
 }));
 
 function renderSection() {
@@ -83,7 +72,7 @@ describe("MarketsOverviewSection", () => {
             marketplace_domain: "store-alpha.example",
             url: "https://example.com/1",
             title: "Смартфон X",
-            image_url: null,
+            image_url: "https://img.example/1.jpg",
             current_price: 1200,
             currency: "UAH",
             price_change_pct_24h: 6.2,
@@ -92,7 +81,6 @@ describe("MarketsOverviewSection", () => {
             recent_prices: [
               { date: "2026-05-15", price: 1000, currency: "UAH" },
               { date: "2026-05-16", price: 1050, currency: "UAH" },
-              { date: "2026-05-17", price: 1100, currency: "UAH" },
             ],
           },
           {
@@ -109,10 +97,7 @@ describe("MarketsOverviewSection", () => {
             price_change_pct_24h: -3,
             status: "active",
             last_scraped_at: "2026-05-20T10:00:00Z",
-            recent_prices: [
-              { date: "2026-05-15", price: 2400, currency: "UAH" },
-              { date: "2026-05-16", price: 2300, currency: "UAH" },
-            ],
+            recent_prices: [],
           },
         ],
         total: 2,
@@ -131,7 +116,6 @@ describe("MarketsOverviewSection", () => {
         total_products: 90,
       },
     });
-    createAlertMock.mockResolvedValue({ data: { id: "alert-1" } });
     createProductMock.mockResolvedValue({ data: { id: "product-new" } });
   });
 
@@ -139,45 +123,40 @@ describe("MarketsOverviewSection", () => {
     renderSection();
     await screen.findByText("market.overview.kpi.totalPool");
     expect(screen.getByText("market.overview.kpi.updated24h")).toBeInTheDocument();
-    expect(screen.getByText("market.overview.kpi.changedMore5")).toBeInTheDocument();
     expect(screen.getByText("market.overview.kpi.avgVolatility")).toBeInTheDocument();
-    expect(screen.getByText("market.overview.kpi.lastUpdate")).toBeInTheDocument();
   });
 
-  it("renders table with sparkline and allows switching to cards", async () => {
+  it("renders product cards with image and external product link", async () => {
     renderSection();
-    expect((await screen.findAllByRole("cell", { name: "Смартфон X" })).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("market.overview.sparkline7d").length).toBeGreaterThan(0);
+    await screen.findByText("Смартфон X");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /market\.overview\.viewCards/i })[0]);
-    await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: "market.overview.addToMyProducts" }).length).toBeGreaterThan(0);
-    });
+    const image = screen.getByAltText("Смартфон X") as HTMLImageElement;
+    expect(image.src).toBe("https://img.example/1.jpg");
+
+    const externalLinks = screen
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("href") === "https://example.com/1");
+    expect(externalLinks.length).toBeGreaterThan(0);
   });
 
-  it("filters by marketplace and tabs", async () => {
+  it("exposes marketplace filters in the side panel", async () => {
     renderSection();
-    expect((await screen.findAllByRole("cell", { name: "Смартфон X" })).length).toBeGreaterThan(0);
+    await screen.findByText("Смартфон X");
 
-    fireEvent.click(screen.getByRole("button", { name: "market.overview.historyOnly" }));
-    expect(screen.getByRole("button", { name: "market.overview.historyOnly" })).toBeInTheDocument();
-
-    const callsBeforeTab = getOverviewMock.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "dashboard.market.topGainers" }));
-    await waitFor(() => {
-      expect(getOverviewMock.mock.calls.length).toBeGreaterThan(callsBeforeTab);
-    });
+    expect(screen.getByText("market.filters.marketplaces")).toBeInTheDocument();
+    expect(screen.getAllByText("Store Alpha").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Store Beta").length).toBeGreaterThan(0);
   });
 
-  it("creates alert and adds product actions", async () => {
+  it("adds a product to my products from a card", async () => {
     renderSection();
-    expect((await screen.findAllByRole("cell", { name: "Смартфон X" })).length).toBeGreaterThan(0);
+    await screen.findByText("Смартфон X");
 
-    fireEvent.click(screen.getAllByRole("button", { name: /alerts\.createAlert/i })[0]);
-    fireEvent.click(screen.getAllByRole("button", { name: /market\.overview\.addToMy/i })[0]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: /market\.overview\.addToMyProducts/i })[0],
+    );
 
     await waitFor(() => {
-      expect(createAlertMock).toHaveBeenCalled();
       expect(createProductMock).toHaveBeenCalled();
     });
   });
