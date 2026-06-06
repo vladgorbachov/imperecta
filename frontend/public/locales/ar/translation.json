@@ -44,6 +44,8 @@
   "displayCurrency.backendPending": "في انتظار دعم الخادم",
   "displayCurrency.noRate": "(لا سعر صرف)",
   "displayCurrency.noRateTooltip": "لا يوجد سعر صرف لهذا التاريخ أو العملة. يُعرض السعر المحلي.",
+  "displayCurrency.localUnavailableShort": "غير متاح",
+  "displayCurrency.localUnavailableTooltip": "العملة المحلية غير متاحة لهذا المتجر — لا يمكن تحديد دولته من النطاق.",
   "common.dash": "—",
   "market.filters.title": "عوامل التصفية",
   "market.filters.marketplaces": "الأسواق",

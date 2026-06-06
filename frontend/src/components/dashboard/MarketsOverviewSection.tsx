@@ -360,6 +360,23 @@ export function MarketsOverviewSection() {
     filteredItems.length > MARKET_OVERVIEW_INITIAL_VISIBLE &&
     visibleCount > MARKET_OVERVIEW_INITIAL_VISIBLE;
 
+  const localCurrencyUnavailable = useMemo(() => {
+    if (selectedMarketplaces.length !== 1) {
+      return false;
+    }
+    const target = selectedMarketplaces[0];
+    const item = rawItems.find(
+      (candidate) => candidate.marketplace_domain === target,
+    );
+    if (!item) {
+      return false;
+    }
+    if (item.local_currency_unavailable === true) {
+      return true;
+    }
+    return item.local_currency_resolution?.source === "unknown";
+  }, [selectedMarketplaces, rawItems]);
+
   const visibleMarketplaces = useMemo(() => {
     const query = marketplaceSearch.trim().toLowerCase();
     if (!query) {
@@ -397,7 +414,11 @@ export function MarketsOverviewSection() {
   const filterPanel = (
     <div className="space-y-3">
       <FilterSection title={t("displayCurrency.label")}>
-        <DisplayCurrencySelector compact={false} className="w-full" />
+        <DisplayCurrencySelector
+          compact={false}
+          className="w-full"
+          localUnavailable={localCurrencyUnavailable}
+        />
       </FilterSection>
 
       <FilterSection title={t("market.filters.marketplaces")}>

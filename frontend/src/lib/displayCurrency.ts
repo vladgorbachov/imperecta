@@ -30,9 +30,17 @@ export const DISPLAY_CURRENCY_OPTIONS: DisplayCurrencyOption[] = [
   { value: "USD", labelKey: "displayCurrency.usd", hintKey: "displayCurrency.usdHint" },
 ];
 
-export function isDisplayCurrencyEnabled(value: DisplayCurrency): boolean {
+export interface DisplayCurrencyContext {
+  /** True when the currently scoped marketplace cannot resolve a local currency. */
+  localUnavailable?: boolean;
+}
+
+export function isDisplayCurrencyEnabled(
+  value: DisplayCurrency,
+  context: DisplayCurrencyContext = {},
+): boolean {
   if (value === "local") {
-    return true;
+    return context.localUnavailable !== true;
   }
   return DISPLAY_CURRENCY_BACKEND_SUPPORT[value];
 }

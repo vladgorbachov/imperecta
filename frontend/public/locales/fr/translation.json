@@ -44,6 +44,8 @@
   "displayCurrency.backendPending": "Support backend en attente",
   "displayCurrency.noRate": "(pas de taux)",
   "displayCurrency.noRateTooltip": "Pas de taux de change pour cette date ou devise. Prix local affiché.",
+  "displayCurrency.localUnavailableShort": "indisponible",
+  "displayCurrency.localUnavailableTooltip": "La devise locale n'est pas disponible pour ce marketplace — son pays ne peut pas être déterminé à partir du domaine.",
   "common.dash": "—",
   "market.filters.title": "Filtres",
   "market.filters.marketplaces": "Marketplaces",

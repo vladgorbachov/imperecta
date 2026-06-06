@@ -44,6 +44,8 @@
   "displayCurrency.backendPending": "等待后端支持",
   "displayCurrency.noRate": "（无汇率）",
   "displayCurrency.noRateTooltip": "该日期或货币无汇率。显示本地价格。",
+  "displayCurrency.localUnavailableShort": "不可用",
+  "displayCurrency.localUnavailableTooltip": "此市场无法使用本地货币 — 无法通过域名确定其国家。",
   "common.dash": "—",
   "market.filters.title": "筛选",
   "market.filters.marketplaces": "商城",

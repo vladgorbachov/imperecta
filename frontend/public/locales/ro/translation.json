@@ -44,6 +44,8 @@
   "displayCurrency.backendPending": "Suport backend în așteptare",
   "displayCurrency.noRate": "(fără curs)",
   "displayCurrency.noRateTooltip": "Nu există curs de schimb pentru această dată sau monedă. Se afișează prețul local.",
+  "displayCurrency.localUnavailableShort": "indisponibil",
+  "displayCurrency.localUnavailableTooltip": "Moneda locală nu este disponibilă pentru acest marketplace — țara nu poate fi determinată din domeniu.",
   "common.dash": "—",
   "market.filters.title": "Filtre",
   "market.filters.marketplaces": "Marketplace-uri",

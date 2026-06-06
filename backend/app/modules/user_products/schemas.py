@@ -44,6 +44,13 @@ class ProductResponse(BaseModel):
         from_attributes = True
 
 
+class LocalCurrencyResolution(BaseModel):
+    """How the marketplace's local currency was determined for display."""
+
+    currency: str | None = None
+    source: str = "unknown"
+
+
 class ProductListItem(ProductResponse):
     min_competitor_price: Decimal | None = None
     max_competitor_price: Decimal | None = None
@@ -53,6 +60,8 @@ class ProductListItem(ProductResponse):
     min_competitor_display_price: float | None = None
     max_competitor_display_price: float | None = None
     last_checked_at: datetime | None = None
+    local_currency_resolution: LocalCurrencyResolution | None = None
+    local_currency_unavailable: bool = False
 
 
 class ProductListResponse(BaseModel):

@@ -9,8 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.currency import (
     DISPLAY_LOCAL,
     CurrencyConverter,
-    display_price_fields,
-    normalize_display_currency,
+    compute_display_fields_for_marketplace,
 )
 from app.models.dimensions import DimDate, DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
@@ -190,21 +189,28 @@ class ProductPoolService:
         items: list[dict[str, Any]],
         display_currency: str,
     ) -> None:
-        """Populate display_price/display_currency/conversion_available on items."""
-        target = normalize_display_currency(display_currency)
-        if target == DISPLAY_LOCAL or not items:
+        """Populate display_price / display_currency / conversion_available /
+        local_currency_resolution on items.
+
+        For ``local`` mode the marketplace's local currency is resolved from
+        the domain TLD (or country_code fallback); the parsed currency is
+        converted into it when they differ. For ``EUR``/``USD`` the previous
+        behaviour applies, plus the resolution metadata is still surfaced so
+        the UI can disable the local-currency toggle when undeterminable.
+        """
+        if not items:
             return
         converter = await CurrencyConverter.load_latest(self.db)
         for item in items:
-            display_value, display_code, available = display_price_fields(
-                item.get("current_price"),
-                item.get("currency"),
-                target,
-                converter,
+            fields = compute_display_fields_for_marketplace(
+                amount=item.get("current_price"),
+                currency=item.get("currency"),
+                display_currency=display_currency,
+                converter=converter,
+                marketplace_domain=item.get("marketplace_domain"),
+                marketplace_country_code=item.get("country_code"),
             )
-            item["display_price"] = display_value
-            item["display_currency"] = display_code
-            item["conversion_available"] = available
+            item.update(fields)
 
     async def _get_recent_prices_map(
         self,
@@ -398,6 +404,8 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "display_price": None,
         "display_currency": None,
         "conversion_available": False,
+        "local_currency_resolution": None,
+        "local_currency_unavailable": False,
         "price_change_pct_24h": float(pct) if pct is not None else None,
         "price_change_pct_7d": None,
         "price_change_pct_30d": None,

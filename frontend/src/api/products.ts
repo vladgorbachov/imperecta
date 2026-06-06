@@ -1,5 +1,8 @@
 import type { DisplayCurrency } from "@/lib/displayCurrency";
+import type { LocalCurrencyResolution } from "./markets";
 import { apiClient } from "./client";
+
+export type { LocalCurrencyResolution };
 
 // --- Pool products (global marketplace pool) ---
 
@@ -40,6 +43,8 @@ export interface PoolProductItem {
   display_price?: number | null;
   display_currency?: string | null;
   conversion_available?: boolean;
+  local_currency_resolution?: LocalCurrencyResolution | null;
+  local_currency_unavailable?: boolean;
   price_change_pct_24h?: number | null;
   price_change_pct_7d?: number | null;
   price_change_pct_30d?: number | null;
@@ -91,6 +96,8 @@ export interface ProductListItem extends Product {
   min_competitor_display_price?: number | null;
   max_competitor_display_price?: number | null;
   last_checked_at: string | null;
+  local_currency_resolution?: LocalCurrencyResolution | null;
+  local_currency_unavailable?: boolean;
 }
 
 export interface ProductListResponse {

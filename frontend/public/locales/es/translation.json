@@ -44,6 +44,8 @@
   "displayCurrency.backendPending": "Soporte backend pendiente",
   "displayCurrency.noRate": "(sin tipo)",
   "displayCurrency.noRateTooltip": "No hay tipo de cambio para esta fecha o moneda. Se muestra el precio local.",
+  "displayCurrency.localUnavailableShort": "no disponible",
+  "displayCurrency.localUnavailableTooltip": "La moneda local no está disponible para este marketplace — su país no puede determinarse a partir del dominio.",
   "common.dash": "—",
   "market.filters.title": "Filtros",
   "market.filters.marketplaces": "Marketplaces",

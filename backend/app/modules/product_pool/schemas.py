@@ -14,6 +14,13 @@ class PoolRecentPricePoint(BaseModel):
     currency: str
 
 
+class LocalCurrencyResolution(BaseModel):
+    """How the marketplace's local currency was determined for display."""
+
+    currency: str | None = None
+    source: str = "unknown"
+
+
 class PoolProductItem(BaseModel):
     """Single row in the pool: listing + product + marketplace context."""
 
@@ -33,6 +40,8 @@ class PoolProductItem(BaseModel):
     display_price: float | None = None
     display_currency: str | None = None
     conversion_available: bool = False
+    local_currency_resolution: LocalCurrencyResolution | None = None
+    local_currency_unavailable: bool = False
     price_change_pct: float | None = None
     in_stock: bool | None = None
     last_checked_at: datetime | None = None

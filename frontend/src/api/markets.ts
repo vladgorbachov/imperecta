@@ -125,6 +125,13 @@ export interface MarketsTickerResponse {
 
 // --- Market Overview ---
 
+export interface LocalCurrencyResolution {
+  /** ISO 4217 currency code resolved for the marketplace, or null when undeterminable. */
+  currency: string | null;
+  /** How the currency was resolved: tld | country_code | parse_currency | unknown. */
+  source: string;
+}
+
 export interface MarketsOverviewItem {
   id: string;
   marketplace_id: string;
@@ -141,6 +148,8 @@ export interface MarketsOverviewItem {
   display_price?: number | null;
   display_currency?: string | null;
   conversion_available?: boolean;
+  local_currency_resolution?: LocalCurrencyResolution | null;
+  local_currency_unavailable?: boolean;
   price_change_pct_24h?: number | null;
   price_change_pct_7d?: number | null;
   price_change_pct_30d?: number | null;

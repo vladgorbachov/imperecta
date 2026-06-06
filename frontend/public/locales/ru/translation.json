@@ -44,6 +44,8 @@
   "displayCurrency.backendPending": "Ожидается поддержка backend",
   "displayCurrency.noRate": "(нет курса)",
   "displayCurrency.noRateTooltip": "Нет курса для этой даты или валюты. Показана локальная цена.",
+  "displayCurrency.localUnavailableShort": "недоступно",
+  "displayCurrency.localUnavailableTooltip": "Локальная валюта недоступна для этого маркетплейса — его страна не определяется по домену.",
   "common.dash": "—",
   "market.filters.title": "Фильтры",
   "market.filters.marketplaces": "Маркетплейсы",

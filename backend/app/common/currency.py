@@ -15,6 +15,11 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.marketplace_locale import (
+    SOURCE_PARSE_CURRENCY,
+    SOURCE_UNKNOWN,
+    resolve_local_currency_from_parts,
+)
 from app.models.facts import FactCurrencyRate
 
 DISPLAY_LOCAL = "local"
@@ -172,6 +177,53 @@ class CurrencyConverter:
             return None
         return float(amount) * factor
 
+    def _amount_in_eur(self, amount: float, currency: str) -> float | None:
+        """Express ``amount`` (in ``currency``) in EUR using stored rates."""
+        if currency == DISPLAY_EUR:
+            return amount
+        if currency == DISPLAY_USD:
+            usd_row = self._rates.get(DISPLAY_USD)
+            if usd_row and usd_row.to_eur > 0:
+                return amount * usd_row.to_eur
+            if self._usd_per_eur and self._usd_per_eur > 0:
+                return amount / self._usd_per_eur
+            return None
+        rate = self._rates.get(currency)
+        if rate is None or rate.to_eur <= 0:
+            return None
+        return amount * rate.to_eur
+
+    def convert_to(
+        self,
+        amount: float | Decimal | None,
+        currency: str | None,
+        target: str | None,
+    ) -> float | None:
+        """Convert ``amount`` from ``currency`` to an arbitrary ``target`` ISO code.
+
+        Generalises :meth:`convert` (which only supports EUR/USD targets) by
+        pivoting through EUR. Returns ``None`` when any leg of the pivot has no
+        stored rate; the caller surfaces the local price unchanged.
+        """
+        if amount is None:
+            return None
+        cur = (currency or "").strip().upper()
+        tgt = (target or "").strip().upper()
+        if not cur or not tgt:
+            return None
+        amount_f = float(amount)
+        if cur == tgt:
+            return amount_f
+        if tgt in (DISPLAY_EUR, DISPLAY_USD):
+            return self.convert(amount_f, cur, tgt)
+        amount_eur = self._amount_in_eur(amount_f, cur)
+        if amount_eur is None:
+            return None
+        target_rate = self._rates.get(tgt)
+        if target_rate is None or target_rate.to_eur <= 0:
+            return None
+        return amount_eur / target_rate.to_eur
+
 
 def display_price_fields(
     amount: float | Decimal | None,
@@ -191,3 +243,102 @@ def display_price_fields(
     if converted is None:
         return None, None, False
     return round(converted, 2), target, True
+
+
+def compute_display_fields_for_marketplace(
+    amount: float | Decimal | None,
+    currency: str | None,
+    display_currency: str,
+    converter: CurrencyConverter | None,
+    *,
+    marketplace_domain: str | None = None,
+    marketplace_country_code: str | None = None,
+) -> dict:
+    """Compute display fields plus local-currency resolution metadata.
+
+    Returns a dict suitable for merging into an API item with the keys:
+
+    - ``display_price`` (float | None)
+    - ``display_currency`` (str | None)
+    - ``conversion_available`` (bool)
+    - ``local_currency_resolution`` (``{"currency": str | None, "source": str}``)
+    - ``local_currency_unavailable`` (bool, only when local resolution failed)
+
+    Behaviour by ``display_currency`` mode:
+
+    - ``"local"``: resolve the marketplace's local currency from its domain TLD
+      (or ``country_code`` fallback). When resolution succeeds and matches the
+      parsed ``currency``, return the price unchanged. When it succeeds but
+      differs, convert through ``CurrencyConverter.convert_to``. When it fails
+      entirely, surface the parsed currency and flag
+      ``local_currency_unavailable=True`` so the UI can disable the toggle.
+    - ``"EUR"`` / ``"USD"``: convert via the existing converter; the
+      ``local_currency_resolution`` block is still emitted (so the frontend can
+      know whether the local toggle is enabled), with conversion source
+      ``"unknown"`` when nothing resolves.
+    """
+    target = normalize_display_currency(display_currency)
+    parsed_currency = (currency or "").strip().upper() or None
+    local_currency, local_source = resolve_local_currency_from_parts(
+        marketplace_domain,
+        marketplace_country_code,
+    )
+    resolution: dict[str, str | None] = {
+        "currency": local_currency,
+        "source": local_source,
+    }
+
+    if target == DISPLAY_LOCAL:
+        if local_currency is None:
+            return {
+                "display_price": float(amount) if amount is not None else None,
+                "display_currency": parsed_currency,
+                "conversion_available": False,
+                "local_currency_resolution": {
+                    "currency": parsed_currency,
+                    "source": SOURCE_PARSE_CURRENCY if parsed_currency else SOURCE_UNKNOWN,
+                },
+                "local_currency_unavailable": True,
+            }
+        if amount is None:
+            return {
+                "display_price": None,
+                "display_currency": local_currency,
+                "conversion_available": False,
+                "local_currency_resolution": resolution,
+            }
+        if parsed_currency is None or parsed_currency == local_currency:
+            return {
+                "display_price": float(amount),
+                "display_currency": local_currency,
+                "conversion_available": parsed_currency is not None,
+                "local_currency_resolution": resolution,
+            }
+        converted = (
+            converter.convert_to(amount, parsed_currency, local_currency)
+            if converter is not None
+            else None
+        )
+        if converted is None:
+            return {
+                "display_price": None,
+                "display_currency": None,
+                "conversion_available": False,
+                "local_currency_resolution": resolution,
+            }
+        return {
+            "display_price": round(converted, 2),
+            "display_currency": local_currency,
+            "conversion_available": True,
+            "local_currency_resolution": resolution,
+        }
+
+    converted_value, converted_code, available = display_price_fields(
+        amount, currency, target, converter
+    )
+    return {
+        "display_price": converted_value,
+        "display_currency": converted_code,
+        "conversion_available": available,
+        "local_currency_resolution": resolution,
+    }
