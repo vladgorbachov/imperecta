@@ -18,7 +18,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("usePipelineStatus", () => {
-  it("fetches pipeline status from /pipeline-status", async () => {
+  it("fetches pipeline status from /admin/parsing/pipeline-status", async () => {
     vi.mocked(getPipelineStatus).mockResolvedValue({
       data: {
         job_id: "job-1",

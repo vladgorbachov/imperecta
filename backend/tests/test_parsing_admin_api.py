@@ -33,6 +33,7 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("GET", "/api/admin/parsing/marketplaces-detailed"),
         ("GET", "/api/admin/parsing/job-live-feed/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/active-job"),
+        ("GET", "/api/admin/parsing/pipeline-status"),
     ]
     for method, path in paths:
         if method == "GET":
@@ -198,3 +199,105 @@ async def test_parsing_admin_job_status_not_found(client, superuser_headers):
         headers=superuser_headers,
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_enqueue_uses_tick_when_flag_set(client, superuser_headers, monkeypatch):
+    """O3: ORCHESTRATOR_MODE=tick dispatches orchestrator_tick, not the monolith."""
+    monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
+
+    class _StubSettings:
+        orchestrator_mode = "tick"
+
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.Settings", lambda: _StubSettings()
+    )
+    mono_calls: list = []
+    tick_calls: list = []
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
+        lambda job_id: mono_calls.append(job_id),
+    )
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
+        lambda args, **kwargs: tick_calls.append((args, kwargs)),
+    )
+
+    resp = await client.post(
+        "/api/admin/parsing/run-pipeline", headers=superuser_headers
+    )
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    assert mono_calls == []
+    assert len(tick_calls) == 1
+    assert tick_calls[0][0] == [job_id]
+
+    async with async_session_maker() as session:
+        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == UUID(job_id)))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_enqueue_uses_monolith_by_default(client, superuser_headers, monkeypatch):
+    """O3: with no/invalid mode the dispatch falls back to run_full_pipeline_test."""
+    monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
+
+    class _StubSettings:
+        orchestrator_mode = "monolith"
+
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.Settings", lambda: _StubSettings()
+    )
+    mono_calls: list = []
+    tick_calls: list = []
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
+        lambda job_id: mono_calls.append(job_id),
+    )
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
+        lambda args, **kwargs: tick_calls.append((args, kwargs)),
+    )
+
+    resp = await client.post(
+        "/api/admin/parsing/run-pipeline", headers=superuser_headers
+    )
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    assert tick_calls == []
+    assert mono_calls == [job_id]
+
+    async with async_session_maker() as session:
+        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == UUID(job_id)))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_status_route_requires_superuser_and_returns_contract(
+    client, superuser_headers
+):
+    """GET /pipeline-status: superuser only, flat object with the frontend contract."""
+    resp = await client.get(
+        "/api/admin/parsing/pipeline-status",
+        headers=superuser_headers,
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert isinstance(payload, dict)
+    assert "active_job" not in payload  # flat object, not wrapped
+    expected_keys = {
+        "job_id",
+        "status",
+        "current_stage",
+        "started_at",
+        "completed_at",
+        "duration_seconds",
+        "metadata",
+        "discovery",
+    }
+    assert expected_keys.issubset(payload.keys())
+    assert payload["status"] in {"idle", "running", "completed", "failed"}
+    assert isinstance(payload["discovery"], dict)
+    assert set(payload["discovery"].keys()) == {"done", "total", "current_domain"}

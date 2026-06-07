@@ -377,3 +377,266 @@ class TestNormalizeMarketplaceStatus:
             == "failed"
         )
 
+
+class TestToFrontendStatus:
+    """Pure mapping from internal status to frontend enum."""
+
+    def test_running_passes_through(self):
+        assert ParsingAdminService._to_frontend_status("running") == "running"
+
+    def test_completed_passes_through(self):
+        assert ParsingAdminService._to_frontend_status("completed") == "completed"
+
+    def test_partial_maps_to_completed(self):
+        assert ParsingAdminService._to_frontend_status("partial") == "completed"
+
+    def test_failed_passes_through(self):
+        assert ParsingAdminService._to_frontend_status("failed") == "failed"
+
+    def test_cancelled_collapses_to_failed(self):
+        assert ParsingAdminService._to_frontend_status("cancelled") == "failed"
+
+
+async def _cleanup_full_pipeline_jobs(session) -> None:
+    """Wipe every full_pipeline_test row so latest-job tests see a clean slate."""
+    from sqlalchemy import delete as sa_delete
+
+    await session.execute(
+        sa_delete(ScrapeJob).where(ScrapeJob.job_type == "manual")
+    )
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_status_running(monkeypatch):
+    """Running pipeline → status='running', discovery + job_id populated."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+        await _cleanup_full_pipeline_jobs(session)
+
+        running_job = ScrapeJob(
+            job_type="manual",
+            status="running",
+            started_at=datetime.now(UTC) - timedelta(seconds=30),
+            config={
+                "metadata": {
+                    "current_stage": "discovery",
+                    "last_activity_at": datetime.now(UTC).isoformat(),
+                    "summary": {"listings_created": 4, "prices_saved": 3, "errors_count": 0},
+                    "timings": {"discovery_ms": 0, "scrape_ms": 0, "persist_ms": 0, "total_ms": 0},
+                    "per_marketplace": [],
+                    "discovery_marketplace_done": 2,
+                    "discovery_marketplace_total": 5,
+                    "discovery_current_domain": "barbora.lv",
+                }
+            },
+        )
+        session.add(running_job)
+        await session.commit()
+
+        try:
+            payload = await service.get_pipeline_status()
+            assert payload["status"] == "running"
+            assert payload["job_id"] == str(running_job.id)
+            assert payload["current_stage"] in {"discovery", "queued", "scrape", "persist"}
+            assert payload["discovery"] == {
+                "done": 2,
+                "total": 5,
+                "current_domain": "barbora.lv",
+            }
+        finally:
+            await session.delete(running_job)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_status_latest_completed_when_none_running(monkeypatch):
+    """No running job → latest completed terminal job is returned."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+        await _cleanup_full_pipeline_jobs(session)
+
+        started = datetime.now(UTC) - timedelta(minutes=10)
+        completed = datetime.now(UTC) - timedelta(minutes=8)
+        terminal = ScrapeJob(
+            job_type="manual",
+            status="completed",
+            started_at=started,
+            completed_at=completed,
+            duration_ms=120_000,
+            config={
+                "metadata": {
+                    "current_stage": "completed",
+                    "summary": {
+                        "listings_created": 7,
+                        "prices_saved": 6,
+                        "errors_count": 1,
+                    },
+                    "timings": {
+                        "discovery_ms": 0,
+                        "scrape_ms": 0,
+                        "persist_ms": 0,
+                        "total_ms": 120_000,
+                    },
+                    "per_marketplace": [],
+                }
+            },
+        )
+        session.add(terminal)
+        await session.commit()
+
+        try:
+            payload = await service.get_pipeline_status()
+            assert payload["status"] == "completed"
+            assert payload["job_id"] == str(terminal.id)
+            assert payload["completed_at"] is not None
+            assert payload["duration_seconds"] == 120.0
+        finally:
+            await session.delete(terminal)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_status_partial_maps_to_completed(monkeypatch):
+    """Latest 'partial' job collapses to frontend 'completed' while keeping metadata."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+        await _cleanup_full_pipeline_jobs(session)
+
+        partial = ScrapeJob(
+            job_type="manual",
+            status="partial",
+            started_at=datetime.now(UTC) - timedelta(minutes=5),
+            completed_at=datetime.now(UTC) - timedelta(minutes=4),
+            duration_ms=60_000,
+            config={
+                "metadata": {
+                    "current_stage": "completed",
+                    "summary": {
+                        "listings_created": 2,
+                        "prices_saved": 2,
+                        "errors_count": 3,
+                    },
+                    "timings": {
+                        "discovery_ms": 0,
+                        "scrape_ms": 0,
+                        "persist_ms": 0,
+                        "total_ms": 60_000,
+                    },
+                    "per_marketplace": [
+                        {
+                            "marketplace_id": "00000000-0000-0000-0000-000000000001",
+                            "domain": "barbora.lt",
+                            "status": "failed",
+                            "listings_created": 0,
+                            "prices_saved": 0,
+                            "errors_count": 3,
+                            "duration_ms": 1000,
+                        }
+                    ],
+                }
+            },
+        )
+        session.add(partial)
+        await session.commit()
+
+        try:
+            payload = await service.get_pipeline_status()
+            assert payload["status"] == "completed"
+            assert payload["metadata"]["per_marketplace"][0]["status"] == "failed"
+            assert payload["metadata"]["summary"]["errors_count"] == 3
+        finally:
+            await session.delete(partial)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw_status", ["failed", "cancelled"])
+async def test_pipeline_status_failed(monkeypatch, raw_status):
+    """Latest failed/cancelled job collapses to frontend 'failed'."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "manual")
+        await _cleanup_full_pipeline_jobs(session)
+
+        job = ScrapeJob(
+            job_type="manual",
+            status=raw_status,
+            started_at=datetime.now(UTC) - timedelta(minutes=2),
+            completed_at=datetime.now(UTC) - timedelta(minutes=1),
+            duration_ms=30_000,
+            config={
+                "metadata": {
+                    "current_stage": "failed",
+                    "summary": {
+                        "listings_created": 0,
+                        "prices_saved": 0,
+                        "errors_count": 1,
+                    },
+                    "timings": {
+                        "discovery_ms": 0,
+                        "scrape_ms": 0,
+                        "persist_ms": 0,
+                        "total_ms": 30_000,
+                    },
+                    "per_marketplace": [],
+                    "error": "boom",
+                }
+            },
+        )
+        session.add(job)
+        await session.commit()
+
+        try:
+            payload = await service.get_pipeline_status()
+            assert payload["status"] == "failed"
+            assert payload["job_id"] == str(job.id)
+        finally:
+            await session.delete(job)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_status_idle_when_no_jobs(monkeypatch):
+    """No pipeline jobs at all → idle payload with zeroed discovery."""
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        # Use a unique job_type that no real row in the DB carries so we
+        # observe the genuine empty case without fabricating fake rows.
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "__o6_no_such_job_type__")
+
+        payload = await service.get_pipeline_status()
+        assert payload == {
+            "job_id": None,
+            "status": "idle",
+            "current_stage": None,
+            "started_at": None,
+            "completed_at": None,
+            "duration_seconds": None,
+            "metadata": {},
+            "discovery": {"done": 0, "total": 0, "current_domain": None},
+        }
+
+
+@pytest.mark.asyncio
+async def test_pipeline_status_calls_stale_reaper(monkeypatch):
+    """Parity with get_active_pipeline_job: stale reaper runs before the query."""
+    calls: list[str] = []
+
+    async with async_session_maker() as session:
+        service = ParsingAdminService(session)
+        monkeypatch.setattr(service, "TEST_PIPELINE_JOB_TYPE", "__o6_no_such_job_type__")
+
+        original = service._fail_stale_running_pipeline_jobs
+
+        async def spy() -> None:
+            calls.append("reaped")
+            await original()
+
+        monkeypatch.setattr(service, "_fail_stale_running_pipeline_jobs", spy)
+
+        await service.get_pipeline_status()
+        assert calls == ["reaped"]

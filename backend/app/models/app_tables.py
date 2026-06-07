@@ -350,6 +350,18 @@ class ScrapeJob(Base):
         nullable=True,
         index=True,
     )
+    # Self-referential link: child ScrapeJob → parent pipeline ScrapeJob.
+    # NULL for legacy/standalone discovery and the monolithic pipeline path.
+    parent_job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "scrape_jobs.id",
+            name="fk_scrape_jobs_parent_job_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        default=None,
+    )
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -389,6 +401,7 @@ class ScrapeJob(Base):
         Index("idx_scrape_jobs_status", "status"),
         Index("idx_scrape_jobs_marketplace", "marketplace_id"),
         Index("idx_scrape_jobs_created", "created_at"),
+        Index("idx_scrape_jobs_parent_status", "parent_job_id", "status"),
     )
 
 

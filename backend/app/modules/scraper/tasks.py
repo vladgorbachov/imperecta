@@ -19,7 +19,10 @@ from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
-from app.modules.scraper.discovery import DiscoveryCrawler
+from app.modules.scraper.discovery import (
+    DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
+    DiscoveryCrawler,
+)
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as _finalize_full_pipeline_job
 from app.modules.scraper.pipeline.activity_pulse import pulse_job_activity_sync
 from app.modules.scraper.scraper_pool import ScraperPool
@@ -198,6 +201,103 @@ def discover_all_marketplaces():
             "marketplaces_seen": seen,
             "errors": errors[:20],
         }
+
+    return _run_async(_do())
+
+
+@celery_app.task(
+    name="orchestrator_tick",
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=120,
+    time_limit=150,
+)
+def orchestrator_tick(self, parent_job_id: str):
+    """O3: one short state-machine step for a tick-mode pipeline parent.
+
+    Re-enqueues itself with an adaptive countdown until the pipeline reaches a
+    terminal state. Idempotent under acks_late re-delivery: state lives in
+    ``scrape_jobs`` (parent metadata + child rows), not in task memory, so a
+    Railway redeploy mid-tick is non-fatal.
+
+    No autoretry: the tick re-enqueues itself deliberately; a blind retry would
+    double-drive the state machine.
+    """
+
+    async def _do() -> dict:
+        from app.modules.scraper.pipeline.tick_orchestrator import run_tick
+
+        engine, session_factory = _make_session_factory()
+        try:
+            async with session_factory() as db:
+                return await run_tick(db, UUID(str(parent_job_id)))
+        finally:
+            await engine.dispose()
+
+    return _run_async(_do())
+
+
+@celery_app.task(
+    name="discover_one_marketplace",
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=900,
+    time_limit=960,
+)
+def discover_one_marketplace(self, child_job_id: str):
+    """Orchestrator child task (O2): run discovery for ONE marketplace whose
+    pending ScrapeJob (child_job_id) was created by the orchestrator tick.
+
+    Idempotent under acks_late re-delivery: a job already in a terminal state
+    is skipped; a job still 'running' (prior worker died mid-flight) is resumed
+    — discover() is idempotent via existing url_hash deduplication.
+    """
+
+    async def _do() -> dict:
+        engine, session_factory = _make_session_factory()
+        try:
+            async with session_factory() as db:
+                job_uuid = UUID(str(child_job_id))
+                job = await db.get(ScrapeJob, job_uuid)
+                if job is None:
+                    return {
+                        "status": "not_found",
+                        "child_job_id": str(child_job_id),
+                    }
+                if job.status in ("completed", "failed", "partial", "cancelled"):
+                    return {
+                        "status": "skipped",
+                        "job_status": job.status,
+                        "child_job_id": str(child_job_id),
+                    }
+                marketplace = await db.get(DimMarketplace, job.marketplace_id)
+                if marketplace is None:
+                    job.status = "failed"
+                    job.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    return {
+                        "status": "marketplace_not_found",
+                        "child_job_id": str(child_job_id),
+                    }
+                crawler = DiscoveryCrawler(db, ScraperPool())
+                deadline = (
+                    time.monotonic() + DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+                )
+                res = await crawler.discover(
+                    marketplace,
+                    deadline_monotonic=deadline,
+                    inner_job=job,
+                )
+                return {
+                    "status": res.status,
+                    "child_job_id": str(child_job_id),
+                    "marketplace_id": str(marketplace.id),
+                    "products_new": int(res.persisted_listings),
+                }
+        finally:
+            await engine.dispose()
 
     return _run_async(_do())
 

@@ -124,7 +124,7 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Polls GET /pipeline-status and renders the current pipeline run state.
+ * Polls GET /admin/parsing/pipeline-status and renders the current pipeline run state.
  */
 export function PipelineStatusPanel({
   pollInterval = 5000,

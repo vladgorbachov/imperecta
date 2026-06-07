@@ -3,7 +3,7 @@ import { apiClient } from "@/api/client";
 
 export type PipelineRunStatus = "idle" | "running" | "completed" | "failed";
 
-/** Response from GET /api/pipeline-status. */
+/** Response from GET /api/admin/parsing/pipeline-status. */
 export interface PipelineStatusResponse {
   job_id: string | null;
   status: PipelineRunStatus;
@@ -16,4 +16,4 @@ export interface PipelineStatusResponse {
 }
 
 export const getPipelineStatus = () =>
-  apiClient.get<PipelineStatusResponse>("/pipeline-status");
+  apiClient.get<PipelineStatusResponse>("/admin/parsing/pipeline-status");

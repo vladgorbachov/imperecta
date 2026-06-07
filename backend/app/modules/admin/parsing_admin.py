@@ -889,6 +889,90 @@ class ParsingAdminService:
             },
         }
 
+    async def get_pipeline_status(self) -> dict[str, Any]:
+        """Frontend ``/pipeline-status`` contract: current running pipeline,
+        else latest terminal pipeline, else idle.
+
+        The internal job status enum is wider than the frontend enum
+        (``running | completed | failed | partial | cancelled``), so the
+        terminal value is mapped through :meth:`_to_frontend_status` to the
+        4-value enum the React panel understands.
+        """
+        await self._fail_stale_running_pipeline_jobs()
+
+        running = await self.db.execute(
+            select(ScrapeJob)
+            .where(
+                ScrapeJob.job_type == self.TEST_PIPELINE_JOB_TYPE,
+                ScrapeJob.status == "running",
+            )
+            .order_by(ScrapeJob.started_at.desc().nullslast())
+            .limit(1)
+        )
+        job = running.scalar_one_or_none()
+
+        if job is None:
+            latest = await self.db.execute(
+                select(ScrapeJob)
+                .where(ScrapeJob.job_type == self.TEST_PIPELINE_JOB_TYPE)
+                .order_by(
+                    ScrapeJob.started_at.desc().nullslast(),
+                    ScrapeJob.created_at.desc(),
+                )
+                .limit(1)
+            )
+            job = latest.scalar_one_or_none()
+
+        if job is None:
+            return {
+                "job_id": None,
+                "status": "idle",
+                "current_stage": None,
+                "started_at": None,
+                "completed_at": None,
+                "duration_seconds": None,
+                "metadata": {},
+                "discovery": {"done": 0, "total": 0, "current_domain": None},
+            }
+
+        metadata = self._extract_metadata(job.config)
+        last_log_at = await self._job_last_log_at(job.id)
+        metadata = self._merge_runtime_activity(
+            job=job,
+            metadata=metadata,
+            last_log_at=last_log_at,
+        )
+        normalized = self._normalize_job_status(job.status)
+        current_stage = self._resolve_current_stage(metadata, normalized, last_log_at)
+        return {
+            "job_id": str(job.id),
+            "status": self._to_frontend_status(normalized),
+            "current_stage": current_stage,
+            "started_at": self._to_iso(job.started_at),
+            "completed_at": self._to_iso(job.completed_at),
+            "duration_seconds": self._duration_seconds(
+                job.started_at, job.completed_at, job.duration_ms
+            ),
+            "metadata": metadata,
+            "discovery": self._discovery_progress(metadata),
+        }
+
+    @staticmethod
+    def _to_frontend_status(normalized: str) -> str:
+        """Collapse the internal job status to the frontend enum
+        ``{idle, running, completed, failed}``.
+
+        ``partial`` maps to ``completed`` (work was persisted; per-marketplace
+        breakdown stays in ``metadata``). Everything terminal that is not a
+        success collapses to ``failed`` so the UI can render a single error
+        state without inventing a new enum value.
+        """
+        if normalized == "running":
+            return "running"
+        if normalized in {"completed", "partial"}:
+            return "completed"
+        return "failed"
+
     async def get_active_pipeline_job(self) -> dict[str, Any] | None:
         """Return currently running full pipeline job, if any."""
         await self._fail_stale_running_pipeline_jobs()

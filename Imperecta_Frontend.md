@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-07 (head `4d42623`)  
+**Актуально на:** 2026-06-07 (head `e2369b8`; WIP: γ-orchestrator UI wiring)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 ---
@@ -243,6 +243,13 @@ frontend/src/
 | Tabs Discovery / Scrape / Summary | status, per-MP table, recharts pie/bar/timeline |
 | `WorkerLogRelayPanel` | только `status === "running"` |
 
+**Pipeline status panel** (`PipelineStatusPanel.tsx`):
+
+- `GET /api/admin/parsing/pipeline-status` via `api/pipeline.ts` + `usePipelineStatus` (poll **5s**).
+- Contract: `{ job_id, status: idle|running|completed|failed, current_stage, metadata, discovery, … }`.
+- Backend maps internal `partial` → frontend `completed` (`_to_frontend_status`).
+- Standalone component + Vitest (`usePipelineStatus.test.tsx`); интеграция в `DataCollectionTab` — по мере wiring γ-orchestrator.
+
 **History:**
 
 - `RUNS_LIMIT = 10` pipeline runs (не 200).
@@ -297,7 +304,7 @@ frontend/src/
 ## 16. Тесты
 
 - **Vitest:** `cd frontend && npm test`
-- `AdminPage.parsing.test.tsx`, `MarketsOverviewSection.test.tsx`, `marketplaceLabel.test.ts`
+- `AdminPage.parsing.test.tsx`, `MarketsOverviewSection.test.tsx`, `marketplaceLabel.test.ts`, `usePipelineStatus.test.tsx`
 - i18n tests under `src/i18n/__tests__/`
 - **Playwright E2E:** `e2e/` — smoke против Cloudflare/Railway URL в CI
 - **Backend pytest:** см. `Imperecta_Backend.md` §12 — требует `backend/.env` + Postgres `imperecta_test`
@@ -346,7 +353,18 @@ frontend/src/
 
 ---
 
-### 20.3 Display currency stack
+### 20.3 Pipeline status (`PipelineStatusPanel`)
+
+| Элемент | Логика |
+|---------|--------|
+| `getPipelineStatus` | `api/pipeline.ts` — typed `PipelineStatusResponse` |
+| `usePipelineStatus` | TanStack Query; `refetchInterval` default 5000 ms; `staleTime: 0` |
+| `PipelineStatusPanel` | Badge by status; progress bar from `metadata` stage; discovery sub-progress |
+| Status mapping | Backend normalizes DB `partial` → UI `completed` |
+
+---
+
+### 20.4 Display currency stack
 
 | Элемент | Логика |
 |---------|--------|
@@ -359,7 +377,7 @@ frontend/src/
 
 **Правило:** конвертация и local-currency resolution только на backend.
 
-### 20.3b Marketplace labels
+### 20.5 Marketplace labels
 
 | Элемент | Логика |
 |---------|--------|
@@ -370,7 +388,7 @@ frontend/src/
 
 ---
 
-### 20.4 Admin parsing hooks (`useAdmin.ts`)
+### 20.6 Admin parsing hooks (`useAdmin.ts`)
 
 | Hook | Логика |
 |------|--------|
@@ -384,7 +402,7 @@ frontend/src/
 
 ---
 
-### 20.5 `DataCollectionTab.tsx`
+### 20.7 `DataCollectionTab.tsx`
 
 | UI block | Логика |
 |----------|--------|
@@ -400,7 +418,7 @@ frontend/src/
 
 ---
 
-### 20.6 `WorkerLogRelayPanel.tsx`
+### 20.8 `WorkerLogRelayPanel.tsx`
 
 1. `useParsingWorkerLogRelay({ jobId, after, enabled })`.
 2. Append new lines to client buffer (max 120).
@@ -409,7 +427,7 @@ frontend/src/
 
 ---
 
-### 20.7 `MarketsOverviewSection.tsx`
+### 20.9 `MarketsOverviewSection.tsx`
 
 | Feature | Логика |
 |---------|--------|
@@ -424,7 +442,7 @@ frontend/src/
 
 ---
 
-### 20.8 `AdminPage.tsx` — три таба
+### 20.10 `AdminPage.tsx` — три таба
 
 | Tab | Логика |
 |-----|--------|
@@ -434,18 +452,19 @@ frontend/src/
 
 ---
 
-### 20.9 API clients (`api/`)
+### 20.11 API clients (`api/`)
 
 | Client | Логика |
 |--------|--------|
 | `client.ts` | Force HTTPS when page is HTTPS |
 | `admin.ts` | Parsing + user admin types and endpoints |
+| `pipeline.ts` | `GET /admin/parsing/pipeline-status` — `PipelineStatusResponse` |
 | `products.ts` | User products + pool with display_currency |
 | `markets.ts` | Market widgets + overview |
 
 ---
 
-### 20.10 Entitlements (client)
+### 20.12 Entitlements (client)
 
 `useEntitlements` reads user plan → feature flags. `AIAnalystRoute` blocks render without PAID_FULL + AI feature. Trial: full platform except AI.
 
@@ -458,6 +477,7 @@ frontend/src/
 | Routes | `frontend/src/App.tsx` |
 | Admin page | `frontend/src/pages/AdminPage.tsx` |
 | Data Collection | `frontend/src/components/admin/DataCollectionTab.tsx` |
+| Pipeline status | `frontend/src/components/admin/PipelineStatusPanel.tsx`, `hooks/usePipelineStatus.ts`, `api/pipeline.ts` |
 | Worker logs | `frontend/src/components/admin/WorkerLogRelayPanel.tsx` |
 | Admin API | `frontend/src/api/admin.ts` |
 | Hooks | `frontend/src/hooks/useAdmin.ts` |

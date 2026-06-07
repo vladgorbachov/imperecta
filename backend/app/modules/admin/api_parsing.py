@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
+from app.config import Settings
 from app.modules.admin.parsing_admin import ParsingAdminService
-from app.modules.scraper.tasks import run_full_pipeline_test
+from app.modules.scraper.tasks import orchestrator_tick, run_full_pipeline_test
 
 router = APIRouter(
     prefix="/admin/parsing",
@@ -95,7 +96,14 @@ async def _enqueue_pipeline_run(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    run_full_pipeline_test.delay(created["job_id"])
+    # O3 feature flag: "tick" routes to the distributed orchestrator;
+    # anything else (including missing/unset) falls back to the proven
+    # monolithic full-pipeline task. Instant rollback by unsetting the env var.
+    mode = (Settings().orchestrator_mode or "monolith").strip().lower()
+    if mode == "tick":
+        orchestrator_tick.apply_async([created["job_id"]])
+    else:
+        run_full_pipeline_test.delay(created["job_id"])
     return created
 
 
@@ -363,3 +371,14 @@ async def get_active_job(
     service = ParsingAdminService(db)
     active = await service.get_active_pipeline_job()
     return {"active_job": active}
+
+
+@router.get("/pipeline-status")
+async def get_pipeline_status(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """No-id status of the current pipeline (running → latest → idle) for the
+    PipelineStatusPanel polling hook."""
+    service = ParsingAdminService(db)
+    return await service.get_pipeline_status()

@@ -802,6 +802,8 @@ class DiscoveryCrawler:
         marketplace: DimMarketplace,
         *,
         deadline_monotonic: float | None = None,
+        parent_job_id: UUID | None = None,
+        inner_job: ScrapeJob | None = None,
     ) -> DiscoveryResult:
         """Run discovery for one marketplace (ScrapeJob + listing crawl)."""
         started_perf = time.perf_counter()
@@ -810,16 +812,29 @@ class DiscoveryCrawler:
         mp_id = marketplace.id
         domain = (marketplace.domain or "").strip()
 
-        job = ScrapeJob(
-            job_type="discovery",
-            marketplace_id=mp_id,
-            status="running",
-            started_at=started_at,
-            config={"domain": domain},
-        )
-        self.db.add(job)
-        await self.db.commit()
-        await self.db.refresh(job)
+        if inner_job is not None:
+            # Orchestrator path (O2): tick pre-created this job as 'pending'
+            # with parent_job_id and marketplace_id already set. Take
+            # ownership without inserting a second row; do not overwrite the
+            # tick-assigned linkage columns.
+            job = inner_job
+            job.status = "running"
+            if job.started_at is None:
+                job.started_at = started_at
+            await self.db.commit()
+            await self.db.refresh(job)
+        else:
+            job = ScrapeJob(
+                job_type="discovery",
+                marketplace_id=mp_id,
+                parent_job_id=parent_job_id,
+                status="running",
+                started_at=started_at,
+                config={"domain": domain},
+            )
+            self.db.add(job)
+            await self.db.commit()
+            await self.db.refresh(job)
 
         pages_scanned = 0
         candidate_urls_found = 0

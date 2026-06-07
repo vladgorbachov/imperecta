@@ -996,3 +996,175 @@ class TestPhase2CategoryResume:
 
         assert exhausted is False
         assert mp.category_resume_index == 0
+
+
+class TestDiscoverParentJobId:
+    """O1: discover() accepts + persists optional parent_job_id on inner job."""
+
+    @staticmethod
+    def _make_db() -> AsyncMock:
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+        return db
+
+    @pytest.mark.asyncio
+    async def test_discover_sets_parent_job_id_when_provided(self):
+        mp = _make_marketplace(sitemap_resume_offset=0)
+        urls = [f"https://shop.example/p/item-{i}" for i in range(10)]
+        db = self._make_db()
+        parent_id = uuid4()
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(10, 10, False),
+        ):
+            await crawler.discover(mp, parent_job_id=parent_id)
+
+        added_jobs = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.ScrapeJob)
+        ]
+        assert added_jobs, "expected at least one ScrapeJob to be added"
+        assert added_jobs[0].parent_job_id == parent_id
+
+    @pytest.mark.asyncio
+    async def test_discover_parent_job_id_defaults_none(self):
+        mp = _make_marketplace(sitemap_resume_offset=0)
+        urls = [f"https://shop.example/p/item-{i}" for i in range(10)]
+        db = self._make_db()
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(10, 10, False),
+        ):
+            await crawler.discover(mp)
+
+        added_jobs = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.ScrapeJob)
+        ]
+        assert added_jobs, "expected at least one ScrapeJob to be added"
+        assert added_jobs[0].parent_job_id is None
+
+    def test_scrape_job_parent_fk_nullable(self):
+        from app.models.app_tables import ScrapeJob
+
+        job_no_parent = ScrapeJob(job_type="discovery", status="running")
+        assert job_no_parent.parent_job_id is None
+
+        parent_id = uuid4()
+        job_with_parent = ScrapeJob(
+            job_type="discovery",
+            status="running",
+            parent_job_id=parent_id,
+        )
+        assert job_with_parent.parent_job_id == parent_id
+
+
+class TestDiscoverInnerJobOwnership:
+    """O2: discover() owns a pre-created inner ScrapeJob instead of inserting."""
+
+    @staticmethod
+    def _make_db() -> AsyncMock:
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+        return db
+
+    @pytest.mark.asyncio
+    async def test_discover_uses_inner_job_when_provided(self):
+        from app.models.app_tables import ScrapeJob
+
+        mp = _make_marketplace(sitemap_resume_offset=0)
+        parent_id = uuid4()
+        pending_job = ScrapeJob(
+            job_type="discovery",
+            marketplace_id=mp.id,
+            parent_job_id=parent_id,
+            status="pending",
+        )
+        urls = [f"https://shop.example/p/item-{i}" for i in range(10)]
+        db = self._make_db()
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(10, 10, False),
+        ):
+            await crawler.discover(mp, inner_job=pending_job)
+
+        new_scrape_jobs = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.ScrapeJob)
+        ]
+        assert new_scrape_jobs == [], (
+            "discover() must NOT insert a new ScrapeJob when inner_job is provided"
+        )
+        assert pending_job.status in {"completed", "partial", "failed"}, (
+            f"job did not finalize; status={pending_job.status}"
+        )
+        assert pending_job.parent_job_id == parent_id
+
+    @pytest.mark.asyncio
+    async def test_discover_creates_own_job_when_inner_job_none(self):
+        mp = _make_marketplace(sitemap_resume_offset=0)
+        urls = [f"https://shop.example/p/item-{i}" for i in range(10)]
+        db = self._make_db()
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(10, 10, False),
+        ):
+            await crawler.discover(mp)
+
+        new_scrape_jobs = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.ScrapeJob)
+        ]
+        assert len(new_scrape_jobs) == 1

@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-07 (head `4d42623`)  
+**Актуально на:** 2026-06-07 (head `e2369b8`; WIP: `020`, γ-orchestrator)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 ---
@@ -106,6 +106,7 @@
 | GET | `/marketplaces-detailed` | Пагинация `page`, `page_size`≤100 |
 | GET | `/job-live-feed/{job_id}` | Steps из `scrape_logs` |
 | GET | `/active-job` | Текущий running pipeline |
+| GET | `/pipeline-status` | Running → latest → idle (`PipelineStatusPanel`) |
 
 #### Stale job handling
 
@@ -141,8 +142,9 @@
 - **Phase 0:** sitemap (300s budget) + content-aware filter.
 - **Phase 1:** category recon (BFS, schema-aware classifier).
 - **Phase 2:** product harvest + `CATEGORY_CONVERGENCE_STREAK=3`.
-- **Resumable save:** `sitemap_resume_offset`, batch 500, `partial_budget` на sitemap path.
-- **Phase 2 cooperative deadline (`4d42623`):** `_headroom_deadline`, `_phase2_product_harvest` → `exhausted_budget`; `partial_budget` на category path.
+- **Resumable save:** `sitemap_resume_offset` (`016`), `recon_frontier_state` (`017`), `category_resume_index` (`018`); batch 500; inner job `partial` (`019`).
+- **Phase 2 cooperative deadline:** `_headroom_deadline`, `_phase2_product_harvest` → `exhausted_budget`; `partial_budget` на category path.
+- **γ-orchestrator (WIP):** `parent_job_id`, `inner_job` pre-created `pending`; Celery `discover_one_marketplace`.
 - Timeouts: `SITEMAP_PHASE_BUDGET_SECONDS=300`, `DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`, `SITEMAP_TIMEOUT_COOLDOWN_HOURS=24`.
 
 **Page analysis (`scraper_pool.py`):**
@@ -182,6 +184,7 @@ Standalone `scrape_all_pool_products` вызывает `_run_scrape_all_pool()` 
 | `cancellation.py` | Cancel checks, revoke task |
 | `activity_pulse.py` | Heartbeat в metadata |
 | `worker_log_relay.py` | Redis relay + logging handler |
+| `child_aggregation.py` | `aggregate_discovery_children` (O3, WIP) |
 
 ### 4.4 Остальные модули
 
@@ -206,9 +209,7 @@ Standalone `scrape_all_pool_products` вызывает `_run_scrape_all_pool()` 
 
 ### `scheduler.py`
 
-```python
-celery_app.conf.beat_schedule = {}
-```
+Beat включает reaper + infra (см. `scheduler.py`); **не** включает discovery/scrape cron.
 
 ### Задачи
 
@@ -217,6 +218,8 @@ celery_app.conf.beat_schedule = {}
 | `discover_all_marketplaces` | scraper |
 | `discover_single_marketplace` | scraper |
 | `run_full_pipeline_test` | scraper |
+| `discover_one_marketplace` | scraper (O2 child task, WIP) |
+| `reap_orphan_jobs` | `workers/reaper_tasks.py` (Beat 300s) |
 | `scrape_all_pool_products` | scraper |
 | `scrape_pool_product` | scraper (soft 120s / hard 150s) |
 | `check_pool_completeness` | scraper |
@@ -331,9 +334,11 @@ GlobalScrapeService.scrape_product(listing_id)
 **Проблема (prod, 2026-06-02):** migration `009` создала RANGE `fact_price`, но не все месяцы 2026 были покрыты → scrape INSERT падал.
 
 **Migration `015`:** `fact_price_202606` … `fact_price_202612` + `fact_price_default` (DEFAULT partition — safety net).  
-**Migration `016`:** `dim_marketplace.sitemap_resume_offset` — resumable sitemap discovery.
+**Migration `016`–`018`:** resumable discovery columns on `dim_marketplace`.  
+**Migration `019`:** `partial` in `scrape_jobs.status`.  
+**Migration `020` (WIP):** `parent_job_id` self-FK on `scrape_jobs`.
 
-**Celery `ensure_fact_price_partitions`:** создаёт партиции на **следующие 3 календарных месяца** (`CREATE TABLE IF NOT EXISTS`). Запускать по расписанию или после деплоя, пока beat пустой — вручную/enqueue.
+**Celery `ensure_fact_price_partitions`:** создаёт партиции на **следующие 3 календарных месяца** (`CREATE TABLE IF NOT EXISTS`). Beat: daily 00:00 (`scheduler.py`).
 
 ---
 
@@ -466,7 +471,8 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Компонент | Логика |
 |-----------|--------|
 | `_headroom_deadline` | 85% of remaining MP budget for phase work; 15% for finalize |
-| `discover(deadline_monotonic?)` | Inner job; cooperative budget; `partial_budget` on sitemap or Phase 2 |
+| `discover(...)` | `deadline_monotonic`, `parent_job_id`, `inner_job` (O2); cooperative budget; `partial` job status |
+| `discover_one_marketplace` | Celery O2 — runs discover on pre-created child job |
 | `_save_product_urls` | Batch 500; `(new_count, next_offset, exhausted)`; resume offset |
 | `_filter_urls_by_role` | Sample/trust/reject sitemap filter |
 | `_phase2_product_harvest` | Pagination + convergence + cooperative deadline → `exhausted_budget` |
@@ -512,7 +518,9 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Pipeline | `backend/app/modules/scraper/pipeline/` |
 | Celery | `backend/app/workers/celery_app.py` |
 | Partitions task | `backend/app/workers/maintenance_tasks.py` |
-| Migration 015/016 | `backend/alembic/versions/015_*.py`, `016_*.py` |
+| Migrations 015–020 | `backend/alembic/versions/015_*.py` … `020_*.py` (020 WIP) |
+| Reaper | `backend/app/workers/reaper_tasks.py` |
+| Pipeline status | `parsing_admin.get_pipeline_status`, `api_parsing` GET `/pipeline-status` |
 | Display currency | `backend/app/common/currency.py`, `marketplace_locale.py` |
 | Entitlements | `backend/app/entitlements/plan.py` |
 

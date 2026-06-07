@@ -8,7 +8,7 @@ export interface UsePipelineStatusOptions {
   refetchInterval?: number | false;
 }
 
-/** Polls GET /pipeline-status for the current data-collection pipeline state. */
+/** Polls GET /admin/parsing/pipeline-status for the current data-collection pipeline state. */
 export function usePipelineStatus(options?: UsePipelineStatusOptions) {
   return useQuery({
     queryKey: pipelineStatusQueryKey,

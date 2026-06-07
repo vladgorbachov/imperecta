@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-07 (ветка `main`, head `4d42623`)  
+**Актуально на:** 2026-06-07 (ветка `main`, head `e2369b8`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 ---
@@ -67,12 +67,13 @@ imperecta/
 │   ├── app/models/
 │   ├── app/modules/          # доменная логика
 │   ├── app/workers/
-│   └── alembic/versions/     # 001 … 016 (head: sitemap_resume_offset)
+│   └── alembic/versions/     # 001 … 019 (head tracked); 020 WIP
 ├── Imperecta_Architecture.md
 ├── Imperecta_Backend.md
 ├── Imperecta_Frontend.md
 ├── Imperecta_Database.md
-└── Imperecta_Parsing.md
+├── Imperecta_Parsing.md
+└── Imperecta_File_Structure.md
 ```
 
 Legacy `app/api/`, `app/services/` удалены.
@@ -150,8 +151,8 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 | 1 | `_phase1_category_recon` | BFS по hub/listing, кэш `discovered_category_urls` |
 | 2 | `_phase2_product_harvest` | Обход category pages, pagination, save listings |
 
-Если sitemap дал ≥10 product URLs — **sitemap path** (resumable offset, `016`); иначе category crawl с Phase 2 budget.  
-При нехватке 15 min budget — `partial_budget`; следующий run продолжает.  
+Если sitemap дал ≥10 product URLs — **sitemap path** (resumable offset, `016`); иначе category crawl с Phase 2 budget (`017`/`018` resume).  
+При нехватке 15 min budget — `partial_budget` / inner job `partial` (`019`); следующий run продолжает.  
 Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest retry через 1h.
 
 Подробно: `Imperecta_Parsing.md`.
@@ -196,16 +197,16 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 
 ## 8. Workers
 
-- **Beat:** `beat_schedule = {}` — cron отключён.  
+- **Beat:** `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape cron **выключен** — только manual API.  
 - **Result backend:** `None` (экономия Upstash).  
-- Задачи: scraper, market_data, cleanup, maintenance, stubs (alerts/digests).
+- Задачи: scraper, `reap_orphan_jobs`, market_data, cleanup, maintenance, stubs (alerts/digests).
 
 ---
 
 ## 9. База данных (кратко)
 
 - Star schema + app tables.  
-- Head migration: `016_dim_marketplace_sitemap_resume_offset` (после `015` fact_price partitions).
+- Head migration (tracked): `019_scrape_jobs_status_allow_partial`; WIP `020` `parent_job_id`. Resumable discovery: `016`–`018` on `dim_marketplace`.
 - `fact_price` partitioned by `date_id` (`fact_price_YYYYMM` + **`fact_price_default`** safety partition).
 - Без партиции на текущий месяц INSERT в `fact_price` падает (`no partition found for row`).
 - `url_hash` unique на `fact_listing`.
@@ -218,7 +219,7 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 
 - React 19, Router 7, TanStack Query, Zustand (`authStore`, **`displayCurrencyStore`**).  
 - **Dashboard:** `MarketsOverviewSection` — каталог товаров пула (поиск, сортировка, `DisplayCurrencySelector`, `PriceDisplay`).  
-- **Admin:** три таба; Data Collection с live monitor; Users Management CRUD.  
+- **Admin:** три таба; Data Collection с live monitor; `PipelineStatusPanel` + `usePipelineStatus` (5s poll); Users Management CRUD.  
 - i18n: 8 языков; русский только superuser.
 
 Подробно: `Imperecta_Frontend.md`.
@@ -285,6 +286,10 @@ sequenceDiagram
 | `cab086f` P0 scrape guards | Persistence gate, currency whitelist, deactivate after 15 errors |
 | `98e2e89` Admin CRUD | Users Management: create/edit/role/password/delete |
 | `4cd33d3` Worker log relay | Redis `pipeline:worker_deploy_log` → admin terminal |
+| `e2369b8` Orphan reaper + pipeline status | `reap_orphan_jobs` Beat 300s; `GET /pipeline-status`; `PipelineStatusPanel` |
+| `019` partial job status | Inner discovery `status=partial` when budget exhausted with progress |
+| `017`–`018` resumable Phase 1/2 | `recon_frontier_state`, `category_resume_index` on `dim_marketplace` |
+| WIP γ-orchestrator | `020` `parent_job_id`; `discover_one_marketplace`; `child_aggregation` |
 
 ---
 
@@ -306,6 +311,9 @@ sequenceDiagram
 | **Metadata heartbeat** | `pipeline/metadata_store.py`, `activity_pulse.py` | JSONB progress + anti-stale pulses |
 | **Worker logs** | `pipeline/worker_log_relay.py` | Redis 500 lines → admin terminal |
 | **Stale parent jobs** | `admin/parsing_admin.py` | Auto-fail idle 5/10/30 min on API read |
+| **Orphan reaper** | `workers/reaper_tasks.py` | Beat: fail stuck `running` after deploy/SIGTERM |
+| **Pipeline status API** | `parsing_admin.get_pipeline_status` | running → latest terminal → idle; `partial`→`completed` for UI |
+| **γ-orchestrator (WIP)** | `child_aggregation`, `discover_one_marketplace` | Child jobs per MP; aggregate for `complete_pipeline_job` |
 | **Admin cancel** | `parsing_admin.py` + `cancellation.revoke_celery_task` | Revoke Celery + mark parent failed |
 
 ### 15.2 Backend runtime (см. `Imperecta_Backend.md` §14)
@@ -338,6 +346,7 @@ sequenceDiagram
 | **Session/auth** | `authStore`, `setupAuth.ts` | JWT + refresh on 401 |
 | **Display currency UI** | `displayCurrencyStore`, `PriceDisplay` | Query param → backend conversion |
 | **Data Collection** | `DataCollectionTab.tsx` | Pipeline run/monitor/history; stale badge 300s |
+| **Pipeline status** | `PipelineStatusPanel.tsx`, `usePipelineStatus` | Poll `/pipeline-status` 5s; progress badge |
 | **Worker terminal** | `WorkerLogRelayPanel.tsx` | Poll relay 2s, buffer 120 lines |
 | **Markets catalog** | `MarketsOverviewSection.tsx` | Pool browse + currency + `formatMarketplaceLabel` |
 | **Marketplace labels** | `lib/marketplaceLabel.ts` | Country suffix for local TLD stores; intl .com without suffix |
@@ -372,5 +381,6 @@ sequenceDiagram
 | `Imperecta_Frontend.md` | React, admin UI, hooks |
 | `Imperecta_Database.md` | Схема, миграции, RLS |
 | `Imperecta_Parsing.md` | Discovery, scrape, pipeline, quality gates |
+| `Imperecta_File_Structure.md` | Полная карта файлов репозитория (472 tracked) |
 
 **Cursor rules:** `.cursor/rules/*.mdc` (backend, frontend, database, scraper, git-ci-deploy).

@@ -1,6 +1,6 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-06-07 (head `016`; app `4d42623`)  
+**Актуально на:** 2026-06-07 (head tracked `019`; WIP `020`; app `e2369b8`)  
 **Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 ---
@@ -14,7 +14,8 @@
 | Backend access | Direct URL, table owner — **RLS bypass** |
 | Supabase REST | RLS enabled (migration 012) |
 | Alembic version | Schema `alembic_meta.alembic_version` |
-| Head revision | `016_dim_marketplace_sitemap_resume_offset` |
+| Head revision (tracked) | `019_scrape_jobs_status_allow_partial` |
+| WIP revision | `020_scrape_jobs_parent_job_id` (untracked) |
 
 При старте API: `alembic upgrade head` (subprocess).
 
@@ -39,7 +40,11 @@
 | 013 | `search_trend_source_generic` | Generic `fact_search_trend.source` CHECK |
 | 014 | `marketplace_scrape_tier` | `dim_marketplace.scrape_tier` 1–3 |
 | 015 | `fact_price_default_partition` | `fact_price_202606`–`202612` + `fact_price_default` |
-| 016 | `dim_marketplace_sitemap_resume_offset` | `sitemap_resume_offset INTEGER DEFAULT 0` — resumable sitemap (**head**) |
+| 016 | `dim_marketplace_sitemap_resume_offset` | `sitemap_resume_offset INTEGER DEFAULT 0` |
+| 017 | `dim_marketplace_recon_frontier_state` | JSONB BFS queue/visited/listing_urls — resumable Phase 1 |
+| 018 | `dim_marketplace_category_resume_index` | INTEGER — resumable Phase 2 category loop |
+| 019 | `scrape_jobs_status_allow_partial` | CHECK + `'partial'` for inner discovery jobs (**head tracked**) |
+| 020 | `scrape_jobs_parent_job_id` | Self-FK `parent_job_id` + index `(parent_job_id, status)` — γ-orchestrator (**WIP**) |
 
 **Правила:** не редактировать старые revisions; один statement per `op.execute()` для asyncpg; `IF NOT EXISTS` для repair.
 
@@ -70,7 +75,7 @@
 | `dim_product` | DimProduct |
 | `dim_seller` | DimSeller |
 
-**`dim_marketplace` (parsing + scrape):** **`marketplace_code`** (unique, scoped pipeline filter), `code`, `base_url`, `is_active`, `requires_js`, **`scrape_tier`** (1–3, default 1), `scraper_config` JSONB, `product_quota`, `products_in_pool`, `last_discovery_*`, `discovered_category_urls` (JSONB), `last_category_recon_at`, `sitemap_url`, `last_sitemap_harvest_at`, **`sitemap_resume_offset`** (INTEGER, default 0 — absolute index for resumable sitemap save, migration `016`).
+**`dim_marketplace` (parsing + scrape):** **`marketplace_code`** (unique, scoped pipeline filter), `code`, `base_url`, `is_active`, `requires_js`, **`scrape_tier`** (1–3, default 1), `scraper_config` JSONB, `product_quota`, `products_in_pool`, `last_discovery_*`, `discovered_category_urls` (JSONB), `last_category_recon_at`, `sitemap_url`, `last_sitemap_harvest_at`, **`sitemap_resume_offset`** (`016`), **`recon_frontier_state`** JSONB (`017`), **`category_resume_index`** (`018`).
 
 **Scoped pipeline:** `POST run-pipeline { marketplace_codes }` → orchestrator фильтрует listings через `dim_marketplace.marketplace_code IN (...)`.
 
@@ -146,9 +151,11 @@ Indexes: `idx_listing_url_hash` UNIQUE, `idx_listing_active` partial, marketplac
 
 #### `scrape_jobs`
 
-- `job_type`: e.g. `full_pipeline_test`
-- `status`: queued, running, completed, failed, cancelled
+- `job_type`: `full_pipeline_test`, `discovery`, `scheduled`, `manual`, `retry`, `backfill`
+- `status`: `pending`, `running`, `completed`, `failed`, `cancelled`, **`partial`** (`019`)
+- `parent_job_id` (UUID, nullable, self-FK — **`020` WIP**): child discovery job → parent pipeline job
 - `config` JSONB: metadata (stage, timings, per_marketplace, celery_task_id)
+- Index `idx_scrape_jobs_parent_status` on `(parent_job_id, status)` (`020`)
 
 #### `scrape_logs`
 
@@ -285,11 +292,13 @@ Normalizer in `Settings.validate_database_url`.
 
 **Migration 014:** `scrape_tier` on `dim_marketplace`.  
 **Migration 015:** monthly partitions Jun–Dec 2026 + `fact_price_default`.  
-**Migration 016:** `sitemap_resume_offset` on `dim_marketplace`.
+**Migrations 016–018:** resumable discovery columns on `dim_marketplace`.  
+**Migration 019:** `partial` in `scrape_jobs.status`.  
+**Migration 020 (WIP):** `parent_job_id` on `scrape_jobs`.
 
 **Display currency (runtime, no migration):** `CurrencyConverter` + `marketplace_locale.py` — local mode resolves currency from domain TLD (preferred) or `country_code`; API fields `local_currency_resolution`, `local_currency_unavailable`.
 
-`models/__init__.py` docstring may reference older head — **trust migration files** (`016_*`) over comments.
+`models/__init__.py` docstring may reference older head — **trust migration files** (`019_*` tracked) over comments.
 
 ---
 
@@ -319,6 +328,7 @@ Normalizer in `Settings.validate_database_url`.
 | Identity | `marketplace_code` UNIQUE — **scoped pipeline filter**; `domain`, `base_url` |
 | Scrape | `requires_js`, `scrape_tier` (1–3), `scraper_config` JSONB selectors + `allowed_currencies` |
 | Discovery state | `last_discovery_*`, `products_in_pool`, `discovered_category_urls`, sitemap timestamps |
+| Resumable discovery | `sitemap_resume_offset` (`016`), `recon_frontier_state` (`017`), `category_resume_index` (`018`) |
 | Quota | `product_quota` — 0 = use `discovery_no_quota_limit` |
 | Active | `is_active=false` excludes from discovery SELECT |
 
@@ -388,14 +398,17 @@ Columns: `currency_code`, `rate_to_eur`, `rate_to_usd`, `date_id`.
 | job_type | Логика |
 |----------|--------|
 | `full_pipeline_test` | Parent admin pipeline; metadata in `config` |
-| `discovery` | Inner per-MP job from `discover()`; **Z1 reap** fixes stuck `running` |
+| `discovery` | Inner per-MP job from `discover()` or γ-orchestrator child (`parent_job_id`); **Z1 reap** + **reaper** fix stuck `running` |
 | `scheduled`, `manual`, … | Legacy/other flows |
 
 | status | Transitions |
 |--------|-------------|
+| `pending` | Pre-dispatched child job (γ-orchestrator O2) |
 | `running` | Active work |
-| `completed` / `failed` | Terminal; set by discover, complete_pipeline_job, stale, cancel |
+| `completed` / `failed` / `partial` | Terminal; `partial` = cooperative budget exhausted with durable progress |
 | `cancelled` | CHECK allows; admin cancel uses `failed` + error message |
+
+| `parent_job_id` | NULL = monolithic path; non-NULL = child of `full_pipeline_test` (`020`) |
 
 **Metadata JSONB:** `current_stage`, `last_activity_at`, `celery_task_id`, `timings`, `summary`, `per_marketplace[]`, `discovery_*` progress fields.
 
@@ -447,7 +460,9 @@ scrape fail ×15 → fact_listing.is_active=false
 pipeline complete → scrape_jobs counters from scrape_logs + discovery seed
 stale parent → scrape_jobs.failed via parsing_admin (not Z1)
 Z1 hard cancel → inner discovery jobs.failed via discovery_phase SQL
-partial_budget → sitemap_resume_offset preserved; cooperative deadline exit
+reaper (Beat 300s) → stuck running jobs.failed via reaper_tasks (external SIGTERM/OOM)
+partial_budget / partial status → resume columns preserved; cooperative deadline exit
+child jobs → parent_job_id links discovery children to pipeline parent (020)
 ```
 
 ---
