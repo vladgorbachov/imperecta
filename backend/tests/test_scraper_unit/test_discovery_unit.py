@@ -1,11 +1,15 @@
 """Unit tests for discovery helpers (pure functions + dataclass)."""
 
-from datetime import datetime, timezone
+import asyncio
+import time
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 import app.modules.scraper.discovery as disc
+from app.models.dimensions import DimMarketplace
 
 
 def test_title_from_url_and_normalize():
@@ -38,17 +42,19 @@ async def test_save_product_urls_creates_new_rows():
     existing.all.return_value = []
     db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
-    db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     crawler = disc.DiscoveryCrawler(db, MagicMock())
-    count = await crawler._save_product_urls(
+    new_count, next_offset, exhausted = await crawler._save_product_urls(
         mp_id,
         [
             "https://unique-shop.example/p/unique-12345",
             "https://unique-shop.example/p/other-67890",
         ],
     )
-    assert count == 2
+    assert new_count == 2
+    assert next_offset == 2
+    assert exhausted is False
     assert db.add.call_count >= 2
 
 
@@ -64,11 +70,13 @@ async def test_save_product_urls_skips_duplicate_hash():
     existing.all.return_value = [(url_hash,)]
     db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
-    db.flush = AsyncMock()
+    db.commit = AsyncMock()
 
     crawler = disc.DiscoveryCrawler(db, MagicMock())
-    count = await crawler._save_product_urls(mp_id, [url])
-    assert count == 0
+    new_count, next_offset, exhausted = await crawler._save_product_urls(mp_id, [url])
+    assert new_count == 0
+    assert next_offset == 1
+    assert exhausted is False
     db.add.assert_not_called()
 
 
@@ -133,3 +141,166 @@ async def test_filter_urls_by_role_reject_sample(monkeypatch):
     accepted, stats = await crawler._filter_urls_by_role(urls)
     assert stats["mode"] == "reject_sample"
     assert len(accepted) == 1
+
+
+def _make_mock_db_for_save(existing_hashes: list = None) -> AsyncMock:
+    """Build an AsyncMock AsyncSession suitable for _save_product_urls calls."""
+    db = AsyncMock()
+    existing_result = MagicMock()
+    existing_result.all.return_value = [(h,) for h in (existing_hashes or [])]
+    db.execute = AsyncMock(return_value=existing_result)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.flush = AsyncMock()
+    return db
+
+
+def _make_marketplace(**overrides) -> DimMarketplace:
+    """Build a minimal DimMarketplace ORM instance (not session-attached)."""
+    defaults = dict(
+        id=uuid4(),
+        marketplace_code="test-mp",
+        domain="test-mp.example",
+        base_url="https://test-mp.example",
+        is_active=True,
+        product_quota=0,
+        sitemap_resume_offset=0,
+        discovered_category_urls=[],
+        discovery_error_count=0,
+    )
+    defaults.update(overrides)
+    mp = DimMarketplace(**defaults)
+    return mp
+
+
+class TestResumableSitemap:
+    """Cooperative deadline + resumable sitemap offset behavior."""
+
+    @pytest.mark.asyncio
+    async def test_save_product_urls_respects_deadline(self):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+
+        async def slow_commit():
+            await asyncio.sleep(0.3)
+
+        db.commit = AsyncMock(side_effect=slow_commit)
+        urls = [f"https://shop.example/p/item-{i}" for i in range(1500)]
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+        deadline = time.monotonic() + 0.5
+        new_count, next_offset, exhausted = await crawler._save_product_urls(
+            mp_id, urls, deadline_monotonic=deadline,
+        )
+
+        assert exhausted is True
+        assert next_offset == disc.SAVE_PRODUCT_URLS_BATCH_SIZE
+        assert new_count == disc.SAVE_PRODUCT_URLS_BATCH_SIZE
+        assert db.commit.await_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_save_product_urls_resumes_from_offset(self):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+        urls = [f"https://shop.example/p/item-{i}" for i in range(1000)]
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+        new_count, next_offset, exhausted = await crawler._save_product_urls(
+            mp_id, urls, start_offset=500,
+        )
+
+        assert new_count == 500
+        assert next_offset == 1000
+        assert exhausted is False
+        product_adds = [
+            call for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.DimProduct)
+        ]
+        assert len(product_adds) == 500
+
+    @pytest.mark.asyncio
+    async def test_discover_persists_sitemap_resume_offset_on_partial(self):
+        mp = _make_marketplace(sitemap_resume_offset=0)
+        urls = [f"https://shop.example/p/item-{i}" for i in range(2000)]
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(300, 800, True),
+        ):
+            deadline = time.monotonic() + 60
+            result = await crawler.discover(mp, deadline_monotonic=deadline)
+
+        assert mp.sitemap_resume_offset == 800
+        assert result.status == "partial_budget"
+        added_jobs = [
+            call.args[0] for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.ScrapeJob)
+        ]
+        assert added_jobs and added_jobs[0].status == "partial"
+
+    @pytest.mark.asyncio
+    async def test_discover_resets_offset_on_completion(self):
+        mp = _make_marketplace(sitemap_resume_offset=150)
+        urls = [f"https://shop.example/p/item-{i}" for i in range(200)]
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(200, 200, False),
+        ):
+            result = await crawler.discover(mp)
+
+        assert mp.sitemap_resume_offset == 0
+        assert result.status == "completed"
+
+    def test_should_run_sitemap_harvest_with_offset(self):
+        crawler = disc.DiscoveryCrawler(MagicMock(), MagicMock())
+        recent_dt = datetime.now(timezone.utc) - timedelta(hours=1)
+
+        mp_fresh = _make_marketplace(
+            last_sitemap_harvest_at=recent_dt, sitemap_resume_offset=0,
+        )
+        assert crawler._should_run_sitemap_harvest(mp_fresh) is False
+
+        mp_resume = _make_marketplace(
+            last_sitemap_harvest_at=recent_dt, sitemap_resume_offset=500,
+        )
+        assert crawler._should_run_sitemap_harvest(mp_resume) is True
+
+        mp_never = _make_marketplace(
+            last_sitemap_harvest_at=None, sitemap_resume_offset=0,
+        )
+        assert crawler._should_run_sitemap_harvest(mp_never) is True

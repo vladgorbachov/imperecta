@@ -29,6 +29,17 @@ slog = structlog.get_logger(__name__)
 ProgressCallback = Callable[[], Awaitable[None]]
 
 
+def _map_discovery_status(discovery_status: str) -> str:
+    """Map DiscoveryResult.status to per_marketplace status."""
+    if discovery_status == "error":
+        return "failed"
+    if discovery_status == "partial_budget":
+        return "partial_budget"
+    if discovery_status == "partial":
+        return "partial"
+    return "completed"
+
+
 async def run_discovery_phase(
     db: AsyncSession,
     *,
@@ -81,9 +92,12 @@ async def run_discovery_phase(
 
         started = time.perf_counter()
         try:
-            discovered = await asyncio.wait_for(
-                crawler.discover(marketplace),
-                timeout=DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
+            deadline = (
+                time.monotonic()
+                + DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+            )
+            discovered = await crawler.discover(
+                marketplace, deadline_monotonic=deadline
             )
             per_marketplace[marketplace.id] = {
                 "marketplace_id": str(marketplace.id),
@@ -97,9 +111,15 @@ async def run_discovery_phase(
                 )
                 if discovered.completed_at
                 else int((time.perf_counter() - started) * 1000),
-                "status": "failed" if discovered.status == "error" else "completed",
+                "status": _map_discovery_status(discovered.status),
             }
             errors.extend(discovered.errors)
+        # Defense-in-depth: the cooperative deadline inside
+        # crawler.discover() should normally prevent this path.
+        # External cancellations (admin SIGTERM via
+        # /cancel-active-job, OOM kill, worker shutdown) can still
+        # inject CancelledError mid-flight. The orphan-job reap
+        # below remains as a safety net for those cases.
         except asyncio.TimeoutError:
             # Circuit breaker (Level 3): per-marketplace discovery budget exceeded.
             # crawler.discover() was cancelled mid-flight via CancelledError, so

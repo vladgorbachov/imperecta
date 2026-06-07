@@ -45,6 +45,13 @@ CATEGORY_CONVERGENCE_STREAK = 3
 # 500 is a balance between round-trip overhead (smaller batches = more flushes)
 # and lost-work-on-cancel (larger batches = bigger loss when cancel hits mid-batch).
 SAVE_PRODUCT_URLS_BATCH_SIZE = 500
+# Fraction of the per-marketplace discovery budget that
+# _save_product_urls is allowed to consume before voluntarily
+# exiting with a resumable offset. The remaining 15% is
+# headroom for finalization (final commit of marketplace row,
+# status updates, return path) so the caller never has to
+# hard-cancel us mid-commit.
+SAVE_BUDGET_HEADROOM_FRACTION = 0.85
 # Max BFS depth when exploring hub pages for category links.
 RECON_BFS_MAX_DEPTH = 3
 # Min URLs found via sitemap to consider sitemap harvest successful.
@@ -119,7 +126,8 @@ class DiscoveryResult:
     """
 
     marketplace_id: UUID
-    status: str  # completed, partial, error, no_categories
+    status: str  # completed, partial, partial_budget,
+    # error, no_categories
     started_at: datetime
     completed_at: datetime | None = None
 
@@ -190,24 +198,32 @@ class DiscoveryCrawler:
             out.append(url)
         return out
 
-    async def _save_product_urls(self, marketplace_id: UUID, urls: list[str]) -> int:
-        """Save discovered URLs. Creates DimProduct + FactListing per new URL.
+    async def _save_product_urls(
+        self,
+        marketplace_id: UUID,
+        urls: list[str],
+        *,
+        start_offset: int = 0,
+        deadline_monotonic: float | None = None,
+    ) -> tuple[int, int, bool]:
+        """Save discovered URLs. Returns (new_count, next_offset, exhausted_budget).
 
-        Persists in batches of SAVE_PRODUCT_URLS_BATCH_SIZE with a commit after each
-        batch. This makes progress durable: if discover() is cancelled mid-flight by
-        the circuit breaker, batches committed before cancel-point survive, and the
-        next discovery run skips them via existing_hashes deduplication.
+        next_offset is the absolute index (into the original `urls` list) at
+        which a subsequent call should resume. When all entries are processed
+        without hitting the deadline, next_offset == len(urls) and
+        exhausted_budget == False.
 
-        Note on transactional semantics: each batch commit is independent. Other
-        pending changes in the same session at call-time will also be flushed by
-        these intermediate commits. This is an acceptable trade-off — the alternative
-        (one monolithic transaction) loses ALL work on cancel, which is far worse
-        than partial loss of atomicity with other operations.
+        When deadline_monotonic is set and time.monotonic() reaches it BETWEEN
+        batch commits, the loop commits its current batch, stops, and returns
+        (new_count_so_far, absolute_index_after_last_commit, True). The
+        deadline is never checked mid-commit — only after a successful commit
+        returns control.
         """
         if not urls:
-            return 0
+            return 0, start_offset, False
 
-        normalized_urls = [url for url in urls if url]
+        work_urls = urls[start_offset:] if start_offset > 0 else urls
+        normalized_urls = [u for u in work_urls if u]
         hash_by_url = {url: FactListing.compute_url_hash(url) for url in normalized_urls}
         existing_hashes_result = await self.db.execute(
             select(FactListing.url_hash).where(FactListing.url_hash.in_(list(hash_by_url.values()))),
@@ -216,7 +232,7 @@ class DiscoveryCrawler:
 
         new_count = 0
         pending_in_batch = 0
-        for url in normalized_urls:
+        for relative_index, url in enumerate(normalized_urls):
             url_hash = hash_by_url[url]
             if url_hash in existing_hashes:
                 continue
@@ -246,13 +262,33 @@ class DiscoveryCrawler:
             if pending_in_batch >= SAVE_PRODUCT_URLS_BATCH_SIZE:
                 await self.db.commit()
                 pending_in_batch = 0
+                # absolute_index points to the URL we just FINISHED
+                # processing in the original list. The next run
+                # should resume from this index (inclusive of any
+                # already-saved URL, which existing_hashes will skip).
+                absolute_index = start_offset + relative_index + 1
+                logger.info(
+                    "save_product_urls_progress marketplace_id=%s "
+                    "absolute_offset=%d new_in_run=%d batch_size=%d",
+                    marketplace_id,
+                    absolute_index,
+                    new_count,
+                    SAVE_PRODUCT_URLS_BATCH_SIZE,
+                )
+                if (
+                    deadline_monotonic is not None
+                    and time.monotonic() >= deadline_monotonic
+                ):
+                    return new_count, absolute_index, True
 
         if pending_in_batch > 0:
             await self.db.commit()
-        return new_count
+        return new_count, start_offset + len(normalized_urls), False
 
     def _should_run_sitemap_harvest(self, marketplace: DimMarketplace) -> bool:
         """Return True if sitemap harvest should run."""
+        if int(getattr(marketplace, "sitemap_resume_offset", 0) or 0) > 0:
+            return True
         if marketplace.last_sitemap_harvest_at is None:
             return True
         age = (datetime.now(tz=timezone.utc) - marketplace.last_sitemap_harvest_at).days
@@ -568,7 +604,7 @@ class DiscoveryCrawler:
                 if not product_urls:
                     product_urls = extract_product_links(soup, marketplace.base_url)
                 if product_urls:
-                    saved_this_call = await self._save_product_urls(
+                    saved_this_call, _, _ = await self._save_product_urls(
                         marketplace.id, product_urls
                     )
                     saved_for_this_category += saved_this_call
@@ -598,7 +634,12 @@ class DiscoveryCrawler:
 
         return total_saved
 
-    async def discover(self, marketplace: DimMarketplace) -> DiscoveryResult:
+    async def discover(
+        self,
+        marketplace: DimMarketplace,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> DiscoveryResult:
         """Run discovery for one marketplace (ScrapeJob + listing crawl)."""
         started_perf = time.perf_counter()
         started_at = datetime.now(timezone.utc)
@@ -675,6 +716,7 @@ class DiscoveryCrawler:
                     sitemap_product_urls = []
 
             products_found = 0
+            partial_budget = False
             if len(sitemap_product_urls) >= SITEMAP_MIN_USEFUL_URLS:
                 logger.info(
                     "discovery_using_sitemap marketplace_id=%s url_count=%d",
@@ -685,7 +727,27 @@ class DiscoveryCrawler:
                 batch = sitemap_product_urls[:remaining]
                 accepted_urls = len(batch)
                 rejected_urls = max(0, len(sitemap_product_urls) - len(batch))
-                products_found = await self._save_product_urls(marketplace.id, batch)
+                start_offset = int(getattr(marketplace, "sitemap_resume_offset", 0) or 0)
+                save_deadline: float | None = None
+                if deadline_monotonic is not None:
+                    now_m = time.monotonic()
+                    remaining_budget = max(0.0, deadline_monotonic - now_m)
+                    save_deadline = now_m + (
+                        remaining_budget * SAVE_BUDGET_HEADROOM_FRACTION
+                    )
+                new_count, next_offset, exhausted = await self._save_product_urls(
+                    marketplace.id,
+                    batch,
+                    start_offset=start_offset,
+                    deadline_monotonic=save_deadline,
+                )
+                products_found = new_count
+                if exhausted and next_offset < len(batch):
+                    marketplace.sitemap_resume_offset = next_offset
+                    partial_budget = True
+                else:
+                    marketplace.sitemap_resume_offset = 0
+                    partial_budget = False
                 logger.info(
                     "discovery_sitemap_path marketplace_id=%s candidate=%d accepted=%d "
                     "saved=%d rejected=%d remaining=%d",
@@ -727,7 +789,9 @@ class DiscoveryCrawler:
                 duplicate_urls = max(0, accepted_urls - products_found)
                 remaining = max(0, remaining - products_found)
 
-            if errors and persisted_listings > 0:
+            if partial_budget:
+                status = "partial_budget"
+            elif errors and persisted_listings > 0:
                 status = "partial"
             elif errors:
                 status = "error"
@@ -737,7 +801,12 @@ class DiscoveryCrawler:
                 status = "completed"
 
             completed_at = datetime.now(timezone.utc)
-            job.status = "failed" if status == "error" else "completed"
+            if status == "error":
+                job.status = "failed"
+            elif status == "partial_budget":
+                job.status = "partial"
+            else:
+                job.status = "completed"
             job.completed_at = completed_at
             job.duration_ms = int((time.perf_counter() - started_perf) * 1000)
             job.total_listings = candidate_urls_found
