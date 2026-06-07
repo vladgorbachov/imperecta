@@ -176,6 +176,9 @@ class DimMarketplace(Base):
     last_category_recon_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    recon_frontier_state: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=None,
+    )
     sitemap_url: Mapped[str | None] = mapped_column(
         String(2048), nullable=True, default=None
     )

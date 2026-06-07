@@ -484,6 +484,8 @@ class DiscoveryCrawler:
 
     def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:
         """Return True if category recon should run."""
+        if marketplace.recon_frontier_state:
+            return True
         if not marketplace.discovered_category_urls:
             return True
         if marketplace.last_category_recon_at is None:
@@ -491,8 +493,22 @@ class DiscoveryCrawler:
         age = (datetime.now(tz=timezone.utc) - marketplace.last_category_recon_at).days
         return age >= CATEGORY_RECON_STALE_DAYS
 
-    async def _phase1_category_recon(self, marketplace: DimMarketplace) -> list[str]:
-        """Phase 1: BFS traversal to discover category/listing URLs."""
+    async def _phase1_category_recon(
+        self,
+        marketplace: DimMarketplace,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> tuple[list[str], bool]:
+        """Phase 1: BFS traversal to discover category/listing URLs.
+
+        Returns (listing_urls, exhausted_budget). On deadline expiry the
+        BFS frontier (queue, visited, listing_urls) is persisted to
+        marketplace.recon_frontier_state and the method returns
+        (current_listing_urls, True); a later run resumes from the
+        frontier. On natural completion the frontier is cleared (None)
+        and discovered_category_urls is written. The incoming deadline
+        is already headroom-adjusted by discover() — do not shrink again.
+        """
         from collections import deque
 
         from app.modules.scraper.extractors import (
@@ -500,17 +516,53 @@ class DiscoveryCrawler:
             extract_internal_links_all,
         )
 
-        logger.info(
-            "category_recon_start marketplace_id=%s url=%s",
-            marketplace.id,
-            marketplace.base_url,
-        )
-        queue: deque[tuple[str, int]] = deque([(marketplace.base_url, 0)])
-        visited: set[str] = {marketplace.base_url}
-        listing_urls: list[str] = []
+        saved = marketplace.recon_frontier_state
+        if saved:
+            queue: deque[tuple[str, int]] = deque(
+                (str(item[0]), int(item[1]))
+                for item in saved.get("queue", [])
+            )
+            visited: set[str] = set(saved.get("visited", []))
+            listing_urls: list[str] = list(saved.get("listing_urls", []))
+            logger.info(
+                "category_recon_resume marketplace_id=%s queue=%d "
+                "visited=%d listing=%d",
+                marketplace.id,
+                len(queue),
+                len(visited),
+                len(listing_urls),
+            )
+        else:
+            logger.info(
+                "category_recon_start marketplace_id=%s url=%s",
+                marketplace.id,
+                marketplace.base_url,
+            )
+            queue = deque([(marketplace.base_url, 0)])
+            visited = {marketplace.base_url}
+            listing_urls = []
         fallback_seeds = ["/catalog", "/categories", "/shop", "/store", "/all"]
 
         while queue:
+            if (
+                deadline_monotonic is not None
+                and time.monotonic() >= deadline_monotonic
+            ):
+                marketplace.recon_frontier_state = {
+                    "queue": [[u, d] for (u, d) in queue],
+                    "visited": list(visited),
+                    "listing_urls": listing_urls,
+                }
+                await self.db.flush()
+                logger.info(
+                    "category_recon_budget_exhausted marketplace_id=%s "
+                    "queue=%d visited=%d listing=%d",
+                    marketplace.id,
+                    len(queue),
+                    len(visited),
+                    len(listing_urls),
+                )
+                return listing_urls, True
             current_url, depth = queue.popleft()
             if depth > RECON_BFS_MAX_DEPTH:
                 continue
@@ -566,13 +618,14 @@ class DiscoveryCrawler:
 
         marketplace.discovered_category_urls = unique
         marketplace.last_category_recon_at = datetime.now(tz=timezone.utc)
+        marketplace.recon_frontier_state = None
         await self.db.flush()
         logger.info(
             "category_recon_done marketplace_id=%s listing_urls_found=%d",
             marketplace.id,
             len(unique),
         )
-        return unique
+        return unique, False
 
     async def _phase2_product_harvest(
         self,
@@ -819,37 +872,61 @@ class DiscoveryCrawler:
                 remaining = max(0, remaining - products_found)
                 pages_scanned = 1 if sitemap_product_urls else 0
             else:
+                block_deadline = self._headroom_deadline(deadline_monotonic)
+                phase1_exhausted = False
                 if self._should_run_category_recon(marketplace):
-                    await self._phase1_category_recon(marketplace)
-
-                harvest_urls = [marketplace.base_url] + (marketplace.discovered_category_urls or [])
-                candidate_urls_found = len(harvest_urls)
-                accepted_urls = min(len(harvest_urls), remaining)
-                rejected_urls = max(0, len(harvest_urls) - accepted_urls)
-                pages_scanned = accepted_urls
-                harvest_deadline = self._headroom_deadline(deadline_monotonic)
-                products_found, phase2_exhausted = (
-                    await self._phase2_product_harvest(
-                        marketplace,
-                        harvest_urls[:accepted_urls],
-                        deadline_monotonic=harvest_deadline,
+                    # phase1 writes discovered_category_urls itself on completion;
+                    # on exhaust we deliberately ignore the partial listing list and
+                    # skip phase2 this run.
+                    _phase1_partial_urls, phase1_exhausted = (
+                        await self._phase1_category_recon(
+                            marketplace,
+                            deadline_monotonic=block_deadline,
+                        )
                     )
-                )
-                logger.info(
-                    "discovery_category_path marketplace_id=%s candidate=%d accepted=%d "
-                    "saved=%d rejected=%d remaining=%d",
-                    marketplace.id,
-                    candidate_urls_found,
-                    accepted_urls,
-                    products_found,
-                    rejected_urls,
-                    remaining,
-                )
-                persisted_listings = products_found
-                duplicate_urls = max(0, accepted_urls - products_found)
-                remaining = max(0, remaining - products_found)
-                if phase2_exhausted:
+                if phase1_exhausted:
+                    logger.info(
+                        "discovery_category_path_phase1_exhausted marketplace_id=%s "
+                        "remaining=%d",
+                        marketplace.id,
+                        remaining,
+                    )
+                    candidate_urls_found = 0
+                    accepted_urls = 0
+                    rejected_urls = 0
+                    pages_scanned = 0
+                    products_found = 0
+                    persisted_listings = 0
+                    duplicate_urls = 0
                     partial_budget = True
+                else:
+                    harvest_urls = [marketplace.base_url] + (marketplace.discovered_category_urls or [])
+                    candidate_urls_found = len(harvest_urls)
+                    accepted_urls = min(len(harvest_urls), remaining)
+                    rejected_urls = max(0, len(harvest_urls) - accepted_urls)
+                    pages_scanned = accepted_urls
+                    products_found, phase2_exhausted = (
+                        await self._phase2_product_harvest(
+                            marketplace,
+                            harvest_urls[:accepted_urls],
+                            deadline_monotonic=block_deadline,
+                        )
+                    )
+                    logger.info(
+                        "discovery_category_path marketplace_id=%s candidate=%d accepted=%d "
+                        "saved=%d rejected=%d remaining=%d",
+                        marketplace.id,
+                        candidate_urls_found,
+                        accepted_urls,
+                        products_found,
+                        rejected_urls,
+                        remaining,
+                    )
+                    persisted_listings = products_found
+                    duplicate_urls = max(0, accepted_urls - products_found)
+                    remaining = max(0, remaining - products_found)
+                    if phase2_exhausted:
+                        partial_budget = True
 
             if partial_budget:
                 status = "partial_budget"
