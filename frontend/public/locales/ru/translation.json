@@ -808,6 +808,8 @@
   "admin.dataCollection.stage.queued": "В очереди",
   "admin.dataCollection.stage.unknown": "Неизвестно",
   "admin.dataCollection.loadingActiveJob": "Загрузка активного job…",
+  "admin.dataCollection.pipelineIdle": "Нет активного прогона пайплайна",
+  "admin.dataCollection.pipelineStatusError": "Не удалось загрузить статус пайплайна",
   "admin.dataCollection.lastActivity": "Последняя активность",
   "admin.dataCollection.discoveryInProgress": "Discovery: {{domain}} (готово {{done}}/{{total}})",
   "admin.dataCollection.discoveryErrors": "Ошибки discovery",

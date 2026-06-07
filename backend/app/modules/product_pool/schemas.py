@@ -89,6 +89,7 @@ class PoolCategorySummary(BaseModel):
 
     marketplace_domain: str
     marketplace_name: str | None = None
+    country_code: str | None = None
     product_count: int
     avg_price: float | None = None
 

@@ -35,6 +35,7 @@ import { DisplayCurrencySelector } from "@/components/ui/DisplayCurrencySelector
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
+import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { cn } from "@/lib/utils";
 
 type SortKey = "random" | "recent" | "gainers" | "losers" | "volatile" | "trending";
@@ -138,6 +139,12 @@ function ProductCard({
   addDisabled: boolean;
 }) {
   const { t } = useTranslation();
+  const formatMarketplaceLabel = useMarketplaceLabelFormatter();
+  const marketplaceLabel = formatMarketplaceLabel({
+    name: item.marketplace_name,
+    domain: item.marketplace_domain,
+    countryCode: item.country_code,
+  });
   const externalHref = item.url || undefined;
   const internalHref = `/products/${item.product_id ?? item.id}`;
   const changeValue = item.price_change_pct_24h ?? null;
@@ -184,7 +191,7 @@ function ProductCard({
         />
         <div className="flex items-center justify-between gap-2">
           <Badge variant="outline" className="max-w-[60%] truncate text-[10px]">
-            {item.marketplace_name ?? item.marketplace_domain ?? t("dashboard.market.marketplace")}
+            {marketplaceLabel || t("dashboard.market.marketplace")}
           </Badge>
           {changeValue != null && (
             <span
@@ -223,6 +230,7 @@ function ProductCard({
 export function MarketsOverviewSection() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "en";
+  const formatMarketplaceLabel = useMarketplaceLabelFormatter();
   const { apiParam: displayCurrency } = useDisplayCurrency();
 
   const [searchRaw, setSearchRaw] = useState("");
@@ -382,12 +390,15 @@ export function MarketsOverviewSection() {
     if (!query) {
       return marketplaceStats;
     }
-    return marketplaceStats.filter((item) =>
-      `${item.marketplace_name ?? ""} ${item.marketplace_domain}`
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [marketplaceStats, marketplaceSearch]);
+    return marketplaceStats.filter((item) => {
+      const label = formatMarketplaceLabel({
+        name: item.marketplace_name,
+        domain: item.marketplace_domain,
+        countryCode: item.country_code,
+      });
+      return `${label} ${item.marketplace_domain ?? ""}`.toLowerCase().includes(query);
+    });
+  }, [marketplaceStats, marketplaceSearch, formatMarketplaceLabel]);
 
   const hasActiveFilters =
     selectedMarketplaces.length > 0 ||
@@ -444,7 +455,11 @@ export function MarketsOverviewSection() {
                   onCheckedChange={() => toggleMarketplace(item.marketplace_domain)}
                 />
                 <span className="min-w-0 flex-1 truncate text-foreground">
-                  {item.marketplace_name ?? item.marketplace_domain}
+                  {formatMarketplaceLabel({
+                    name: item.marketplace_name,
+                    domain: item.marketplace_domain,
+                    countryCode: item.country_code,
+                  }) || item.marketplace_domain}
                 </span>
                 <span className="shrink-0 text-muted-foreground">{item.product_count}</span>
               </label>

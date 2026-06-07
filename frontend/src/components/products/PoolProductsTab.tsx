@@ -16,6 +16,7 @@ import { Search } from "lucide-react";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePoolProducts, usePoolCategories } from "@/hooks/usePoolProducts";
+import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,11 +102,12 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
 
   const search = useDebounce(searchRaw, 500);
   const offset = (page - 1) * pageSize;
+  const formatMarketplaceLabel = useMarketplaceLabelFormatter();
 
   const { data: categories = [] } = usePoolCategories();
   const { data, isLoading } = usePoolProducts({
     search: search.length >= 2 ? search : undefined,
-    marketplace_id: marketplaceId !== "all" ? Number(marketplaceId) : undefined,
+    marketplace_id: marketplaceId !== "all" ? marketplaceId : undefined,
     sort: sort as Parameters<typeof usePoolProducts>[0]["sort"],
     limit: pageSize,
     offset,
@@ -195,8 +197,13 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
           <SelectContent>
             <SelectItem value="all">{t("products.allMarketplaces")}</SelectItem>
             {categories.map((c) => (
-              <SelectItem key={c.id} value={String(c.id)}>
-                {c.name || c.domain} ({c.product_count})
+              <SelectItem key={c.marketplace_id} value={c.marketplace_id}>
+                {formatMarketplaceLabel({
+                  name: c.name,
+                  domain: c.domain,
+                  countryCode: c.country_code,
+                }) || c.domain}{" "}
+                ({c.listing_count})
               </SelectItem>
             ))}
           </SelectContent>
@@ -315,7 +322,16 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                       </TableCell>
                       <TableCell>
                         <MarketplaceBadge
-                          marketplace={item.marketplace_domain || item.marketplace_name || String(item.marketplace_id)}
+                          marketplace={
+                            item.marketplace_domain ||
+                            item.marketplace_name ||
+                            String(item.marketplace_id)
+                          }
+                          label={formatMarketplaceLabel({
+                            name: item.marketplace_name,
+                            domain: item.marketplace_domain,
+                            countryCode: item.country_code,
+                          })}
                           size="sm"
                         />
                       </TableCell>

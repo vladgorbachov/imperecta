@@ -19,7 +19,7 @@ export type PoolProductsSort =
 
 export interface PoolProductsParams {
   search?: string;
-  marketplace_id?: number;
+  marketplace_id?: string;
   category?: string;
   sort?: PoolProductsSort;
   limit?: number;
@@ -33,6 +33,7 @@ export interface PoolProductItem {
   product_id?: string | null;
   marketplace_name?: string | null;
   marketplace_domain?: string | null;
+  country_code?: string | null;
   url: string;
   title?: string | null;
   image_url?: string | null;
@@ -66,10 +67,12 @@ export interface PoolProductsResponse {
 }
 
 export interface PoolCategoryItem {
-  id: number;
-  domain: string;
+  marketplace_id: string;
+  marketplace_code?: string;
   name: string;
-  product_count: number;
+  domain: string;
+  country_code?: string | null;
+  listing_count: number;
 }
 
 export interface Product {

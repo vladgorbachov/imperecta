@@ -383,7 +383,7 @@ class ScrapeJob(Base):
             name="ck_scrape_jobs_job_type",
         ),
         CheckConstraint(
-            "status IN ('pending','running','completed','failed','cancelled')",
+            "status IN ('pending','running','completed','failed','cancelled','partial')",
             name="ck_scrape_jobs_status",
         ),
         Index("idx_scrape_jobs_status", "status"),

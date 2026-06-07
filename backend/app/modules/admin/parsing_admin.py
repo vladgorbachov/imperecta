@@ -943,7 +943,10 @@ class ParsingAdminService:
 
     @staticmethod
     def _normalize_job_status(raw_status: str | None) -> str:
-        if raw_status in {"running", "completed", "failed"}:
+        # 'partial' is a valid terminal outcome for inner discovery jobs on
+        # resumable budget exits; pass it through so it is neither collapsed
+        # to 'failed' (wrong: it persisted real progress) nor to 'running'.
+        if raw_status in {"running", "completed", "failed", "partial"}:
             return raw_status
         if raw_status in {"pending"}:
             return "running"
@@ -954,7 +957,7 @@ class ParsingAdminService:
         latest_job_status: str | None,
         last_scrape_status: str | None,
     ) -> str:
-        if latest_job_status in {"running", "completed", "failed"}:
+        if latest_job_status in {"running", "completed", "failed", "partial"}:
             return latest_job_status
         if latest_job_status == "pending":
             return "running"

@@ -268,6 +268,7 @@ class ProductPoolService:
                 DimMarketplace.marketplace_code,
                 DimMarketplace.name,
                 DimMarketplace.domain,
+                DimMarketplace.country_code,
                 func.count(FactListing.id).label("listing_count"),
             )
             .select_from(FactListing)
@@ -278,6 +279,7 @@ class ProductPoolService:
                 DimMarketplace.marketplace_code,
                 DimMarketplace.name,
                 DimMarketplace.domain,
+                DimMarketplace.country_code,
             )
             .order_by(desc("listing_count"))
         )
@@ -292,6 +294,7 @@ class ProductPoolService:
                 "marketplace_code": r.marketplace_code,
                 "name": r.name,
                 "domain": r.domain,
+                "country_code": r.country_code,
                 "listing_count": int(r.listing_count),
             }
             for r in result.all()
@@ -330,6 +333,7 @@ class ProductPoolService:
             out.append({
                 "marketplace_domain": r.marketplace_domain,
                 "marketplace_name": r.marketplace_name,
+                "country_code": r.country_code,
                 "product_count": int(r.listing_count),
                 "avg_price": float(avg) if avg is not None else None,
             })

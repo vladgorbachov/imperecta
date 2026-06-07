@@ -311,3 +311,69 @@ async def test_get_test_runs_falls_back_to_job_counters(monkeypatch):
         await session.delete(job)
         await session.commit()
 
+
+# ---------------------------------------------------------------------------
+# Pure staticmethod tests (no DB, no async) for status normalizers.
+# Covers 'partial' as a first-class valid status alongside existing values.
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeJobStatus:
+    def test_partial_passes_through(self):
+        assert ParsingAdminService._normalize_job_status("partial") == "partial"
+
+    def test_running_completed_failed_pass_through(self):
+        assert ParsingAdminService._normalize_job_status("running") == "running"
+        assert ParsingAdminService._normalize_job_status("completed") == "completed"
+        assert ParsingAdminService._normalize_job_status("failed") == "failed"
+
+    def test_pending_maps_to_running(self):
+        assert ParsingAdminService._normalize_job_status("pending") == "running"
+
+    def test_cancelled_collapses_to_failed(self):
+        # Regression guard: existing collapse is intentionally unchanged.
+        assert ParsingAdminService._normalize_job_status("cancelled") == "failed"
+
+    def test_none_collapses_to_failed(self):
+        assert ParsingAdminService._normalize_job_status(None) == "failed"
+
+
+class TestNormalizeMarketplaceStatus:
+    def test_partial_passes_through(self):
+        assert (
+            ParsingAdminService._normalize_marketplace_status("partial", None)
+            == "partial"
+        )
+
+    def test_running_completed_failed_pass_through(self):
+        assert (
+            ParsingAdminService._normalize_marketplace_status("running", None)
+            == "running"
+        )
+        assert (
+            ParsingAdminService._normalize_marketplace_status("completed", None)
+            == "completed"
+        )
+        assert (
+            ParsingAdminService._normalize_marketplace_status("failed", None)
+            == "failed"
+        )
+
+    def test_pending_maps_to_running(self):
+        assert (
+            ParsingAdminService._normalize_marketplace_status("pending", None)
+            == "running"
+        )
+
+    def test_last_scrape_success_maps_to_completed(self):
+        assert (
+            ParsingAdminService._normalize_marketplace_status(None, "success")
+            == "completed"
+        )
+
+    def test_last_scrape_timeout_maps_to_failed(self):
+        assert (
+            ParsingAdminService._normalize_marketplace_status(None, "timeout")
+            == "failed"
+        )
+

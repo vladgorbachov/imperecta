@@ -817,6 +817,8 @@
   "admin.dataCollection.stage.queued": "Queued",
   "admin.dataCollection.stage.unknown": "Unknown",
   "admin.dataCollection.loadingActiveJob": "Loading active pipeline job…",
+  "admin.dataCollection.pipelineIdle": "No active pipeline run",
+  "admin.dataCollection.pipelineStatusError": "Failed to load pipeline status",
   "admin.dataCollection.lastActivity": "Last activity",
   "admin.dataCollection.discoveryInProgress": "Discovering {{domain}} ({{done}}/{{total}} marketplaces done)",
   "admin.dataCollection.discoveryErrors": "Discovery errors",

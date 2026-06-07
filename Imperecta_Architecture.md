@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-05 (ветка `main`, head `3d1eb66`)  
+**Актуально на:** 2026-06-07 (ветка `main`, head `4d42623`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 ---
@@ -15,7 +15,7 @@
 | Каталог пользователя | `user_products`, импорт CSV/XLS |
 | Глобальный пул | `product_pool`, поиск по `dim_product` / `fact_listing` |
 | Рыночные виджеты | Forex, crypto, commodities, fuel |
-| Display currency | `local` / `EUR` / `USD` — конвертация цен через `fact_currency_rate` + live forex fallback |
+| Display currency | `local` / `EUR` / `USD` — `fact_currency_rate` + live forex; **local** = TLD→country→currency (`marketplace_locale.py`) |
 | Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`), сравнения, прогнозы |
 | Алерты и дайджесты | Celery (часть задач — stubs) |
 | AI-аналитик | Claude; entitlement по плану (`business` / `pro` / `enterprise`) |
@@ -67,7 +67,7 @@ imperecta/
 │   ├── app/models/
 │   ├── app/modules/          # доменная логика
 │   ├── app/workers/
-│   └── alembic/versions/     # 001 … 015 (head: fact_price partitions)
+│   └── alembic/versions/     # 001 … 016 (head: sitemap_resume_offset)
 ├── Imperecta_Architecture.md
 ├── Imperecta_Backend.md
 ├── Imperecta_Frontend.md
@@ -140,9 +140,9 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 5. `complete_pipeline_job` → UI polling (`active-job`, `job-status`, `job-live-feed`, `worker-log-relay`).  
 6. Stale jobs: auto-fail при idle >30 min (`ParsingAdminService`).
 
-### 7.3 Discovery (content-aware sitemap)
+### 7.3 Discovery (content-aware sitemap + cooperative budget)
 
-`DiscoveryCrawler` (`discovery.py`) — три фазы:
+`DiscoveryCrawler` (`discovery.py`) — три фазы + **cooperative deadline** (`4bad080`, `4d42623`):
 
 | Фаза | Метод | Суть |
 |------|-------|------|
@@ -150,7 +150,8 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 | 1 | `_phase1_category_recon` | BFS по hub/listing, кэш `discovered_category_urls` |
 | 2 | `_phase2_product_harvest` | Обход category pages, pagination, save listings |
 
-Если sitemap дал ≥10 product URLs — **sitemap path**; иначе category crawl.  
+Если sitemap дал ≥10 product URLs — **sitemap path** (resumable offset, `016`); иначе category crawl с Phase 2 budget.  
+При нехватке 15 min budget — `partial_budget`; следующий run продолжает.  
 Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest retry через 1h.
 
 Подробно: `Imperecta_Parsing.md`.
@@ -204,7 +205,7 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 ## 9. База данных (кратко)
 
 - Star schema + app tables.  
-- Head migration: `015_fact_price_default_partition` (после `014` scrape_tier, `013` search_trend, `012` RLS).
+- Head migration: `016_dim_marketplace_sitemap_resume_offset` (после `015` fact_price partitions).
 - `fact_price` partitioned by `date_id` (`fact_price_YYYYMM` + **`fact_price_default`** safety partition).
 - Без партиции на текущий месяц INSERT в `fact_price` падает (`no partition found for row`).
 - `url_hash` unique на `fact_listing`.
@@ -261,6 +262,16 @@ sequenceDiagram
 
 | Коммит / область | Суть |
 |------------------|------|
+| `4d42623` Phase2 cooperative deadline | `_headroom_deadline` + budget checks в category crawl; `partial_budget` на category path |
+| `4bad080` Resumable sitemap | Cooperative deadline + `sitemap_resume_offset`; `partial_budget` на sitemap path |
+| `4430907` Batch save URLs | `_save_product_urls` commit every 500 |
+| `5d6d4fa` Microdata classifier | Layer 2.5 `itemscope`/`itemtype` в `classify_page_role_for_discovery` |
+| `3309259` Harvest convergence | `CATEGORY_CONVERGENCE_STREAK=3` early exit Phase 2 |
+| `e25dbac` Z1 reap | Zombie inner discovery jobs on hard cancel |
+| `d221ae7` Discovery timeouts | 300s sitemap / 900s per-MP / 24h sitemap cooldown |
+| `4338e5c` discount_pct | `_calculate_discount_pct` at `fact_price` insert |
+| `0fb6ac2` Local currency | `marketplace_locale.py` + `local_currency_resolution` in API |
+| `c8f464b` Price formatting | `formatPrice` always 2 fraction digits |
 | `3d1eb66` Live forex fallback | `CurrencyConverter`: `fact_currency_rate` → live `fetch_forex_rates` |
 | `fced191` Display currency API | `display_currency` query на products/pool/dashboard; `app/common/currency.py` |
 | `7f16333` Markets catalog UI | Redesign `MarketsOverviewSection` — product catalog на dashboard |
@@ -274,11 +285,85 @@ sequenceDiagram
 | `cab086f` P0 scrape guards | Persistence gate, currency whitelist, deactivate after 15 errors |
 | `98e2e89` Admin CRUD | Users Management: create/edit/role/password/delete |
 | `4cd33d3` Worker log relay | Redis `pipeline:worker_deploy_log` → admin terminal |
-| `a8295ad` Data Collection UI | Redesign monitor, history table, scoped marketplace run |
 
 ---
 
-## 14. Карта документации
+## 15. Детальная логика элементов (сквозной индекс)
+
+Каждый элемент: **где живёт** → **что делает** → **с кем связан**. Полные алгоритмы — в профильных документах.
+
+### 15.1 Pipeline & parsing (см. `Imperecta_Parsing.md` §18)
+
+| Элемент | Где живёт | Суть |
+|---------|-----------|------|
+| **Z1 reap** | `pipeline/discovery_phase.py` | Defense-in-depth: inner `discovery` jobs `running→failed` при внешней отмене; **не** в cancellation/job_completion |
+| **Resumable sitemap** | `discovery.py` + `016` | `sitemap_resume_offset` + cooperative deadline; `partial_budget` |
+| **Phase2 cooperative deadline** | `discovery.py` `_phase2_product_harvest` | `_headroom_deadline`; `exhausted_budget` → `partial_budget` |
+| **Batch save** | `discovery.py` `_save_product_urls` | Commit каждые 500 URL + resume index |
+| **Parent cancel check** | `pipeline/cancellation.py` | `is_pipeline_job_cancelled` между MP |
+| **Job finalize** | `pipeline/job_completion.py` | Merge discovery seed + `scrape_logs` → parent metadata |
+| **Orchestrator** | `pipeline/orchestrator.py` | discovery → scrape → complete; relay context |
+| **Metadata heartbeat** | `pipeline/metadata_store.py`, `activity_pulse.py` | JSONB progress + anti-stale pulses |
+| **Worker logs** | `pipeline/worker_log_relay.py` | Redis 500 lines → admin terminal |
+| **Stale parent jobs** | `admin/parsing_admin.py` | Auto-fail idle 5/10/30 min on API read |
+| **Admin cancel** | `parsing_admin.py` + `cancellation.revoke_celery_task` | Revoke Celery + mark parent failed |
+
+### 15.2 Backend runtime (см. `Imperecta_Backend.md` §14)
+
+| Элемент | Где живёт | Суть |
+|---------|-----------|------|
+| **Lifespan** | `main.py` | Alembic → superuser → create_all → Telegram webhook |
+| **Auth JWT** | `core/api_auth.py`, `core/service` | Register/login/refresh; Bearer middleware |
+| **Display currency** | `common/currency.py`, `marketplace_locale.py` | `fact_currency_rate` → live forex; local = TLD resolution |
+| **Tiered fetch** | `scraper_pool.py` `_layer_order` | Tier 1 only: httpx → decodo/playwright |
+| **Persistence gate** | `scraper/service.py` | P0 guards before `fact_price` |
+| **Celery broker** | `workers/celery_app.py` | Redis, no result backend |
+| **Partitions** | `workers/maintenance_tasks.py` | Rolling `fact_price_YYYYMM` +3 months |
+
+### 15.3 Database (см. `Imperecta_Database.md` §13)
+
+| Элемент | Таблица / объект | Суть |
+|---------|------------------|------|
+| **Listing identity** | `fact_listing.url_hash` | SHA256 dedup |
+| **Price snapshots** | `fact_price` partitions | One row/listing/day; monthly RANGE + DEFAULT |
+| **Job metadata** | `scrape_jobs.config.metadata` | Pipeline stage, timings, per_marketplace |
+| **Scrape audit** | `scrape_logs` | Per-listing outcome + status taxonomy |
+| **MP scrape config** | `dim_marketplace` | `scrape_tier`, `scraper_config`, `sitemap_resume_offset`, discovery columns |
+| **RLS** | migration 012 | PostgREST guard; backend owner bypass |
+
+### 15.4 Frontend (см. `Imperecta_Frontend.md` §20)
+
+| Элемент | Где живёт | Суть |
+|---------|-----------|------|
+| **Session/auth** | `authStore`, `setupAuth.ts` | JWT + refresh on 401 |
+| **Display currency UI** | `displayCurrencyStore`, `PriceDisplay` | Query param → backend conversion |
+| **Data Collection** | `DataCollectionTab.tsx` | Pipeline run/monitor/history; stale badge 300s |
+| **Worker terminal** | `WorkerLogRelayPanel.tsx` | Poll relay 2s, buffer 120 lines |
+| **Markets catalog** | `MarketsOverviewSection.tsx` | Pool browse + currency + `formatMarketplaceLabel` |
+| **Marketplace labels** | `lib/marketplaceLabel.ts` | Country suffix for local TLD stores; intl .com without suffix |
+| **Admin users** | `AdminPage` Users tab | CRUD via `useAdmin` hooks |
+
+### 15.5 Диаграмма: Z1 reap в контексте discovery
+
+```mermaid
+sequenceDiagram
+    participant Orch as orchestrator
+    participant DP as discovery_phase
+    participant DC as DiscoveryCrawler.discover
+    participant DB as PostgreSQL
+
+    Orch->>DP: run_discovery_phase(900s budget/MP)
+    DP->>DC: asyncio.wait_for(discover, 900)
+    Note over DC: inner scrape_job discovery running
+    DC--xDP: TimeoutError (CancelledError inside)
+    DP->>DB: UPDATE discovery jobs running→failed (Z1 reap)
+    DP->>DB: dim_marketplace timeout_skipped
+    DP->>DP: next marketplace
+```
+
+---
+
+## 16. Карта документации
 
 | Файл | Содержание |
 |------|------------|

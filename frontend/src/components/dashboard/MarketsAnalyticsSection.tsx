@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
+import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function MarketsAnalyticsSection() {
-  const { t, i18n } = useTranslation();
-  const locale = i18n.language || "en";
+  const { t } = useTranslation();
+  const formatMarketplaceLabel = useMarketplaceLabelFormatter();
 
   const { data: marketplaceStats, isLoading: statsLoading } = useQuery({
     queryKey: marketsQueryKeys.poolMarketplaceStats(),
@@ -59,7 +60,11 @@ export function MarketsAnalyticsSection() {
               className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-[var(--glass-bg-hover)]"
             >
               <span className="truncate text-sm font-medium">
-                {item.marketplace_name || item.marketplace_domain}
+                {formatMarketplaceLabel({
+                  name: item.marketplace_name,
+                  domain: item.marketplace_domain,
+                  countryCode: item.country_code,
+                }) || item.marketplace_domain}
               </span>
               <span className="text-sm text-muted-foreground">{item.product_count}</span>
             </div>
@@ -72,7 +77,11 @@ export function MarketsAnalyticsSection() {
           {rows.map((item) => (
             <li key={item.marketplace_domain} className="flex items-center justify-between text-sm">
               <span className="truncate font-medium">
-                {item.marketplace_name || item.marketplace_domain}
+                {formatMarketplaceLabel({
+                  name: item.marketplace_name,
+                  domain: item.marketplace_domain,
+                  countryCode: item.country_code,
+                }) || item.marketplace_domain}
               </span>
               <span className="text-muted-foreground">
                 {t("markets.analytics.itemsCount", { count: item.product_count })}

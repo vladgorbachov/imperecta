@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-05 (head `3d1eb66`)  
+**Актуально на:** 2026-06-07 (head `4d42623`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 ---
@@ -137,11 +137,13 @@
 
 **Discovery (`discovery.py`):**
 
-- `DiscoveryCrawler.discover()` — job type `discovery`, quota-aware save.
-- **Phase 0:** sitemap harvest + content-aware URL filter.
-- **Phase 1:** category recon (BFS, `classify_page_role_for_discovery`, JSONB `discovered_category_urls`).
-- **Phase 2:** product harvest from category URLs + pagination.
-- Cooldowns: `SITEMAP_STALE_DAYS=3`, `CATEGORY_RECON_STALE_DAYS=7`, bad sitemap retry ~1h.
+- `DiscoveryCrawler.discover(deadline_monotonic?)` — cooperative 900s budget, inner job type `discovery`.
+- **Phase 0:** sitemap (300s budget) + content-aware filter.
+- **Phase 1:** category recon (BFS, schema-aware classifier).
+- **Phase 2:** product harvest + `CATEGORY_CONVERGENCE_STREAK=3`.
+- **Resumable save:** `sitemap_resume_offset`, batch 500, `partial_budget` на sitemap path.
+- **Phase 2 cooperative deadline (`4d42623`):** `_headroom_deadline`, `_phase2_product_harvest` → `exhausted_budget`; `partial_budget` на category path.
+- Timeouts: `SITEMAP_PHASE_BUDGET_SECONDS=300`, `DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`, `SITEMAP_TIMEOUT_COOLDOWN_HOURS=24`.
 
 **Page analysis (`scraper_pool.py`):**
 
@@ -152,7 +154,7 @@
 
 | Function | Used by | Strategy |
 |----------|---------|----------|
-| `classify_page_role_for_discovery` | `discovery.py`; **`merge_and_finalize`** (scrape) | Layer 1: `og:type`; Layer 2: JSON-LD `@type` (Product wins); Layer 3: `classify_page_role` fallback |
+| `classify_page_role_for_discovery` | `discovery.py`; **`merge_and_finalize`** (scrape) | Layer 1: `og:type`; Layer 2: JSON-LD `@type`; Layer 2.5: microdata top-level `itemtype`; Layer 3: structural fallback |
 | `classify_page_role` | Layer 3 fallback only | JSON-LD + DOM repetition + price density |
 
 **`merge_and_finalize`:** если role `listing`/`hub` → `merge_skipped_non_pdp_page`, пустой extract (раньше structural classifier давал false listing на PDP с блоками «похожие товары»).
@@ -174,7 +176,7 @@ Standalone `scrape_all_pool_products` вызывает `_run_scrape_all_pool()` 
 | Файл | Роль |
 |------|------|
 | `orchestrator.py` | `FullPipelineOrchestrator`; проброс `marketplace_codes` в scrape |
-| `discovery_phase.py` | Discovery по active marketplaces |
+| `discovery_phase.py` | Discovery по active marketplaces; `deadline_monotonic`; Z1 reap safety net |
 | `job_completion.py` | Финализация parent job |
 | `metadata_store.py` | Read/write metadata, `touch(stage=…)` |
 | `cancellation.py` | Cancel checks, revoke task |
@@ -227,21 +229,28 @@ celery_app.conf.beat_schedule = {}
 
 ---
 
-## 6. Display currency (`app/common/currency.py`)
+## 6. Display currency (`app/common/currency.py`, `app/common/marketplace_locale.py`)
 
 | Компонент | Роль |
 |-----------|------|
 | `CurrencyConverter.load_latest` | Курсы из `fact_currency_rate` (max `date_id`); fallback — live `fetch_forex_rates("EUR")` |
 | `normalize_display_currency` | `local` \| `EUR` \| `USD` |
-| `apply_display_price_fields` | `(display_price, display_currency, conversion_available)` |
+| `apply_display_price_fields` | `(display_price, display_currency, conversion_available)` + **`local_currency_resolution`** |
+| `resolve_local_currency` / `resolve_local_currency_from_parts` | TLD → country (`TLD_TO_COUNTRY`) → currency (`COUNTRY_TO_CURRENCY`); fallback `country_code`, then parsed listing currency |
 
-**Принцип:** нет mock/fallback курсов — при отсутствии rate `conversion_available=false`, UI показывает local.
+**Режим `local` (`0fb6ac2`):**
+
+- Предпочитает TLD домена над `dim_marketplace.country_code` (storefront country vs registration).
+- Ответ включает `local_currency_resolution: { currency, source }` где `source` ∈ `tld`, `country_code`, `parse_currency`, `unknown`.
+- При невозможности resolve → `local_currency_unavailable=true` (UI отключает local toggle).
+
+**Принцип:** нет mock/fallback курсов — при отсутствии rate `conversion_available=false`.
 
 **API с `display_currency` query:**
 
 - `GET /api/products` (`user_products/api_products.py`)
 - `GET /api/pool/*` (`product_pool/api.py`, `service._apply_display_currency`)
-- `GET /api/dashboard/...` / markets overview (`dashboard/api.py`)
+- `GET /api/dashboard/...` / markets overview (`dashboard/api.py`, `markets` API)
 
 ---
 
@@ -321,7 +330,8 @@ GlobalScrapeService.scrape_product(listing_id)
 
 **Проблема (prod, 2026-06-02):** migration `009` создала RANGE `fact_price`, но не все месяцы 2026 были покрыты → scrape INSERT падал.
 
-**Migration `015`:** `fact_price_202606` … `fact_price_202612` + `fact_price_default` (DEFAULT partition — safety net, не постоянное хранилище).
+**Migration `015`:** `fact_price_202606` … `fact_price_202612` + `fact_price_default` (DEFAULT partition — safety net).  
+**Migration `016`:** `dim_marketplace.sitemap_resume_offset` — resumable sitemap discovery.
 
 **Celery `ensure_fact_price_partitions`:** создаёт партиции на **следующие 3 календарных месяца** (`CREATE TABLE IF NOT EXISTS`). Запускать по расписанию или после деплоя, пока beat пустой — вручную/enqueue.
 
@@ -329,12 +339,167 @@ GlobalScrapeService.scrape_product(listing_id)
 
 ## 12. Тесты
 
-`backend/tests/` — API, scraper contracts, parsing admin.  
-Запуск в CI / локально с test DB (не Supabase prod).
+`backend/tests/` — API contract, scraper unit/integration, parsing admin.  
+Конфиг: `backend/pyproject.toml` (`asyncio_mode=auto`, marker `integration`).
+
+### Локальный запуск pytest
+
+1. `pip install -r requirements.txt pytest pytest-asyncio httpx`
+2. Postgres `imperecta_test` + Redis (например `docker compose up -d postgres redis`)
+3. **`backend/.env`** с полным набором `Settings` (см. `app/config.py`) — корневой `.env` не подхватывается автоматически
+4. `alembic upgrade head` на test DB
+5. `cd backend && pytest tests -v` или `pytest -m "not integration"` для unit-only
+
+**Блокер без env:** `conftest.py` импортирует `app.main` → `Settings()`; пустые `setdefault("", …)` дают ValidationError. CI использует GitHub Secrets `TEST_*` (см. `.github/workflows/ci.yml`).
+
+**Не использовать Supabase prod** как test DB.
 
 ---
 
-## 13. Источники истины
+## 14. Детальная логика элементов
+
+### 14.1 `main.py` — lifespan и routing
+
+| Шаг | Логика |
+|-----|--------|
+| Alembic | Subprocess `alembic upgrade head`, env `DATABASE_URL`, timeout 600s; warn on fail, не блокирует навсегда |
+| Superuser | `ensure_superuser` до 10× retry, sleep 2s — bootstrap admin из Settings |
+| create_all | Safety net если migration пропустила таблицу |
+| Telegram | Background `setWebhook` с secret header |
+| Routers | 12 domain routers под `/api`; scraper/alerts routers **не** mounted |
+
+**Health:** `/health` liveness; `/api/health` — ping DB, Redis, pool stats.
+
+---
+
+### 14.2 `core` — auth, admin stats, Telegram
+
+| Компонент | Логика |
+|-----------|--------|
+| **Auth API** | Register → hash password; Login → JWT access+refresh; Refresh → rotate; Me → current user |
+| **Admin stats** | Aggregates для Market Overview cards |
+| **Telegram webhook** | Verify `X-Telegram-Bot-Api-Secret-Token`; reject if secret missing when bot token set |
+| **Entitlements** | `plan.py`: `UserPlan` → `ServiceTier` → feature flags (AI only PAID_FULL) |
+
+---
+
+### 14.3 `admin/parsing_admin.py` — ParsingAdminService
+
+| Метод | Логика |
+|-------|--------|
+| `trigger_full_pipeline_test` | `_fail_stale` → reject if active running → create `ScrapeJob(full_pipeline_test, running)` + metadata dispatching + optional `marketplace_codes` → commit (auto-repair job_type CHECK on IntegrityError) |
+| `get_active_pipeline_job` | Latest running full_pipeline_test |
+| `get_job_status` | `_fail_stale` → merge runtime activity → discovery progress helper |
+| `cancel_active_pipeline_job` | Revoke Celery + parent failed + error `pipeline_cancelled_by_admin` |
+| `_fail_stale_running_pipeline_jobs` | См. Parsing §18.12 — idle thresholds 5/10/30 min |
+| `get_worker_log_relay` | Delegate to `fetch_relay_lines` |
+| User CRUD | Standard CRUD on `users` with plan/language/role validation |
+
+**Constants:** `TEST_PIPELINE_JOB_TYPE = 'full_pipeline_test'`, stale timeouts in minutes.
+
+---
+
+### 14.4 `admin/api_parsing.py`
+
+Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `ValueError` → HTTP 400/404; enqueue Celery on run-pipeline.
+
+---
+
+### 14.5 Pipeline package (детали — `Imperecta_Parsing.md` §18)
+
+| Файл | Ответственность |
+|------|-----------------|
+| `orchestrator.py` | End-to-end async+sync flow |
+| `discovery_phase.py` | Per-MP discovery + **Z1 reap** |
+| `job_completion.py` | Parent job finalize (не Z1) |
+| `cancellation.py` | Cancel detection + Celery revoke (не Z1) |
+| `metadata_store.py` | JSONB read/write/touch |
+| `activity_pulse.py` | Heartbeat 15s throttle |
+| `worker_log_relay.py` | Redis 500-line buffer |
+
+---
+
+### 14.6 `scraper/tasks.py`
+
+| Task | Логика |
+|------|--------|
+| `run_full_pipeline_test` | `_make_session_factory` → `FullPipelineOrchestrator.run` |
+| `discover_all_marketplaces` | Async loop all active MP, no per-MP 900s wrapper |
+| `discover_single_marketplace` | One UUID |
+| `_run_scrape_all_pool` | Stale listing batch scrape; optional marketplace_codes scope |
+| `scrape_pool_product` | Single listing, soft 120s / hard 150s |
+| `scrape_all_pool_products` | Standalone full pool (no scope) |
+| `check_pool_completeness` | Listings missing price/image |
+
+**Async in worker:** `_run_async` / `_run_coro_in_worker` pattern.
+
+---
+
+### 14.7 `scraper/service.py` — GlobalScrapeService
+
+| Этап | Логика |
+|------|--------|
+| Load | `FactListing` + `DimMarketplace` + product |
+| Fetch | `ScraperPool.scrape_product(url, requires_js, scrape_tier)` |
+| Extract | `merge_and_finalize` → PDP gate |
+| Gate | name, price>0, currency, currency_raw len, whitelist |
+| Persist | delete same-day price if changed → insert `fact_price` (+ `discount_pct`); else `no_change` |
+| Failure | consecutive_errors++; at 15 → `is_active=false` |
+| Logs | `_determine_log_status` → `scrape_logs` row |
+| Drift repair | Auto ALTER scrape_logs on constraint mismatch |
+
+---
+
+### 14.8 `scraper/scraper_pool.py`
+
+| Функция | Логика |
+|---------|--------|
+| `_layer_order` | Tier 1: httpx-first; tier 2/3 → NotImplementedError |
+| `scrape_product` | Iterate layers until success or exhaust |
+| `scrape_page_for_analysis` | Static HTML for discovery classify |
+| `fetch_sitemap_candidates` | robots.txt → nested XML → Playwright fallback |
+
+---
+
+### 14.9 `scraper/discovery.py`
+
+| Компонент | Логика |
+|-----------|--------|
+| `_headroom_deadline` | 85% of remaining MP budget for phase work; 15% for finalize |
+| `discover(deadline_monotonic?)` | Inner job; cooperative budget; `partial_budget` on sitemap or Phase 2 |
+| `_save_product_urls` | Batch 500; `(new_count, next_offset, exhausted)`; resume offset |
+| `_filter_urls_by_role` | Sample/trust/reject sitemap filter |
+| `_phase2_product_harvest` | Pagination + convergence + cooperative deadline → `exhausted_budget` |
+| `_should_run_sitemap_harvest` | True if `sitemap_resume_offset > 0` or stale harvest |
+
+---
+
+### 14.10 `common/currency.py` + `marketplace_locale.py`
+
+| Функция | Логика |
+|---------|--------|
+| `CurrencyConverter.load_latest` | Latest `date_id` from `fact_currency_rate`; empty → live forex |
+| `normalize_display_currency` | Validate local/EUR/USD |
+| `apply_display_price_fields` | Convert price; emit `local_currency_resolution` / `local_currency_unavailable` |
+| `resolve_local_currency_from_parts` | TLD → country → ISO currency; sources: `tld`, `country_code`, `parse_currency`, `unknown` |
+
+---
+
+### 14.11 Остальные модули (кратко)
+
+| Модуль | Логика |
+|--------|--------|
+| **marketplaces** | CRUD `dim_marketplace`; exposes requires_js, scraper_config |
+| **product_pool** | Search/listings MV; applies display currency |
+| **user_products** | User catalog CRUD + CSV import |
+| **market_data** | Provider fetch → fact_* tables; ingest tasks |
+| **dashboard/analytics** | Read-only aggregations for UI |
+| **ai_analyst** | Claude sessions, api_logs, entitlement gate |
+| **workers/maintenance** | `ensure_fact_price_partitions`, MV refresh, cleanup retention |
+
+---
+
+## 15. Источники истины
 
 | Область | Путь |
 |---------|------|
@@ -347,8 +512,8 @@ GlobalScrapeService.scrape_product(listing_id)
 | Pipeline | `backend/app/modules/scraper/pipeline/` |
 | Celery | `backend/app/workers/celery_app.py` |
 | Partitions task | `backend/app/workers/maintenance_tasks.py` |
-| Migration 015 | `backend/alembic/versions/015_fact_price_default_partition.py` |
-| Display currency | `backend/app/common/currency.py` |
+| Migration 015/016 | `backend/alembic/versions/015_*.py`, `016_*.py` |
+| Display currency | `backend/app/common/currency.py`, `marketplace_locale.py` |
 | Entitlements | `backend/app/entitlements/plan.py` |
 
 Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Database.md`, `Imperecta_Parsing.md`.

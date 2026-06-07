@@ -68,8 +68,9 @@ describe("MarketsOverviewSection", () => {
             id: "listing-1",
             product_id: "product-1",
             marketplace_id: "market-1",
-            marketplace_name: "Store Alpha",
-            marketplace_domain: "store-alpha.example",
+            marketplace_name: "Barbora",
+            marketplace_domain: "barbora.lv",
+            country_code: "LV",
             url: "https://example.com/1",
             title: "Смартфон X",
             image_url: "https://img.example/1.jpg",
@@ -107,8 +108,24 @@ describe("MarketsOverviewSection", () => {
     });
     getPoolMarketplaceStatsMock.mockResolvedValue({
       data: [
-        { marketplace_domain: "store-alpha.example", marketplace_name: "Store Alpha", product_count: 50 },
-        { marketplace_domain: "store-beta.example", marketplace_name: "Store Beta", product_count: 40 },
+        {
+          marketplace_domain: "barbora.lv",
+          marketplace_name: "Barbora",
+          country_code: "LV",
+          product_count: 50,
+        },
+        {
+          marketplace_domain: "barbora.lt",
+          marketplace_name: "Barbora",
+          country_code: "LT",
+          product_count: 40,
+        },
+        {
+          marketplace_domain: "store-beta.example",
+          marketplace_name: "Store Beta",
+          country_code: "UA",
+          product_count: 30,
+        },
       ],
     });
     getPoolStatsMock.mockResolvedValue({
@@ -144,8 +161,9 @@ describe("MarketsOverviewSection", () => {
     await screen.findByText("Смартфон X");
 
     expect(screen.getByText("market.filters.marketplaces")).toBeInTheDocument();
-    expect(screen.getAllByText("Store Alpha").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Store Beta").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Barbora \(Latvia\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Barbora \(Lithuania\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Store Beta \(Ukraine\)/i).length).toBeGreaterThan(0);
   });
 
   it("adds a product to my products from a card", async () => {

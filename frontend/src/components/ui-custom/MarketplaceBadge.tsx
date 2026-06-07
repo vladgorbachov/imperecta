@@ -1,8 +1,10 @@
 import { cn } from "@/lib/utils";
 
 export interface MarketplaceBadgeProps {
-  /** Marketplace identifier or name from API */
+  /** Stable identifier for badge color (domain or marketplace id). */
   marketplace: string;
+  /** Optional display label; defaults to marketplace. */
+  label?: string;
   /** Badge size */
   size?: "sm" | "md";
   /** Additional CSS classes */
@@ -31,9 +33,14 @@ function displayName(s: string): string {
   return s;
 }
 
-export function MarketplaceBadge({ marketplace, size = "md", className }: MarketplaceBadgeProps) {
+export function MarketplaceBadge({
+  marketplace,
+  label,
+  size = "md",
+  className,
+}: MarketplaceBadgeProps) {
   const token = hashToColor(marketplace);
-  const name = displayName(marketplace);
+  const name = displayName(label ?? marketplace);
   const sizeClasses = size === "sm" ? "px-1.5 py-0 text-xs" : "px-2 py-0.5 text-sm";
 
   return (

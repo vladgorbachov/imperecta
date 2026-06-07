@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-05 (head `3d1eb66`)  
+**Актуально на:** 2026-06-07 (head `4d42623`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 ---
@@ -158,14 +158,20 @@ frontend/src/
 | Файл | Роль |
 |------|------|
 | `lib/displayCurrency.ts` | Modes `local` \| `EUR` \| `USD`; `resolvePriceForDisplay`; storage key |
+| `lib/marketplaceLabel.ts` | `formatMarketplaceLabel` — country suffix for local TLD stores |
+| `hooks/useMarketplaceLabel.ts` | Locale-aware formatter hook |
 | `stores/displayCurrencyStore.ts` | Zustand — выбранная валюта |
 | `hooks/useDisplayCurrency.ts` | Форматирование, `apiParam` для запросов |
 | `components/ui/DisplayCurrencySelector.tsx` | Переключатель в Header / Markets |
 | `components/ui-custom/PriceDisplay.tsx` | Цена + badge `noRate` при отсутствии курса |
 
-**Поток:** UI → `?display_currency=EUR|USD|local` → backend `CurrencyConverter` → поля `display_price`, `conversion_available`. Конвертация **только на backend**; frontend форматирует.
+**Поток:** UI → `?display_currency=EUR|USD|local` → backend `CurrencyConverter` + `marketplace_locale` → `display_price`, `conversion_available`, `local_currency_resolution`, `local_currency_unavailable`.
 
-**Используется в:** `MyProductsTab`, `PoolProductsTab`, `ProductDetailPage`, `CompetitorsPage`, `MarketsOverviewSection`, analytics hooks.
+**Режим `local`:** backend резолвит валюту по TLD домена; при `local_currency_unavailable` — `MarketsOverviewSection` отключает local toggle.
+
+**Формат цен (`c8f464b`):** `formatPrice` в `lib/formatters.ts` — всегда `minimumFractionDigits: 2`.
+
+**Используется в:** `MyProductsTab`, `PoolProductsTab`, `ProductDetailPage`, `CompetitorsPage`, `MarketsOverviewSection`, `MarketsAnalyticsSection`, analytics hooks.
 
 ---
 
@@ -290,10 +296,11 @@ frontend/src/
 
 ## 16. Тесты
 
-- Vitest: `npm test`
-- `AdminPage.parsing.test.tsx` — parsing tab behaviors
+- **Vitest:** `cd frontend && npm test`
+- `AdminPage.parsing.test.tsx`, `MarketsOverviewSection.test.tsx`, `marketplaceLabel.test.ts`
 - i18n tests under `src/i18n/__tests__/`
-- Playwright E2E (отдельный config)
+- **Playwright E2E:** `e2e/` — smoke против Cloudflare/Railway URL в CI
+- **Backend pytest:** см. `Imperecta_Backend.md` §12 — требует `backend/.env` + Postgres `imperecta_test`
 
 ---
 
@@ -317,7 +324,134 @@ frontend/src/
 
 ---
 
-## 19. Источники
+## 20. Детальная логика элементов
+
+### 20.1 Bootstrap chain (`main.tsx`)
+
+1. `setupAuth()` — attach axios interceptors before any API call.
+2. Load i18n resources.
+3. `AppWithInit` — restore session from storage, validate token.
+4. Render `App` with QueryClient + providers.
+
+---
+
+### 20.2 Auth flow
+
+| Элемент | Логика |
+|---------|--------|
+| `authStore` | Zustand: user, tokens, login/logout actions |
+| `authStorage` | Abstraction over localStorage keys |
+| `setupAuth.ts` | Inject Bearer; on 401 → refresh once → retry or logout |
+| Route guards | `ProtectedRoute`, `AdminRoute`, `AIAnalystRoute`, `LandingRoute` |
+
+---
+
+### 20.3 Display currency stack
+
+| Элемент | Логика |
+|---------|--------|
+| `displayCurrencyStore` | Persist mode `local` \| `EUR` \| `USD` |
+| `useDisplayCurrency` | Expose `apiParam` for query string |
+| `DisplayCurrencySelector` | UI toggle; writes store |
+| `PriceDisplay` | Render via `formatPrice` (2 decimals); badge when `!conversion_available` |
+| API types | `local_currency_resolution`, `local_currency_unavailable` on pool/products/markets |
+| API consumers | Append `?display_currency=` on products/pool/dashboard requests |
+
+**Правило:** конвертация и local-currency resolution только на backend.
+
+### 20.3b Marketplace labels
+
+| Элемент | Логика |
+|---------|--------|
+| `formatMarketplaceLabel` | Base name; append `(Country)` for country-TLD domains |
+| `isInternationalMarketplace` | Known globals (amazon.com, ebay.com, …) and generic .com → no suffix |
+| `useMarketplaceLabelFormatter` | Binds current i18n locale for country names (ru uses `name_local`) |
+| Consumers | `MarketsOverviewSection`, `PoolProductsTab`, `MarketsAnalyticsSection`, `MarketplaceBadge` |
+
+---
+
+### 20.4 Admin parsing hooks (`useAdmin.ts`)
+
+| Hook | Логика |
+|------|--------|
+| `useRunParsingPipeline` | POST `/run-pipeline` with optional `marketplace_codes`; invalidate active job |
+| `useCancelParsingActiveJob` | POST cancel; stop polls |
+| `useParsingActiveJob` | ~4s poll while admin tab open |
+| `useParsingJobStatus(jobId)` | 2s when monitoring selected job |
+| `useParsingJobLiveFeed` | 3s — steps from `scrape_logs` aggregation |
+| `useParsingWorkerLogRelay` | 2s; cursor `after` from `next_cursor`; filter by `jobId` |
+| `useParsingPipelineRuns(10)` | History table data |
+
+---
+
+### 20.5 `DataCollectionTab.tsx`
+
+| UI block | Логика |
+|----------|--------|
+| **Marketplace picker** | Checkboxes → scoped `marketplace_codes`; Clear selection |
+| **Run buttons** | Disabled when `useParsingActiveJob` returns running job |
+| **Cancel** | Calls cancel mutation; expects parent failed server-side |
+| **Stage progress** | Maps `metadata.current_stage`: dispatching → discovery → scrape → persist |
+| **Stale badge** | If `now - last_activity_at > 300s` (`STALE_ACTIVITY_SECONDS`) — warning only (server stale at 30 min) |
+| **Metrics cards** | From `metadata.summary` + elapsed timer |
+| **Charts** | Recharts pie (scrape status), bar per MP, timeline throughput |
+| **History** | `RUNS_LIMIT=10`; resizable columns; row click opens monitor |
+| **WorkerLogRelayPanel** | Enabled only when `status === "running"` |
+
+---
+
+### 20.6 `WorkerLogRelayPanel.tsx`
+
+1. `useParsingWorkerLogRelay({ jobId, after, enabled })`.
+2. Append new lines to client buffer (max 120).
+3. Reset buffer when jobId changes or disabled.
+4. Mono terminal styling; `aria-live="polite"`.
+
+---
+
+### 20.7 `MarketsOverviewSection.tsx`
+
+| Feature | Логика |
+|---------|--------|
+| Data source | `GET /markets/overview` (dashboard API) |
+| Search/filter | Client-side on product name/code |
+| Sort modes | recent, gainers, losers, volatile, trending |
+| Pagination | `PAGE_LIMIT=200`; expand +20 |
+| Currency | `DisplayCurrencySelector` + `PriceDisplay` per row |
+| Marketplace label | `useMarketplaceLabelFormatter()` — country suffix for local TLD |
+| Local currency guard | Disable local when `local_currency_unavailable` or `source === "unknown"` |
+| Add to catalog | `productsApi` create from pool item |
+
+---
+
+### 20.8 `AdminPage.tsx` — три таба
+
+| Tab | Логика |
+|-----|--------|
+| **Market Overview** | Stats cards; marketplaces CRUD paginated 20/50/100; ingest trigger |
+| **Data Collection** | Delegates to `DataCollectionTab` |
+| **Users Management** | Table + dialogs; plans trial→enterprise; languages all 8 |
+
+---
+
+### 20.9 API clients (`api/`)
+
+| Client | Логика |
+|--------|--------|
+| `client.ts` | Force HTTPS when page is HTTPS |
+| `admin.ts` | Parsing + user admin types and endpoints |
+| `products.ts` | User products + pool with display_currency |
+| `markets.ts` | Market widgets + overview |
+
+---
+
+### 20.10 Entitlements (client)
+
+`useEntitlements` reads user plan → feature flags. `AIAnalystRoute` blocks render without PAID_FULL + AI feature. Trial: full platform except AI.
+
+---
+
+## 21. Источники
 
 | Область | Путь |
 |---------|------|
@@ -328,5 +462,6 @@ frontend/src/
 | Admin API | `frontend/src/api/admin.ts` |
 | Hooks | `frontend/src/hooks/useAdmin.ts` |
 | Auth | `frontend/src/stores/authStore.ts` |
+| Marketplace labels | `frontend/src/lib/marketplaceLabel.ts`, `hooks/useMarketplaceLabel.ts` |
 
 Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Backend.md`, `Imperecta_Parsing.md`.

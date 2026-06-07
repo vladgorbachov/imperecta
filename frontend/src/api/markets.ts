@@ -138,6 +138,7 @@ export interface MarketsOverviewItem {
   product_id?: string | null;
   marketplace_name?: string | null;
   marketplace_domain?: string | null;
+  country_code?: string | null;
   url: string;
   title?: string | null;
   image_url?: string | null;
@@ -176,6 +177,7 @@ export interface MarketsOverviewResponse {
 export interface PoolMarketplaceStatsItem {
   marketplace_domain: string;
   marketplace_name?: string | null;
+  country_code?: string | null;
   product_count: number;
   avg_price?: number | null;
 }
