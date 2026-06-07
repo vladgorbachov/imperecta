@@ -484,6 +484,8 @@ class DiscoveryCrawler:
 
     def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:
         """Return True if category recon should run."""
+        if int(getattr(marketplace, "category_resume_index", 0) or 0) > 0:
+            return False
         if marketplace.recon_frontier_state:
             return True
         if not marketplace.discovered_category_urls:
@@ -619,6 +621,7 @@ class DiscoveryCrawler:
         marketplace.discovered_category_urls = unique
         marketplace.last_category_recon_at = datetime.now(tz=timezone.utc)
         marketplace.recon_frontier_state = None
+        marketplace.category_resume_index = 0
         await self.db.flush()
         logger.info(
             "category_recon_done marketplace_id=%s listing_urls_found=%d",
@@ -632,24 +635,37 @@ class DiscoveryCrawler:
         marketplace: DimMarketplace,
         category_urls: list[str],
         *,
+        start_index: int = 0,
         deadline_monotonic: float | None = None,
-    ) -> tuple[int, bool]:
+    ) -> tuple[int, int, bool]:
         """Phase 2: crawl each category URL, extract product links, save to pool.
 
+        Processes a window of categories starting at start_index, capped at
+        MAX_CATEGORY_URLS_PER_RUN entries.
+
         Convergence detection: if CATEGORY_CONVERGENCE_STREAK consecutive
-        categories yield zero NEW persisted PDP, discovery exits early. This
-        treats small/exhausted marketplaces gracefully (converges in minutes)
-        without affecting large marketplaces (continues iterating until either
-        new PDPs stop arriving or MAX_CATEGORY_URLS_PER_RUN is exhausted).
+        categories yield zero NEW persisted PDP, discovery exits early.
 
-        A "category" here is one entry in category_urls (pagination of one
-        category counts as part of that single category's contribution).
+        Returns (total_saved, next_index, more_remaining) per the cursor
+        state machine:
+          - DEADLINE before/within absolute_idx → next_index = absolute_idx,
+            more_remaining = True.
+          - CONVERGENCE → next_index = 0, more_remaining = False.
+          - WINDOW EXHAUSTED with end_index < total → next_index = end_index,
+            more_remaining = True.
+          - REACHED END (end_index >= total) → next_index = 0, more = False.
+          - EMPTY WINDOW (start_index >= total, list shrank) →
+            next_index = 0, more_remaining = False.
 
-        Returns (total_saved, exhausted_budget). exhausted_budget is True
-        when the deadline was reached before all category URLs / pages were
-        processed; discover() then records the marketplace as partial_budget.
-        The incoming deadline is ALREADY headroom-adjusted by discover() —
-        pass it through unchanged, do not shrink again.
+        next_index is an absolute index into category_urls. The incoming
+        deadline is already headroom-adjusted by discover() — pass through
+        unchanged.
+
+        CRITICAL: next_index and more_remaining are INDEPENDENT signals.
+        next_index==0 with more_remaining=True means "resume from index 0
+        next run" (the very first category hit the deadline); it is NOT a
+        completion signal. Completion is decided solely by
+        more_remaining=False.
         """
         from app.modules.scraper.extractors import (
             detect_next_page,
@@ -659,10 +675,16 @@ class DiscoveryCrawler:
 
         total_saved = 0
         empty_streak = 0
-        exhausted = False
-        harvest_targets = category_urls[:MAX_CATEGORY_URLS_PER_RUN]
+        total_categories = len(category_urls)
+        harvest_targets = category_urls[
+            start_index : start_index + MAX_CATEGORY_URLS_PER_RUN
+        ]
+        more_remaining = False
+        next_index = 0
+        converged = False
 
-        for category_idx, category_url in enumerate(harvest_targets):
+        for relative_idx, category_url in enumerate(harvest_targets):
+            absolute_idx = start_index + relative_idx
             if (
                 deadline_monotonic is not None
                 and time.monotonic() >= deadline_monotonic
@@ -670,13 +692,15 @@ class DiscoveryCrawler:
                 logger.info(
                     "discovery_phase2_budget_exhausted marketplace_id=%s "
                     "categories_processed=%d categories_total=%d "
-                    "total_saved=%d",
+                    "total_saved=%d next_index=%d",
                     marketplace.id,
-                    category_idx,
-                    len(harvest_targets),
+                    absolute_idx,
+                    total_categories,
                     total_saved,
+                    absolute_idx,
                 )
-                exhausted = True
+                more_remaining = True
+                next_index = absolute_idx
                 break
 
             saved_for_this_category = 0
@@ -687,7 +711,8 @@ class DiscoveryCrawler:
                     deadline_monotonic is not None
                     and time.monotonic() >= deadline_monotonic
                 ):
-                    exhausted = True
+                    more_remaining = True
+                    next_index = absolute_idx
                     break
 
                 _html, soup = await self.pool.scrape_page_for_analysis(
@@ -719,14 +744,17 @@ class DiscoveryCrawler:
                     saved_for_this_category += saved_this_call
                     total_saved += saved_this_call
                     if save_exhausted:
-                        exhausted = True
+                        more_remaining = True
+                        next_index = absolute_idx
                         break
 
                 next_page = detect_next_page(soup, current_url)
                 current_url = next_page
                 page_num += 1
 
-            if exhausted:
+            # Deadline detected in the inner loop wins over convergence:
+            # check before updating empty_streak / convergence.
+            if more_remaining:
                 break
 
             if saved_for_this_category == 0:
@@ -740,14 +768,34 @@ class DiscoveryCrawler:
                     "categories_processed=%d categories_total=%d total_saved=%d "
                     "empty_streak=%d",
                     marketplace.id,
-                    category_idx + 1,
+                    relative_idx + 1,
                     len(harvest_targets),
                     total_saved,
                     empty_streak,
                 )
+                converged = True
                 break
 
-        return total_saved, exhausted
+        # Resolve final cursor per the state machine. This runs after the
+        # loop in ALL cases. If the loop broke on a deadline,
+        # more_remaining is already True and next_index already set, so
+        # the first branch is a no-op. Otherwise resolve window-end vs
+        # full-completion vs converged.
+        if more_remaining:
+            pass
+        elif converged:
+            next_index = 0
+            more_remaining = False
+        else:
+            end_index = start_index + len(harvest_targets)
+            if end_index < total_categories:
+                next_index = end_index
+                more_remaining = True
+            else:
+                next_index = 0
+                more_remaining = False
+
+        return total_saved, next_index, more_remaining
 
     async def discover(
         self,
@@ -905,13 +953,26 @@ class DiscoveryCrawler:
                     accepted_urls = min(len(harvest_urls), remaining)
                     rejected_urls = max(0, len(harvest_urls) - accepted_urls)
                     pages_scanned = accepted_urls
-                    products_found, phase2_exhausted = (
+                    # start_index indexes into the quota-trimmed list. When quota is
+                    # finite and nearly exhausted, accepted_urls may shrink below
+                    # start_index between runs → EMPTY WINDOW rule resets the cursor.
+                    # This is intentional: quota is a hard ceiling and takes precedence
+                    # over category-harvest completeness.
+                    start_index = int(
+                        getattr(marketplace, "category_resume_index", 0) or 0
+                    )
+                    products_found, next_index, phase2_more = (
                         await self._phase2_product_harvest(
                             marketplace,
                             harvest_urls[:accepted_urls],
+                            start_index=start_index,
                             deadline_monotonic=block_deadline,
                         )
                     )
+                    marketplace.category_resume_index = next_index
+                    # Completion is decided by phase2_more (→ partial_budget), NOT by
+                    # next_index. next_index==0 with phase2_more=True means "restart at
+                    # 0 next run", not "done".
                     logger.info(
                         "discovery_category_path marketplace_id=%s candidate=%d accepted=%d "
                         "saved=%d rejected=%d remaining=%d",
@@ -925,7 +986,7 @@ class DiscoveryCrawler:
                     persisted_listings = products_found
                     duplicate_urls = max(0, accepted_urls - products_found)
                     remaining = max(0, remaining - products_found)
-                    if phase2_exhausted:
+                    if phase2_more:
                         partial_budget = True
 
             if partial_budget:

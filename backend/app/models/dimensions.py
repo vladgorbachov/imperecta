@@ -188,6 +188,9 @@ class DimMarketplace(Base):
     sitemap_resume_offset: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0",
     )
+    category_resume_index: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
