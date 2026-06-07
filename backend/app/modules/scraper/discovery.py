@@ -198,6 +198,26 @@ class DiscoveryCrawler:
             out.append(url)
         return out
 
+    @staticmethod
+    def _headroom_deadline(
+        deadline_monotonic: float | None,
+    ) -> float | None:
+        """Shrink a hard deadline by SAVE_BUDGET_HEADROOM_FRACTION.
+
+        Reserves the remaining fraction of the budget for
+        finalization (final commits, marketplace row updates, the
+        return path) so a phase voluntarily stops before the
+        caller's hard deadline, never mid-commit. Returns None when
+        no deadline is set (unbounded run).
+        """
+        if deadline_monotonic is None:
+            return None
+        now_m = time.monotonic()
+        remaining_budget = max(0.0, deadline_monotonic - now_m)
+        return now_m + (
+            remaining_budget * SAVE_BUDGET_HEADROOM_FRACTION
+        )
+
     async def _save_product_urls(
         self,
         marketplace_id: UUID,
@@ -558,7 +578,9 @@ class DiscoveryCrawler:
         self,
         marketplace: DimMarketplace,
         category_urls: list[str],
-    ) -> int:
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> tuple[int, bool]:
         """Phase 2: crawl each category URL, extract product links, save to pool.
 
         Convergence detection: if CATEGORY_CONVERGENCE_STREAK consecutive
@@ -569,6 +591,12 @@ class DiscoveryCrawler:
 
         A "category" here is one entry in category_urls (pagination of one
         category counts as part of that single category's contribution).
+
+        Returns (total_saved, exhausted_budget). exhausted_budget is True
+        when the deadline was reached before all category URLs / pages were
+        processed; discover() then records the marketplace as partial_budget.
+        The incoming deadline is ALREADY headroom-adjusted by discover() —
+        pass it through unchanged, do not shrink again.
         """
         from app.modules.scraper.extractors import (
             detect_next_page,
@@ -578,13 +606,37 @@ class DiscoveryCrawler:
 
         total_saved = 0
         empty_streak = 0
+        exhausted = False
         harvest_targets = category_urls[:MAX_CATEGORY_URLS_PER_RUN]
 
         for category_idx, category_url in enumerate(harvest_targets):
+            if (
+                deadline_monotonic is not None
+                and time.monotonic() >= deadline_monotonic
+            ):
+                logger.info(
+                    "discovery_phase2_budget_exhausted marketplace_id=%s "
+                    "categories_processed=%d categories_total=%d "
+                    "total_saved=%d",
+                    marketplace.id,
+                    category_idx,
+                    len(harvest_targets),
+                    total_saved,
+                )
+                exhausted = True
+                break
+
             saved_for_this_category = 0
             current_url: str | None = category_url
             page_num = 0
             while current_url and page_num < MAX_PAGES_PER_CATEGORY:
+                if (
+                    deadline_monotonic is not None
+                    and time.monotonic() >= deadline_monotonic
+                ):
+                    exhausted = True
+                    break
+
                 _html, soup = await self.pool.scrape_page_for_analysis(
                     current_url,
                     static_fetch=True,
@@ -604,15 +656,25 @@ class DiscoveryCrawler:
                 if not product_urls:
                     product_urls = extract_product_links(soup, marketplace.base_url)
                 if product_urls:
-                    saved_this_call, _, _ = await self._save_product_urls(
-                        marketplace.id, product_urls
+                    saved_this_call, _, save_exhausted = (
+                        await self._save_product_urls(
+                            marketplace.id,
+                            product_urls,
+                            deadline_monotonic=deadline_monotonic,
+                        )
                     )
                     saved_for_this_category += saved_this_call
                     total_saved += saved_this_call
+                    if save_exhausted:
+                        exhausted = True
+                        break
 
                 next_page = detect_next_page(soup, current_url)
                 current_url = next_page
                 page_num += 1
+
+            if exhausted:
+                break
 
             if saved_for_this_category == 0:
                 empty_streak += 1
@@ -632,7 +694,7 @@ class DiscoveryCrawler:
                 )
                 break
 
-        return total_saved
+        return total_saved, exhausted
 
     async def discover(
         self,
@@ -728,13 +790,7 @@ class DiscoveryCrawler:
                 accepted_urls = len(batch)
                 rejected_urls = max(0, len(sitemap_product_urls) - len(batch))
                 start_offset = int(getattr(marketplace, "sitemap_resume_offset", 0) or 0)
-                save_deadline: float | None = None
-                if deadline_monotonic is not None:
-                    now_m = time.monotonic()
-                    remaining_budget = max(0.0, deadline_monotonic - now_m)
-                    save_deadline = now_m + (
-                        remaining_budget * SAVE_BUDGET_HEADROOM_FRACTION
-                    )
+                save_deadline = self._headroom_deadline(deadline_monotonic)
                 new_count, next_offset, exhausted = await self._save_product_urls(
                     marketplace.id,
                     batch,
@@ -771,9 +827,13 @@ class DiscoveryCrawler:
                 accepted_urls = min(len(harvest_urls), remaining)
                 rejected_urls = max(0, len(harvest_urls) - accepted_urls)
                 pages_scanned = accepted_urls
-                products_found = await self._phase2_product_harvest(
-                    marketplace,
-                    harvest_urls[:accepted_urls],
+                harvest_deadline = self._headroom_deadline(deadline_monotonic)
+                products_found, phase2_exhausted = (
+                    await self._phase2_product_harvest(
+                        marketplace,
+                        harvest_urls[:accepted_urls],
+                        deadline_monotonic=harvest_deadline,
+                    )
                 )
                 logger.info(
                     "discovery_category_path marketplace_id=%s candidate=%d accepted=%d "
@@ -788,6 +848,8 @@ class DiscoveryCrawler:
                 persisted_listings = products_found
                 duplicate_urls = max(0, accepted_urls - products_found)
                 remaining = max(0, remaining - products_found)
+                if phase2_exhausted:
+                    partial_budget = True
 
             if partial_budget:
                 status = "partial_budget"

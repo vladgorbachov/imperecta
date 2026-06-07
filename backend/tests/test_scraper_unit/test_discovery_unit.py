@@ -304,3 +304,196 @@ class TestResumableSitemap:
             last_sitemap_harvest_at=None, sitemap_resume_offset=0,
         )
         assert crawler._should_run_sitemap_harvest(mp_never) is True
+
+
+class TestPhase2CooperativeDeadline:
+    """Cooperative deadline enforcement inside _phase2_product_harvest."""
+
+    def test_headroom_deadline_arithmetic(self):
+        assert disc.DiscoveryCrawler._headroom_deadline(None) is None
+        with patch("app.modules.scraper.discovery.time.monotonic", return_value=1000.0):
+            result = disc.DiscoveryCrawler._headroom_deadline(1100.0)
+        assert result == 1000.0 + 100.0 * disc.SAVE_BUDGET_HEADROOM_FRACTION
+
+    @pytest.mark.asyncio
+    async def test_phase2_bails_before_fetch_when_deadline_expired(self):
+        mp = _make_marketplace()
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        with patch(
+            "app.modules.scraper.discovery.time.monotonic",
+            return_value=5000.0,
+        ):
+            urls = [f"https://shop.example/c/{i}" for i in range(10)]
+            total, exhausted = await crawler._phase2_product_harvest(
+                mp, urls, deadline_monotonic=4999.0,
+            )
+
+        assert (total, exhausted) == (0, True)
+        pool.scrape_page_for_analysis.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_phase2_stops_midway_when_deadline_hits(self):
+        mp = _make_marketplace()
+        pool = MagicMock()
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup("<html></html>", "html.parser")
+        pool.scrape_page_for_analysis = AsyncMock(return_value=(None, soup))
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            clock["t"] += 5.0
+            return clock["t"]
+
+        with patch(
+            "app.modules.scraper.discovery.time.monotonic",
+            side_effect=fake_monotonic,
+        ), patch(
+            "app.modules.scraper.extractors.extract_links_from_repeated_structure",
+            return_value=["https://shop.example/p/1"],
+        ), patch(
+            "app.modules.scraper.extractors.detect_next_page",
+            return_value=None,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(1, 1, False),
+        ):
+            urls = [f"https://shop.example/c/{i}" for i in range(5)]
+            total, exhausted = await crawler._phase2_product_harvest(
+                mp, urls, deadline_monotonic=20.0,
+            )
+
+        assert exhausted is True
+        assert pool.scrape_page_for_analysis.await_count < 5
+
+    @pytest.mark.asyncio
+    async def test_phase2_completes_without_deadline(self):
+        mp = _make_marketplace()
+        pool = MagicMock()
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup("<html></html>", "html.parser")
+        pool.scrape_page_for_analysis = AsyncMock(return_value=(None, soup))
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        with patch(
+            "app.modules.scraper.extractors.extract_links_from_repeated_structure",
+            return_value=["https://shop.example/p/x"],
+        ), patch(
+            "app.modules.scraper.extractors.detect_next_page",
+            return_value=None,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            new_callable=AsyncMock,
+            return_value=(1, 1, False),
+        ):
+            urls = [f"https://shop.example/c/{i}" for i in range(3)]
+            total, exhausted = await crawler._phase2_product_harvest(mp, urls)
+
+        assert exhausted is False
+        assert total == 3
+        assert pool.scrape_page_for_analysis.await_count == 3
+        assert disc.DiscoveryCrawler._headroom_deadline(None) is None
+
+    @pytest.mark.asyncio
+    async def test_discover_category_path_marks_partial_budget(self):
+        mp = _make_marketplace(
+            discovered_category_urls=[
+                "https://shop.example/c/a",
+                "https://shop.example/c/b",
+            ],
+            last_category_recon_at=datetime.now(timezone.utc),
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_should_run_category_recon",
+            return_value=False,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_phase2_product_harvest",
+            new_callable=AsyncMock,
+            return_value=(7, True),
+        ):
+            result = await crawler.discover(mp, deadline_monotonic=time.monotonic() + 60)
+
+        assert result.status == "partial_budget"
+        added_jobs = [
+            call.args[0] for call in db.add.call_args_list
+            if isinstance(call.args[0], disc.ScrapeJob)
+        ]
+        assert added_jobs and added_jobs[0].status == "partial"
+
+    @pytest.mark.asyncio
+    async def test_sitemap_path_preserves_headroom(self):
+        mp = _make_marketplace()
+        urls = [f"https://shop.example/p/{i}" for i in range(20)]
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+        captured: dict = {}
+
+        async def capture_save(_mp_id, _batch, *, start_offset=0, deadline_monotonic=None):
+            captured["deadline_monotonic"] = deadline_monotonic
+            return (20, 20, False)
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=urls,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_save_product_urls",
+            side_effect=capture_save,
+        ), patch(
+            "app.modules.scraper.discovery.time.monotonic",
+            return_value=1000.0,
+        ):
+            await crawler.discover(mp, deadline_monotonic=1100.0)
+
+        expected = 1000.0 + 100.0 * disc.SAVE_BUDGET_HEADROOM_FRACTION
+        assert captured["deadline_monotonic"] == expected
