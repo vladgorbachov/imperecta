@@ -5,16 +5,13 @@ Fetches forex, crypto, commodities, and fuel prices from APIs.
 
 import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterable
 
-import httpx
 from sqlalchemy import asc, func, nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
 from app.models.app_tables import ApiLog
 from app.models.core import User
 from app.models.facts import (
@@ -409,61 +406,48 @@ class MarketDataService:
         return items, last_at, False
 
 
-_cache: dict[str, tuple[object, float]] = {}
-DEFAULT_TTL = 7200
-
-
-def _get_cached(key: str, ttl: int = DEFAULT_TTL) -> object | None:
-    if key in _cache:
-        value, ts = _cache[key]
-        if time.time() - ts < ttl:
-            return value
-    return None
-
-
-def _set_cached(key: str, value: object) -> None:
-    _cache[key] = (value, time.time())
-
-
 async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
-    cached = _get_cached(f"forex_{base}")
-    if cached is not None:
-        return cached
+    """Fetch forex rates via ForexUnifiedAdapter. Empty list on provider failure.
 
+    Cache removed in M2: DB facts hold the last snapshot, and `api.py` reads
+    them first; this thin wrapper exists only for ingestion + DB-empty fallback.
+    """
     from app.modules.market_data.providers.forex_adapter import ForexUnifiedAdapter
 
     try:
         adapter = ForexUnifiedAdapter(timeout=15.0)
         items = await adapter.fetch()
-        normalized = []
-        for dto in items:
-            pair = dto.symbol.upper()
-            if not pair.startswith(f"{base.upper()}/"):
-                continue
-            normalized.append({
-                "pair": pair,
-                "rate": round(float(dto.bid), 6),
-                "change_24h": dto.change_24h,
-            })
-        normalized.sort(key=lambda row: row["pair"])
-        _set_cached(f"forex_{base}", normalized)
-        logger.info("Forex rates fetched via unified adapter: %d pairs (base=%s)", len(normalized), base)
-        return normalized
     except Exception as error:
         logger.error("Forex unified provider error: %s", error)
-        return _get_cached(f"forex_{base}", ttl=86400) or []
+        return []
+
+    base_prefix = f"{base.upper()}/"
+    normalized: list[dict] = []
+    for dto in items:
+        pair = dto.symbol.upper()
+        if not pair.startswith(base_prefix):
+            continue
+        normalized.append({
+            "pair": pair,
+            "rate": round(float(dto.bid), 6),
+            "change_24h": dto.change_24h,
+        })
+    normalized.sort(key=lambda row: row["pair"])
+    logger.info("Forex rates fetched via unified adapter: %d pairs (base=%s)", len(normalized), base)
+    return normalized
 
 
 async def fetch_crypto_prices() -> tuple[list[dict], bool]:
-    cached = _get_cached("crypto")
-    if cached is not None:
-        return (cached, True)
+    """Fetch crypto via CryptoUnifiedAdapter.
 
+    Returns (items, from_cache). After M2 the second element is always False
+    because the in-memory cache was removed; the tuple shape is kept for
+    backward compatibility with callers (api.py, ingestion.py).
+    """
     from app.modules.market_data.providers.crypto_adapter import CryptoUnifiedAdapter
 
     adapter = CryptoUnifiedAdapter(timeout=15.0)
     items = await adapter.fetch()
-
     result = [
         {
             "symbol": dto.symbol,
@@ -476,216 +460,38 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
         }
         for dto in items
     ]
-
-    _set_cached("crypto", result)
     logger.info("Crypto prices fetched: %d coins", len(result))
     return (result, False)
 
 
-GOLDAPI_TTL = 129600
-ALPHA_VANTAGE_TTL = 14400  # 4h — free tier 25 req/day; 1 req per 4h keeps under limit
-GOLDAPI_METALS: list[tuple[str, str]] = [
-    ("Gold", "XAU"),
-    ("Silver", "XAG"),
-    ("Platinum", "XPT"),
-    ("Palladium", "XPD"),
-]
-
-
-async def _fetch_one_metal(
-    client: httpx.AsyncClient,
-    symbol: str,
-    name: str,
-    api_key: str,
-) -> dict | None:
-    try:
-        resp = await client.get(
-            f"https://www.goldapi.io/api/{symbol}/USD",
-            headers={"x-access-token": api_key},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        price = float(data.get("price", 0))
-        chp = data.get("chp")
-        change_24h = round(float(chp), 2) if chp is not None else None
-        return {
-            "name": name,
-            "symbol": symbol,
-            "price": round(price, 2),
-            "unit": "oz",
-            "change_24h": change_24h,
-        }
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code in (403, 429):
-            logger.warning(
-                "GoldAPI %s: %s. Using cached data from DB.",
-                symbol,
-                "403 Forbidden" if error.response.status_code == 403 else "429 Rate limited",
-            )
-        else:
-            logger.warning("GoldAPI %s fetch failed: %s", symbol, error)
-        return None
-    except Exception as error:
-        logger.warning("GoldAPI %s fetch failed: %s", symbol, error)
-        return None
-
-
-async def fetch_metals() -> dict:
-    cached = _get_cached("commodities_metals", ttl=GOLDAPI_TTL)
-    if cached is not None:
-        return cached
-
-    settings = Settings()
-    api_key = (settings.goldapi_key or "").strip()
-    if not api_key:
-        result = {"items": [], "error": "GOLDAPI_KEY not configured"}
-        _set_cached("commodities_metals", result)
-        return result
-
-    try:
-        result_items: list[dict] = []
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            tasks = [
-                _fetch_one_metal(client, symbol, name, api_key)
-                for name, symbol in GOLDAPI_METALS
-            ]
-            metals = await asyncio.gather(*tasks)
-
-        for item in metals:
-            if item is not None:
-                result_items.append(item)
-
-        result = {"items": result_items, "error": None}
-        if not result_items:
-            result["error"] = (
-                "Metals unavailable. Set GOLDAPI_KEY in Railway; 403 usually means invalid key or quota exceeded."
-            )
-        _set_cached("commodities_metals", result)
-        logger.info("Metals fetched: %d items from goldapi.io", len(result_items))
-        return result
-    except Exception as error:
-        err_msg = f"GoldAPI error: {error}"
-        result = {"items": [], "error": err_msg}
-        _set_cached("commodities_metals", result)
-        return result
-
-
-# 6 symbols: 4 metals (GoldAPI) + 2 energy (Alpha Vantage). 4 req/day × 6 = 24, fits free tier.
-ALPHA_VANTAGE_TICKERS: list[tuple[str, str, str]] = [
-    ("Crude Oil (WTI)", "WTI", "bbl"),
-    ("Crude Oil (Brent)", "BRENT", "bbl"),
-]
-ALPHA_VANTAGE_FUNCTIONS: dict[str, str] = {
-    "WTI": "WTI",
-    "BRENT": "BRENT",
-}
-
-
-async def _fetch_alpha_vantage(
-    client: httpx.AsyncClient,
-    function: str,
-    name: str,
-    symbol: str,
-    unit: str,
-    api_key: str,
-) -> dict | None:
-    try:
-        url = f"https://www.alphavantage.co/query?function={function}&interval=daily&apikey={api_key}"
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-        err_msg = data.get("Error Message") or data.get("Note")
-        if err_msg:
-            logger.warning("Alpha Vantage %s: API message: %s", symbol, err_msg[:200])
-            return None
-        data_list = data.get("data")
-        if not isinstance(data_list, list) or len(data_list) < 2:
-            logger.warning("Alpha Vantage %s: insufficient data", symbol)
-            return None
-        latest = float(data_list[0].get("value", 0))
-        prev = float(data_list[1].get("value", 0))
-        if prev == 0:
-            change_24h = None
-        else:
-            change_24h = round(((latest - prev) / prev) * 100, 2)
-        return {
-            "name": name,
-            "symbol": symbol,
-            "price": round(latest, 2),
-            "unit": unit,
-            "change_24h": change_24h,
-        }
-    except Exception as error:
-        logger.warning("Alpha Vantage %s fetch failed: %s", symbol, error)
-        return None
-
-
-async def fetch_energy() -> dict:
-    cached = _get_cached("commodities_energy", ttl=ALPHA_VANTAGE_TTL)
-    if cached is not None:
-        return cached
-
-    settings = Settings()
-    api_key = (settings.alpha_vantage_key or "").strip()
-    if not api_key:
-        result = {"items": [], "error": "ALPHA_VANTAGE_KEY not configured"}
-        _set_cached("commodities_energy", result)
-        return result
-
-    try:
-        result_items: list[dict] = []
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            for name, symbol, unit in ALPHA_VANTAGE_TICKERS:
-                func = ALPHA_VANTAGE_FUNCTIONS[symbol]
-                item = await _fetch_alpha_vantage(client, func, name, symbol, unit, api_key)
-                if item is not None:
-                    result_items.append(item)
-
-        result = {"items": result_items, "error": None}
-        if not result_items:
-            result["error"] = (
-                "Energy data unavailable. Check ALPHA_VANTAGE_KEY in Railway; free tier is 5 calls/min."
-            )
-        _set_cached("commodities_energy", result)
-        logger.info("Energy fetched: %d items from Alpha Vantage", len(result_items))
-        return result
-    except Exception as error:
-        err_msg = f"Alpha Vantage error: {error}"
-        result = {"items": [], "error": err_msg}
-        _set_cached("commodities_energy", result)
-        return result
-
-
 async def fetch_commodities() -> tuple[list[dict], str | None, bool]:
-    cached = _get_cached("commodities", ttl=ALPHA_VANTAGE_TTL)
-    if cached is not None:
-        return (cached, None, True)
+    """Fetch commodities via CommoditiesUnifiedAdapter.
 
+    Returns (items, error_message, from_cache). After M2 the third element is
+    always False (cache removed); the tuple shape is preserved for callers.
+    """
     from app.modules.market_data.providers.commodities_adapter import CommoditiesUnifiedAdapter
 
     try:
         adapter = CommoditiesUnifiedAdapter(timeout=15.0)
         items = await adapter.fetch()
-        normalized_items = [
-            {
-                "name": dto.name or dto.symbol,
-                "symbol": dto.symbol,
-                "price": float(dto.price),
-                "unit": dto.unit or "",
-                "change_24h": dto.change_24h,
-            }
-            for dto in items
-        ]
-        _set_cached("commodities", normalized_items)
-        if not normalized_items:
-            return ([], "Commodities providers unavailable (Gold API and Alpha Vantage/Yahoo)", False)
-        return (normalized_items, None, False)
     except Exception as error:
         logger.warning("Unified commodities fetch failed: %s", error)
-        fallback = _get_cached("commodities", ttl=GOLDAPI_TTL) or []
-        if fallback:
-            return (fallback, "Using cached commodities data", True)
         return ([], "Commodities providers unavailable (Gold API and Alpha Vantage/Yahoo)", False)
+
+    normalized_items = [
+        {
+            "name": dto.name or dto.symbol,
+            "symbol": dto.symbol,
+            "price": float(dto.price),
+            "unit": dto.unit or "",
+            "change_24h": dto.change_24h,
+        }
+        for dto in items
+    ]
+    if not normalized_items:
+        return ([], "Commodities providers unavailable (Gold API and Alpha Vantage/Yahoo)", False)
+    return (normalized_items, None, False)
 
 
 def _fuel_facts_to_legacy_dict(rows: list[dict[str, Any]], country_code: str) -> dict[str, Any]:
