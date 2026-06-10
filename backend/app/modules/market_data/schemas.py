@@ -1,8 +1,7 @@
-"""Schemas for market data: forex, crypto, commodities, fuel, ticker, preferences."""
+"""Schemas for market data: forex, crypto, commodities, ticker, preferences."""
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -51,7 +50,7 @@ class MarketsInstrumentsResponse(BaseModel):
     commodities: list[MarketsInstrumentOption] = Field(default_factory=list)
 
 
-# --- Refresh metadata (legacy list shape for API) ---
+# --- Refresh metadata (list shape returned by /markets/refresh-metadata) ---
 
 
 class MarketsRefreshStatusItem(BaseModel):
@@ -67,16 +66,7 @@ class MarketsRefreshMetadataResponse(BaseModel):
     items: list[MarketsRefreshStatusItem]
 
 
-class RefreshMetadataResponse(BaseModel):
-    """Alternative grouped metadata (optional future use)."""
-
-    forex: dict[str, Any] | None = None
-    crypto: dict[str, Any] | None = None
-    commodities: dict[str, Any] | None = None
-    fuel: dict[str, Any] | None = None
-
-
-# --- Forex (existing API shape) ---
+# --- Forex ---
 
 
 class MarketsForexItem(BaseModel):
@@ -91,19 +81,6 @@ class MarketsForexItem(BaseModel):
 class MarketsForexResponse(BaseModel):
     items: list[MarketsForexItem]
     last_refreshed_at: datetime | None
-
-
-class ForexRateItem(BaseModel):
-    currency_code: str
-    rate_to_eur: float
-    rate_to_usd: float
-    source: str
-    fetched_at: datetime
-
-
-class ForexResponse(BaseModel):
-    items: list[ForexRateItem]
-    base: str = "EUR"
 
 
 # --- Crypto ---
@@ -122,23 +99,6 @@ class MarketsCryptoResponse(BaseModel):
     error: str | None = None
     cached: bool = False
     last_refreshed_at: datetime | None
-
-
-class CryptoItem(BaseModel):
-    symbol: str
-    name: str | None = None
-    price_usd: float
-    price_eur: float | None = None
-    market_cap_usd: float | None = None
-    volume_24h_usd: float | None = None
-    change_24h_pct: float | None = None
-    change_7d_pct: float | None = None
-    rank: int | None = None
-    source: str = ""
-
-
-class CryptoResponse(BaseModel):
-    items: list[CryptoItem]
 
 
 # --- Commodities ---
@@ -160,38 +120,6 @@ class MarketsCommoditiesResponse(BaseModel):
     last_refreshed_at: datetime | None
 
 
-class CommodityItem(BaseModel):
-    symbol: str
-    name: str
-    commodity_type: str
-    price_usd: float
-    price_eur: float | None = None
-    change_24h_pct: float | None = None
-    unit: str
-    source: str
-
-
-class CommoditiesResponse(BaseModel):
-    items: list[CommodityItem]
-    error: str | None = None
-
-
-# --- Fuel ---
-
-
-class FuelPriceItem(BaseModel):
-    fuel_type: str
-    price_local: float
-    currency_code: str
-    price_eur: float | None = None
-    change_week_pct: float | None = None
-
-
-class FuelResponse(BaseModel):
-    country_code: str
-    items: list[FuelPriceItem]
-
-
 # --- Ticker ---
 
 
@@ -207,16 +135,3 @@ class MarketsTickerItem(BaseModel):
 class MarketsTickerResponse(BaseModel):
     items: list[MarketsTickerItem]
     last_refreshed_at: datetime | None
-
-
-class TickerItem(BaseModel):
-    symbol: str
-    name: str | None = None
-    price: float
-    change_pct: float | None = None
-    type: str  # forex, crypto, commodity, fuel
-
-
-class TickerResponse(BaseModel):
-    items: list[TickerItem]
-    country: str

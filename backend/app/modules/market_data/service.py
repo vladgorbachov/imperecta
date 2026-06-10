@@ -425,17 +425,6 @@ def _set_cached(key: str, value: object) -> None:
     _cache[key] = (value, time.time())
 
 
-def get_cache_info() -> dict:
-    now = time.time()
-    return {
-        key: {
-            "age_seconds": int(now - ts),
-            "expired": (now - ts) > DEFAULT_TTL,
-        }
-        for key, (_, ts) in _cache.items()
-    }
-
-
 async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
     cached = _get_cached(f"forex_{base}")
     if cached is not None:

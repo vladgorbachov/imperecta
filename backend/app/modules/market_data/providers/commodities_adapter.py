@@ -212,7 +212,3 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         except Exception as error:
             logger.warning("Yahoo fallback failed for %s (%s): %s", symbol, yahoo_symbol, error)
             return None
-
-
-class CommoditiesHttpAdapter(CommoditiesUnifiedAdapter):
-    """Backward-compatible alias for existing imports."""

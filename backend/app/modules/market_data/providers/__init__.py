@@ -6,10 +6,7 @@ from app.modules.market_data.providers.base import (
     ForexProviderAdapter,
 )
 from app.modules.market_data.providers.binance_adapter import BinanceCryptoAdapter
-from app.modules.market_data.providers.commodities_adapter import CommoditiesHttpAdapter
-from app.modules.market_data.providers.commodities_goldapi_alphavantage import (
-    CommoditiesGoldAPIAlphaVantageAdapter,
-)
+from app.modules.market_data.providers.commodities_adapter import CommoditiesUnifiedAdapter
 from app.modules.market_data.providers.crypto_adapter import (
     CryptoCoingeckoAdapter,
     CryptoCompositeAdapter,
@@ -27,6 +24,5 @@ __all__ = [
     "CryptoCompositeAdapter",
     "CryptoUnifiedAdapter",
     "BinanceCryptoAdapter",
-    "CommoditiesHttpAdapter",
-    "CommoditiesGoldAPIAlphaVantageAdapter",
+    "CommoditiesUnifiedAdapter",
 ]

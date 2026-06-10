@@ -339,9 +339,3 @@ class IngestionService:
             await _log_ingestion(self.db, endpoint="commodities", status="error", error_message=str(exc)[:2000])
             await self.db.commit()
             return 0
-
-
-class MarketDataIngestionService(IngestionService):
-    """Backward-compatible name for Celery/tasks."""
-
-    pass
