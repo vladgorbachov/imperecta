@@ -43,7 +43,6 @@ def test_market_data_imports_clean() -> None:
         "app.modules.market_data.ingestion",
         "app.modules.market_data.dto",
         "app.modules.market_data.schemas",
-        "app.modules.market_data.tasks",
         "app.modules.market_data.providers",
         "app.modules.market_data.providers.base",
         "app.modules.market_data.providers.binance_adapter",
@@ -90,10 +89,11 @@ def test_no_provider_imports_service() -> None:
             "CommoditiesGoldAPIAlphaVantageAdapter",
         ),
         ("app.modules.market_data.service", "MarketDataService"),
+        ("app.modules.market_data.tasks", "ingest_market_data"),
     ],
 )
 def test_removed_modules_gone(module_path: str, symbol: str) -> None:
-    """Modules deleted in M1/M3a must no longer be importable."""
+    """Modules deleted in M1/M3a/M3b must no longer be importable."""
     _ = symbol
     with pytest.raises(ImportError):
         importlib.import_module(module_path)

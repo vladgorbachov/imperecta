@@ -214,7 +214,7 @@ async def get_ticker(
 @router.post("/ingest")
 async def trigger_ingest(superuser: CurrentSuperuser) -> dict:
     _ = superuser
-    from app.modules.market_data.tasks import ingest_market_data
+    from app.workers.market_data_tasks import ingest_market_data
 
     task = ingest_market_data.delay()
     return {"status": "enqueued", "task_id": task.id}

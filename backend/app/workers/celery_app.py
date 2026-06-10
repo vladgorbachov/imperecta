@@ -45,7 +45,7 @@ celery_app.conf.include = [
     "app.modules.scraper.tasks",
     "app.modules.alerts.tasks",
     "app.modules.digests.tasks",
-    "app.modules.market_data.tasks",
+    "app.workers.market_data_tasks",
     "app.workers.cleanup_tasks",
     "app.workers.maintenance_tasks",
     "app.workers.reaper_tasks",

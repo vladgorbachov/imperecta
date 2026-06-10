@@ -1,4 +1,14 @@
-"""Market data Celery tasks: ingest quotes into v2 fact tables."""
+"""Celery task wrappers for market_data ingestion (Tier-2).
+
+Tier-2 (workers) owns Celery; Tier-1 (market_data) does not. These two wrappers
+only manage an async engine + session and dispatch to the module's Tier-1
+contract (`IngestionService`); the task NAMES match the prior Tier-1
+definitions verbatim so beat schedules and `/markets/ingest` remain compatible.
+"""
+
+# TODO(workers): extract a shared async-session helper for Tier-2 task wrappers
+# (duplicated with app.modules.scraper.tasks). Not done in M3b to keep the pass
+# scope-limited; planned alongside the broader worker-tier refactor.
 
 import asyncio
 import logging
@@ -17,7 +27,6 @@ from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# Persist layer (IngestionService writes these tables).
 FACT_TABLE_NAMES = (
     FactCurrencyRate.__tablename__,
     FactCryptoPrice.__tablename__,
