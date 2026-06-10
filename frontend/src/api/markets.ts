@@ -189,51 +189,6 @@ export interface PoolStatsResponse {
   last_discovery_at?: string | null;
 }
 
-// --- Category analytics ---
-
-export interface MarketsCategoryAnalyticsItem {
-  id: string;
-  category_id: string;
-  segment: string | null;
-  metrics: Record<string, unknown>;
-  refreshed_at: string;
-}
-
-export interface MarketsCategoryAnalyticsResponse {
-  items: MarketsCategoryAnalyticsItem[];
-  last_refreshed_at: string | null;
-}
-
-// --- Marketplace analytics ---
-
-export interface MarketsMarketplaceAnalyticsItem {
-  id: string;
-  marketplace_id: string;
-  marketplace_name: string | null;
-  metrics: Record<string, unknown>;
-  refreshed_at: string;
-}
-
-export interface MarketsMarketplaceAnalyticsResponse {
-  items: MarketsMarketplaceAnalyticsItem[];
-  last_refreshed_at: string | null;
-}
-
-// --- Opportunity blocks ---
-
-export interface MarketsOpportunityBlockItem {
-  id: string;
-  block_type: string;
-  title: string;
-  metrics: Record<string, unknown>;
-  refreshed_at: string;
-}
-
-export interface MarketsOpportunitiesResponse {
-  items: MarketsOpportunityBlockItem[];
-  last_refreshed_at: string | null;
-}
-
 // --- API ---
 
 export const marketsApi = {
@@ -286,15 +241,6 @@ export const marketsApi = {
   getPoolStats: () =>
     apiClient.get<PoolStatsResponse>("/pool/stats"),
 
-  getCategoryAnalytics: () =>
-    apiClient.get<MarketsCategoryAnalyticsResponse>("/markets/category-analytics"),
-
-  getMarketplaceAnalytics: () =>
-    apiClient.get<MarketsMarketplaceAnalyticsResponse>("/markets/marketplace-analytics"),
-
-  getOpportunities: () =>
-    apiClient.get<MarketsOpportunitiesResponse>("/markets/opportunities"),
-
   /** Trigger market data ingestion. Superuser only. Enqueues Celery task. */
   triggerIngest: () =>
     apiClient.post<{ status: string; task_id: string }>("/markets/ingest"),
@@ -331,7 +277,4 @@ export const marketsQueryKeys = {
     ] as const,
   poolMarketplaceStats: () => [...marketsQueryKeys.all, "pool-marketplace-stats"] as const,
   poolStats: () => [...marketsQueryKeys.all, "pool-stats"] as const,
-  categoryAnalytics: () => [...marketsQueryKeys.all, "category-analytics"] as const,
-  marketplaceAnalytics: () => [...marketsQueryKeys.all, "marketplace-analytics"] as const,
-  opportunities: () => [...marketsQueryKeys.all, "opportunities"] as const,
 };

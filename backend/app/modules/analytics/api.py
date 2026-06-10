@@ -12,8 +12,7 @@ from app.modules.analytics.schemas import (
     PriceHistoryResponse,
     SimulateRequest,
 )
-from app.modules.analytics.service import BenchmarkService, ForecastService
-from app.modules.dashboard.service import DashboardService
+from app.modules.analytics.service import AnalyticsKpiService, BenchmarkService, ForecastService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -84,10 +83,4 @@ async def get_comparison_matrix(current_user: CurrentUser, db: DbSession) -> dic
 
 @router.get("/dashboard/summary")
 async def get_dashboard_summary(current_user: CurrentUser, db: DbSession) -> dict:
-    return await DashboardService(db, current_user.id).get_kpi()
-
-
-@router.get("/dashboard/anomalies")
-async def get_dashboard_anomalies(current_user: CurrentUser, db: DbSession, limit: int = Query(10, ge=1, le=100)) -> dict:
-    items = await DashboardService(db, current_user.id).get_anomalies(limit=limit)
-    return {"items": items}
+    return await AnalyticsKpiService(db, current_user.id).get_summary()

@@ -91,12 +91,3 @@ class MarketsService:
             "crypto": crypto,
             "commodities": commodities,
         }
-
-    async def get_category_analytics(self) -> dict:
-        return {"items": [], "last_refreshed_at": None}
-
-    async def get_marketplace_analytics(self) -> dict:
-        return {"items": [], "last_refreshed_at": None}
-
-    async def get_opportunities(self) -> dict:
-        return {"items": [], "last_refreshed_at": None}

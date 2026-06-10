@@ -13,6 +13,39 @@ from app.modules.product_pool.schemas import (
 from app.modules.product_pool.service import ProductPoolService
 
 router = APIRouter(prefix="/pool", tags=["product-pool"])
+markets_overview_router = APIRouter(prefix="/markets", tags=["markets"])
+
+OVERVIEW_SORT = ("volatile", "trending", "gainers", "losers", "recent")
+
+
+@markets_overview_router.get("/overview")
+async def get_overview(
+    current_user: CurrentUser,
+    db: DbSession,
+    sort: str = Query("volatile", description="Sort: volatile, trending, gainers, losers, recent"),
+    search: str | None = Query(None, min_length=2),
+    marketplace_id: UUID | None = Query(None),
+    limit: int = Query(50, ge=1, le=500, description="Max items per page"),
+    offset: int = Query(0, ge=0),
+    display_currency: str = Query("local", description="local|EUR|USD"),
+) -> dict:
+    """Dashboard overview list. Public path `/markets/overview` is preserved
+    verbatim from the dissolved dashboard module; the load-bearing frontend
+    consumer is `marketsApi.getOverview` in `MarketsOverviewSection`.
+    """
+    if sort not in OVERVIEW_SORT:
+        sort = "volatile"
+    service = ProductPoolService(db)
+    items, total = await service.list_products(
+        sort=sort,
+        search=search,
+        marketplace_id=marketplace_id,
+        limit=limit,
+        offset=offset,
+        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
+        display_currency=display_currency,
+    )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/products", response_model=PoolProductsResponse)
 async def list_pool_products(

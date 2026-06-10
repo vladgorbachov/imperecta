@@ -20,10 +20,12 @@ from app.modules.analytics.api import router as analytics_router
 from app.modules.core.api_admin import router as admin_router
 from app.modules.core.api_auth import router as auth_router
 from app.modules.core.api_telegram import router as telegram_router
-from app.modules.dashboard.api import router as dashboard_router
 from app.modules.digests.api import router as digests_router
 from app.modules.market_data.api import router as market_data_router
 from app.modules.marketplaces.api import router as marketplaces_router
+from app.modules.product_pool.api import (
+    markets_overview_router as markets_overview_router,
+)
 from app.modules.product_pool.api import router as pool_router
 from app.modules.user_products.api_import import router as import_router
 from app.modules.user_products.api_products import router as products_router
@@ -150,8 +152,8 @@ for router in [
     telegram_router,
     marketplaces_router,
     pool_router,
+    markets_overview_router,
     market_data_router,
-    dashboard_router,
     products_router,
     import_router,
     analytics_router,

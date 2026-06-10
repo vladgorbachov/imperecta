@@ -3,9 +3,13 @@ M3a structure tests for the market_data module.
 
 Verifies the post-split layout: service.py is retired, every former public
 symbol lives in exactly one new file (reader / facade / fetching / ticker /
-fuel), the api.py route set is unchanged, the dashboard C3 routes still mount
-the facade, ticker assembly retains its pre-split behaviour (including the
-known-dead live-fallback fuel branch), and ingestion still reaches fetching.*.
+fuel), the api.py route set is unchanged, ticker assembly retains its
+pre-split behaviour (including the known-dead live-fallback fuel branch),
+and ingestion still reaches fetching.*.
+
+After D1 the dashboard module no longer exists; the C3 analytics routes and
+their facade stubs were removed together. The dissolution itself is covered
+by test_d1_dashboard_dissolution.py.
 """
 
 import importlib
@@ -32,7 +36,6 @@ from app.modules.market_data.fuel import get_fuel_prices
 from app.modules.market_data.ingestion import IngestionService
 from app.modules.market_data.reader import MarketDataService
 from app.modules.market_data.ticker import get_ticker_data
-from app.modules.dashboard.api import router as dashboard_router
 
 EXPECTED_MARKETS_ROUTES: set[str] = {
     "/markets/preferences",
@@ -44,12 +47,6 @@ EXPECTED_MARKETS_ROUTES: set[str] = {
     "/markets/fuel",
     "/markets/ticker",
     "/markets/ingest",
-}
-
-EXPECTED_DASHBOARD_C3_ROUTES: set[str] = {
-    "/markets/category-analytics",
-    "/markets/marketplace-analytics",
-    "/markets/opportunities",
 }
 
 
@@ -97,13 +94,6 @@ def test_routes_unchanged_markets() -> None:
     assert actual_paths == EXPECTED_MARKETS_ROUTES, (
         f"Unexpected /markets routes: {sorted(actual_paths - EXPECTED_MARKETS_ROUTES)}"
     )
-
-
-def test_dashboard_c3_routes_still_registered() -> None:
-    """Dashboard C3 analytics routes still mount on the facade-backed MarketsService."""
-    actual_paths = {route.path for route in dashboard_router.routes}
-    missing = EXPECTED_DASHBOARD_C3_ROUTES - actual_paths
-    assert not missing, f"Missing dashboard C3 routes: {sorted(missing)}"
 
 
 def test_currency_module_imports_from_fetching() -> None:

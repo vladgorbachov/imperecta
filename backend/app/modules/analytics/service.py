@@ -2,12 +2,44 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.core import UserProduct
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
+
+
+class AnalyticsKpiService:
+    """Real KPI counters for the analytics dashboard summary.
+
+    Owns the data the frontend's `usePlanLimits` hook and `SettingsPage`
+    consume (`total_products`, `total_competitors`). Lives in `analytics`
+    because `/analytics/dashboard/summary` is the only live consumer.
+    """
+
+    def __init__(self, db: AsyncSession, user_id: UUID):
+        self.db = db
+        self.user_id = user_id
+
+    async def get_summary(self) -> dict:
+        """Return only fields the frontend actually reads.
+
+        `total_competitors` stays as a zero literal: the frontend reads it to
+        render the competitors-usage meter on SettingsPage, but no v2 fact
+        currently aggregates competitor counts per user. Surfacing zero
+        matches today's behavior; the field must not be dropped while a live
+        consumer reads it.
+        """
+        user_product_count = await self.db.scalar(
+            select(func.count())
+            .select_from(UserProduct)
+            .where(UserProduct.user_id == self.user_id),
+        )
+        return {
+            "total_products": user_product_count or 0,
+            "total_competitors": 0,
+        }
 
 
 def linear_regression(x: list[float], y: list[float]) -> tuple[float, float, float]:
