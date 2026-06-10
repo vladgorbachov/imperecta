@@ -16,11 +16,11 @@ from app.config import Settings
 from app.database import Base, engine
 from app.modules.admin.api_parsing import router as admin_parsing_router
 from app.modules.ai_analyst.api import router as ai_router
-from app.modules.analytics.api import router as analytics_router
 from app.modules.core.api_admin import router as admin_router
 from app.modules.core.api_auth import router as auth_router
 from app.modules.core.api_telegram import router as telegram_router
 from app.modules.digests.api import router as digests_router
+from app.modules.entitlements.api import router as entitlements_router
 from app.modules.market_data.api import router as market_data_router
 from app.modules.marketplaces.api import router as marketplaces_router
 from app.modules.product_pool.api import (
@@ -156,7 +156,7 @@ for router in [
     market_data_router,
     products_router,
     import_router,
-    analytics_router,
+    entitlements_router,
     digests_router,
     ai_router,
 ]:

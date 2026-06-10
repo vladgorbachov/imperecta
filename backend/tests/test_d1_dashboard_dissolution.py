@@ -11,24 +11,21 @@ structural-test style. They guard:
    product_pool module (path + query params unchanged, frontend contract
    intact).
 4. `MarketsService` (market_data facade) no longer exposes the C3 stubs.
-5. `/analytics/dashboard/summary` is still registered and is served by the
-   new `AnalyticsKpiService`; `/analytics/dashboard/anomalies` is gone.
-6. `AnalyticsKpiService.get_summary` returns only the two fields the
-   frontend actually reads (`total_products`, `total_competitors`) - all
-   other previously-hardcoded zero fields are removed in place.
+
+A1 (analytics dissolution) further removes `/analytics/dashboard/summary`
+and `AnalyticsKpiService`; the surviving frontend usage consumer moves to
+`/entitlements/usage`. Those invariants live in
+`test_a1_analytics_dissolution.py`.
 """
 
 import importlib
 import inspect
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
 from app.main import app
-from app.modules.analytics.api import router as analytics_router
-from app.modules.analytics.service import AnalyticsKpiService
 from app.modules.market_data.facade import MarketsService
 from app.modules.product_pool.api import (
     OVERVIEW_SORT,
@@ -43,7 +40,6 @@ DELETED_PATHS: set[str] = {
     "/api/markets/category-analytics",
     "/api/markets/marketplace-analytics",
     "/api/markets/opportunities",
-    "/api/analytics/dashboard/anomalies",
 }
 
 OVERVIEW_QUERY_PARAMS: set[str] = {
@@ -90,7 +86,7 @@ def test_main_does_not_import_dashboard_router() -> None:
 
 
 def test_deleted_routes_absent_from_app() -> None:
-    """All six retired handlers (plus /analytics/dashboard/anomalies) are unmounted."""
+    """All six retired handlers are unmounted."""
     actual_paths = {getattr(route, "path", None) for route in app.routes}
     still_present = DELETED_PATHS & actual_paths
     assert not still_present, (
@@ -177,47 +173,3 @@ def test_market_data_c3_stubs_removed(stub_name: str) -> None:
     assert not hasattr(MarketsService, stub_name), (
         f"MarketsService.{stub_name} must be removed in D1 (had no callers after dashboard dissolution)"
     )
-
-
-def test_analytics_dashboard_summary_still_registered() -> None:
-    """The live /analytics/dashboard/summary endpoint stays at its public path."""
-    paths = {route.path for route in analytics_router.routes}
-    assert "/analytics/dashboard/summary" in paths
-    assert "/analytics/dashboard/anomalies" not in paths
-
-
-def test_analytics_kpi_service_does_not_depend_on_dashboard() -> None:
-    """AnalyticsKpiService is defined in analytics.service (no residual dashboard import)."""
-    assert AnalyticsKpiService.__module__ == "app.modules.analytics.service"
-    analytics_src = inspect.getsource(importlib.import_module("app.modules.analytics.service"))
-    assert "app.modules.dashboard" not in analytics_src
-    api_src = inspect.getsource(importlib.import_module("app.modules.analytics.api"))
-    assert "app.modules.dashboard" not in api_src
-
-
-@pytest.mark.asyncio
-async def test_analytics_kpi_summary_returns_only_consumed_fields() -> None:
-    """get_summary returns exactly the two fields the frontend actually reads.
-
-    `total_products` is a real DB count (from UserProduct rows for the
-    current user); `total_competitors` is the 0 literal SettingsPage reads
-    for its competitors-usage meter. No other zero-padded fields remain.
-    """
-    fake_db = SimpleNamespace(scalar=AsyncMock(return_value=7))
-    service = AnalyticsKpiService(fake_db, uuid4())
-
-    result = await service.get_summary()
-
-    assert result == {"total_products": 7, "total_competitors": 0}
-    assert fake_db.scalar.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_analytics_kpi_summary_handles_no_user_products() -> None:
-    """A user with zero products gets total_products=0 (None scalar coerced)."""
-    fake_db = SimpleNamespace(scalar=AsyncMock(return_value=None))
-    service = AnalyticsKpiService(fake_db, uuid4())
-
-    result = await service.get_summary()
-
-    assert result == {"total_products": 0, "total_competitors": 0}

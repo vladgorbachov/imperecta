@@ -1,7 +1,7 @@
 // MOBILE-2026: fully responsive + bottom nav + drawer
 
 /**
- * Competitors page: card grid (default) / table view, AI scoring, ComparisonMatrix.
+ * Competitors page: card grid (default) / table view.
  * i18n: nav.competitors, competitors.*, common.*
  */
 
@@ -17,7 +17,6 @@ import {
   Search,
   LayoutGrid,
   Table as TableIcon,
-  BarChart3,
   Sparkles,
   ChevronDown as ChevronDownIcon,
 } from "lucide-react";
@@ -28,7 +27,6 @@ import { useDisplayCurrencyStore } from "@/stores/displayCurrencyStore";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { competitorsApi } from "@/api/competitors";
-import { analyticsApi } from "@/api/analytics";
 import { productsApi } from "@/api/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,7 +59,6 @@ import { CircularScore } from "@/components/ui-custom/CircularScore";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { PriceSparkline } from "@/components/competitors/PriceSparkline";
-import { ComparisonMatrix } from "@/components/competitors/ComparisonMatrix";
 import { cn } from "@/lib/utils";
 import type { Competitor, CompetitorProduct } from "@/api/competitors";
 
@@ -180,7 +177,6 @@ export function CompetitorsPage() {
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [searchRaw, setSearchRaw] = useState("");
-  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [addCompetitorOpen, setAddCompetitorOpen] = useState(false);
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [selectedCompetitor, setSelectedCompetitor] = useState<Competitor | null>(null);
@@ -211,21 +207,6 @@ export function CompetitorsPage() {
       return [];
     },
   });
-
-  const { data: benchmarksRaw } = useQuery({
-    queryKey: ["analytics", "competitor-benchmark"],
-    queryFn: () => analyticsApi.getCompetitorBenchmark().then((r) => r.data),
-  });
-  const benchmarkRows = Array.isArray(benchmarksRaw) ? benchmarksRaw : [];
-  const benchmarkMap = Object.fromEntries(
-    benchmarkRows.map((b: { competitor_id?: string; competitor_name?: string; score?: number; trend_30d?: number[] }) => [
-      (b as { competitor_id?: string }).competitor_id ?? "",
-      {
-        score: (b as { score?: number }).score ?? 0,
-        trend_30d: (b as { trend_30d?: number[] }).trend_30d ?? [],
-      },
-    ])
-  );
 
   const { data: productsData } = useQuery({
     queryKey: ["products"],
@@ -387,14 +368,6 @@ export function CompetitorsPage() {
               <TableIcon className="size-4" />
             </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setComparisonOpen(true)}
-          >
-            <BarChart3 className="mr-2 size-4" />
-            {t("competitors.compareAll")}
-          </Button>
         </div>
       </div>
 
@@ -420,7 +393,6 @@ export function CompetitorsPage() {
             <CompetitorCard
               key={c.id}
               competitor={c}
-              benchmark={benchmarkMap[c.id]}
               onWhatIsDoingNow={() => handleWhatIsDoingNow()}
               onDetails={() => setExpandedId((id) => (id === c.id ? null : c.id))}
               expanded={expandedId === c.id}
@@ -454,7 +426,6 @@ export function CompetitorsPage() {
                 <ExpandableCompetitorRow
                   key={c.id}
                   competitor={c}
-                  benchmark={benchmarkMap[c.id]}
                   products={products}
                   loadCompetitorProducts={getCompetitorProducts}
                   expanded={expandedId === c.id}
@@ -471,13 +442,6 @@ export function CompetitorsPage() {
           </Table>
         </div>
       )}
-
-      <ComparisonMatrix
-        open={comparisonOpen}
-        onOpenChange={setComparisonOpen}
-        products={products.map((p) => ({ id: p.id, name: p.name }))}
-        competitors={competitors.map((c) => ({ id: c.id, name: c.name }))}
-      />
 
       <AddCompetitorDialog
         open={addCompetitorOpen}

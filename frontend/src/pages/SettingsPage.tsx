@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Zap, Upload, Link as LinkIcon } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "@/api/auth";
-import { analyticsApi } from "@/api/analytics";
+import { entitlementsApi, entitlementsQueryKeys } from "@/api/entitlements";
 import { useAuthStore } from "@/stores/authStore";
 import { useEntitlements } from "@/hooks/useEntitlements";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const setUser = useAuthStore((s) => s.setUser);
   const updateLanguage = useAuthStore((s) => s.updateLanguage);
-  const { limits: entitlementLimits, trialDurationDays } = useEntitlements();
+  const { trialDurationDays } = useEntitlements();
 
   const [profileForm, setProfileForm] = useState({ name: "", company_name: "" });
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -65,9 +65,9 @@ export function SettingsPage() {
     },
   });
 
-  const { data: summary } = useQuery({
-    queryKey: ["analytics", "dashboard", "summary"],
-    queryFn: () => analyticsApi.getDashboardSummary().then((r) => r.data),
+  const { data: usage } = useQuery({
+    queryKey: entitlementsQueryKeys.usage(),
+    queryFn: () => entitlementsApi.getUsage().then((r) => r.data),
   });
 
   const user = useAuthStore((s) => s.user);
@@ -228,16 +228,10 @@ export function SettingsPage() {
   };
 
   const plan = (u?.plan ?? "").toLowerCase();
-  const limits = {
-    products: entitlementLimits?.products ?? 0,
-    competitors: entitlementLimits?.competitors ?? 0,
-  };
-  const productsCount = summary?.total_products ?? 0;
-  const competitorsCount = summary?.total_competitors ?? 0;
-  const productsPercent = limits.products > 0 ? (productsCount / limits.products) * 100 : 0;
-  const competitorsPercent = limits.competitors > 0 ? (competitorsCount / limits.competitors) * 100 : 0;
+  const productsCount = usage?.products.used ?? 0;
+  const productsLimit = usage?.products.limit ?? 0;
+  const productsPercent = productsLimit > 0 ? (productsCount / productsLimit) * 100 : 0;
   const productsVariant = productsPercent >= 95 ? "danger" : productsPercent >= 80 ? "warning" : "default";
-  const competitorsVariant = competitorsPercent >= 95 ? "danger" : competitorsPercent >= 80 ? "warning" : "default";
 
   const trialEndsAt = u?.trial_ends_at ? new Date(u.trial_ends_at) : null;
   const trialDaysLeft = trialEndsAt
@@ -578,26 +572,13 @@ export function SettingsPage() {
                 <p className="text-sm">
                   {t("settings.productsLimit", {
                     current: productsCount,
-                    limit: limits.products,
+                    limit: productsLimit,
                   })}
                 </p>
                 <Progress
                   value={productsCount}
-                  max={limits.products}
+                  max={productsLimit}
                   variant={productsVariant}
-                />
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm">
-                  {t("settings.competitorsLimit", {
-                    current: competitorsCount,
-                    limit: limits.competitors,
-                  })}
-                </p>
-                <Progress
-                  value={competitorsCount}
-                  max={limits.competitors}
-                  variant={competitorsVariant}
                 />
               </div>
               <Button

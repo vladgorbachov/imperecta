@@ -84,7 +84,6 @@ import { DigestsPage } from "@/pages/DigestsPage";
 import { ImportPage } from "@/pages/ImportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AdminPage } from "@/pages/AdminPage";
-import { AnalyticsPage } from "@/pages/AnalyticsPage";
 import { AIAnalystRoute } from "@/components/AIAnalystRoute";
 import { ChangePasswordRoute } from "@/components/ChangePasswordRoute";
 import { PublicAuthRoute } from "@/components/PublicAuthRoute";
@@ -157,7 +156,6 @@ export function App() {
                     <Route path="products/:id" element={<ProductDetailPage />} />
                     <Route path="digests" element={<DigestsPage />} />
                     <Route path="import" element={<ImportPage />} />
-                    <Route path="analytics" element={<AnalyticsPage />} />
                     <Route path="ai" element={<AIAnalystRoute />} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Route>

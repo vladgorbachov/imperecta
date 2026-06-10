@@ -15,7 +15,6 @@ const PRICE_QUERY_PREFIXES = [
   ["markets"],
   ["pool-products"],
   ["products"],
-  ["analytics"],
   ["competitors"],
 ] as const;
 

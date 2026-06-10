@@ -13,7 +13,6 @@ import {
   FileText,
   Upload,
   Shield,
-  TrendingUp,
   Bot,
   Sparkles,
   ChevronLeft,
@@ -333,16 +332,6 @@ export function Sidebar({
         </SidebarSection>
 
         <SidebarSection label={t("nav.section.intelligence")} collapsed={collapsed}>
-          <SidebarItem
-            icon={TrendingUp}
-            label={t("nav.analytics")}
-            to="/analytics"
-            badge={<SparklesBadge />}
-            collapsed={collapsed}
-            isMobile={isMobile}
-            onNavigate={onNavigate}
-            isActive={isActive("/analytics")}
-          />
           <SidebarItem
             icon={FileText}
             label={t("nav.digests")}
