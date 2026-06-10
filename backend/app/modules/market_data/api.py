@@ -16,14 +16,11 @@ from app.modules.market_data.schemas import (
     MarketsRefreshStatusItem,
     MarketsTickerResponse,
 )
-from app.modules.market_data.service import (
-    MarketDataService,
-    MarketsService,
-    fetch_crypto_prices,
-    fetch_forex_rates,
-    get_fuel_prices,
-    get_ticker_data,
-)
+from app.modules.market_data.facade import MarketsService
+from app.modules.market_data.fetching import fetch_crypto_prices, fetch_forex_rates
+from app.modules.market_data.fuel import get_fuel_prices
+from app.modules.market_data.reader import MarketDataService
+from app.modules.market_data.ticker import get_ticker_data
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 DEFAULT_TICKER_COUNTRY = "DE"

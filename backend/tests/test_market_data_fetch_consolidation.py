@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.modules.market_data import service as market_service
+from app.modules.market_data import fetching as market_service
 from app.modules.market_data.dto import (
     NormalizedCommodity,
     NormalizedCrypto,
@@ -201,7 +201,7 @@ def test_no_http_in_service() -> None:
 def test_cache_symbols_removed(symbol: str) -> None:
     """The module-global in-memory cache must be gone after M2."""
     assert not hasattr(market_service, symbol), (
-        f"market_data.service.{symbol} must be removed in M2"
+        f"market_data.fetching.{symbol} must remain removed"
     )
 
 
@@ -220,15 +220,15 @@ def test_cache_symbols_removed(symbol: str) -> None:
     ],
 )
 def test_metals_energy_removed(symbol: str) -> None:
-    """The orphaned metals/energy duplicate path is removed from service.py."""
+    """The orphaned metals/energy duplicate path stays removed from fetching.py."""
     assert not hasattr(market_service, symbol), (
-        f"market_data.service.{symbol} must be removed in M2"
+        f"market_data.fetching.{symbol} must remain removed"
     )
 
 
 def test_public_fetch_signatures_preserved() -> None:
     """The three public fetch_* helpers must remain importable with the same name."""
-    from app.modules.market_data.service import (  # noqa: F401
+    from app.modules.market_data.fetching import (  # noqa: F401
         fetch_commodities,
         fetch_crypto_prices,
         fetch_forex_rates,
@@ -239,7 +239,7 @@ def test_public_fetch_signatures_preserved() -> None:
 async def test_ingestion_persists_all_three_streams(monkeypatch: pytest.MonkeyPatch) -> None:
     """IngestionService.ingest_all still routes mapped items into persist_* (parity)."""
     monkeypatch.setattr(
-        "app.modules.market_data.service.fetch_forex_rates",
+        "app.modules.market_data.fetching.fetch_forex_rates",
         AsyncMock(
             return_value=[
                 {"pair": "EUR/USD", "rate": 1.08, "change_24h": None},
@@ -248,7 +248,7 @@ async def test_ingestion_persists_all_three_streams(monkeypatch: pytest.MonkeyPa
         ),
     )
     monkeypatch.setattr(
-        "app.modules.market_data.service.fetch_crypto_prices",
+        "app.modules.market_data.fetching.fetch_crypto_prices",
         AsyncMock(
             return_value=(
                 [
@@ -267,7 +267,7 @@ async def test_ingestion_persists_all_three_streams(monkeypatch: pytest.MonkeyPa
         ),
     )
     monkeypatch.setattr(
-        "app.modules.market_data.service.fetch_commodities",
+        "app.modules.market_data.fetching.fetch_commodities",
         AsyncMock(
             return_value=(
                 [

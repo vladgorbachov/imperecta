@@ -11,7 +11,7 @@ from app.modules.dashboard.schemas import (
     MarketsOpportunitiesResponse,
 )
 from app.modules.dashboard.service import DashboardService
-from app.modules.market_data.service import MarketsService
+from app.modules.market_data.facade import MarketsService
 from app.modules.product_pool.service import ProductPoolService
 
 dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])

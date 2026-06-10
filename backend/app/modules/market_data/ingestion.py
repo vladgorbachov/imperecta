@@ -209,7 +209,7 @@ class IngestionService:
 
     async def ingest_all(self, include_commodities: bool = False) -> dict[str, Any]:
         """Fetch from existing adapters and persist (orchestration entrypoint)."""
-        from app.modules.market_data.service import (
+        from app.modules.market_data.fetching import (
             fetch_crypto_prices,
             fetch_forex_rates,
             fetch_commodities,
@@ -309,7 +309,7 @@ class IngestionService:
 
     async def ingest_commodities_only(self) -> int:
         """Commodity-only run for scheduled tasks (no forex/crypto)."""
-        from app.modules.market_data.service import fetch_commodities
+        from app.modules.market_data.fetching import fetch_commodities
 
         try:
             comm_raw, _, _ = await fetch_commodities()

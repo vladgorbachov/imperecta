@@ -96,7 +96,8 @@ class CurrencyConverter:
         Each pair is ``EUR/<quote>`` with ``rate`` = quote units per 1 EUR, so
         one unit of the quote currency is worth ``1 / rate`` EUR.
         """
-        from app.modules.market_data.service import fetch_forex_rates
+        # TODO(boundary): Tier-0 common/currency imports Tier-1 market_data.fetching — dependency-direction violation, to be resolved when the currency/market_data boundary is refactored at that import site.
+        from app.modules.market_data.fetching import fetch_forex_rates
 
         try:
             raw = await fetch_forex_rates("EUR")

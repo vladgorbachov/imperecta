@@ -35,7 +35,11 @@ def test_market_data_imports_clean() -> None:
     """Every surviving module under market_data imports without errors."""
     surviving_modules = [
         "app.modules.market_data.api",
-        "app.modules.market_data.service",
+        "app.modules.market_data.reader",
+        "app.modules.market_data.facade",
+        "app.modules.market_data.fetching",
+        "app.modules.market_data.ticker",
+        "app.modules.market_data.fuel",
         "app.modules.market_data.ingestion",
         "app.modules.market_data.dto",
         "app.modules.market_data.schemas",
@@ -85,10 +89,11 @@ def test_no_provider_imports_service() -> None:
             "app.modules.market_data.providers.commodities_goldapi_alphavantage",
             "CommoditiesGoldAPIAlphaVantageAdapter",
         ),
+        ("app.modules.market_data.service", "MarketDataService"),
     ],
 )
 def test_removed_modules_gone(module_path: str, symbol: str) -> None:
-    """Modules deleted in M1 must no longer be importable."""
+    """Modules deleted in M1/M3a must no longer be importable."""
     _ = symbol
     with pytest.raises(ImportError):
         importlib.import_module(module_path)
@@ -97,7 +102,6 @@ def test_removed_modules_gone(module_path: str, symbol: str) -> None:
 @pytest.mark.parametrize(
     "module_path, attribute",
     [
-        ("app.modules.market_data.service", "get_cache_info"),
         ("app.modules.market_data.ingestion", "MarketDataIngestionService"),
         ("app.modules.market_data.providers", "CommoditiesHttpAdapter"),
         ("app.modules.market_data.providers", "CommoditiesGoldAPIAlphaVantageAdapter"),
@@ -112,13 +116,14 @@ def test_removed_modules_gone(module_path: str, symbol: str) -> None:
         ("app.modules.market_data.schemas", "TickerItem"),
         ("app.modules.market_data.schemas", "TickerResponse"),
         ("app.modules.market_data.schemas", "RefreshMetadataResponse"),
+        ("app.modules.market_data.fetching", "get_cache_info"),
     ],
 )
 def test_removed_symbols_gone(module_path: str, attribute: str) -> None:
-    """Symbols removed in M1 must no longer resolve on their parent module."""
+    """Symbols removed in M1/M2/M3a must no longer resolve on their parent module."""
     module = importlib.import_module(module_path)
     assert not hasattr(module, attribute), (
-        f"{module_path}.{attribute} should be removed (M1)"
+        f"{module_path}.{attribute} should be removed"
     )
 
 
