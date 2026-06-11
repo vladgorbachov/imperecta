@@ -25,16 +25,6 @@ export function useEntitlements() {
     return desc?.value === true;
   };
 
-  const KNOWN_LIMIT_KEYS = ["products", "competitors"] as const;
-  const getLimit = (key: string): number => {
-    if (!KNOWN_LIMIT_KEYS.includes(key as (typeof KNOWN_LIMIT_KEYS)[number])) return 0;
-    const limits = ent?.limits;
-    if (!limits || typeof limits !== "object") return 0;
-    const desc = Object.getOwnPropertyDescriptor(limits, key);
-    const val = desc?.value;
-    return typeof val === "number" ? val : 0;
-  };
-
   const hasAiAnalyst = hasFeature(FEATURE_AI_ANALYST);
   const isTrial = serviceTier === "trial";
   const isFree = serviceTier === "free";
@@ -45,7 +35,6 @@ export function useEntitlements() {
   return {
     serviceTier,
     hasFeature,
-    getLimit,
     hasAiAnalyst,
     isTrial,
     isFree,

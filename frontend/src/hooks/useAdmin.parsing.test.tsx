@@ -110,7 +110,7 @@ describe("useAdmin parsing hooks", () => {
       wrapper: createWrapper(queryClient),
     });
 
-    await result.current.mutateAsync();
+    await result.current.mutateAsync(undefined);
 
     expect(adminApi.runParsingPipeline).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({

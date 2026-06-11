@@ -183,15 +183,11 @@ export function SettingsPage() {
 
   const handleDeleteAvatar = () => {
     if (!window.confirm(t("settings.avatar.deleteConfirm"))) return;
-    authApi.deleteAvatar().then(async () => {
-      setAvatarUrl("");
-      const { data } = await authApi.getMe();
-      setUser(data);
-      queryClient.invalidateQueries({ queryKey: ["user", "me"] });
-      toast.success(t("settings.avatar.deleted"));
-    }).catch(() => {
-      updateMutation.mutate({ avatar_url: "" });
-    });
+    // DELETE /auth/avatar does not exist on the backend; clearing
+    // avatar_url via PUT /users/me is the only path that ever executed.
+    // updateMutation.onSuccess already refreshes the user, invalidates
+    // the cache, and toasts.
+    updateMutation.mutate({ avatar_url: "" });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

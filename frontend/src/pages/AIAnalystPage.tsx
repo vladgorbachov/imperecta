@@ -123,7 +123,7 @@ export function AIAnalystPage() {
                 chatHistory.map((q, i) => (
                   <DropdownMenuItem
                     key={i}
-                    onClick={() => handleSend(q, undefined)}
+                    onClick={() => handleSend(q)}
                     className="max-w-full truncate"
                   >
                     {q}
