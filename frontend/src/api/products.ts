@@ -89,10 +89,4 @@ export const productsApi = {
 
   getPoolCategories: () =>
     apiClient.get<PoolCategoryItem[]>("/pool/categories"),
-
-  /** Bulk delete pool products (superuser only) */
-  bulkDeletePool: (productIds: number[]) =>
-    apiClient.delete<{ deleted: number }>("/pool/products/bulk", {
-      data: { product_ids: productIds },
-    }),
 };
