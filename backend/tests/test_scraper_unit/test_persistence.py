@@ -193,18 +193,18 @@ def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
 
 def test_today_date_id_deadlock_safe():
     """SELECT → INSERT ON CONFLICT DO NOTHING → SELECT; second call uses first SELECT only."""
-    import app.modules.scraper.service as svc
+    import app.modules.ingestion.service as ing_svc
 
     from datetime import datetime as dt
 
-    orig_dt = svc.datetime
+    orig_dt = ing_svc.datetime
 
     class FixedDateTime:
         @classmethod
         def now(cls, tz=None):
             return dt(2026, 4, 1, 12, 0, 0, tzinfo=tz or timezone.utc)
 
-    svc.datetime = FixedDateTime  # type: ignore[misc]
+    ing_svc.datetime = FixedDateTime  # type: ignore[misc]
 
     try:
         session = MagicMock()
@@ -224,7 +224,7 @@ def test_today_date_id_deadlock_safe():
         assert _today_date_id(session) == 20260401
         assert session.execute.call_count == 4
     finally:
-        svc.datetime = orig_dt
+        ing_svc.datetime = orig_dt
 
 
 def test_fact_price_written_only_when_all_required_fields(monkeypatch):

@@ -1,22 +1,42 @@
-"""Global pool scraping: FactListing → FactPrice, DimProduct enrichment."""
+"""Pool scrape orchestration + scrape_logs write.
+
+Post-ING1 contract:
+    - fetch via ``ScraperPool.scrape_product`` (async, bridged for Celery)
+    - delegate gate + FactPrice + DimProduct enrichment + listing denorm to
+      ``app.modules.ingestion.IngestionService`` (which commits)
+    - write the parser-owned ``scrape_logs`` row via ``_persist_scrape_log``
+      (separate commit; non-blocking failure)
+
+Per-shop ``custom_selectors`` read on lines below remains here as the
+extractor input contract pending the Phase 5 extractor universality pass
+(registry item — do NOT delete in ING1).
+"""
 
 import asyncio
 import logging
-import re
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, TypeVar
 from uuid import UUID
 
 import structlog
-from sqlalchemy import delete, select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models.app_tables import ScrapeLog
-from app.models.dimensions import DimCountry, DimMarketplace, DimProduct
-from app.models.facts import FactListing, FactPrice
+from app.models.dimensions import DimMarketplace, DimProduct
+from app.models.facts import FactListing
+from app.modules.ingestion.service import (
+    IngestionService,
+    _calculate_discount_pct,
+    _compute_price_change_pct,
+    _normalize_product_name,
+    _payload_has_product_name_field,
+    _previous_price_snapshot,
+    _should_replace_placeholder_name,
+    _today_date_id,
+)
+from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -36,13 +56,26 @@ _SCRAPE_LOG_STATUSES = (
     "missing_critical_data",
     "technical_error",
 )
-_MAX_ABS_PRICE_CHANGE_PCT = 9_999.9999
 # Number of consecutive scrape failures before a listing is deactivated.
 # Deactivated listings are excluded from the scrape pool.
 LISTING_DEACTIVATE_AFTER_ERRORS = 15
-# Currency text longer than this is almost certainly glued header/footer text caught
-# by merge_and_finalize's fallback currency detection, not a real price label.
-MAX_CURRENCY_RAW_LEN = 50
+
+# Back-compat re-exports so legacy scraper unit tests that monkeypatch /
+# import these symbols from this module keep working after ING1 moved them
+# to ``app.modules.ingestion``. Canonical ownership is ingestion's; this
+# module merely re-exports.
+__all__ = [
+    "GlobalScrapeService",
+    "LISTING_DEACTIVATE_AFTER_ERRORS",
+    "MAX_CURRENCY_RAW_LEN",
+    "_today_date_id",
+    "_previous_price_snapshot",
+    "_compute_price_change_pct",
+    "_calculate_discount_pct",
+    "_normalize_product_name",
+    "_should_replace_placeholder_name",
+    "_payload_has_product_name_field",
+]
 
 
 def _run_coro_in_worker(coro: Awaitable[_CORO_RESULT]) -> _CORO_RESULT:
@@ -134,137 +167,14 @@ def _optional_in_stock(extracted: object | None) -> bool | None:
     return None
 
 
-def _payload_has_product_name_field(payload: object) -> bool:
-    """True when extractor dataclass defines product_name (strict log rules apply)."""
-    if not is_dataclass(payload):
-        return False
-    return any(f.name == "product_name" for f in fields(payload))
-
-
-def _normalize_product_name(raw: str) -> str:
-    s = (raw or "").lower().strip()
-    s = re.sub(r"\s+", " ", s)
-    return s[:500]
-
-
-def _should_replace_placeholder_name(name: str | None, external_url: str) -> bool:
-    """True if dim_product.name is a discovery placeholder; scraped title should replace it."""
-    n = (name or "").strip()
-    if not n or n.lower() == "product":
-        return True
-    if n == external_url:
-        return True
-    compact = n.replace(" ", "").replace("-", "").replace("_", "")
-    if compact.isdigit():
-        return True
-    return False
-
-
-def _today_date_id(db: Session) -> int:
-    """YYYYMMDD surrogate for dim_date; ensures row exists for FK on fact_price.
-
-    Deadlock-safe: SELECT first, INSERT ... ON CONFLICT DO NOTHING if missing,
-    then SELECT again (idempotent; concurrent workers do not block on add+flush).
-    """
-    import calendar
-
-    from app.models.dimensions import DimDate
-
-    today = datetime.now(timezone.utc).date()
-    date_id = int(today.strftime("%Y%m%d"))
-    row_id = db.execute(
-        select(DimDate.date_id).where(DimDate.date_id == date_id),
-    ).scalar_one_or_none()
-    if row_id is not None:
-        return date_id
-
-    _, iso_week, iso_weekday = today.isocalendar()
-    stmt = (
-        pg_insert(DimDate)
-        .values(
-            date_id=date_id,
-            full_date=today,
-            year=today.year,
-            quarter=(today.month - 1) // 3 + 1,
-            month=today.month,
-            month_name=today.strftime("%B"),
-            week_iso=iso_week,
-            day_of_month=today.day,
-            day_of_week=iso_weekday,
-            day_name=today.strftime("%A"),
-            is_weekend=iso_weekday >= 6,
-            is_last_day_of_month=today.day
-            == calendar.monthrange(today.year, today.month)[1],
-        )
-        .on_conflict_do_nothing(index_elements=["date_id"])
-    )
-    db.execute(stmt)
-    db.flush()
-
-    row_id = db.execute(
-        select(DimDate.date_id).where(DimDate.date_id == date_id),
-    ).scalar_one_or_none()
-    if row_id is None:
-        raise RuntimeError(f"dim_date row missing after upsert for date_id={date_id}")
-    return date_id
-
-
-def _previous_price_snapshot(
-    db: Session,
-    listing_id: UUID,
-    before_date_id: int,
-) -> float | None:
-    """Latest prior fact_price.price for change_pct."""
-    row = db.execute(
-        select(FactPrice.price)
-        .where(FactPrice.listing_id == listing_id, FactPrice.date_id < before_date_id)
-        .order_by(FactPrice.date_id.desc())
-        .limit(1),
-    )
-    val = row.scalar_one_or_none()
-    return float(val) if val is not None else None
-
-
-def _compute_price_change_pct(prev_price: float | None, current_price: float) -> float | None:
-    """Compute bounded price change percent for Numeric(8,4) column."""
-    if prev_price is None or prev_price <= 0:
-        return None
-    pct = round((float(current_price) - prev_price) / prev_price * 100.0, 4)
-    if abs(pct) > _MAX_ABS_PRICE_CHANGE_PCT:
-        return None
-    return pct
-
-
-def _calculate_discount_pct(
-    current_price: float | None,
-    original_price: float | None,
-) -> float | None:
-    """Compute discount percentage from original to current price.
-
-    Returns the discount as a percentage (e.g., 25.50 for 25.5% off), rounded
-    to 2 decimal places. Returns None when:
-      - either price is missing or non-positive
-      - original_price <= current_price (no discount — possibly a price increase,
-        which is not a "discount" semantically)
-
-    No fallback values, no mock data: a None result means "discount cannot be
-    determined" and must be persisted as NULL, never as 0.
-    """
-    if current_price is None or original_price is None:
-        return None
-    if current_price <= 0 or original_price <= 0:
-        return None
-    if original_price <= current_price:
-        return None
-    discount = (original_price - current_price) / original_price * 100
-    return round(discount, 2)
-
-
 class GlobalScrapeService:
-    """Scrape pool listings and persist FactPrice + listing denormalized fields.
+    """Orchestrate ScraperPool fetch + ingestion + scrape_logs write.
 
-    Emits ScrapeLog rows with status/error classification (including technical_error
-    paths), applies fact_price quality gates, and resolves dim_date for snapshots.
+    Post-ING1: ingestion logic (gate + FactPrice + DimProduct enrichment +
+    listing denorm) has moved to ``IngestionService``. This class now owns
+    only the parser-side concerns: fetch orchestration, consecutive-error
+    handling on failed scrape (incl. listing deactivation), scrape_logs row
+    construction + commit (separate transaction), and the status classifier.
     """
 
     def __init__(
@@ -276,8 +186,8 @@ class GlobalScrapeService:
         self.db = db
         self.pool = scraper_pool
         self.scrape_job_id = scrape_job_id
-        self._currency_whitelist_cache: dict[UUID, frozenset[str]] = {}
 
+    # Back-compat thin delegate; canonical ownership is IngestionService.
     @staticmethod
     def _should_skip_price_record(
         listing: FactListing,
@@ -285,87 +195,9 @@ class GlobalScrapeService:
         new_currency: str | None,
         new_in_stock: bool | None,
     ) -> bool:
-        """Return True when extracted values are identical to the last known state.
-
-        When True:
-        - No new fact_price row is written.
-        - last_checked_at on the listing is still updated.
-        - scrape_log is written with status 'no_change'.
-
-        Returns False (always write) when:
-        - listing.last_price is None -> no prior record exists.
-        - new_price or new_currency is None -> quality gate handles this separately.
-        - Any value differs from last known state.
-        """
-        if listing.last_price is None or listing.last_currency_code is None:
-            return False
-        if new_price is None or new_currency is None:
-            return False
-
-        price_same = abs(float(new_price) - float(listing.last_price)) < 0.001
-        currency_same = (
-            new_currency.strip().upper() == listing.last_currency_code.strip().upper()
+        return IngestionService._should_skip_price_record(
+            listing, new_price, new_currency, new_in_stock
         )
-        if new_in_stock is None and listing.last_in_stock is None:
-            stock_same = True
-        elif new_in_stock is None or listing.last_in_stock is None:
-            stock_same = False
-        else:
-            stock_same = bool(new_in_stock) == bool(listing.last_in_stock)
-        return price_same and currency_same and stock_same
-
-    def _marketplace_currency_whitelist(self, marketplace_id: UUID) -> frozenset[str]:
-        """Allowed ISO-3 currencies for a marketplace (memoized per instance)."""
-        cached = self._currency_whitelist_cache.get(marketplace_id)
-        if cached is not None:
-            return cached
-
-        marketplace = self.db.get(DimMarketplace, marketplace_id)
-        if marketplace is None:
-            self._currency_whitelist_cache[marketplace_id] = frozenset()
-            return frozenset()
-
-        allowed: set[str] = set()
-        country_code = (marketplace.country_code or "").strip().upper()
-        if country_code:
-            country = self.db.execute(
-                select(DimCountry).where(DimCountry.country_code == country_code)
-            ).scalar_one_or_none()
-            if country is not None:
-                country_currency = getattr(country, "currency_code", None) or getattr(
-                    country, "main_currency_code", None
-                )
-                if isinstance(country_currency, str) and len(country_currency.strip()) == 3:
-                    allowed.add(country_currency.strip().upper())
-
-        allowed.update({"EUR", "USD"})
-        mp_currency = getattr(marketplace, "currency_code", None)
-        if isinstance(mp_currency, str) and len(mp_currency.strip()) == 3:
-            allowed.add(mp_currency.strip().upper())
-
-        config = getattr(marketplace, "scraper_config", None) or {}
-        extra = config.get("allowed_currencies") if isinstance(config, dict) else None
-        if isinstance(extra, list):
-            for code in extra:
-                if isinstance(code, str) and len(code.strip()) == 3:
-                    allowed.add(code.strip().upper())
-
-        result = frozenset(allowed)
-        self._currency_whitelist_cache[marketplace_id] = result
-        return result
-
-    def _currency_matches_marketplace(
-        self,
-        marketplace_id: UUID,
-        currency: str | None,
-    ) -> bool:
-        """Check detected currency against marketplace whitelist."""
-        whitelist = self._marketplace_currency_whitelist(marketplace_id)
-        if not whitelist:
-            return True
-        if not currency:
-            return False
-        return currency.strip().upper() in whitelist
 
     def _build_scrape_log_entry(
         self,
@@ -457,7 +289,7 @@ class GlobalScrapeService:
             return False
 
     def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
-        """Scrape a single listing and save to fact_price (sync Session; pool I/O is async)."""
+        """Scrape a single listing and persist via IngestionService + scrape_logs."""
         listing = self.db.get(FactListing, listing_id)
         if not listing:
             return PoolScrapeResult(success=False, url="", error="listing_not_found")
@@ -469,6 +301,9 @@ class GlobalScrapeService:
         requires_js = bool(mp.requires_js) if mp else False
         scrape_tier = int(getattr(mp, "scrape_tier", 1)) if mp else 1
 
+        # Per-shop custom_selectors (legacy extractor input) — Phase 5 universality
+        # registry item: remove together with the marketplace.custom_*_selector
+        # columns when the extractor pass lands. Do NOT delete here.
         cfg = listing.scraper_config if isinstance(listing.scraper_config, dict) else {}
         custom_selectors = {
             k: v
@@ -513,18 +348,6 @@ class GlobalScrapeService:
             listing.consecutive_errors = 0
 
         last_in_stock = _resolve_in_stock(result, data)
-        slog.info(
-            "EXTRACTED_DATA",
-            line="EXTRACTED DATA → product_name/title/price/currency/in_stock",
-            product_name=getattr(data, "product_name", None),
-            title=getattr(data, "title", None),
-            price=getattr(data, "price", None),
-            currency=getattr(data, "currency", None),
-            in_stock=last_in_stock,
-            is_partial=getattr(result, "is_partial", False),
-            is_empty=getattr(result, "is_empty", False),
-            missing_fields=getattr(result, "missing_fields", []),
-        )
         is_partial = bool(result.is_partial)
         forced_log_status: str | None = None
 
@@ -540,14 +363,31 @@ class GlobalScrapeService:
                         listing.consecutive_errors,
                         listing.external_url,
                     )
-        elif data:
-            # product_name from extractor, or title as fallback when product_name is empty.
+            # No ingestion call on failure path; parser commits listing housekeeping
+            # changes (last_checked_at, error counters, deactivation) below.
+            try:
+                self.db.flush()
+                self.db.commit()
+            except Exception as exc:
+                logger.error(
+                    "scrape failure-path persist rollback listing_id=%s err=%s",
+                    listing_id,
+                    exc,
+                    exc_info=True,
+                )
+                self.db.rollback()
+                return PoolScrapeResult(
+                    success=False,
+                    url=listing.external_url,
+                    data=data,
+                    error="persist_failed",
+                )
+        else:
+            # Success+data: delegate ingestion (gate + FactPrice + enrichment +
+            # listing denorm + commit) to IngestionService.
             product_name_ok = bool(
-                data
-                and (
-                    getattr(data, "product_name", None)
-                    or getattr(data, "title", None)
-                ),
+                getattr(data, "product_name", None)
+                or getattr(data, "title", None),
             )
             is_partial = bool(result.is_partial) or not product_name_ok
             if not product_name_ok:
@@ -556,151 +396,19 @@ class GlobalScrapeService:
                     listing.external_url[:80],
                 )
 
-            product = self.db.get(DimProduct, listing.product_id)
-            if product:
-                pn = getattr(data, "product_name", None)
-                tt = getattr(data, "title", None)
-                pn_nonempty = bool(pn and str(pn).strip())
-                if pn_nonempty:
-                    label = str(pn).strip()[:500]
-                elif tt and str(tt).strip():
-                    label = str(tt).strip()[:500]
-                else:
-                    label = None
-                if label:
-                    if not pn_nonempty:
-                        product.name = label[:500]
-                        product.name_normalized = _normalize_product_name(label)
-                    elif _should_replace_placeholder_name(
-                        product.name,
-                        listing.external_url,
-                    ):
-                        product.name = label[:500]
-                        product.name_normalized = _normalize_product_name(label)
-                if data.image_url and not product.image_url:
-                    product.image_url = data.image_url
+            ing_result = IngestionService(self.db).persist_extracted(
+                data=data,
+                listing=listing,
+                extracted_in_stock=last_in_stock,
+            )
+            forced_log_status = ing_result.log_status
 
-            # fact_price: product_name_ok, price > 0, currency present (non-empty string)
-            curr_raw = getattr(data, "currency", None)
-            currency_raw_text = getattr(data, "currency_raw", None) or ""
-            currency_ok = curr_raw is not None and str(curr_raw).strip() != ""
-            price_ok = data.price is not None and data.price > 0
-            currency_raw_sane_ok = len(currency_raw_text) < MAX_CURRENCY_RAW_LEN
-            currency_country_match_ok = self._currency_matches_marketplace(
-                listing.marketplace_id,
-                curr_raw,
-            )
-            should_write_price_snapshot = (
-                product_name_ok
-                and price_ok
-                and currency_ok
-                and currency_raw_sane_ok
-                and currency_country_match_ok
-            )
-            slog.info(
-                "PERSISTENCE_GATE",
-                line="PERSISTENCE GATE → product_name_ok / price_ok / currency_ok / sane / country",
-                product_name_ok=product_name_ok,
-                price_ok=price_ok,
-                currency_ok=currency_ok,
-                currency_raw_sane_ok=currency_raw_sane_ok,
-                currency_country_match_ok=currency_country_match_ok,
-                price_raw_text=getattr(data, "price_raw_text", None),
-                currency_raw=currency_raw_text[:200] if currency_raw_text else None,
-                detected_currency=curr_raw,
-            )
-            if not should_write_price_snapshot:
-                if not product_name_ok or not currency_ok:
-                    logger.info(
-                        "fact_price skipped: missing product_name or currency (listing_id=%s)",
-                        listing_id,
-                    )
-                elif not currency_raw_sane_ok:
-                    logger.info(
-                        "fact_price skipped: currency_raw too long (likely glued text) "
-                        "listing_id=%s len=%d",
-                        listing_id,
-                        len(currency_raw_text),
-                    )
-                    forced_log_status = "parse_error"
-                elif not currency_country_match_ok:
-                    logger.info(
-                        "fact_price skipped: currency=%s not allowed for marketplace_id=%s",
-                        curr_raw,
-                        listing.marketplace_id,
-                    )
-                    forced_log_status = "parse_error"
-            if should_write_price_snapshot:
-                new_in_stock = _resolve_in_stock(result, data)
-                if self._should_skip_price_record(listing, data.price, data.currency, new_in_stock):
-                    listing.last_checked_at = datetime.now(tz=timezone.utc)
-                    listing.last_price = data.price
-                    listing.last_currency_code = data.currency[:3] if data.currency else None
-                    listing.last_in_stock = new_in_stock
-                    forced_log_status = "no_change"
-                    logger.info(
-                        "PRICE_UNCHANGED listing_id=%s price=%s %s",
-                        listing_id,
-                        data.price,
-                        data.currency,
-                    )
-                else:
-                    date_id = _today_date_id(self.db)
-                    self.db.execute(
-                        delete(FactPrice).where(
-                            FactPrice.listing_id == listing.id,
-                            FactPrice.date_id == date_id,
-                        ),
-                    )
-                    prev = _previous_price_snapshot(self.db, listing.id, date_id)
-                    price_change_pct = _compute_price_change_pct(prev, float(data.price))
-                    if prev is not None and prev > 0 and price_change_pct is None:
-                        logger.warning(
-                            "price_change_pct_out_of_range listing_id=%s prev=%s current=%s",
-                            listing_id,
-                            prev,
-                            float(data.price),
-                        )
-
-                    current_price_value = float(data.price)
-                    original_price_value = (
-                        float(data.original_price) if data.original_price else None
-                    )
-                    discount_pct_value = _calculate_discount_pct(
-                        current_price_value, original_price_value
-                    )
-                    price_record = FactPrice(
-                        listing_id=listing.id,
-                        date_id=date_id,
-                        price=current_price_value,
-                        currency_code=data.currency[:3],
-                        original_price=original_price_value,
-                        discount_pct=discount_pct_value,
-                        in_stock=new_in_stock,
-                        scraped_at=now,
-                        price_change_pct=price_change_pct,
-                    )
-                    self.db.add(price_record)
-                    listing.last_price = data.price
-                    listing.last_currency_code = data.currency[:3] if data.currency else None
-                    listing.last_in_stock = new_in_stock
-                    listing.last_price_changed_at = datetime.now(tz=timezone.utc)
-                    forced_log_status = "success"
-                    logger.info(
-                        "fact_price write listing_id=%s date_id=%s currency=%s",
-                        listing_id,
-                        date_id,
-                        data.currency[:3] if data.currency else None,
-                    )
-            elif not product_name_ok:
-                logger.warning(
-                    "Skipping price snapshot (no product title) for %s",
-                    listing.external_url[:80],
-                )
-            elif data.currency is None:
-                logger.warning(
-                    "Missing currency for %s, skipping price snapshot",
-                    listing.external_url[:80],
+            if ing_result.persist_failed:
+                return PoolScrapeResult(
+                    success=False,
+                    url=listing.external_url,
+                    data=data,
+                    error="persist_failed",
                 )
 
         if forced_log_status is None:
@@ -725,38 +433,6 @@ class GlobalScrapeService:
         title = getattr(data, "title", None) if data else None
         price = getattr(data, "price", None) if data else None
         currency = getattr(data, "currency", None) if data else None
-        slog.info(
-            "FINAL_PERSIST",
-            line=(
-                f"FINAL PERSIST → listing_id={listing_id} status={log_status} "
-                f"price={price!s}"
-            ),
-            listing_id=str(listing_id),
-            product_name=product_name_used,
-            title=title,
-            price=price,
-            currency=currency,
-            in_stock=last_in_stock,
-            status=log_status,
-        )
-
-        try:
-            self.db.flush()
-            self.db.commit()
-        except Exception as exc:
-            logger.error(
-                "scrape persist rollback listing_id=%s err=%s",
-                listing_id,
-                exc,
-                exc_info=True,
-            )
-            self.db.rollback()
-            return PoolScrapeResult(
-                success=False,
-                url=listing.external_url,
-                data=data,
-                error="persist_failed",
-            )
 
         slog.info(
             "scrape_logs_queued",

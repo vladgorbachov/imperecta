@@ -19,7 +19,7 @@ def test_today_date_id_existing_row(monkeypatch):
         def now(tz=None):
             return fixed
 
-    monkeypatch.setattr("app.modules.scraper.service.datetime", _DT)
+    monkeypatch.setattr("app.modules.ingestion.service.datetime", _DT)
 
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = 20260115
@@ -36,7 +36,7 @@ def test_today_date_id_upsert_path(monkeypatch):
         def now(tz=None):
             return fixed
 
-    monkeypatch.setattr("app.modules.scraper.service.datetime", _DT)
+    monkeypatch.setattr("app.modules.ingestion.service.datetime", _DT)
 
     session = MagicMock()
     first = MagicMock()
@@ -59,7 +59,7 @@ def test_today_date_id_raises_when_still_missing(monkeypatch):
         def now(tz=None):
             return fixed
 
-    monkeypatch.setattr("app.modules.scraper.service.datetime", _DT)
+    monkeypatch.setattr("app.modules.ingestion.service.datetime", _DT)
 
     session = MagicMock()
     first = MagicMock()
