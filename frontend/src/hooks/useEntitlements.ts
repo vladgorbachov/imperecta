@@ -1,6 +1,6 @@
 /**
  * Plan entitlements from backend. Single source of truth for feature access.
- * Uses entitlements from GET /auth/me when available.
+ * Uses entitlements from GET /users/me when available.
  */
 
 import { useAuthStore } from "@/stores/authStore";

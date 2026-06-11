@@ -37,76 +37,6 @@ export interface MarketsInstrumentsResponse {
   commodities: MarketsInstrumentOption[];
 }
 
-// --- Refresh metadata ---
-
-export interface MarketsRefreshStatusItem {
-  refresh_type: string;
-  last_successful_refresh: string | null;
-  last_failed_refresh: string | null;
-  provider_source: string | null;
-  country_scope: string | null;
-  error_message: string | null;
-}
-
-export interface MarketsRefreshMetadata {
-  items: MarketsRefreshStatusItem[];
-}
-
-// --- Forex ---
-
-export interface MarketsForexItem {
-  symbol: string;
-  /** Backend may return "rate" or "bid". Use rate ?? bid for compatibility. */
-  rate?: number;
-  bid?: number;
-  ask?: number;
-  spread?: number;
-  change_24h: number | null;
-  refreshed_at: string;
-}
-
-export interface MarketsForexResponse {
-  items: MarketsForexItem[];
-  last_refreshed_at: string | null;
-}
-
-// --- Crypto ---
-
-export interface MarketsCryptoItem {
-  symbol: string;
-  price: number;
-  change_24h: number | null;
-  market_cap: number | null;
-  refreshed_at: string;
-}
-
-export interface MarketsCryptoResponse {
-  items: MarketsCryptoItem[];
-  error: string | null;
-  cached: boolean;
-  last_refreshed_at: string | null;
-}
-
-// --- Commodities ---
-
-export interface MarketsCommodityItem {
-  symbol: string;
-  name: string | null;
-  price: number;
-  change_24h: number | null;
-  unit: string | null;
-  refreshed_at: string;
-}
-
-export interface MarketsCommoditiesResponse {
-  items: MarketsCommodityItem[];
-  error: string | null;
-  cached: boolean;
-  last_refreshed_at: string | null;
-}
-
-// --- Fuel ---
-
 // --- Ticker ---
 
 export interface MarketsTickerItem {
@@ -214,18 +144,6 @@ export const marketsApi = {
   updatePreferences: (body: MarketsPreferencesUpdate) =>
     apiClient.put<MarketsPreferences>("/markets/preferences", body),
 
-  getRefreshMetadata: () =>
-    apiClient.get<MarketsRefreshMetadata>("/markets/refresh-metadata"),
-
-  getForex: () =>
-    apiClient.get<MarketsForexResponse>("/markets/forex"),
-
-  getCrypto: () =>
-    apiClient.get<MarketsCryptoResponse>("/markets/crypto"),
-
-  getCommodities: () =>
-    apiClient.get<MarketsCommoditiesResponse>("/markets/commodities"),
-
   getTicker: () =>
     apiClient.get<MarketsTickerResponse>("/markets/ticker"),
 
@@ -265,10 +183,6 @@ export const marketsQueryKeys = {
   all: ["markets"] as const,
   preferences: () => [...marketsQueryKeys.all, "preferences"] as const,
   instruments: () => [...marketsQueryKeys.all, "instruments"] as const,
-  refreshMetadata: () => [...marketsQueryKeys.all, "refresh-metadata"] as const,
-  forex: () => [...marketsQueryKeys.all, "forex"] as const,
-  crypto: () => [...marketsQueryKeys.all, "crypto"] as const,
-  commodities: () => [...marketsQueryKeys.all, "commodities"] as const,
   ticker: () => [...marketsQueryKeys.all, "ticker"] as const,
   overview: (params?: {
     sort?: string;

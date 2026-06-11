@@ -51,7 +51,6 @@ export const useMarketsIngest = () => {
     mutationFn: () => marketsApi.triggerIngest().then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: marketsQueryKeys.all });
-      qc.invalidateQueries({ queryKey: marketsQueryKeys.refreshMetadata() });
     },
   });
 };
@@ -74,9 +73,6 @@ export const useRunParsingPipeline = () => {
   });
 };
 
-/** @deprecated Use useRunParsingPipeline */
-export const useRunParsingFullTest = useRunParsingPipeline;
-
 export const useCancelParsingActiveJob = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -94,9 +90,6 @@ export const useParsingPipelineRuns = (limit: number) =>
     queryFn: () => adminApi.getParsingPipelineRuns(limit).then((r) => r.data),
     refetchInterval: 5000,
   });
-
-/** @deprecated Use useParsingPipelineRuns */
-export const useParsingTestRuns = useParsingPipelineRuns;
 
 export const useParsingJobStatus = (
   jobId: string | null,

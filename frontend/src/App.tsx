@@ -1,66 +1,14 @@
 /**
  * App root with routing.
  *
- * i18n keys by component:
+ * Live routes (FE1):
+ *   public:      /login, /register, /forgot-password, /
+ *   protected:   /change-password
+ *   layout:      /app/* -> DashboardLayout with nested:
+ *                  dashboard, products, digests, settings, ai, admin (superuser).
+ *   not-found:   * -> NotFoundPage
  *
- * common: save, cancel, delete, loading, error, back, next, search, noData, confirm, close,
- *   add, edit, actions, status, date, price, name, comingSoon, underDevelopment, currency,
- *   dash, copy, copied, notFound, backToMarkets
- *
- * nav: dashboard, products, competitors, alerts, digests, import, settings, logo
- *
- * auth: login, loginTitle, register, registerTitle, logout, profile, email, password, name,
- *   companyName, submitLogin, submitRegister, rememberMe, forgotPassword, or, noAccount,
- *   hasAccount, login.description, register.description, emailPlaceholder, loginError,
- *   register.language, registerError, confirmPassword, emailInvalid, fieldRequired,
- *   passwordMismatch, passwordWeak, passwordMedium, passwordStrong, tagline, feature1,
- *   feature2, feature3, forgotPasswordTitle, forgotPasswordComingSoon
- *
- * dashboard: products, competitors, alertsToday, priceChanges, topChanges, topChangesToday,
- *   updatedAgo, showAll, activePromos, anomalies, anomaliesEmpty, weeklyChart, product,
- *   competitor, was, became, change, noData
- *
- * products: search, category, addProduct, importCsv, name, sku, myPrice, minCompetitorPrice,
- *   maxPrice, competitorCount, lastParsing, overpriced, allCategories, urlPlaceholder,
- *   addSuccess, addError, fillNameAndPrice, paginationCount, paginationShown, noProducts,
- *   noProductsHint, noResults, clearFilters, position, overpricedBy, cheaperBy, add
- *
- * productDetail: priceChart, competitors, alerts, createAlert, period7d, period30d, period90d,
- *   myPrice, trendUp, trendDown, trendStable, inStock, outOfStock, diffPercent, promo, stock,
- *   myPriceLegend, runParsing, parseSuccess, parsePending
- *
- * competitors: addCompetitor, linkProduct, name, websiteUrl, marketplace, product, productUrl,
- *   scraper, selectProduct, added, myProduct, autoDetect, scraperAuto, scraperUniversal,
- *   scraperJsonApi, scraperGeneric, noCompetitors, noProductsLinked, addSuccess, addError,
- *   linkSuccess, linkError, linkTo, productsCount, productsCountHeader, tableProduct, tableUrl,
- *   tablePrice, tableLastChecked
- *
- * alerts: createAlert, createRule, activeRules, recentEvents, eventHistory, eventHistoryEmpty,
- *   eventHistoryEmptyHint, noAlerts, noAlertsHint, noEvents, type, product, threshold, channel,
- *   status, on, off, allProducts, create, createSuccess, createError, deleteConfirm,
- *   deleteConfirmDesc, thresholdPlaceholder, typePriceDrop, typePriceIncrease, typeOutOfStock,
- *   typeNewPromo, channelEmail, channelTelegram, channelBoth, date, change, sentVia
- *
- * digests: noDigests, dailyDigest, weeklyDigest, typeDaily, typeWeekly, created, sent, draft,
- *   view, resend, emptyTitle, emptyHint
- *
- * import: uploadTitle, uploadDescription, dropzone, dropzoneCsv, or, selectFile, changeFile,
- *   ignore, downloadTemplate, previewTitle, resultTitle, imported, errors, importing, importBtn,
- *   importProducts, importMore, success, error, errorsCount, parseError, fileFormatError,
- *   rowError, previewName, previewSku, previewPrice, previewUrl, previewCategory,
- *   columnName, columnSku, columnPrice, columnUrl, columnCategory, resultSummary
- *
- * settings: profile, profileDescription, telegram, telegramDescription,
- *   telegramConnected, telegramDisconnected, telegramDisconnect, telegramDisconnectedSuccess,
- *   getLinkCode, codeInstruction, getCodeInstruction, notifications, notificationsDescription,
- *   channelEmail, channelTelegram, channelBoth, digestTime, digestTimeComingSoon, plan,
- *   planDescription, planTrial, planBasic, planPro, trialWarning, trialEnds, productsLimit,
- *   competitorsLimit, upgradePlan, upgradeComingSoon
- *
- * layout: navigation, defaultCompany, trialDaysLeft, upgrade
- *
- * ui: trendPercentPositive, trendPercentNegative, trendPercentZero, priceChangeArrow,
- *   promo, discount, outOfStock, new
+ * i18n keys live in src/i18n/locales/*.json — see FE4 for inventory.
  */
 
 import { Suspense } from "react";

@@ -7,16 +7,16 @@ import { type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useParsingJobStatus,
+  useParsingPipelineRuns,
   useParsingTestMarketplaces,
-  useParsingTestRuns,
-  useRunParsingFullTest,
+  useRunParsingPipeline,
 } from "./useAdmin";
 import * as adminApi from "@/api/admin";
 
 vi.mock("@/api/admin", () => ({
   getParsingTestMarketplaces: vi.fn(),
-  runParsingFullTest: vi.fn(),
-  getParsingTestRuns: vi.fn(),
+  runParsingPipeline: vi.fn(),
+  getParsingPipelineRuns: vi.fn(),
   getParsingJobStatus: vi.fn(),
 }));
 
@@ -26,7 +26,6 @@ vi.mock("@/api/markets", () => ({
   },
   marketsQueryKeys: {
     all: ["markets"],
-    refreshMetadata: () => ["markets", "refresh-metadata"],
   },
 }));
 
@@ -59,22 +58,22 @@ describe("useAdmin parsing hooks", () => {
     expect(adminApi.getParsingTestMarketplaces).toHaveBeenCalledTimes(1);
   });
 
-  it("loads test runs with limit", async () => {
-    vi.mocked(adminApi.getParsingTestRuns).mockResolvedValue({
+  it("loads pipeline runs with limit", async () => {
+    vi.mocked(adminApi.getParsingPipelineRuns).mockResolvedValue({
       data: [{ job_id: "job-1" }],
     } as never);
 
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
-    const { result } = renderHook(() => useParsingTestRuns(100), {
+    const { result } = renderHook(() => useParsingPipelineRuns(100), {
       wrapper: createWrapper(queryClient),
     });
 
     await waitFor(() => {
       expect(result.current.data).toEqual([{ job_id: "job-1" }]);
     });
-    expect(adminApi.getParsingTestRuns).toHaveBeenCalledWith(100);
+    expect(adminApi.getParsingPipelineRuns).toHaveBeenCalledWith(100);
   });
 
   it("loads job status only when enabled", async () => {
@@ -98,8 +97,8 @@ describe("useAdmin parsing hooks", () => {
     expect(adminApi.getParsingJobStatus).toHaveBeenCalledWith("job-active");
   });
 
-  it("runs full test and invalidates runs query", async () => {
-    vi.mocked(adminApi.runParsingFullTest).mockResolvedValue({
+  it("runs pipeline and invalidates canonical pipeline-runs query", async () => {
+    vi.mocked(adminApi.runParsingPipeline).mockResolvedValue({
       data: { job_id: "new-job-id" },
     } as never);
     const queryClient = new QueryClient({
@@ -107,15 +106,15 @@ describe("useAdmin parsing hooks", () => {
     });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    const { result } = renderHook(() => useRunParsingFullTest(), {
+    const { result } = renderHook(() => useRunParsingPipeline(), {
       wrapper: createWrapper(queryClient),
     });
 
     await result.current.mutateAsync();
 
-    expect(adminApi.runParsingFullTest).toHaveBeenCalledTimes(1);
+    expect(adminApi.runParsingPipeline).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["admin", "parsing", "test-runs"],
+      queryKey: ["admin", "parsing", "pipeline-runs"],
     });
   });
 });

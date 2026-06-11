@@ -34,27 +34,6 @@ export interface AdminMarketplace {
   products_count: number;
 }
 
-export interface ScrapeActivity {
-  labels: string[];
-  datasets: { label: string; data: number[] }[];
-}
-
-export interface ErrorDistribution {
-  labels: string[];
-  data: number[];
-}
-
-export interface AdminUser {
-  id: string;
-  email: string;
-  name?: string;
-  plan: string;
-  products_count?: number;
-  created_at: string;
-  last_login_at: string | null;
-  is_active?: boolean;
-}
-
 export const getAdminStats = () => apiClient.get<AdminStats>("/admin/stats");
 export const addMarketplace = (url: string) =>
   apiClient.post<AdminMarketplace>("/admin/marketplaces", { url });
@@ -65,36 +44,16 @@ export const updateMarketplace = (
 export const deleteMarketplace = (id: string) =>
   apiClient.delete(`/admin/marketplaces/${id}`);
 
-export interface ClaudeHealth {
-  status:
-    | "online"
-    | "error"
-    | "timeout"
-    | "rate_limited"
-    | "overloaded"
-    | "auth_error"
-    | "not_configured";
-  message: string;
-  latency_ms: number;
-  status_code?: number;
-}
-
-export interface ClaudeStats {
-  calls_24h: number;
-  successful_24h: number;
-  failed_24h: number;
-  avg_latency_ms: number;
-  total_tokens_24h: number;
-  last_success_at: string | null;
-  last_error: string | null;
-  last_error_at: string | null;
-}
-
+/**
+ * Backend /admin/claude-status response shape (canonical).
+ * Trimmed in FE1 to match the actual backend response (configured, model,
+ * model_config); the prior ClaudeHealth/ClaudeStats fields were never emitted
+ * by the backend.
+ */
 export interface ClaudeStatus {
-  health?: ClaudeHealth;
-  stats?: ClaudeStats;
-  configured?: boolean;
-  model?: string;
+  configured: boolean;
+  model: string;
+  model_config: string;
 }
 
 export const getClaudeStatus = () =>
@@ -103,35 +62,6 @@ export const getClaudeStatus = () =>
 export const clearPool = () =>
   apiClient.post<{ deleted: number; message: string }>("/admin/products/clear-pool");
 
-
-export interface PoolDiagnostics {
-  marketplaces: { total: number; active: number; zero_quota: number };
-  global_products: { total: number; by_status: Record<string, number> };
-  price_snapshots: number;
-  discovery_logs: {
-    total: number;
-    recent: Array<{
-      domain: string;
-      status: string;
-      found: number;
-      new: number;
-      errors: number;
-      error: string | null;
-      started_at: string | null;
-      duration_s: number | null;
-    }>;
-  };
-  user_products: number;
-  marketplace_details: Array<{
-    domain: string;
-    quota: number;
-    products: number;
-    active: boolean;
-    requires_js: boolean;
-    last_discovery: string | null;
-  }>;
-  diagnosis: string[];
-}
 
 export interface ParsingTestMarketplace {
   id?: string;
@@ -173,9 +103,6 @@ export interface ParsingPipelineRun {
   error_message: string | null;
   summary_pending: boolean;
 }
-
-/** @deprecated Use ParsingPipelineRun */
-export type ParsingTestRun = ParsingPipelineRun;
 
 export interface ParsingMarketplaceBreakdown {
   marketplace_id: string;
@@ -392,17 +319,8 @@ export interface RunPipelinePayload {
 export const runParsingPipeline = (payload?: RunPipelinePayload) =>
   apiClient.post<ParsingRunCreateResponse>("/admin/parsing/run-pipeline", payload ?? {});
 
-/** Full pool run (all active marketplaces). */
-export const runParsingFullCollection = () => runParsingPipeline();
-
-/** @deprecated Use runParsingPipeline */
-export const runParsingFullTest = runParsingFullCollection;
-
 export const getParsingPipelineRuns = (limit = 50) =>
   apiClient.get<ParsingPipelineRun[]>("/admin/parsing/pipeline-runs", { params: { limit } });
-
-/** @deprecated Use getParsingPipelineRuns */
-export const getParsingTestRuns = getParsingPipelineRuns;
 
 export const cancelParsingActiveJob = () =>
   apiClient.post<{ job_id: string; status: string; cancelled: boolean }>(
