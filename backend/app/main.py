@@ -16,8 +16,9 @@ from app.config import Settings
 from app.database import Base, engine
 from app.modules.admin.api_parsing import router as admin_parsing_router
 from app.modules.ai_analyst.api import router as ai_router
+from app.modules.auth.api import router as auth_router
 from app.modules.core.api_admin import router as admin_router
-from app.modules.core.api_auth import router as auth_router
+from app.modules.core.api_auth import router as core_user_router
 from app.modules.core.api_telegram import router as telegram_router
 from app.modules.entitlements.api import router as entitlements_router
 from app.modules.market_data.api import router as market_data_router
@@ -146,6 +147,7 @@ for router in [
     admin_router,
     admin_parsing_router,
     auth_router,
+    core_user_router,
     telegram_router,
     marketplaces_router,
     pool_router,

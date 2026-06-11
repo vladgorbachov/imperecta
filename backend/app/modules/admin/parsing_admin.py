@@ -18,8 +18,8 @@ from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.core import User, UserProduct
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.core.auth.service import hash_password
-from app.modules.core.schemas import ALLOWED_LANGUAGE_CODES
+from app.common.validation import ALLOWED_LANGUAGE_CODES
+from app.modules.auth.service import hash_password
 
 
 class ParsingAdminService:

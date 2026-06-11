@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.entitlements.plan import UserPlan
 from app.models.core import User
-from app.modules.core.auth.service import hash_password
+from app.modules.auth.service import hash_password
 
 logger = logging.getLogger(__name__)
 
