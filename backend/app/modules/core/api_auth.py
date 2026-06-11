@@ -10,8 +10,8 @@ from jose import JWTError
 from sqlalchemy import select
 
 from app.common.deps import CurrentUser, DbSession
+from app.config import Settings
 from app.entitlements import get_entitlements_for_frontend
-from app.modules.alerts.notifications import BOT_URL
 from app.modules.core.auth.service import (
     create_access_token,
     create_refresh_token,
@@ -33,6 +33,7 @@ from app.modules.core.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+settings = Settings()
 
 
 def _create_tokens(user_id: UUID, force_password_change: bool | None = None, persistent: bool = False) -> TokenResponse:
@@ -153,7 +154,7 @@ async def generate_telegram_link(current_user: CurrentUser, db: DbSession) -> Te
     code = "".join(random.choices(string.digits, k=6))
     current_user.telegram_link_code = code
     await db.flush()
-    return TelegramLinkResponse(code=code, bot_url=BOT_URL)
+    return TelegramLinkResponse(code=code, bot_url=settings.telegram_bot_url or "")
 
 
 @router.post("/telegram-disconnect")

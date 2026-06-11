@@ -19,7 +19,6 @@ from app.modules.ai_analyst.api import router as ai_router
 from app.modules.core.api_admin import router as admin_router
 from app.modules.core.api_auth import router as auth_router
 from app.modules.core.api_telegram import router as telegram_router
-from app.modules.digests.api import router as digests_router
 from app.modules.entitlements.api import router as entitlements_router
 from app.modules.market_data.api import router as market_data_router
 from app.modules.marketplaces.api import router as marketplaces_router
@@ -157,7 +156,6 @@ for router in [
     products_router,
     import_router,
     entitlements_router,
-    digests_router,
     ai_router,
 ]:
     app.include_router(router, prefix="/api")

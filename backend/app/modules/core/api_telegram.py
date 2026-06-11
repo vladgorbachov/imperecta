@@ -12,12 +12,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.deps import get_current_user
 from app.config import Settings
 from app.database import get_db
-from app.modules.alerts.notifications import send_message
 from app.models.core import User
+from app.modules.alerts.notifications import NotificationMessage, TelegramChannel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 settings = Settings()
+_telegram_channel = TelegramChannel()
+
+
+async def _send_html(chat_id: int, html: str) -> bool:
+    """Deliver an HTML-formatted bot reply via the Telegram channel.
+
+    The Russian/HTML copy is bot-domain content composed here (the integration
+    layer); the channel only delivers - per the notifications strategy
+    contract, channels carry no hardcoded language or business semantics.
+    """
+    return await _telegram_channel.send(
+        str(chat_id),
+        NotificationMessage(body=html, parse_mode="HTML"),
+    )
 
 
 def _verify_telegram_webhook_secret(request: Request) -> bool:
@@ -48,17 +62,17 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
         return {"ok": True}
 
     if text.startswith("/start"):
-        await send_message(chat_id, "👋 <b>Добро пожаловать в Imperecta Bot!</b>")
+        await _send_html(chat_id, "👋 <b>Добро пожаловать в Imperecta Bot!</b>")
         return {"ok": True}
     if text.startswith("/status"):
         user = (await db.execute(select(User).where(User.telegram_chat_id == chat_id))).scalar_one_or_none()
         if user:
-            await send_message(chat_id, f"✅ <b>Аккаунт привязан</b>\nEmail: {user.email}\nПлан: {user.plan.value}")
+            await _send_html(chat_id, f"✅ <b>Аккаунт привязан</b>\nEmail: {user.email}\nПлан: {user.plan.value}")
         else:
-            await send_message(chat_id, "❌ Аккаунт не привязан. Отправьте код привязки из Настроек приложения.")
+            await _send_html(chat_id, "❌ Аккаунт не привязан. Отправьте код привязки из Настроек приложения.")
         return {"ok": True}
     if text.startswith("/help"):
-        await send_message(chat_id, "📖 <b>Команды Imperecta Bot</b>\n/start\n/status\n/help")
+        await _send_html(chat_id, "📖 <b>Команды Imperecta Bot</b>\n/start\n/status\n/help")
         return {"ok": True}
 
     if len(text.strip()) == 6 and text.strip().isalnum():
@@ -67,13 +81,13 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
         if user:
             user.telegram_chat_id = chat_id
             user.telegram_link_code = None
-            await send_message(chat_id, f"✅ <b>Аккаунт успешно привязан!</b>\nEmail: {user.email}")
+            await _send_html(chat_id, f"✅ <b>Аккаунт успешно привязан!</b>\nEmail: {user.email}")
             logger.info("Telegram linked: user=%s, chat_id=%s", user.email, chat_id)
         else:
-            await send_message(chat_id, "❌ Неверный код.")
+            await _send_html(chat_id, "❌ Неверный код.")
         return {"ok": True}
 
-    await send_message(chat_id, "Я не понимаю это сообщение. Отправьте /help для списка команд.")
+    await _send_html(chat_id, "Я не понимаю это сообщение. Отправьте /help для списка команд.")
     return {"ok": True}
 
 
