@@ -17,94 +17,49 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from app.common.html_parsing import (
+    REPEATED_STRUCTURE_MIN_COUNT,
+    _CURRENCY_SYMBOLS,
+    _CURRENCY_TEXT_CODES,
+    _MAX_REALISTIC_PRICE,
+    _PRICE_CONTEXT_NEGATIVE,
+    _PRICE_CONTEXT_POSITIVE,
+    _compute_element_signature,
+    _detect_currency,
+    compute_element_signature,
+    parse_currency_code,
+    parse_currency_symbol,
+    parse_price_text,
+)
+from app.modules.classifier import (
+    classify_page_role,
+    classify_page_role_for_discovery,
+)
+
 logger = logging.getLogger(__name__)
 
 # Max chars stored for debug/raw extraction traces (avoid huge strings in logs).
 _MAX_TITLE_LEN = 1000
 
-_CURRENCY_SYMBOLS: dict[str, str] = {
-    "€": "EUR",
-    "$": "USD",
-    "£": "GBP",
-    "₴": "UAH",
-    "₽": "RUB",
-    "zł": "PLN",
-    "₺": "TRY",
-    "₸": "KZT",
-    "₾": "GEL",
-    "₼": "AZN",
-    "лв": "BGN",
-    "kč": "CZK",
-    "kr": "SEK",
-    "ft": "HUF",
-    "lei": "RON",
-    "din": "RSD",
-    "ден": "MKD",
-    "сўм": "UZS",
-    "сом": "KGS",
-    "br": "BYN",
-    "sm": "TJS",
-}
-
-# ISO codes mentioned as text near prices (case-insensitive match after a space).
-_CURRENCY_TEXT_CODES: dict[str, str] = {
-    "usd": "USD",
-    "eur": "EUR",
-    "gbp": "GBP",
-    "uah": "UAH",
-    "грн": "UAH",
-    "rub": "RUB",
-    "руб": "RUB",
-    "р.": "RUB",
-    "pln": "PLN",
-    "ron": "RON",
-    "try": "TRY",
-    "tl": "TRY",
-    "kzt": "KZT",
-    "тг": "KZT",
-    "тенге": "KZT",
-    "byn": "BYN",
-    "бел.руб": "BYN",
-    "gel": "GEL",
-    "azn": "AZN",
-    "man": "AZN",
-    "bgn": "BGN",
-    "czk": "CZK",
-    "sek": "SEK",
-    "nok": "NOK",
-    "dkk": "DKK",
-    "huf": "HUF",
-    "hrk": "HRK",
-    "rsd": "RSD",
-    "mdl": "MDL",
-    "лей": "MDL",
-    "лэй": "MDL",
-    "chf": "CHF",
-    "uzs": "UZS",
-    "kgs": "KGS",
-    "tjs": "TJS",
-}
-
-_PRICE_CONTEXT_POSITIVE = (
-    "price",
-    "цена",
-    "стоимость",
-    "total",
-    "итого",
-    "sale",
-    "our price",
-)
-_PRICE_CONTEXT_NEGATIVE = (
-    "%",
-    "cashback",
-    "кэшбэк",
-    "bonus",
-    "бонус",
-    "скидка",
-    "discount",
-    "save",
-    "эконом",
-)
+# Re-export the moved primitives so legacy imports
+#   ``from app.modules.scraper.extractors import parse_price_text``
+# keep resolving. Canonical home is app.common.html_parsing (CLS1).
+__all__ = [
+    "_CURRENCY_SYMBOLS",
+    "_CURRENCY_TEXT_CODES",
+    "_MAX_REALISTIC_PRICE",
+    "_PRICE_CONTEXT_NEGATIVE",
+    "_PRICE_CONTEXT_POSITIVE",
+    "REPEATED_STRUCTURE_MIN_COUNT",
+    "_compute_element_signature",
+    "_detect_currency",
+    "compute_element_signature",
+    "parse_currency_code",
+    "parse_currency_symbol",
+    "parse_price_text",
+    "classify_page_role",
+    "classify_page_role_for_discovery",
+]
 
 _EXCLUDED_LINK_HINTS = (
     "login",
@@ -179,43 +134,6 @@ _CATEGORY_PATH_SEGMENTS = (
     "best",
     "popular",
 )
-_MAX_REALISTIC_PRICE = 5_000_000.0
-# Minimum count of structurally-identical elements to classify as a product grid.
-REPEATED_STRUCTURE_MIN_COUNT = 6
-# Open Graph og:type values that indicate a single product detail page.
-# Reference: https://ogp.me/ + product-specific extensions used by Shopify,
-# WooCommerce, Magento, Facebook Catalog.
-_OG_TYPES_PRODUCT = frozenset({"product", "product.group", "product.item"})
-# Open Graph og:type values that indicate a non-product content page.
-# 'website' maps to 'hub' downstream; the rest map to 'listing'.
-# Rare/ambiguous og:types (profile, book, music, video) are intentionally
-# excluded here — they fall through to JSON-LD layer and then to the
-# structural fallback rather than being force-classified.
-_OG_TYPES_LISTING = frozenset({"article", "blog", "news"})
-_OG_TYPES_HUB = frozenset({"website"})
-# JSON-LD @type values from schema.org that indicate a single product detail page.
-_JSONLD_TYPES_PRODUCT = frozenset({"Product", "IndividualProduct", "ProductModel"})
-# JSON-LD @type values that indicate a listing/results page.
-_JSONLD_TYPES_LISTING = frozenset({
-    "CollectionPage", "ItemList", "SearchResultsPage",
-    "Article", "NewsArticle", "BlogPosting",
-})
-# JSON-LD @type values that indicate a navigational/informational page (hub).
-_JSONLD_TYPES_HUB = frozenset({"WebPage", "AboutPage", "ContactPage", "FAQPage"})
-# HTML5 Microdata itemtype values (schema.org). Both http:// and https://
-# prefixes are valid per schema.org docs and appear in the wild.
-_MICRODATA_TYPES_PRODUCT = frozenset({
-    "http://schema.org/Product",
-    "https://schema.org/Product",
-})
-_MICRODATA_TYPES_LISTING = frozenset({
-    "http://schema.org/ItemList",
-    "https://schema.org/ItemList",
-    "http://schema.org/OfferCatalog",
-    "https://schema.org/OfferCatalog",
-    "http://schema.org/CollectionPage",
-    "https://schema.org/CollectionPage",
-})
 # Maximum number of sitemap sub-files to follow from a sitemap index.
 SITEMAP_MAX_SUBFILES = 15
 # Maximum product URLs to harvest from a single sitemap (memory guard).
@@ -483,14 +401,6 @@ def extract_with_custom_selectors(
     return result
 
 
-def _detect_currency(text: str) -> str | None:
-    """Detect currency from symbols or textual codes embedded in *text*."""
-    result = parse_currency_symbol(text)
-    if result:
-        return result
-    return parse_currency_code(text)
-
-
 def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
     """Level 4: Auto-detect using universal heuristics."""
     result = ExtractedProduct()
@@ -583,125 +493,6 @@ def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
 
     _ensure_title(result, soup, url)
     return result
-
-
-def parse_price_text(text: str) -> float | None:
-    """Parse price from text containing EU / CIS / Anglo-Saxon number formats.
-
-    Supported patterns:
-      1,234.56   (US/UK)         →  1234.56
-      1.234,56   (DE/FR/RU/UA)   →  1234.56
-      1 234,56   (RU/UA/KZ)      →  1234.56
-      1 234.56   (rarely)        →  1234.56
-      1234,56    (short EU)      →  1234.56
-      1234.56    (plain)         →  1234.56
-      1234       (integer)       →  1234.0
-    """
-    if not text:
-        return None
-
-    raw = str(text).strip()
-    raw = raw.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
-    lowered = raw.lower()
-
-    def _parse_number_token(token: str) -> float | None:
-        value = token.strip()
-        if not value:
-            return None
-
-        value = re.sub(r"\s*([,.])\s*", r"\1", value)
-        has_comma = "," in value
-        has_dot = "." in value
-        has_space = " " in value
-
-        if has_comma and has_dot:
-            if value.rfind(",") > value.rfind("."):
-                value = value.replace(" ", "").replace(".", "").replace(",", ".")
-            else:
-                value = value.replace(" ", "").replace(",", "")
-        elif has_comma and not has_dot:
-            parts = value.replace(" ", "").split(",")
-            if len(parts) == 2 and len(parts[-1]) in (1, 2):
-                value = value.replace(" ", "").replace(",", ".")
-            elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
-                value = value.replace(" ", "").replace(",", "")
-            else:
-                last_part = parts[-1]
-                if len(last_part) <= 2:
-                    value = ",".join(parts[:-1]).replace(",", "") + "." + last_part
-                    value = value.replace(" ", "")
-                else:
-                    value = value.replace(" ", "").replace(",", "")
-        elif has_dot and not has_comma:
-            parts = value.replace(" ", "").split(".")
-            if len(parts) == 2 and len(parts[-1]) in (1, 2):
-                value = value.replace(" ", "")
-            elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
-                value = value.replace(" ", "").replace(".", "")
-            else:
-                value = value.replace(" ", "")
-        elif has_space:
-            value = value.replace(" ", "")
-
-        try:
-            number = float(value)
-            return number if number > 0 else None
-        except ValueError:
-            return None
-
-    candidates: list[tuple[float, int]] = []
-    token_pattern = re.compile(r"\d{1,3}(?:[ \u00a0\u2009\u202f.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?")
-    for match in token_pattern.finditer(raw):
-        token = match.group(0)
-        parsed = _parse_number_token(token)
-        if parsed is None:
-            continue
-
-        start, end = match.span()
-        context = lowered[max(0, start - 20):min(len(lowered), end + 20)]
-        score = 0
-        if _detect_currency(context):
-            score += 8
-        if any(marker in context for marker in _PRICE_CONTEXT_POSITIVE):
-            score += 4
-        if any(marker in context for marker in _PRICE_CONTEXT_NEGATIVE):
-            score -= 6
-        if parsed < 1:
-            score -= 3
-        has_currency_context = _detect_currency(context) is not None
-        if parsed > _MAX_REALISTIC_PRICE and not has_currency_context:
-            continue
-        if parsed > _MAX_REALISTIC_PRICE:
-            score -= 20
-
-        candidates.append((parsed, score))
-
-    if not candidates:
-        return None
-
-    # Prefer high-confidence contexts; for ties choose larger realistic amount.
-    candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
-    best_value = candidates[0][0]
-    if best_value > _MAX_REALISTIC_PRICE:
-        return None
-    return best_value
-
-
-def parse_currency_symbol(text: str) -> str | None:
-    """Detect currency ISO code from symbol characters in *text*."""
-    for symbol, code in _CURRENCY_SYMBOLS.items():
-        if symbol in text.lower():
-            return code
-    return None
-
-
-def parse_currency_code(text: str) -> str | None:
-    """Detect currency ISO code from textual code / abbreviation near a price."""
-    lowered = text.lower()
-    for token, code in _CURRENCY_TEXT_CODES.items():
-        if token in lowered:
-            return code
-    return None
 
 
 def merge_results(*results: ExtractedProduct) -> ExtractedProduct:
@@ -962,17 +753,6 @@ def detect_next_page(
     return None
 
 
-def _compute_element_signature(element) -> tuple[str, frozenset[str]]:
-    """Return a structural signature for a BeautifulSoup element.
-
-    Signature = (tag_name, frozenset_of_css_classes). Language-agnostic:
-    CSS class names are treated as opaque tokens regardless of their meaning.
-    """
-    tag = getattr(element, "name", "") or ""
-    classes: list[str] = element.get("class", []) if hasattr(element, "get") else []
-    return (tag.lower(), frozenset(classes))
-
-
 def extract_links_from_repeated_structure(
     soup: BeautifulSoup,
     base_url: str,
@@ -1066,219 +846,6 @@ def extract_links_from_repeated_structure(
             continue
         filtered.append(url)
     return filtered
-
-
-def classify_page_role(soup: BeautifulSoup, base_url: str) -> str:
-    """Classify a fetched page as 'listing', 'product', 'hub', or 'unknown'.
-
-    Uses three language-agnostic signals:
-    1. Schema.org JSON-LD @type annotation (most reliable).
-    2. Repeated DOM structure count (listing signal).
-    3. Price density - count of parseable prices on the page.
-
-    Returns one of: 'listing', 'product', 'hub', 'unknown'.
-    """
-    from collections import defaultdict
-
-    for script_tag in soup.find_all("script", type="application/ld+json"):
-        try:
-            data = json.loads(script_tag.string or "")
-            if isinstance(data, list):
-                data = data[0] if data else {}
-            page_type = data.get("@type", "")
-            if isinstance(page_type, list):
-                page_type = page_type[0] if page_type else ""
-            if page_type == "Product":
-                return "product"
-            if page_type in ("ItemList", "OfferCatalog", "CollectionPage"):
-                return "listing"
-            if page_type in ("WebSite", "Organization", "BreadcrumbList"):
-                pass
-        except (json.JSONDecodeError, AttributeError, TypeError):
-            continue
-
-    signature_counts: dict[tuple, int] = defaultdict(int)
-    for element in soup.find_all(True):
-        sig = _compute_element_signature(element)
-        if sig[0] and sig[1]:
-            signature_counts[sig] += 1
-    max_repetition = max(signature_counts.values()) if signature_counts else 0
-    has_product_grid = max_repetition >= REPEATED_STRUCTURE_MIN_COUNT
-
-    price_count = 0
-    for text_node in soup.find_all(string=True):
-        text = str(text_node).strip()
-        if len(text) <= 1:
-            continue
-        parsed_price = parse_price_text(text)
-        if parsed_price is not None and 0 < parsed_price < 9_999_999:
-            price_count += 1
-
-    if has_product_grid and price_count >= REPEATED_STRUCTURE_MIN_COUNT:
-        return "listing"
-    if price_count == 0 and max_repetition < REPEATED_STRUCTURE_MIN_COUNT:
-        return "hub"
-    if 1 <= price_count <= 5 and not has_product_grid:
-        return "product"
-    if has_product_grid:
-        return "listing"
-    return "unknown"
-
-
-def _get_og_type(soup: BeautifulSoup) -> str | None:
-    """Return lowercased Open Graph og:type from the page, or None if absent.
-
-    Open Graph is a single-value page-level meta tag set by site authors for
-    social-network preview, e.g. <meta property="og:type" content="product">.
-    """
-    meta = soup.find("meta", attrs={"property": "og:type"})
-    if meta is None:
-        return None
-    content = meta.get("content")
-    if not isinstance(content, str):
-        return None
-    cleaned = content.strip().lower()
-    return cleaned or None
-
-
-def _get_jsonld_root_types(soup: BeautifulSoup) -> set[str]:
-    """Return the set of top-level @type values from all JSON-LD scripts on the page.
-
-    Handles three structural cases:
-    - JSON-LD root is a dict with @type: string or list of strings.
-    - JSON-LD root is a list of such dicts.
-    - JSON-LD is malformed → silently skip that script tag.
-
-    Nested @types (e.g. inside `offers`, `aggregateRating`) are intentionally
-    NOT collected: they describe sub-entities of a parent object, not the
-    page as a whole.
-    """
-    types: set[str] = set()
-    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
-        raw = script.string or ""
-        if not raw.strip():
-            continue
-        try:
-            parsed = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        items = parsed if isinstance(parsed, list) else [parsed]
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            type_value = item.get("@type")
-            if isinstance(type_value, str):
-                types.add(type_value)
-            elif isinstance(type_value, list):
-                for sub in type_value:
-                    if isinstance(sub, str):
-                        types.add(sub)
-    return types
-
-
-def _get_microdata_toplevel_types(soup: BeautifulSoup) -> set[str]:
-    """Return itemtype values from top-level itemscope elements only.
-
-    "Top-level" means the element has no ancestor with `itemscope` attribute.
-    This excludes nested Product cards inside an ItemList (category page),
-    or nested ListItem inside a BreadcrumbList. Such nested types describe
-    components of the page, not the page's role itself.
-
-    Returns the itemtype URL set (e.g., {"http://schema.org/Product"}).
-    Values are returned as-is, without case normalization, since schema.org
-    URLs are always lowercase by convention and our constant sets follow
-    the same convention.
-    """
-    result: set[str] = set()
-    for tag in soup.find_all(attrs={"itemtype": True}):
-        has_outer_itemscope = False
-        parent = tag.parent
-        while parent is not None:
-            if getattr(parent, "attrs", None) is not None and "itemscope" in parent.attrs:
-                has_outer_itemscope = True
-                break
-            parent = parent.parent
-        if has_outer_itemscope:
-            continue
-        itemtype_value = (tag.get("itemtype") or "").strip()
-        if itemtype_value:
-            result.add(itemtype_value)
-    return result
-
-
-def classify_page_role_for_discovery(soup: BeautifulSoup, base_url: str) -> str:
-    """Discovery-targeted page role classification using structured-data signals.
-
-    Returns one of: 'product', 'listing', 'hub', 'unknown'.
-
-    Strategy — three layers, from most to least reliable:
-
-    Layer 1: Open Graph og:type. A single-value page-level meta tag explicitly
-    set by site authors for social-network previews. Strong, unambiguous signal:
-      - og:type in _OG_TYPES_PRODUCT  → 'product'
-      - og:type in _OG_TYPES_HUB      → 'hub'
-      - og:type in _OG_TYPES_LISTING  → 'listing'  (article/blog/news grouped
-        with listing because they are non-product content pages; this is a
-        deliberate design choice, not a bug)
-      - any other og:type value       → fall through to Layer 2
-
-    Layer 2: JSON-LD top-level @type. The site author's schema.org declaration
-    of what the page represents. If multiple types appear, Product wins over
-    listing-coexisting types (a PDP can include a Breadcrumb in JSON-LD without
-    being a listing). Otherwise, listing/hub mapping is taken from the
-    corresponding _JSONLD_TYPES_* sets.
-
-    Layer 3: Fallback to existing classify_page_role(). Handles sites that emit
-    no structured data — rare on modern e-commerce but possible on small/legacy
-    shops. The existing function is more conservative (tuned for extractor use),
-    but its 'unknown' result is preserved as 'unknown' here, not silently
-    promoted to 'listing'.
-
-    This function intentionally ignores repeated-DOM-structure signals on layers
-    1 and 2: related-product blocks on a real PDP would trigger them, leading
-    to false 'listing' classification (which is exactly the bug this function
-    fixes for discovery).
-    """
-    # Layer 1: Open Graph
-    og_type = _get_og_type(soup)
-    if og_type is not None:
-        if og_type in _OG_TYPES_PRODUCT:
-            return "product"
-        if og_type in _OG_TYPES_HUB:
-            return "hub"
-        if og_type in _OG_TYPES_LISTING:
-            return "listing"
-        # Other og:type values (profile, book, music, video) → fall through.
-
-    # Layer 2: JSON-LD
-    ld_types = _get_jsonld_root_types(soup)
-    if ld_types:
-        if ld_types & _JSONLD_TYPES_PRODUCT:
-            # Product wins over coexisting listing-like types (PDP + Breadcrumb).
-            return "product"
-        if ld_types & _JSONLD_TYPES_LISTING:
-            return "listing"
-        if ld_types & _JSONLD_TYPES_HUB:
-            return "hub"
-        # Other JSON-LD types → fall through to structural fallback.
-
-    # Layer 2.5: HTML5 Microdata via itemscope/itemtype attributes.
-    # Some sites emit schema.org via Microdata only, without og:type or JSON-LD.
-    # We look at top-level itemtype only (not nested) so that:
-    #   - A PDP with a "Related products" ItemList block remains 'product'
-    #     (Product on top-level + ItemList for related → Product wins).
-    #   - A pure category page (only ItemList/OfferCatalog top-level, with
-    #     nested Product cards) is 'listing'.
-    md_top_types = _get_microdata_toplevel_types(soup)
-    if md_top_types:
-        if md_top_types & _MICRODATA_TYPES_PRODUCT:
-            return "product"
-        if md_top_types & _MICRODATA_TYPES_LISTING:
-            return "listing"
-        # Other Microdata top-level types → fall through to Layer 3.
-
-    # Layer 3: structural fallback
-    return classify_page_role(soup, base_url)
 
 
 def extract_internal_links_all(soup: BeautifulSoup, base_url: str) -> list[str]:

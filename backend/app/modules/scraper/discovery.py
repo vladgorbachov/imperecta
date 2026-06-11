@@ -17,7 +17,7 @@ from app.config import Settings
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
-from app.modules.scraper.extractors import classify_page_role_for_discovery
+from app.modules.classifier import classify_page_role_for_discovery
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -513,10 +513,8 @@ class DiscoveryCrawler:
         """
         from collections import deque
 
-        from app.modules.scraper.extractors import (
-            classify_page_role_for_discovery,
-            extract_internal_links_all,
-        )
+        from app.modules.classifier import classify_page_role_for_discovery
+        from app.modules.scraper.extractors import extract_internal_links_all
 
         saved = marketplace.recon_frontier_state
         if saved:
