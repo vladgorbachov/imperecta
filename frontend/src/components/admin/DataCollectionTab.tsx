@@ -17,7 +17,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -351,7 +350,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
 
   const liveFeed = liveFeedQuery.data;
   const progress = computeProgress(monitorStatus);
-  const discovery = monitorStatus?.discovery;
+  const discovery = monitorStatus?.discovery ?? null;
   const summary = monitorStatus?.metadata?.summary;
   const lastActivityAt = monitorStatus?.metadata?.last_activity_at;
   const activityStale =
@@ -360,7 +359,8 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   const activeMarketplaces = useMemo(
     () =>
       (marketplacesQuery.data ?? []).filter(
-        (mp) => mp.is_active !== false && Boolean(mp.marketplace_code),
+        (mp): mp is typeof mp & { marketplace_code: string } =>
+          mp.is_active !== false && Boolean(mp.marketplace_code),
       ),
     [marketplacesQuery.data],
   );
@@ -447,32 +447,6 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
     }));
   }, [liveFeed?.steps]);
 
-  const throughputTimeline = useMemo(() => {
-    const bucket = new Map<
-      string,
-      { minuteLabel: string; steps: number; success: number; failed: number }
-    >();
-    for (const step of liveFeed?.steps ?? []) {
-      if (!step.created_at) continue;
-      const ts = new Date(step.created_at);
-      if (Number.isNaN(ts.getTime())) continue;
-      const minuteKey = `${ts.getUTCFullYear()}-${String(ts.getUTCMonth() + 1).padStart(2, "0")}-${String(ts.getUTCDate()).padStart(2, "0")} ${String(ts.getUTCHours()).padStart(2, "0")}:${String(ts.getUTCMinutes()).padStart(2, "0")}`;
-      const row = bucket.get(minuteKey) ?? {
-        minuteLabel: `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`,
-        steps: 0,
-        success: 0,
-        failed: 0,
-      };
-      row.steps += 1;
-      if (step.status === "success") row.success += 1;
-      else row.failed += 1;
-      bucket.set(minuteKey, row);
-    }
-    return Array.from(bucket.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([, value]) => value);
-  }, [liveFeed?.steps]);
-
   const toggleMarketplace = (code: string, checked: boolean) => {
     setSelectedCodes((prev) => {
       const next = new Set(prev);
@@ -483,7 +457,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
   };
 
   const selectAllMarketplaces = () => {
-    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code as string)));
+    setSelectedCodes(new Set(activeMarketplaces.map((mp) => mp.marketplace_code)));
   };
 
   const clearMarketplaceSelection = () => {

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
 
 export type PromoType = "promo" | "discount" | "out_of_stock" | "new";
@@ -17,7 +18,7 @@ export interface PromoBadgeProps {
  */
 type PromoConfig = { label: string; style: object };
 
-function getPromoConfig(type: PromoType, label: string | undefined, t: (k: string, opts?: object) => string): PromoConfig {
+function getPromoConfig(type: PromoType, label: string | undefined, t: TFunction): PromoConfig {
   switch (type) {
     case "promo":
       return {

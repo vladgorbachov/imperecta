@@ -4,7 +4,7 @@
 
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
-import { Bot, Copy, MoreHorizontal } from "lucide-react";
+import { Bot, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -93,10 +93,6 @@ export function ChatMessageComponent({ message, onCopy }: ChatMessageProps) {
             <Button variant="ghost" size="sm" className="h-2 px-2 text-xs" onClick={handleCopy}>
               <Copy className="mr-1 size-3" />
               {t("ai.copy")}
-            </Button>
-            <Button variant="ghost" size="sm" className="h-2 px-2 text-xs">
-              <MoreHorizontal className="mr-1 size-3" />
-              {t("ai.more")}
             </Button>
           </div>
         )}

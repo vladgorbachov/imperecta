@@ -15,7 +15,6 @@ import { Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { AuthProvider } from "@/components/auth/AuthProvider";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -49,8 +48,7 @@ function LandingRoute({ children }: { children: React.ReactNode }) {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <TooltipProvider delayDuration={300}>
             <Suspense fallback={<LoadingScreen />}>
               <BrowserRouter>
@@ -138,8 +136,7 @@ export function App() {
               </BrowserRouter>
             </Suspense>
           </TooltipProvider>
-        </ThemeProvider>
-      </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }
