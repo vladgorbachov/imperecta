@@ -58,7 +58,7 @@ export const authApi = {
         trial_duration_days?: number;
         is_trial_expired?: boolean;
       };
-    }>("/auth/me"),
+    }>("/users/me"),
   updateMe: (data: {
     name?: string;
     company_name?: string;
@@ -67,7 +67,7 @@ export const authApi = {
     avatar_url?: string | null;
     ai_tone?: string;
     preferences?: Record<string, unknown>;
-  }) => apiClient.put("/auth/me", data),
+  }) => apiClient.put("/users/me", data),
   deleteAvatar: () => apiClient.delete<{ message: string }>("/auth/avatar"),
   getTelegramLink: () =>
     apiClient.post<{ code: string; bot_url: string }>("/auth/telegram-link"),

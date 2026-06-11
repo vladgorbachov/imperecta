@@ -413,27 +413,27 @@ export const getParsingJobStatus = (jobId: string) =>
   apiClient.get<ParsingJobStatus>(`/admin/parsing/job-status/${jobId}`);
 
 export const getParsingUsersDetailed = (limit = 500) =>
-  apiClient.get<ParsingDetailedUser[]>("/admin/parsing/users-detailed", { params: { limit } });
+  apiClient.get<ParsingDetailedUser[]>("/admin/users", { params: { limit } });
 
 export const createAdminUser = (payload: AdminUserCreatePayload) =>
-  apiClient.post<ParsingDetailedUser>("/admin/parsing/users", payload);
+  apiClient.post<ParsingDetailedUser>("/admin/users", payload);
 
 export const updateAdminUser = (userId: string, payload: AdminUserUpdatePayload) =>
-  apiClient.patch<ParsingDetailedUser>(`/admin/parsing/users/${userId}`, payload);
+  apiClient.patch<ParsingDetailedUser>(`/admin/users/${userId}`, payload);
 
 export const setAdminUserStatus = (userId: string, payload: AdminUserStatusPayload) =>
-  apiClient.patch<ParsingDetailedUser>(`/admin/parsing/users/${userId}/status`, payload);
+  apiClient.patch<ParsingDetailedUser>(`/admin/users/${userId}/status`, payload);
 
 export const setAdminUserRole = (userId: string, payload: AdminUserRolePayload) =>
-  apiClient.patch<ParsingDetailedUser>(`/admin/parsing/users/${userId}/role`, payload);
+  apiClient.patch<ParsingDetailedUser>(`/admin/users/${userId}/role`, payload);
 
 export const resetAdminUserPassword = (
   userId: string,
   payload: AdminUserResetPasswordPayload,
-) => apiClient.post<ParsingDetailedUser>(`/admin/parsing/users/${userId}/reset-password`, payload);
+) => apiClient.post<ParsingDetailedUser>(`/admin/users/${userId}/reset-password`, payload);
 
 export const deleteAdminUser = (userId: string) =>
-  apiClient.delete<{ deleted: boolean }>(`/admin/parsing/users/${userId}`);
+  apiClient.delete<{ deleted: boolean }>(`/admin/users/${userId}`);
 
 export const getParsingMarketplacesDetailed = (page = 1, pageSize = 20) =>
   apiClient.get<ParsingMarketplacesDetailedPage>("/admin/parsing/marketplaces-detailed", {

@@ -23,13 +23,13 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("GET", "/api/admin/parsing/pipeline-runs"),
         ("POST", "/api/admin/parsing/cancel-active-job"),
         ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
-        ("GET", "/api/admin/parsing/users-detailed"),
-        ("POST", "/api/admin/parsing/users"),
-        ("PATCH", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001"),
-        ("PATCH", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001/status"),
-        ("PATCH", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001/role"),
-        ("POST", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001/reset-password"),
-        ("DELETE", "/api/admin/parsing/users/00000000-0000-0000-0000-000000000001"),
+        ("GET", "/api/admin/users"),
+        ("POST", "/api/admin/users"),
+        ("PATCH", "/api/admin/users/00000000-0000-0000-0000-000000000001"),
+        ("PATCH", "/api/admin/users/00000000-0000-0000-0000-000000000001/status"),
+        ("PATCH", "/api/admin/users/00000000-0000-0000-0000-000000000001/role"),
+        ("POST", "/api/admin/users/00000000-0000-0000-0000-000000000001/reset-password"),
+        ("DELETE", "/api/admin/users/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/marketplaces-detailed"),
         ("GET", "/api/admin/parsing/job-live-feed/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/active-job"),
@@ -71,8 +71,9 @@ async def test_parsing_admin_get_marketplaces_contract(client, superuser_headers
 
 @pytest.mark.asyncio
 async def test_parsing_admin_get_users_and_marketplaces_detailed(client, superuser_headers):
-    """Superuser can fetch detailed users/marketplaces lists for admin tabs."""
-    users_resp = await client.get("/api/admin/parsing/users-detailed", headers=superuser_headers)
+    """Superuser can fetch detailed users (now under /api/admin/users after
+    CORE-USERS1) and marketplaces lists for admin tabs."""
+    users_resp = await client.get("/api/admin/users", headers=superuser_headers)
     assert users_resp.status_code == 200
     users_payload = users_resp.json()
     assert isinstance(users_payload, list)

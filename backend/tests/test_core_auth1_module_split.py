@@ -69,6 +69,9 @@ def test_auth_router_owns_only_the_four_extracted_routes() -> None:
 # 2. /api/auth/* paths preserved ----------------------------------------------
 
 def test_auth_paths_preserved_under_api() -> None:
+    """CORE-AUTH1 owns these four routes; CORE-USERS1 moved /me out
+    (now /api/users/me), so the /api/auth/* surface here is only the four
+    auth flows + the two telegram routes still mounted from core/api_auth."""
     inventory = sorted(
         {
             (",".join(sorted(r.methods - {"HEAD"})), r.path)
@@ -77,20 +80,20 @@ def test_auth_paths_preserved_under_api() -> None:
         }
     )
     assert inventory == [
-        ("GET", "/api/auth/me"),
         ("POST", "/api/auth/change-initial-password"),
         ("POST", "/api/auth/login"),
         ("POST", "/api/auth/refresh"),
         ("POST", "/api/auth/register"),
         ("POST", "/api/auth/telegram-disconnect"),
         ("POST", "/api/auth/telegram-link"),
-        ("PUT", "/api/auth/me"),
     ], f"/api/auth/* inventory drifted: {inventory}"
 
 
 # 3. core/api_auth.py still serves the not-yet-migrated routes ---------------
 
-def test_core_api_auth_still_owns_me_and_telegram_routes() -> None:
+def test_core_api_auth_still_owns_telegram_routes() -> None:
+    """After CORE-USERS1 the residual core/api_auth.py owns only the two
+    telegram routes; /me migrated to app.modules.users.api."""
     from app.modules.core.api_auth import router as core_router
 
     pairs = sorted(
@@ -101,10 +104,8 @@ def test_core_api_auth_still_owns_me_and_telegram_routes() -> None:
         }
     )
     assert pairs == [
-        ("GET", "/auth/me"),
         ("POST", "/auth/telegram-disconnect"),
         ("POST", "/auth/telegram-link"),
-        ("PUT", "/auth/me"),
     ], f"core/api_auth.py drifted from the expected residual surface: {pairs}"
 
 
@@ -128,7 +129,7 @@ def test_old_core_auth_directory_gone() -> None:
     [
         ("app.common.deps", "decode_token"),
         ("app.modules.core.admin_service", "hash_password"),
-        ("app.modules.admin.parsing_admin", "hash_password"),
+        ("app.modules.users.service", "hash_password"),
     ],
 )
 def test_importers_repathed_to_auth_service(module_name: str, attr: str) -> None:
@@ -173,9 +174,11 @@ def test_user_register_uses_common_validator() -> None:
 
 
 def test_user_update_uses_common_validator() -> None:
+    """CORE-USERS1 moved UserUpdate to app.modules.users.schemas; the
+    validator stays in common/validation."""
     from pydantic import ValidationError
 
-    from app.modules.core.schemas import UserUpdate
+    from app.modules.users.schemas import UserUpdate
 
     UserUpdate(language="ru")
     UserUpdate(ai_tone="balanced")
@@ -206,8 +209,13 @@ def test_auth_only_schemas_left_core(name: str) -> None:
     assert hasattr(auth_schemas, name)
 
 
-def test_core_schemas_keeps_user_response_and_update() -> None:
+def test_core_schemas_residual_after_users_extraction() -> None:
+    """After CORE-USERS1 the residual core/schemas.py owns only
+    TelegramLinkResponse; UserResponse/UserUpdate moved to users.schemas."""
     core_schemas = importlib.import_module("app.modules.core.schemas")
-    assert hasattr(core_schemas, "UserResponse")
-    assert hasattr(core_schemas, "UserUpdate")
     assert hasattr(core_schemas, "TelegramLinkResponse")
+    assert not hasattr(core_schemas, "UserResponse")
+    assert not hasattr(core_schemas, "UserUpdate")
+    users_schemas = importlib.import_module("app.modules.users.schemas")
+    assert hasattr(users_schemas, "UserResponse")
+    assert hasattr(users_schemas, "UserUpdate")
