@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ChevronDown,
   ExternalLink,
-  Plus,
   Search,
   SlidersHorizontal,
 } from "lucide-react";
-import { toast } from "sonner";
 import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
-import { productsApi } from "@/api/products";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -131,12 +127,8 @@ function ProductImage({ item }: { item: MarketsOverviewItem }) {
 
 function ProductCard({
   item,
-  onAdd,
-  addDisabled,
 }: {
   item: MarketsOverviewItem;
-  onAdd: (item: MarketsOverviewItem) => void;
-  addDisabled: boolean;
 }) {
   const { t } = useTranslation();
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
@@ -146,7 +138,6 @@ function ProductCard({
     countryCode: item.country_code,
   });
   const externalHref = item.url || undefined;
-  const internalHref = `/products/${item.product_id ?? item.id}`;
   const changeValue = item.price_change_pct_24h ?? null;
 
   const imageContent = (
@@ -174,10 +165,10 @@ function ProductCard({
           {titleContent}
         </a>
       ) : (
-        <Link to={internalHref} className="space-y-2">
+        <div className="space-y-2">
           {imageContent}
           {titleContent}
-        </Link>
+        </div>
       )}
 
       <div className="mt-auto space-y-1.5">
@@ -205,23 +196,20 @@ function ProductCard({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 pt-1">
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            disabled={addDisabled}
-            onClick={() => onAdd(item)}
-          >
-            <Plus className="size-3.5" />
-            {t("market.overview.addToMyProducts")}
-          </Button>
-          <Button size="sm" variant="ghost" asChild>
-            <Link to={internalHref} aria-label={t("market.overview.details")}>
-              <ExternalLink className="size-3.5" />
-            </Link>
-          </Button>
-        </div>
+        {externalHref && (
+          <div className="flex items-center gap-1.5 pt-1">
+            <Button size="sm" variant="ghost" asChild>
+              <a
+                href={externalHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("market.overview.details")}
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -273,22 +261,6 @@ export function MarketsOverviewSection() {
     queryKey: marketsQueryKeys.poolStats(),
     queryFn: () => marketsApi.getPoolStats().then((response) => response.data),
     staleTime: 60_000,
-  });
-
-  const addProductMutation = useMutation({
-    mutationFn: (item: MarketsOverviewItem) => {
-      if (item.current_price == null || !item.currency) {
-        throw new Error("Missing price data");
-      }
-      return productsApi.create({
-        name: item.title ?? t("market.overview.productFallback"),
-        current_price: item.current_price,
-        currency: item.currency,
-        url: item.url,
-      });
-    },
-    onSuccess: () => toast.success(t("market.overview.addedToMyProducts")),
-    onError: () => toast.error(t("market.overview.addToMyProductsFailed")),
   });
 
   const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
@@ -612,12 +584,7 @@ export function MarketsOverviewSection() {
             ) : (
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {visibleItems.map((item) => (
-                  <ProductCard
-                    key={item.id}
-                    item={item}
-                    onAdd={(value) => addProductMutation.mutate(value)}
-                    addDisabled={item.current_price == null || !item.currency}
-                  />
+                  <ProductCard key={item.id} item={item} />
                 ))}
               </div>
             )}

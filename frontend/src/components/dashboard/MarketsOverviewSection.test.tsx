@@ -2,28 +2,14 @@
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketsOverviewSection } from "./MarketsOverviewSection";
 
-const createProductMock = vi.fn();
 const getOverviewMock = vi.fn();
 const getPoolMarketplaceStatsMock = vi.fn();
 const getPoolStatsMock = vi.fn();
-
-vi.mock("sonner", () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
-vi.mock("@/api/products", () => ({
-  productsApi: {
-    create: (...args: unknown[]) => createProductMock(...args),
-  },
-}));
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
@@ -133,7 +119,6 @@ describe("MarketsOverviewSection", () => {
         total_products: 90,
       },
     });
-    createProductMock.mockResolvedValue({ data: { id: "product-new" } });
   });
 
   it("renders KPI cards", async () => {
@@ -164,18 +149,5 @@ describe("MarketsOverviewSection", () => {
     expect(screen.getAllByText(/Barbora \(Latvia\)/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Barbora \(Lithuania\)/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Store Beta \(Ukraine\)/i).length).toBeGreaterThan(0);
-  });
-
-  it("adds a product to my products from a card", async () => {
-    renderSection();
-    await screen.findByText("Смартфон X");
-
-    fireEvent.click(
-      screen.getAllByRole("button", { name: /market\.overview\.addToMyProducts/i })[0],
-    );
-
-    await waitFor(() => {
-      expect(createProductMock).toHaveBeenCalled();
-    });
   });
 });

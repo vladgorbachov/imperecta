@@ -79,9 +79,7 @@ import { ForgotPasswordPage } from "@/pages/auth/ForgotPasswordPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
-import { ProductDetailPage } from "@/pages/ProductDetailPage";
 import { DigestsPage } from "@/pages/DigestsPage";
-import { ImportPage } from "@/pages/ImportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { AIAnalystRoute } from "@/components/AIAnalystRoute";
@@ -153,9 +151,7 @@ export function App() {
                     <Route index element={<Navigate to="/dashboard" replace />} />
                     <Route path="dashboard" element={<DashboardPage />} />
                     <Route path="products" element={<ProductsPage />} />
-                    <Route path="products/:id" element={<ProductDetailPage />} />
                     <Route path="digests" element={<DigestsPage />} />
-                    <Route path="import" element={<ImportPage />} />
                     <Route path="ai" element={<AIAnalystRoute />} />
                     <Route path="settings" element={<SettingsPage />} />
                   </Route>

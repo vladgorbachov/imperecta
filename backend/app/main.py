@@ -26,8 +26,6 @@ from app.modules.product_pool.api import (
     markets_overview_router as markets_overview_router,
 )
 from app.modules.product_pool.api import router as pool_router
-from app.modules.user_products.api_import import router as import_router
-from app.modules.user_products.api_products import router as products_router
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -153,8 +151,6 @@ for router in [
     pool_router,
     markets_overview_router,
     market_data_router,
-    products_router,
-    import_router,
     entitlements_router,
     ai_router,
 ]:

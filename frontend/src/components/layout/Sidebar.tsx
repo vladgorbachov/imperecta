@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   Package,
   FileText,
-  Upload,
   Shield,
   Bot,
   Sparkles,
@@ -353,15 +352,6 @@ export function Sidebar({
             isMobile={isMobile}
             onNavigate={onNavigate}
             isActive={isActive("/ai")}
-          />
-          <SidebarItem
-            icon={Upload}
-            label={t("nav.import")}
-            to="/import"
-            collapsed={collapsed}
-            isMobile={isMobile}
-            onNavigate={onNavigate}
-            isActive={isActive("/import")}
           />
         </SidebarSection>
 

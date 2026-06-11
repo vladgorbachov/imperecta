@@ -149,23 +149,6 @@ describe("translation coverage diagnostics", () => {
         const lines = source.split(/\r?\n/);
         lines.forEach((line, index) => {
           if (!/[А-Яа-яЁё]/.test(line)) return;
-          if (
-            filePath.endsWith(path.join("pages", "ImportPage.tsx")) &&
-            line.includes("COLUMN_ALIASES")
-          ) {
-            return;
-          }
-          if (
-            filePath.endsWith(path.join("pages", "ImportPage.tsx")) &&
-            (line.includes("название") ||
-              line.includes("артикул") ||
-              line.includes("цена") ||
-              line.includes("ссылка") ||
-              line.includes("категория"))
-          ) {
-            // Import parser supports localized CSV headers on purpose.
-            return;
-          }
 
           violations.push({
             filePath,

@@ -1,6 +1,9 @@
-"""Security-focused tests: auth, IDOR, input validation, import, redirects, data exposure."""
+"""Security-focused tests: auth, IDOR, input validation, redirects, data exposure.
 
-import io
+UP1 removed user_products + alerts + digests + competitors endpoints; the
+corresponding security tests for those routes were deleted with their
+endpoints. AI, markets, auth, admin, and preferences coverage remains.
+"""
 
 import pytest
 import pytest_asyncio
@@ -40,12 +43,8 @@ async def test_unauthenticated_cannot_access_protected_endpoints(client):
     """Unauthenticated user cannot access protected endpoints."""
     endpoints = [
         ("GET", "/api/auth/me"),
-        ("GET", "/api/products"),
-        ("GET", "/api/dashboard/kpi"),
-        ("GET", "/api/alerts/"),
-        ("GET", "/api/competitors"),
-        ("GET", "/api/digests"),
         ("GET", "/api/markets/preferences"),
+        ("GET", "/api/markets/overview"),
     ]
     for method, path in endpoints:
         if method == "GET":
@@ -95,121 +94,6 @@ async def test_me_returns_user_profile_without_sensitive_fields(client, auth_hea
 
 
 @pytest.mark.asyncio
-async def test_user_a_cannot_access_user_b_product(client, auth_headers, auth_headers_b):
-    """User A cannot fetch/update/delete User B's product."""
-    create_resp = await client.post(
-        "/api/products/",
-        headers=auth_headers,
-        json={
-            "name": "User A Product",
-            "current_price": 100.0,
-            "currency": "RUB",
-        },
-    )
-    assert create_resp.status_code in (200, 201)
-    product_id = create_resp.json()["id"]
-
-    get_resp = await client.get(f"/api/products/{product_id}", headers=auth_headers_b)
-    assert get_resp.status_code == 404
-
-    put_resp = await client.put(
-        f"/api/products/{product_id}",
-        headers=auth_headers_b,
-        json={"name": "Hijacked"},
-    )
-    assert put_resp.status_code == 404
-
-    del_resp = await client.delete(f"/api/products/{product_id}", headers=auth_headers_b)
-    assert del_resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_user_b_cannot_access_user_a_product_by_forged_id(client, auth_headers, auth_headers_b):
-    """User B with valid token cannot access User A's product by ID (proves ownership check)."""
-    create_resp = await client.post(
-        "/api/products/",
-        headers=auth_headers,
-        json={
-            "name": "User A Product",
-            "current_price": 100.0,
-            "currency": "RUB",
-        },
-    )
-    assert create_resp.status_code in (200, 201)
-    product_id = create_resp.json()["id"]
-
-    get_resp = await client.get(f"/api/products/{product_id}", headers=auth_headers_b)
-    assert get_resp.status_code == 404, "User B must not access User A's product"
-
-
-@pytest.mark.asyncio
-async def test_user_b_cannot_access_digest_by_id(client, auth_headers_b):
-    """User B cannot access digest by arbitrary ID (404 for non-owner/non-existent)."""
-    fake_id = "00000000-0000-0000-0000-000000000001"
-    get_resp = await client.get(f"/api/digests/{fake_id}", headers=auth_headers_b)
-    assert get_resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_user_a_cannot_access_user_b_alert(client, auth_headers, auth_headers_b):
-    """User A cannot update/delete User B's alert."""
-    create_resp = await client.post(
-        "/api/products/",
-        headers=auth_headers,
-        json={
-            "name": "Prod",
-            "current_price": 100.0,
-            "currency": "RUB",
-        },
-    )
-    product_id = create_resp.json()["id"]
-
-    alert_resp = await client.post(
-        "/api/alerts/",
-        headers=auth_headers,
-        json={
-            "product_id": product_id,
-            "type": "price_drop",
-            "channel": "email",
-        },
-    )
-    if alert_resp.status_code in (200, 201):
-        alert_id = alert_resp.json().get("id")
-        if alert_id:
-            put_resp = await client.put(
-                f"/api/alerts/{alert_id}",
-                headers=auth_headers_b,
-                json={"is_active": False},
-            )
-            assert put_resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_user_a_cannot_access_user_b_competitor(client, auth_headers, auth_headers_b):
-    """User B cannot update/delete User A's competitor."""
-    create_resp = await client.post(
-        "/api/competitors/",
-        headers=auth_headers,
-        json={
-            "name": "Competitor A",
-            "website_url": "https://example.com",
-        },
-    )
-    assert create_resp.status_code in (200, 201)
-    comp_id = create_resp.json()["id"]
-
-    put_resp = await client.put(
-        f"/api/competitors/{comp_id}",
-        headers=auth_headers_b,
-        json={"name": "Hijacked"},
-    )
-    assert put_resp.status_code == 404
-
-    del_resp = await client.delete(f"/api/competitors/{comp_id}", headers=auth_headers_b)
-    assert del_resp.status_code == 404
-
-
-@pytest.mark.asyncio
 async def test_user_a_cannot_overwrite_user_b_preferences(client, auth_headers, auth_headers_b):
     """User A cannot overwrite User B's markets preferences via API."""
     resp_a = await client.put(
@@ -246,175 +130,6 @@ async def test_put_me_rejects_extra_fields(client, auth_headers):
     assert data.get("is_superuser") is False
     assert data.get("email") != "hacker@evil.com"
     assert data.get("name") == "Updated"
-
-
-@pytest.mark.asyncio
-async def test_put_product_rejects_extra_fields(client, auth_headers):
-    """PUT /products/{id} does not accept user_id or other privileged fields."""
-    create_resp = await client.post(
-        "/api/products/",
-        headers=auth_headers,
-        json={
-            "name": "Prod",
-            "current_price": 100.0,
-            "currency": "RUB",
-        },
-    )
-    product_id = create_resp.json()["id"]
-
-    resp = await client.put(
-        f"/api/products/{product_id}",
-        headers=auth_headers,
-        json={
-            "name": "Updated",
-            "user_id": "00000000-0000-0000-0000-000000000001",
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert str(data.get("user_id")) != "00000000-0000-0000-0000-000000000001"
-
-
-# --- INPUT VALIDATION ---
-
-
-@pytest.mark.asyncio
-async def test_invalid_product_id_returns_404(client, auth_headers):
-    """Invalid UUID returns 404, not 500."""
-    resp = await client.get("/api/products/not-a-uuid", headers=auth_headers)
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_products_list_filter_safe(client, auth_headers):
-    """Invalid page/limit params are rejected."""
-    resp = await client.get(
-        "/api/products/",
-        headers=auth_headers,
-        params={"page": -1, "limit": 9999},
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_auto_categorize_rejects_invalid_payload(client, auth_headers):
-    """Auto-categorize rejects invalid payloads."""
-    resp = await client.post(
-        "/api/import/auto-categorize",
-        headers=auth_headers,
-        json={"products": "not-a-list"},
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_auto_categorize_rejects_oversized_list(client, auth_headers):
-    """Auto-categorize rejects oversized product list."""
-    products = [{"name": f"x{i}", "sku": "s", "price": 1.0} for i in range(150)]
-    resp = await client.post(
-        "/api/import/auto-categorize",
-        headers=auth_headers,
-        json={"products": products},
-    )
-    assert resp.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_auto_categorize_rejects_invalid_product_item(client, auth_headers):
-    """Auto-categorize rejects invalid product item fields."""
-    resp = await client.post(
-        "/api/import/auto-categorize",
-        headers=auth_headers,
-        json={
-            "products": [
-                {"name": "x" * 600, "sku": "s", "price": 1.0},
-            ],
-        },
-    )
-    assert resp.status_code == 422
-
-
-# --- IMPORT / UPLOAD SECURITY ---
-
-
-@pytest.mark.asyncio
-async def test_import_preview_rejects_oversized_file(client, auth_headers):
-    """Import preview rejects file larger than limit."""
-    content = b"x" * (6 * 1024 * 1024)
-    resp = await client.post(
-        "/api/import/products/preview",
-        headers=auth_headers,
-        files={"file": ("large.csv", io.BytesIO(content), "text/csv")},
-    )
-    assert resp.status_code == 413
-
-
-@pytest.mark.asyncio
-async def test_import_csv_rejects_oversized_file(client, auth_headers):
-    """Import CSV rejects file larger than limit."""
-    content = b"x" * (6 * 1024 * 1024)
-    resp = await client.post(
-        "/api/import/products/csv",
-        headers=auth_headers,
-        files={"file": ("large.csv", io.BytesIO(content), "text/csv")},
-    )
-    assert resp.status_code == 413
-
-
-@pytest.mark.asyncio
-async def test_import_csv_rejects_unsupported_format(client, auth_headers):
-    """Import rejects unsupported file format."""
-    content = b"not csv content"
-    resp = await client.post(
-        "/api/import/products/preview",
-        headers=auth_headers,
-        files={"file": ("evil.exe", io.BytesIO(content), "application/octet-stream")},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("errors") or not data.get("preview")
-
-
-@pytest.mark.asyncio
-async def test_import_csv_rejects_required_columns(client, auth_headers):
-    """Import preview rejects file missing required columns."""
-    content = b"sku,url,category\n1,http://x.com,cat"
-    resp = await client.post(
-        "/api/import/products/preview",
-        headers=auth_headers,
-        files={"file": ("bad.csv", io.BytesIO(content), "text/csv")},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("errors")
-
-
-@pytest.mark.asyncio
-async def test_import_csv_path_traversal_filename(client, auth_headers):
-    """Path traversal-like filename does not escape allowed handling."""
-    content = b"name,price\nProduct,100"
-    resp = await client.post(
-        "/api/import/products/preview",
-        headers=auth_headers,
-        files={"file": ("../../../etc/passwd", io.BytesIO(content), "text/csv")},
-    )
-    assert resp.status_code == 200
-
-
-# --- DATA EXPOSURE ---
-
-
-@pytest.mark.asyncio
-async def test_404_response_no_stack_trace(client, auth_headers):
-    """404 responses do not leak stack traces or internal paths."""
-    resp = await client.get(
-        "/api/products/00000000-0000-0000-0000-000000000001",
-        headers=auth_headers,
-    )
-    assert resp.status_code == 404
-    body = resp.text.lower()
-    assert "traceback" not in body
-    assert "file \"" not in body
 
 
 # --- AI ENDPOINT ---
@@ -504,5 +219,3 @@ async def test_markets_preferences_rejects_oversized_favorites(client, auth_head
         json={"favorite_instrument_ids": ids},
     )
     assert resp.status_code == 422
-
-
