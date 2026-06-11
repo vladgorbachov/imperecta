@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
-from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimCountry, DimMarketplace
 from app.modules.marketplaces.schemas import (
     AdminMarketplaceListItem,
@@ -43,7 +42,6 @@ def _normalize_scrape_status(
 
 
 def _to_admin_row(mp: DimMarketplace, region: str) -> AdminMarketplaceListItem:
-    st = _normalize_scrape_status(mp.last_scrape_status)
     return AdminMarketplaceListItem(
         marketplace_id=str(mp.id),
         name=mp.name,
@@ -53,12 +51,7 @@ def _to_admin_row(mp: DimMarketplace, region: str) -> AdminMarketplaceListItem:
         source="admin",
         is_active=mp.is_active,
         last_scrape_at=mp.last_scrape_at,
-        last_scrape_status=st,
-        last_error=None,
-        total_scrapes=0,
-        successful_scrapes=0,
-        failed_scrapes=0,
-        success_rate=0.0,
+        last_scrape_status=_normalize_scrape_status(mp.last_scrape_status),
         products_count=mp.products_in_pool,
     )
 
@@ -145,35 +138,3 @@ async def recalculate_quotas(
 ) -> dict:
     svc = MarketplaceService(db)
     return await svc.recalculate_quotas()
-
-
-@router.get("/{marketplace_id}/logs")
-async def marketplace_logs(
-    marketplace_id: UUID,
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-) -> list[dict]:
-    result = await db.execute(
-        select(ScrapeLog)
-        .where(ScrapeLog.marketplace_id == marketplace_id)
-        .order_by(ScrapeLog.created_at.desc())
-        .limit(100)
-    )
-    rows = list(result.scalars().all())
-    out: list[dict] = []
-    for log in rows:
-        proxy = log.proxy_used
-        proxy_used = bool(proxy) if proxy not in (None, "", "false") else False
-        out.append(
-            {
-                "id": int(log.id),
-                "url": log.url,
-                "status": log.status,
-                "error_message": log.error_message,
-                "price_found": float(log.price_found) if log.price_found is not None else None,
-                "duration_ms": log.duration_ms,
-                "proxy_used": proxy_used,
-                "created_at": log.created_at.isoformat() if log.created_at else "",
-            }
-        )
-    return out

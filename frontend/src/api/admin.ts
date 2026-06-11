@@ -16,6 +16,11 @@ export interface AdminStats {
   total_competitor_products?: number;
 }
 
+/**
+ * Marketplace mutation result shape from /admin/marketplaces (POST/PATCH).
+ * Real scrape statistics live on /admin/parsing/marketplaces-detailed.
+ * MP1 dropped the fabricated zero fields (total_scrapes/success_rate/...).
+ */
 export interface AdminMarketplace {
   marketplace_id: string;
   name: string;
@@ -26,23 +31,7 @@ export interface AdminMarketplace {
   is_active: boolean;
   last_scrape_at: string | null;
   last_scrape_status: "success" | "error" | "timeout" | "blocked" | null;
-  last_error: string | null;
-  total_scrapes: number;
-  successful_scrapes: number;
-  failed_scrapes: number;
-  success_rate: number;
   products_count: number;
-}
-
-export interface ScrapeLog {
-  id: number;
-  url: string;
-  status: string;
-  error_message: string | null;
-  price_found: number | null;
-  duration_ms: number | null;
-  proxy_used: boolean;
-  created_at: string;
 }
 
 export interface ScrapeActivity {
@@ -67,10 +56,6 @@ export interface AdminUser {
 }
 
 export const getAdminStats = () => apiClient.get<AdminStats>("/admin/stats");
-export const getAdminMarketplaces = () =>
-  apiClient.get<AdminMarketplace[]>("/admin/marketplaces");
-export const getMarketplaceLogs = (id: string) =>
-  apiClient.get<ScrapeLog[]>(`/admin/marketplaces/${id}/logs`);
 export const addMarketplace = (url: string) =>
   apiClient.post<AdminMarketplace>("/admin/marketplaces", { url });
 export const updateMarketplace = (
@@ -115,9 +100,6 @@ export interface ClaudeStatus {
 export const getClaudeStatus = () =>
   apiClient.get<ClaudeStatus>("/admin/claude-status");
 
-export const recalculateQuotas = () =>
-  apiClient.post<RecalculateQuotasResponse>("/admin/marketplaces/recalculate-quotas");
-
 export const clearPool = () =>
   apiClient.post<{ deleted: number; message: string }>("/admin/products/clear-pool");
 
@@ -149,13 +131,6 @@ export interface PoolDiagnostics {
     last_discovery: string | null;
   }>;
   diagnosis: string[];
-}
-
-export interface RecalculateQuotasResponse {
-  status: string;
-  active_marketplaces: number;
-  quota_per_marketplace: number;
-  total_pool_capacity: number;
 }
 
 export interface ParsingTestMarketplace {

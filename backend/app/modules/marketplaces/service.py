@@ -17,8 +17,14 @@ from app.models.facts import FactListing
 logger = logging.getLogger(__name__)
 
 
+# Target product capacity across all active marketplaces. The admin
+# recalculate-quotas endpoint splits this evenly among active marketplaces
+# to set DimMarketplace.product_quota. Tune as the pool scales.
+DEFAULT_TOTAL_POOL_SIZE: int = 50_000
+
+
 class MarketplacePoolService:
-    """Maintain products_in_pool from fact_listing and expose dim_marketplace reads."""
+    """Pipeline-side helper: maintain products_in_pool from fact_listing."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -40,32 +46,6 @@ class MarketplacePoolService:
             )
         await self.db.commit()
         logger.info("recalculate_all_quotas updated %d marketplaces", len(rows))
-
-    async def list_active_marketplaces(self) -> list[DimMarketplace]:
-        """All active rows from dim_marketplace (workers / admin)."""
-        result = await self.db.execute(
-            select(DimMarketplace)
-            .where(DimMarketplace.is_active.is_(True))
-            .order_by(DimMarketplace.marketplace_code),
-        )
-        return list(result.scalars().all())
-
-    async def get_by_id(self, marketplace_id: UUID) -> DimMarketplace | None:
-        """Load one marketplace by primary key."""
-        result = await self.db.execute(
-            select(DimMarketplace).where(DimMarketplace.id == marketplace_id),
-        )
-        return result.scalar_one_or_none()
-
-    async def get_by_code(self, marketplace_code: str) -> DimMarketplace | None:
-        """Load marketplace by stable code (replaces legacy int marketplace_id)."""
-        code = (marketplace_code or "").strip()
-        if not code:
-            return None
-        result = await self.db.execute(
-            select(DimMarketplace).where(DimMarketplace.marketplace_code == code),
-        )
-        return result.scalar_one_or_none()
 
     @staticmethod
     def _normalize_url(url: str) -> str:
@@ -89,8 +69,13 @@ class MarketplacePoolService:
 
 
 class MarketplaceService:
-    """CRUD and helpers for dim_marketplace (admin)."""
+    """CRUD for dim_marketplace (admin)."""
 
+    # Whitelist of writable columns on DimMarketplace via admin update path.
+    # Per-shop CSS selectors (custom_*_selector) and scraper_type were
+    # stripped in MP1: the new universal extractor does not consume per-shop
+    # selectors, and per-shop selector knobs violate the universality rule.
+    # DB columns may still exist; we just stop writing them from this API.
     _UPDATE_KEYS = frozenset(
         {
             "requires_js",
@@ -100,11 +85,6 @@ class MarketplaceService:
             "domain",
             "base_url",
             "rate_limit_delay",
-            "custom_product_link_selector",
-            "custom_next_page_selector",
-            "custom_price_selector",
-            "custom_title_selector",
-            "scraper_type",
             "locale",
         }
     )
@@ -116,9 +96,6 @@ class MarketplaceService:
         """All marketplaces ordered by name."""
         result = await self.db.execute(select(DimMarketplace).order_by(DimMarketplace.name))
         return list(result.scalars().all())
-
-    async def get_marketplace(self, marketplace_id: UUID) -> DimMarketplace | None:
-        return await self.db.get(DimMarketplace, marketplace_id)
 
     @staticmethod
     def _tld_to_country(tld: str) -> str:
@@ -219,33 +196,6 @@ class MarketplaceService:
         await self.db.refresh(mp)
         return mp, True
 
-    async def import_from_text(self, content: str) -> dict:
-        """Import marketplaces from text (one URL per line)."""
-        lines = [line.strip() for line in content.splitlines() if line.strip()]
-        added = 0
-        skipped = 0
-        errors: list[str] = []
-
-        for line in lines:
-            if line.startswith("#"):
-                continue
-            try:
-                _mp, is_new = await self.add_by_url(line)
-                if is_new:
-                    added += 1
-                else:
-                    skipped += 1
-            except Exception as e:
-                errors.append(f"{line}: {str(e)[:100]}")
-                skipped += 1
-
-        return {
-            "added": added,
-            "skipped": skipped,
-            "total_lines": len(lines),
-            "errors": errors,
-        }
-
     async def delete_marketplace(self, marketplace_id: UUID) -> bool:
         mp = await self.db.get(DimMarketplace, marketplace_id)
         if not mp:
@@ -294,7 +244,10 @@ class MarketplaceService:
         await self.db.refresh(mp)
         return mp
 
-    async def recalculate_quotas(self, total_pool_size: int = 50_000) -> dict:
+    async def recalculate_quotas(
+        self,
+        total_pool_size: int = DEFAULT_TOTAL_POOL_SIZE,
+    ) -> dict:
         """Distribute product_quota equally among active marketplaces."""
         active_count = await self.db.scalar(
             select(func.count())
