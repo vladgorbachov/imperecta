@@ -1,5 +1,10 @@
 import { apiClient } from "./client";
 
+/**
+ * AI chat client. AI1 dropped the dead listSessions/getSession/deleteSession
+ * exports; the live AIAnalystPage keeps message history in local React state.
+ * Server-side session history will return alongside the future AI agent.
+ */
 export const aiApi = {
   chat: (data: {
     message: string;
@@ -13,24 +18,4 @@ export const aiApi = {
       tokens_used: number;
       duration_ms: number;
     }>("/ai/chat", data),
-  listSessions: () =>
-    apiClient.get<
-      Array<{
-        id: number;
-        title: string | null;
-        context_type: string | null;
-        created_at: string;
-        updated_at: string;
-        message_count: number;
-      }>
-    >("/ai/sessions"),
-  getSession: (sessionId: number) =>
-    apiClient.get<{
-      id: number;
-      title: string | null;
-      context_type: string | null;
-      messages: Array<{ role: string; content: string; created_at: string }>;
-    }>(`/ai/sessions/${sessionId}`),
-  deleteSession: (sessionId: number) =>
-    apiClient.delete(`/ai/sessions/${sessionId}`),
 };

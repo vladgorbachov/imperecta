@@ -1,67 +1,87 @@
-"""AI analyst services: chat and helpers (v2 migration stubs)."""
+"""AI analyst chat core: persists session/messages and calls Anthropic."""
 
-import json
-import logging
-import re
+from __future__ import annotations
+
 import time
 from uuid import UUID
 
 from anthropic import AsyncAnthropic
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog
-from app.models.core import UserProduct
+from app.models.core import User
 from app.modules.ai_analyst.claude_client import resolve_claude_model
 
-logger = logging.getLogger(__name__)
 settings = Settings()
 
-SYSTEM_PROMPT = """You are Imperecta AI Analyst. Answer in user's language and use markdown."""
+SYSTEM_PROMPT: str = (
+    "You are Imperecta AI Analyst. Answer in the user's language and use "
+    "markdown."
+)
+
+# Recent-message window fed back into Anthropic per turn. Bounds latency and
+# token cost; raising it should be paired with a context-window check.
+CHAT_HISTORY_DEPTH: int = 20
+
+# Max tokens for a single assistant reply (Anthropic Messages API).
+CHAT_MAX_TOKENS: int = 2000
+
+# Session title is derived from the first user message, truncated to this many
+# characters so it fits in admin lists without ellipsing the column.
+SESSION_TITLE_MAX_LEN: int = 100
 
 
 def _get_client() -> AsyncAnthropic | None:
+    """Return a configured Anthropic client, or None when the key is absent.
+
+    Callers must handle the None case explicitly; we never substitute a fake
+    response for a missing API key (Rule 3).
+    """
     if not settings.claude_api_key:
         return None
     return AsyncAnthropic(api_key=settings.claude_api_key)
 
 
-async def build_user_context(db: AsyncSession, user_id: UUID, context_type: str | None = None, context_id: UUID | None = None) -> str:
-    _ = context_type, context_id
-    count = (
-        await db.execute(select(func.count()).select_from(UserProduct).where(UserProduct.user_id == user_id))
-    ).scalar() or 0
-    if count:
-        return f"User tracks {count} canonical product(s) (dim_product links). v2 migration in progress."
-    return "No tracked products yet."
-
-
 async def chat(
     db: AsyncSession,
-    user,
+    user: User,
     session_id: UUID | None,
     message: str,
     context_type: str = "general",
     context_id: UUID | None = None,
 ) -> dict:
+    """Persist a chat turn and call Anthropic. Raises ValueError on missing
+    Claude config or on a session_id that does not belong to the caller."""
     client = _get_client()
     if not client:
         raise ValueError("Claude API key not configured")
-    if session_id:
+
+    if session_id is not None:
         session = (
-            await db.execute(select(AIChatSession).where(AIChatSession.id == session_id, AIChatSession.user_id == user.id))
+            await db.execute(
+                select(AIChatSession).where(
+                    AIChatSession.id == session_id,
+                    AIChatSession.user_id == user.id,
+                ),
+            )
         ).scalar_one_or_none()
-        if not session:
+        if session is None:
             raise ValueError("Session not found")
     else:
-        session = AIChatSession(user_id=user.id, context_type=context_type, title=message[:100])
+        session = AIChatSession(
+            user_id=user.id,
+            context_type=context_type,
+            context_id=context_id,
+            title=message[:SESSION_TITLE_MAX_LEN],
+        )
         db.add(session)
         await db.flush()
 
     db.add(AIChatMessage(session_id=session.id, role="user", content=message))
     await db.flush()
-    context = await build_user_context(db, user.id, context_type, context_id)
+
     history = list(
         reversed(
             (
@@ -69,23 +89,28 @@ async def chat(
                     select(AIChatMessage)
                     .where(AIChatMessage.session_id == session.id)
                     .order_by(AIChatMessage.created_at.desc())
-                    .limit(20)
+                    .limit(CHAT_HISTORY_DEPTH)
                 )
             ).scalars().all()
         )
     )
     messages = [{"role": m.role, "content": m.content} for m in history]
+
     model_id = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
     start = time.time()
     response = await client.messages.create(
         model=model_id,
-        max_tokens=2000,
-        system=f"{SYSTEM_PROMPT}\n{context}",
+        max_tokens=CHAT_MAX_TOKENS,
+        system=SYSTEM_PROMPT,
         messages=messages,
     )
     duration_ms = int((time.time() - start) * 1000)
+
     assistant_content = response.content[0].text if response.content else ""
-    tokens = (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0) if response.usage else 0
+    tokens_used = 0
+    if response.usage is not None:
+        tokens_used = (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0)
+
     db.add(
         ApiLog(
             service="claude",
@@ -93,36 +118,15 @@ async def chat(
             status="success",
             status_code=200,
             duration_ms=duration_ms,
-            tokens_used=tokens,
+            tokens_used=tokens_used,
         )
     )
     db.add(AIChatMessage(session_id=session.id, role="assistant", content=assistant_content))
     await db.flush()
-    return {"session_id": session.id, "response": assistant_content, "tokens_used": tokens, "duration_ms": duration_ms}
 
-
-async def auto_categorize(products: list[dict]) -> list[dict]:
-    if not products:
-        return []
-    if not settings.claude_api_key:
-        return [{**p, "suggested_category": None} for p in products]
-    client = AsyncAnthropic(api_key=settings.claude_api_key)
-    items = [{"name": p.get("name", ""), "sku": p.get("sku", ""), "price": str(p.get("price", ""))} for p in products]
-    prompt = f"""Given these products, suggest short category name. JSON array with index/suggested_category. Products: {json.dumps(items, ensure_ascii=False)}"""
-    model_id = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
-    response = await client.messages.create(model=model_id, max_tokens=512, messages=[{"role": "user", "content": prompt}])
-    text = response.content[0].text if response.content else "[]"
-    match = re.search(r"\[[\s\S]*\]", text)
-    suggestions = json.loads(match.group()) if match else []
-    by_idx = {s["index"]: s.get("suggested_category") for s in suggestions if isinstance(s, dict)}
-    return [{**p, "suggested_category": by_idx.get(i)} for i, p in enumerate(products)]
-
-
-async def get_price_recommendation(db: AsyncSession, product_id: UUID, user_id: UUID) -> dict:
-    _ = db, product_id, user_id
-    raise NotImplementedError("Pending migration to v2 schema")
-
-
-async def get_products_at_risk(db: AsyncSession, user_id: UUID, limit: int = 5) -> list[dict]:
-    _ = db, user_id, limit
-    return []
+    return {
+        "session_id": session.id,
+        "response": assistant_content,
+        "tokens_used": tokens_used,
+        "duration_ms": duration_ms,
+    }

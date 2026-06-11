@@ -1,45 +1,34 @@
-"""Claude API integration for digest generation."""
+"""Anthropic model-id resolver.
 
-import json
-import logging
-import re
+AI1 trimmed this file to a single public function (`resolve_claude_model`) and
+its internal helpers. The DA1-orphan digest functions (generate_digest,
+_fallback_digest, _parse_json_response) were removed in AI1.
+"""
+
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
 
-import anthropic
 import httpx
 
-from app.config import Settings
+ANTHROPIC_MODELS_URL: str = "https://api.anthropic.com/v1/models"
+ANTHROPIC_API_VERSION: str = "2023-06-01"
 
-logger = logging.getLogger(__name__)
-settings = Settings()
+# Default HTTP timeout for Anthropic model-list lookups. Tight enough to fail
+# fast on outages, loose enough to ride out a normal cold-start round trip.
+ANTHROPIC_HTTP_TIMEOUT_SECONDS: float = 15.0
 
-_MODEL_CACHE_TTL = timedelta(hours=6)
+# Cached resolved model id is reused for this long before re-querying /v1/models.
+_MODEL_CACHE_TTL: timedelta = timedelta(hours=6)
 _cached_model_id: str | None = None
 _cached_model_until: datetime | None = None
 
 
-def _parse_json_response(text: str) -> dict:
-    match = re.search(r"\{[^{}]*\}", text.strip(), re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    return {}
-
-
-def _fallback_digest(period_data: dict) -> str:
-    lines = ["# Дайджест", ""]
-    for item in period_data.get("top_changes", [])[:5]:
-        lines.append(f"- {item.get('product_name', 'Товар')}: {item.get('change', '')}")
-    if len(lines) <= 2:
-        lines.append("Нет значимых изменений за период.")
-    return "\n".join(lines)
-
-
 def _parse_model_preference(raw: str | None) -> tuple[bool, str | None]:
-    """Parse CLAUDE_MODEL into explicit/auto mode and optional family."""
+    """Parse CLAUDE_MODEL into (auto_mode, family).
+
+    - "" / None / "auto"         -> (True, None)  pick latest across families
+    - "auto:<family>"            -> (True, family) pick latest in family
+    - any other explicit string  -> (False, None)  return as-is
+    """
     value = (raw or "").strip()
     if not value:
         return True, None
@@ -53,13 +42,14 @@ def _parse_model_preference(raw: str | None) -> tuple[bool, str | None]:
 
 
 async def _fetch_latest_model_id(api_key: str, family: str | None) -> str:
-    """Fetch latest available Claude model id from Anthropic models API."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    """Fetch the most recently-created Claude model id, optionally filtered
+    by family substring (e.g. ``haiku`` / ``opus``)."""
+    async with httpx.AsyncClient(timeout=ANTHROPIC_HTTP_TIMEOUT_SECONDS) as client:
         response = await client.get(
-            "https://api.anthropic.com/v1/models",
+            ANTHROPIC_MODELS_URL,
             headers={
                 "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
+                "anthropic-version": ANTHROPIC_API_VERSION,
                 "content-type": "application/json",
             },
         )
@@ -95,10 +85,11 @@ async def _fetch_latest_model_id(api_key: str, family: str | None) -> str:
 
 
 async def resolve_claude_model(raw_model: str | None, api_key: str | None) -> str:
-    """
-    Resolve model id for Anthropic calls.
-    - explicit CLAUDE_MODEL value -> returned as is
-    - CLAUDE_MODEL=auto[:family] -> latest model from /v1/models
+    """Resolve the model id for Anthropic calls.
+
+    - explicit CLAUDE_MODEL value -> returned as-is.
+    - CLAUDE_MODEL=auto[:family]  -> latest model from /v1/models (cached for
+      _MODEL_CACHE_TTL).
     """
     global _cached_model_id, _cached_model_until
 
@@ -116,20 +107,3 @@ async def resolve_claude_model(raw_model: str | None, api_key: str | None) -> st
     _cached_model_id = model_id
     _cached_model_until = now + _MODEL_CACHE_TTL
     return model_id
-
-
-async def generate_digest(user_id: UUID, period_data: dict, db=None, user=None) -> str:
-    _ = user_id
-    _ = db
-    _ = user
-    if not settings.claude_api_key:
-        return _fallback_digest(period_data)
-    model_id = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
-    client = anthropic.AsyncAnthropic(api_key=settings.claude_api_key)
-    response = await client.messages.create(
-        model=model_id,
-        max_tokens=2048,
-        system="Ты — аналитик конкурентной разведки. Пиши на русском языке.",
-        messages=[{"role": "user", "content": json.dumps(period_data, ensure_ascii=False)}],
-    )
-    return (response.content[0].text if response.content else "").strip() or _fallback_digest(period_data)

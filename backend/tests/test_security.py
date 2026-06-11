@@ -151,33 +151,10 @@ async def test_ai_chat_requires_entitlement(client, auth_headers):
     assert resp.status_code in (200, 403, 503)
 
 
-@pytest.mark.asyncio
-async def test_ai_session_idor_user_b_cannot_access_user_a_session(client, auth_headers, auth_headers_b):
-    """User B cannot access User A's AI session by ID. Skips if AI_ANALYST not available (Trial/Free)."""
-    resp_a = await client.post(
-        "/api/ai/chat",
-        headers=auth_headers,
-        json={
-            "message": "create session",
-            "session_id": None,
-            "context_type": None,
-            "context_id": None,
-        },
-    )
-    if resp_a.status_code != 200:
-        pytest.skip("AI chat not available (403/503) - cannot create session for IDOR test")
-    session_id = resp_a.json().get("session_id")
-    if not session_id:
-        list_resp = await client.get("/api/ai/sessions", headers=auth_headers)
-        if list_resp.status_code != 200 or not list_resp.json():
-            pytest.skip("No AI session created")
-        session_id = list_resp.json()[0]["id"]
-
-    resp_b = await client.get(
-        f"/api/ai/sessions/{session_id}",
-        headers=auth_headers_b,
-    )
-    assert resp_b.status_code == 404, "User B must not access User A's AI session"
+# AI1: the /api/ai/sessions{,/{id}} read surface was removed (zero frontend
+# consumers); IDOR coverage will be re-introduced alongside the future AI
+# agent's read endpoints. POST /api/ai/chat does not expose another user's
+# session: server resolves session_id against current_user.id in service.chat.
 
 
 # --- MARKETS SORT INJECTION ---

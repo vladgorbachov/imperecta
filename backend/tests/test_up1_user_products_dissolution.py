@@ -14,8 +14,9 @@ Framework-light invariants (no DB / no HTTP) that prove:
    preview_products_file, get_csv_template, css_selector_price) and the
    per-shop scraper_type schema field have no definition under
    backend/app/.
-5. `ai_analyst.service.auto_categorize` still imports cleanly (we removed
-   its caller, not the function).
+5. `ai_analyst.service.auto_categorize` is gone — UP1 was the only caller,
+   so AI1 deleted the function. See test_ai1_ai_analyst_refactor for the
+   ai_analyst-side invariants.
 """
 
 from __future__ import annotations
@@ -162,11 +163,10 @@ def test_user_products_directory_holds_only_init() -> None:
     )
 
 
-def test_ai_analyst_auto_categorize_intact() -> None:
-    """We removed user_products's caller, not the ai_analyst function itself."""
+def test_ai_analyst_auto_categorize_gone() -> None:
+    """UP1 was the only caller; AI1 deleted the orphan function."""
     module = importlib.import_module("app.modules.ai_analyst.service")
-    assert hasattr(module, "auto_categorize"), (
-        "ai_analyst.service.auto_categorize disappeared; UP1 should only remove "
-        "its caller (user_products.api_import), not the function."
+    assert not hasattr(module, "auto_categorize"), (
+        "ai_analyst.service.auto_categorize should be deleted by AI1; UP1 "
+        "removed its only caller (user_products.api_import)."
     )
-    assert callable(module.auto_categorize)
