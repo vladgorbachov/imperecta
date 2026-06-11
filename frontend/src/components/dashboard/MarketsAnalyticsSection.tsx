@@ -5,7 +5,8 @@ import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function MarketsAnalyticsSection() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language || "en";
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
 
   const { data: marketplaceStats, isLoading: statsLoading } = useQuery({
@@ -100,16 +101,16 @@ export function MarketsAnalyticsSection() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">{t("markets.analytics.marketplaces")}</span>
-              <span className="font-medium">{poolStats.total_marketplaces}</span>
+              <span className="font-medium">{poolStats.marketplaces_count}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">{t("markets.analytics.withPrice")}</span>
-              <span className="font-medium">{poolStats.products_with_price}</span>
+              <span className="font-medium">{poolStats.listings_with_price}</span>
             </div>
             <div className="rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-muted-foreground">
               {t("markets.analytics.lastUpdate")}:{" "}
-              {poolStats.last_discovery_at
-                ? new Date(poolStats.last_discovery_at).toLocaleString(locale)
+              {poolStats.last_updated
+                ? new Date(poolStats.last_updated).toLocaleString(locale)
                 : t("common.dash")}
             </div>
           </div>

@@ -4,10 +4,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from app.common.deps import CurrentSuperuser, CurrentUser, DbSession
+from app.common.deps import CurrentUser, DbSession
 from app.modules.product_pool.schemas import (
+    PoolCategoryItem,
     PoolCategorySummary,
     PoolProductsResponse,
+    PoolSearchResponse,
     PoolStatsResponse,
 )
 from app.modules.product_pool.service import ProductPoolService
@@ -18,7 +20,7 @@ markets_overview_router = APIRouter(prefix="/markets", tags=["markets"])
 OVERVIEW_SORT = ("volatile", "trending", "gainers", "losers", "recent")
 
 
-@markets_overview_router.get("/overview")
+@markets_overview_router.get("/overview", response_model=PoolProductsResponse)
 async def get_overview(
     current_user: CurrentUser,
     db: DbSession,
@@ -32,6 +34,10 @@ async def get_overview(
     """Dashboard overview list. Public path `/markets/overview` is preserved
     verbatim from the dissolved dashboard module; the load-bearing frontend
     consumer is `marketsApi.getOverview` in `MarketsOverviewSection`.
+
+    The handler returns a plain dict and relies on `response_model` for HTTP-
+    layer validation/serialisation. This preserves the D1 invariant that
+    direct invocation yields the {items,total,limit,offset} dict.
     """
     if sort not in OVERVIEW_SORT:
         sort = "volatile"
@@ -47,6 +53,7 @@ async def get_overview(
     )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
+
 @router.get("/products", response_model=PoolProductsResponse)
 async def list_pool_products(
     current_user: CurrentUser,
@@ -61,7 +68,7 @@ async def list_pool_products(
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
     display_currency: str = Query("local", description="local|EUR|USD"),
-):
+) -> PoolProductsResponse:
     service = ProductPoolService(db)
     items, total = await service.list_products(
         sort=sort,
@@ -76,40 +83,46 @@ async def list_pool_products(
     return PoolProductsResponse(items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/categories")
-async def pool_categories(current_user: CurrentUser, db: DbSession) -> list[dict]:
+@router.get("/categories", response_model=list[PoolCategoryItem])
+async def pool_categories(current_user: CurrentUser, db: DbSession) -> list[PoolCategoryItem]:
     service = ProductPoolService(db)
-    return await service.get_categories(
+    rows = await service.get_categories(
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
+    return [PoolCategoryItem(**row) for row in rows]
 
 
 @router.get("/marketplace-stats", response_model=list[PoolCategorySummary])
-async def pool_marketplace_stats(current_user: CurrentUser, db: DbSession):
+async def pool_marketplace_stats(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[PoolCategorySummary]:
     service = ProductPoolService(db)
-    return await service.get_marketplace_stats(
+    rows = await service.get_marketplace_stats(
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
+    return [PoolCategorySummary(**row) for row in rows]
 
 
 @router.get("/stats", response_model=PoolStatsResponse)
-async def pool_stats(current_user: CurrentUser, db: DbSession):
+async def pool_stats(current_user: CurrentUser, db: DbSession) -> PoolStatsResponse:
     _ = current_user
     service = ProductPoolService(db)
-    return await service.get_pool_stats()
+    payload = await service.get_pool_stats()
+    return PoolStatsResponse(**payload)
 
 
-@router.get("/search")
+@router.get("/search", response_model=PoolSearchResponse)
 async def search_pool(
     current_user: CurrentUser,
     db: DbSession,
     q: str = Query(..., min_length=2),
     limit: int = Query(50, ge=1, le=200),
-):
+) -> PoolSearchResponse:
     service = ProductPoolService(db)
     items = await service.search_products(
         query=q,
         limit=limit,
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
-    return {"items": items, "total": len(items)}
+    return PoolSearchResponse(items=items, total=len(items))

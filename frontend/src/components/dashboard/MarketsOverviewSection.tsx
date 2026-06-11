@@ -138,7 +138,7 @@ function ProductCard({
     countryCode: item.country_code,
   });
   const externalHref = item.url || undefined;
-  const changeValue = item.price_change_pct_24h ?? null;
+  const changeValue = item.price_change_pct ?? null;
 
   const imageContent = (
     <div className="aspect-square w-full overflow-hidden rounded-lg bg-[var(--background-elevated)]">
@@ -174,7 +174,7 @@ function ProductCard({
       <div className="mt-auto space-y-1.5">
         <PriceDisplay
           className="text-lg font-bold text-foreground"
-          localAmount={item.current_price}
+          localAmount={item.price}
           localCurrency={item.currency}
           displayAmount={item.display_price}
           displayCurrency={item.display_currency}
@@ -288,7 +288,7 @@ export function MarketsOverviewSection() {
       if (historyOnly && (item.recent_prices?.length ?? 0) < 2) {
         return false;
       }
-      const price = item.current_price;
+      const price = item.price;
       if (min != null && !Number.isNaN(min) && (price == null || price < min)) {
         return false;
       }
@@ -302,20 +302,20 @@ export function MarketsOverviewSection() {
   const kpis = useMemo(() => {
     const now = Date.now();
     const updated24h = filteredItems.filter(
-      (item) => now - parseDateValue(item.last_scraped_at) <= 24 * 60 * 60 * 1000,
+      (item) => now - parseDateValue(item.last_checked_at) <= 24 * 60 * 60 * 1000,
     ).length;
     const changedMore5 = filteredItems.filter(
-      (item) => Math.abs(item.price_change_pct_24h ?? 0) > 5,
+      (item) => Math.abs(item.price_change_pct ?? 0) > 5,
     ).length;
     const averageVolatility =
       filteredItems.length === 0
         ? 0
         : filteredItems.reduce(
-            (acc, item) => acc + Math.abs(item.price_change_pct_24h ?? 0),
+            (acc, item) => acc + Math.abs(item.price_change_pct ?? 0),
             0,
           ) / filteredItems.length;
     const lastUpdate = filteredItems.reduce(
-      (max, item) => Math.max(max, parseDateValue(item.last_scraped_at)),
+      (max, item) => Math.max(max, parseDateValue(item.last_checked_at)),
       0,
     );
     return {

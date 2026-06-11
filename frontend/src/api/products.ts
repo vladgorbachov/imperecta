@@ -29,31 +29,37 @@ export interface PoolProductsParams {
   display_currency?: DisplayCurrency;
 }
 
+/**
+ * Pool item canonical shape from /pool/products. PP1 dropped the legacy
+ * duplicate names (current_price, last_scraped_at, price_change_pct_24h)
+ * and the always-None placeholders (original_price, price_change_pct_7d/30d,
+ * volatility_30d). Read `price`, `last_checked_at`, `price_change_pct`.
+ */
 export interface PoolProductItem {
   id: string;
   marketplace_id: string;
   product_id?: string | null;
   marketplace_name?: string | null;
   marketplace_domain?: string | null;
+  marketplace_code?: string | null;
   country_code?: string | null;
   url: string;
   title?: string | null;
   image_url?: string | null;
   description?: string | null;
-  current_price?: number | null;
-  original_price?: number | null;
+  price?: number | null;
+  price_eur?: number | null;
   currency: string;
   display_price?: number | null;
   display_currency?: string | null;
   conversion_available?: boolean;
   local_currency_resolution?: LocalCurrencyResolution | null;
   local_currency_unavailable?: boolean;
-  price_change_pct_24h?: number | null;
-  price_change_pct_7d?: number | null;
-  price_change_pct_30d?: number | null;
-  volatility_30d?: number | null;
+  price_change_pct?: number | null;
+  in_stock?: boolean | null;
   status: string;
-  last_scraped_at?: string | null;
+  is_active?: boolean | null;
+  last_checked_at?: string | null;
   recent_prices?: Array<{
     date: string;
     price: number;

@@ -278,7 +278,6 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                     <TableHead>{t("products.marketplace")}</TableHead>
                     <TableHead>{t("products.price")}</TableHead>
                     <TableHead>{t("products.change24h")}</TableHead>
-                    <TableHead>{t("products.change7d")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -337,7 +336,7 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                       </TableCell>
                       <TableCell>
                         <PriceDisplay
-                          localAmount={item.current_price}
+                          localAmount={item.price}
                           localCurrency={item.currency}
                           displayAmount={item.display_price}
                           displayCurrency={item.display_currency}
@@ -345,32 +344,16 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                         />
                       </TableCell>
                       <TableCell>
-                        {item.price_change_pct_24h != null ? (
+                        {item.price_change_pct != null ? (
                           <span
                             className={cn(
                               "font-medium",
-                              item.price_change_pct_24h > 0 && "text-green-500",
-                              item.price_change_pct_24h < 0 && "text-red-500"
+                              item.price_change_pct > 0 && "text-green-500",
+                              item.price_change_pct < 0 && "text-red-500"
                             )}
                           >
-                            {item.price_change_pct_24h > 0 ? "+" : ""}
-                            {item.price_change_pct_24h.toFixed(2)}%
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {item.price_change_pct_7d != null ? (
-                          <span
-                            className={cn(
-                              "text-sm",
-                              item.price_change_pct_7d > 0 && "text-green-500",
-                              item.price_change_pct_7d < 0 && "text-red-500"
-                            )}
-                          >
-                            {item.price_change_pct_7d > 0 ? "+" : ""}
-                            {item.price_change_pct_7d.toFixed(2)}%
+                            {item.price_change_pct > 0 ? "+" : ""}
+                            {item.price_change_pct.toFixed(2)}%
                           </span>
                         ) : (
                           "—"

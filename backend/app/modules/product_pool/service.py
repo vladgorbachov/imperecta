@@ -203,7 +203,7 @@ class ProductPoolService:
         converter = await CurrencyConverter.load_latest(self.db)
         for item in items:
             fields = compute_display_fields_for_marketplace(
-                amount=item.get("current_price"),
+                amount=item.get("price"),
                 currency=item.get("currency"),
                 display_currency=display_currency,
                 converter=converter,
@@ -353,18 +353,14 @@ class ProductPoolService:
             .select_from(FactListing)
             .where(FactListing.is_active.is_(True), FactListing.last_price.isnot(None)),
         )
-        last_discovery = await self.db.scalar(select(func.max(DimMarketplace.last_discovery_at)))
+        last_updated = await self.db.scalar(select(func.max(DimMarketplace.last_discovery_at)))
 
         return {
             "total_products": int(total_products or 0),
             "total_listings": int(total_listings or 0),
             "marketplaces_count": int(marketplaces_count or 0),
             "listings_with_price": int(listings_with_price or 0),
-            "last_updated": last_discovery,
-            "total_marketplaces": int(marketplaces_count or 0),
-            "products_with_price": int(listings_with_price or 0),
-            "last_discovery_at": last_discovery,
-            "message": None,
+            "last_updated": last_updated,
         }
 
     async def search_products(
@@ -386,7 +382,16 @@ class ProductPoolService:
 
 
 def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
-    """Normalize ORM row mapping to API dict (UUIDs as str for JSON)."""
+    """Normalize ORM row mapping to API dict (UUIDs as str for JSON).
+
+    Returns canonical-only fields. PP1 removed the legacy duplicate names
+    (current_price, last_scraped_at, price_change_pct_24h) and the always-None
+    placeholders (original_price, price_change_pct_7d/30d, volatility_30d):
+    canonical readers are `price`, `last_checked_at`, `price_change_pct`.
+    display_* / conversion_available / local_currency_* are populated later by
+    `_apply_display_currency`; we seed them here so consumers can rely on the
+    keys existing even when display currency resolution is skipped.
+    """
     pct = row.get("price_change_pct")
     return {
         "id": row["id"],
@@ -403,20 +408,13 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "currency": row.get("currency"),
         "price_eur": float(row["price_eur"]) if row.get("price_eur") is not None else None,
         "price_change_pct": float(pct) if pct is not None else None,
-        "current_price": float(row["price"]) if row.get("price") is not None else None,
-        "original_price": None,
         "display_price": None,
         "display_currency": None,
         "conversion_available": False,
         "local_currency_resolution": None,
         "local_currency_unavailable": False,
-        "price_change_pct_24h": float(pct) if pct is not None else None,
-        "price_change_pct_7d": None,
-        "price_change_pct_30d": None,
-        "volatility_30d": None,
         "in_stock": row.get("in_stock"),
         "last_checked_at": row.get("last_checked_at"),
-        "last_scraped_at": row.get("last_checked_at"),
         "status": "active" if row.get("is_active") else "inactive",
         "is_active": row.get("is_active"),
         "recent_prices": [],
