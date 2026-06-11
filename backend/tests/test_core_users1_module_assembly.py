@@ -419,32 +419,19 @@ def test_old_core_users_placeholder_gone() -> None:
         importlib.import_module("app.modules.core.users")
 
 
-def test_core_schemas_is_telegram_only() -> None:
-    from app.modules.core import schemas as core_schemas
-
-    assert hasattr(core_schemas, "TelegramLinkResponse")
-    for moved in (
-        "UserResponse",
-        "UserUpdate",
-        "UserRegister",
-        "UserLogin",
-        "TokenResponse",
-        "RefreshTokenRequest",
-        "ChangeInitialPasswordRequest",
-        "ALLOWED_LANGUAGE_CODES",
-    ):
-        assert not hasattr(core_schemas, moved), (
-            f"core.schemas.{moved} should have moved out by now"
-        )
+def test_core_schemas_module_deleted_by_tg1() -> None:
+    """CORE-TG1 finished dissolving core/: TelegramLinkResponse moved to
+    app.modules.telegram.schemas (renamed TelegramLinkCodeResponse) and the
+    now-empty core/schemas.py file was deleted."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.modules.core.schemas")
+    telegram_schemas = importlib.import_module("app.modules.telegram.schemas")
+    assert hasattr(telegram_schemas, "TelegramLinkCodeResponse")
 
 
-def test_core_api_auth_is_telegram_only() -> None:
-    from app.modules.core.api_auth import router
-
-    pairs = sorted(
-        {(",".join(sorted(r.methods - {"HEAD"})), r.path) for r in router.routes if isinstance(r, APIRoute)}
-    )
-    assert pairs == [
-        ("POST", "/auth/telegram-disconnect"),
-        ("POST", "/auth/telegram-link"),
-    ]
+def test_core_api_auth_module_deleted_by_tg1() -> None:
+    """CORE-TG1 deleted the residual core/api_auth.py; the duplicate
+    telegram link/disconnect routes were folded into the canonical
+    /telegram/* set."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.modules.core.api_auth")

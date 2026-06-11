@@ -364,20 +364,26 @@ def test_telegram_channel_send_signature_matches_contract() -> None:
 
 
 def test_api_telegram_uses_new_channel_not_legacy_helper() -> None:
-    """The Telegram bot integration now consumes notifications.TelegramChannel."""
-    api_telegram = importlib.import_module("app.modules.core.api_telegram")
+    """The Telegram bot integration now consumes notifications.TelegramChannel.
+
+    CORE-TG1 moved the integration to ``app.modules.telegram.api`` (the
+    last ``core`` resident was dissolved); the DA1 channel contract is
+    unchanged.
+    """
+    api_telegram = importlib.import_module("app.modules.telegram.api")
     src = inspect.getsource(api_telegram)
     assert "TelegramChannel" in src
     assert "NotificationMessage" in src
     assert "send_message" not in src, (
-        "api_telegram.py must no longer reference the deleted send_message helper"
+        "telegram/api.py must not reference the deleted send_message helper"
     )
 
 
-def test_api_auth_uses_settings_directly_for_bot_url() -> None:
-    """`BOT_URL` constant is gone; api_auth reads telegram_bot_url from Settings."""
-    api_auth = importlib.import_module("app.modules.core.api_auth")
-    src = inspect.getsource(api_auth)
+def test_telegram_module_uses_settings_directly_for_bot_url() -> None:
+    """``BOT_URL`` constant is gone; telegram/api reads ``telegram_bot_url``
+    from Settings (CORE-TG1: the residual ``core/api_auth.py`` was deleted)."""
+    telegram_api = importlib.import_module("app.modules.telegram.api")
+    src = inspect.getsource(telegram_api)
     assert "BOT_URL" not in src
     assert "telegram_bot_url" in src
 

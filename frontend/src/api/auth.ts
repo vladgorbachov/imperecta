@@ -70,7 +70,9 @@ export const authApi = {
   }) => apiClient.put("/users/me", data),
   deleteAvatar: () => apiClient.delete<{ message: string }>("/auth/avatar"),
   getTelegramLink: () =>
-    apiClient.post<{ code: string; bot_url: string }>("/auth/telegram-link"),
+    apiClient.post<{ code: string; bot_url: string }>(
+      "/telegram/generate-link-code",
+    ),
   disconnectTelegram: () =>
-    apiClient.post<{ ok: boolean }>("/auth/telegram-disconnect"),
+    apiClient.post<{ unlinked: boolean }>("/telegram/unlink"),
 };

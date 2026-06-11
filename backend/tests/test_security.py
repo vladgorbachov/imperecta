@@ -42,7 +42,7 @@ async def auth_headers_b(client):
 async def test_unauthenticated_cannot_access_protected_endpoints(client):
     """Unauthenticated user cannot access protected endpoints."""
     endpoints = [
-        ("GET", "/api/auth/me"),
+        ("GET", "/api/users/me"),
         ("GET", "/api/markets/preferences"),
         ("GET", "/api/markets/overview"),
     ]

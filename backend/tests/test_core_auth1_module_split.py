@@ -84,29 +84,17 @@ def test_auth_paths_preserved_under_api() -> None:
         ("POST", "/api/auth/login"),
         ("POST", "/api/auth/refresh"),
         ("POST", "/api/auth/register"),
-        ("POST", "/api/auth/telegram-disconnect"),
-        ("POST", "/api/auth/telegram-link"),
     ], f"/api/auth/* inventory drifted: {inventory}"
 
 
-# 3. core/api_auth.py still serves the not-yet-migrated routes ---------------
+# 3. core/api_auth.py is gone after CORE-TG1 ----------------------------------
 
-def test_core_api_auth_still_owns_telegram_routes() -> None:
-    """After CORE-USERS1 the residual core/api_auth.py owns only the two
-    telegram routes; /me migrated to app.modules.users.api."""
-    from app.modules.core.api_auth import router as core_router
-
-    pairs = sorted(
-        {
-            (",".join(sorted(r.methods - {"HEAD"})), r.path)
-            for r in core_router.routes
-            if isinstance(r, APIRoute)
-        }
-    )
-    assert pairs == [
-        ("POST", "/auth/telegram-disconnect"),
-        ("POST", "/auth/telegram-link"),
-    ], f"core/api_auth.py drifted from the expected residual surface: {pairs}"
+def test_core_api_auth_module_deleted() -> None:
+    """CORE-TG1 dissolved core/: api_auth.py held only the duplicate
+    telegram link/disconnect routes after CORE-USERS1, and both moved to
+    app.modules.telegram.api as the canonical surface."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.modules.core.api_auth")
 
 
 # 4. old import path gone + every prior importer repathed ---------------------
@@ -200,22 +188,20 @@ def test_user_update_uses_common_validator() -> None:
         "ChangeInitialPasswordRequest",
     ],
 )
-def test_auth_only_schemas_left_core(name: str) -> None:
-    core_schemas = importlib.import_module("app.modules.core.schemas")
-    assert not hasattr(core_schemas, name), (
-        f"core.schemas.{name} should have moved to app.modules.auth.schemas"
-    )
+def test_auth_only_schemas_landed_in_auth_module(name: str) -> None:
+    """Every former core/schemas.py auth model lives in app.modules.auth.schemas."""
     auth_schemas = importlib.import_module("app.modules.auth.schemas")
     assert hasattr(auth_schemas, name)
 
 
-def test_core_schemas_residual_after_users_extraction() -> None:
-    """After CORE-USERS1 the residual core/schemas.py owns only
-    TelegramLinkResponse; UserResponse/UserUpdate moved to users.schemas."""
-    core_schemas = importlib.import_module("app.modules.core.schemas")
-    assert hasattr(core_schemas, "TelegramLinkResponse")
-    assert not hasattr(core_schemas, "UserResponse")
-    assert not hasattr(core_schemas, "UserUpdate")
+def test_core_schemas_module_is_gone_after_tg1() -> None:
+    """CORE-TG1 deleted the residual core/schemas.py; TelegramLinkResponse
+    moved to app.modules.telegram.schemas as TelegramLinkCodeResponse, and
+    UserResponse/UserUpdate live in app.modules.users.schemas."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.modules.core.schemas")
     users_schemas = importlib.import_module("app.modules.users.schemas")
     assert hasattr(users_schemas, "UserResponse")
     assert hasattr(users_schemas, "UserUpdate")
+    telegram_schemas = importlib.import_module("app.modules.telegram.schemas")
+    assert hasattr(telegram_schemas, "TelegramLinkCodeResponse")
