@@ -50,11 +50,6 @@ class Settings(BaseSettings):
     discovery_no_quota_limit: int = 200000
     scrape_pool_batch_size: int = 1000
     scrape_pool_max_listings_per_run: int = 200000
-    # Pipeline orchestrator selector (O3). "tick" routes /run-pipeline through
-    # the distributed orchestrator_tick state machine; anything else (default
-    # "monolith") preserves the legacy run_full_pipeline_test path — fail-safe
-    # to the proven implementation when the env var is unset or malformed.
-    orchestrator_mode: str = "monolith"
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None
     bootstrap_admin_name: str | None = None

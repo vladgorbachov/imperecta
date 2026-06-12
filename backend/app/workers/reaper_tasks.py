@@ -4,9 +4,10 @@ Runs periodically on Celery Beat and marks `scrape_jobs` rows that are stuck
 in `status='running'` past a per-type liveness threshold as `status='failed'`.
 
 Why this exists: Railway redeploys SIGTERM the worker process, so any
-in-flight discovery / pipeline job left mid-finalize stays `running` forever.
-The in-process Z1 reap in `pipeline/discovery_phase.py` cannot reap its own
-process. This task runs externally from Beat and handles that case.
+in-flight discovery / scrape / pipeline job left mid-finalize stays `running`
+forever. The tick orchestrator's in-process reap (tick_orchestrator._reap_*)
+cannot reap its own process when the worker dies mid-tick. This task runs
+externally from Beat and handles that case.
 """
 
 from __future__ import annotations

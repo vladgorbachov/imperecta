@@ -96,8 +96,8 @@ async def test_parsing_admin_run_full_test_and_poll_status(client, superuser_hea
 
     monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
     monkeypatch.setattr(
-        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
-        lambda _job_id: DummyAsyncResult(),
+        "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
+        lambda *_args, **_kwargs: DummyAsyncResult(),
     )
 
     run_resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
@@ -140,8 +140,8 @@ async def test_parsing_admin_test_runs_with_limit_and_contract(client, superuser
 
     monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
     monkeypatch.setattr(
-        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
-        lambda _job_id: DummyAsyncResult(),
+        "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
+        lambda *_args, **_kwargs: DummyAsyncResult(),
     )
     run_resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
     assert run_resp.status_code == 200
@@ -203,22 +203,11 @@ async def test_parsing_admin_job_status_not_found(client, superuser_headers):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_uses_tick_when_flag_set(client, superuser_headers, monkeypatch):
-    """O3: ORCHESTRATOR_MODE=tick dispatches orchestrator_tick, not the monolith."""
+async def test_enqueue_dispatches_tick(client, superuser_headers, monkeypatch):
+    """O4c: /run-pipeline always dispatches orchestrator_tick (the only path)."""
     monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
 
-    class _StubSettings:
-        orchestrator_mode = "tick"
-
-    monkeypatch.setattr(
-        "app.modules.admin.api_parsing.Settings", lambda: _StubSettings()
-    )
-    mono_calls: list = []
     tick_calls: list = []
-    monkeypatch.setattr(
-        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
-        lambda job_id: mono_calls.append(job_id),
-    )
     monkeypatch.setattr(
         "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
         lambda args, **kwargs: tick_calls.append((args, kwargs)),
@@ -230,45 +219,8 @@ async def test_enqueue_uses_tick_when_flag_set(client, superuser_headers, monkey
     assert resp.status_code == 200
     job_id = resp.json()["job_id"]
 
-    assert mono_calls == []
     assert len(tick_calls) == 1
     assert tick_calls[0][0] == [job_id]
-
-    async with async_session_maker() as session:
-        await session.execute(delete(ScrapeJob).where(ScrapeJob.id == UUID(job_id)))
-        await session.commit()
-
-
-@pytest.mark.asyncio
-async def test_enqueue_uses_monolith_by_default(client, superuser_headers, monkeypatch):
-    """O3: with no/invalid mode the dispatch falls back to run_full_pipeline_test."""
-    monkeypatch.setattr(ParsingAdminService, "TEST_PIPELINE_JOB_TYPE", "manual")
-
-    class _StubSettings:
-        orchestrator_mode = "monolith"
-
-    monkeypatch.setattr(
-        "app.modules.admin.api_parsing.Settings", lambda: _StubSettings()
-    )
-    mono_calls: list = []
-    tick_calls: list = []
-    monkeypatch.setattr(
-        "app.modules.admin.api_parsing.run_full_pipeline_test.delay",
-        lambda job_id: mono_calls.append(job_id),
-    )
-    monkeypatch.setattr(
-        "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
-        lambda args, **kwargs: tick_calls.append((args, kwargs)),
-    )
-
-    resp = await client.post(
-        "/api/admin/parsing/run-pipeline", headers=superuser_headers
-    )
-    assert resp.status_code == 200
-    job_id = resp.json()["job_id"]
-
-    assert tick_calls == []
-    assert mono_calls == [job_id]
 
     async with async_session_maker() as session:
         await session.execute(delete(ScrapeJob).where(ScrapeJob.id == UUID(job_id)))

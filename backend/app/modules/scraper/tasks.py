@@ -665,32 +665,6 @@ async def _discover_for_full_pipeline(
 
 @celery_app.task(
     bind=True,
-    name="run_full_pipeline_test",
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_kwargs={"max_retries": 1},
-)
-def run_full_pipeline_test(self, parent_job_id: str) -> dict:
-    """Run discovery + scrape pipeline for admin parsing jobs."""
-
-    async def _do() -> dict:
-        from app.modules.scraper.pipeline.orchestrator import FullPipelineOrchestrator
-
-        engine, session_factory = _make_session_factory()
-        try:
-            runner = FullPipelineOrchestrator(
-                session_factory,
-                celery_task_id=str(self.request.id),
-            )
-            return await runner.run(UUID(str(parent_job_id)))
-        finally:
-            await engine.dispose()
-
-    return _run_async(_do())
-
-
-@celery_app.task(
-    bind=True,
     name="scrape_all_pool_products",
     autoretry_for=(Exception,),
     retry_backoff=True,

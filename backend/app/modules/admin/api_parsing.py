@@ -8,9 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
-from app.config import Settings
 from app.modules.admin.parsing_admin import ParsingAdminService
-from app.modules.scraper.tasks import orchestrator_tick, run_full_pipeline_test
+from app.modules.scraper.tasks import orchestrator_tick
 
 router = APIRouter(
     prefix="/admin/parsing",
@@ -53,14 +52,8 @@ async def _enqueue_pipeline_run(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # O3 feature flag: "tick" routes to the distributed orchestrator;
-    # anything else (including missing/unset) falls back to the proven
-    # monolithic full-pipeline task. Instant rollback by unsetting the env var.
-    mode = (Settings().orchestrator_mode or "monolith").strip().lower()
-    if mode == "tick":
-        orchestrator_tick.apply_async([created["job_id"]])
-    else:
-        run_full_pipeline_test.delay(created["job_id"])
+    # Pipeline dispatch: the distributed tick orchestrator is the only path.
+    orchestrator_tick.apply_async([created["job_id"]])
     return created
 
 
