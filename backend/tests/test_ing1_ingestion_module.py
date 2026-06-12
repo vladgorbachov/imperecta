@@ -466,10 +466,13 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
         def __init__(self, db):
             captured["db"] = db
 
-        def persist_extracted(self, *, data, listing, extracted_in_stock):
+        def persist_extracted(
+            self, *, data, listing, extracted_in_stock, scrape_job_id=None
+        ):
             captured["data"] = data
             captured["listing"] = listing
             captured["extracted_in_stock"] = extracted_in_stock
+            captured["scrape_job_id"] = scrape_job_id
             return IngestionResult(
                 persisted=True,
                 log_status="success",
@@ -524,3 +527,4 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
     assert captured["data"] is pool_data
     assert captured["listing"] is listing
     assert captured["extracted_in_stock"] is True
+    assert captured["scrape_job_id"] is None
