@@ -12,7 +12,7 @@ def test_layer_order_tier1_no_js():
     pool = ScraperPool()
     result = pool._layer_order(requires_js=False, scrape_tier=1)
     if sp.settings.decodo_enabled and sp.settings.decodo_username and sp.settings.decodo_password:
-        assert result == ["decodo", "httpx", "playwright"]
+        assert result == ["httpx", "decodo", "playwright"]
     else:
         assert result == ["httpx", "playwright"]
 

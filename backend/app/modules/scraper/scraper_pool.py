@@ -538,14 +538,19 @@ class ScraperPool:
         - scrape_tier: strategic policy choice (1/2/3) tied to marketplace category.
         - requires_js: fine-grained hint inside a tier (affects layer order, not set).
 
-        Tier 1 (current default): httpx -> decodo (if configured) -> playwright.
-                                  httpx-first saves Decodo quota on server-rendered
-                                  shops (the majority of Tier 1 marketplaces).
-                                  When httpx fails (timeout, blocked, JS-only page),
-                                  Decodo and Playwright are tried in order.
-                                  When requires_js=True, playwright moves up
-                                  to position 2 (right after httpx) since Decodo
-                                  with JS rendering is more expensive than Playwright.
+        Tier 1 (current default), policy B:
+            Server-rendered (requires_js=False): httpx -> decodo -> playwright.
+                httpx is FIRST to save Decodo quota — httpx is free/fast and
+                sufficient for the server-rendered majority of Tier 1 shops.
+                Decodo is tried only when httpx fails; Playwright last.
+            JS-only (requires_js=True): decodo -> playwright -> httpx.
+                httpx cannot execute JS, so leading with it on a JS-only page
+                wastes a request. Decodo (the primary scraper) goes first when
+                configured, then Playwright. httpx is kept as a last-resort
+                fallback because some "JS" pages still expose partial
+                server-rendered content.
+            When Decodo is not configured, "decodo" is dropped from both
+            sequences.
 
         Tier 2 / Tier 3: layers are documented in _SUPPORTED_SCRAPE_TIERS and are
                          not yet implemented. They will be added when the platform
@@ -567,19 +572,29 @@ class ScraperPool:
                 f"currently supported tiers: {sorted(_SUPPORTED_SCRAPE_TIERS)}"
             )
 
-        # Tier 1 layer composition: httpx-first to save Decodo quota.
-        # httpx is free, fast (~400ms on server-rendered shops), and sufficient
-        # for the majority of Tier 1 marketplaces. Decodo is tried only when
-        # httpx fails (timeout, blocked, or JS-only page).
-        layers: list[str] = ["httpx"]
-        if settings.decodo_enabled and settings.decodo_username and settings.decodo_password:
+        decodo_available = (
+            settings.decodo_enabled
+            and settings.decodo_username
+            and settings.decodo_password
+        )
+        if requires_js:
+            # JS-only page: httpx cannot execute JS, so lead with a JS-capable
+            # transport. Decodo (the primary scraper) first when configured, then
+            # Playwright, with httpx kept only as a last-resort fallback (some
+            # "JS" pages still expose partial server-rendered content).
+            layers: list[str] = []
+            if decodo_available:
+                layers.append("decodo")
+            layers.append("playwright")
+            layers.append("httpx")
+            return layers
+        # Server-rendered (general) case: httpx FIRST to save Decodo quota — httpx
+        # is free/fast and sufficient for the server-rendered majority of Tier 1
+        # shops. Decodo is tried only when httpx fails; Playwright last.
+        layers = ["httpx"]
+        if decodo_available:
             layers.append("decodo")
         layers.append("playwright")
-        if requires_js and "playwright" in layers:
-            # JS required: move playwright right after httpx (before Decodo),
-            # so we use the cheaper JS-capable transport first.
-            layers = [layer for layer in layers if layer != "playwright"]
-            layers.insert(1, "playwright")
         return layers
 
     async def _fetch_html_decodo_static(self, url: str) -> tuple[str | None, str | None]:
