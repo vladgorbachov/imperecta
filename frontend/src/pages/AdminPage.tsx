@@ -427,7 +427,7 @@ export function AdminPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t("products.marketplace")}</TableHead>
-                      <TableHead>{t("competitors.tableUrl")}</TableHead>
+                      <TableHead>{t("admin.marketOverview.urlColumn")}</TableHead>
                       <TableHead>{t("admin.pool.productsInPool")}</TableHead>
                       <TableHead>Active listings</TableHead>
                       <TableHead>{t("admin.marketplaces.lastScrape")}</TableHead>
@@ -1219,7 +1219,7 @@ export function AdminPage() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">{t("competitors.tableUrl")}</label>
+              <label className="text-sm text-muted-foreground">{t("admin.marketOverview.urlColumn")}</label>
               <Input
                 value={editMarketplaceForm.url}
                 onChange={(event) =>
