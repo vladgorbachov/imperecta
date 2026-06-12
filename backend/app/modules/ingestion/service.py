@@ -228,6 +228,7 @@ class IngestionService:
         data: Any,
         listing: FactListing,
         extracted_in_stock: bool | None,
+        scrape_job_id: UUID | None = None,
     ) -> IngestionResult:
         """Run gate -> (optional) FactPrice write + enrichment -> commit.
 
@@ -305,6 +306,7 @@ class IngestionService:
                     data=data,
                     listing=listing,
                     extracted_in_stock=extracted_in_stock,
+                    scrape_job_id=scrape_job_id,
                 )
                 forced_log_status = "success"
                 persisted = True
@@ -400,6 +402,7 @@ class IngestionService:
         data: Any,
         listing: FactListing,
         extracted_in_stock: bool | None,
+        scrape_job_id: UUID | None = None,
     ) -> None:
         """Write FactPrice + update FactListing denorm fields (success branch)."""
         date_id = _today_date_id(self.db)
@@ -439,6 +442,7 @@ class IngestionService:
             in_stock=extracted_in_stock,
             scraped_at=now,
             price_change_pct=price_change_pct,
+            scrape_job_id=scrape_job_id,
         )
         self.db.add(price_record)
         listing.last_price = data.price

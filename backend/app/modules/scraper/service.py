@@ -407,6 +407,7 @@ class GlobalScrapeService:
                 data=data,
                 listing=listing,
                 extracted_in_stock=last_in_stock,
+                scrape_job_id=self.scrape_job_id,
             )
             forced_log_status = ing_result.log_status
 
