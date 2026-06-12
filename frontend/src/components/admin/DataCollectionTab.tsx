@@ -65,7 +65,7 @@ interface RunHistoryColumn {
 }
 
 const RUN_HISTORY_COLUMNS: RunHistoryColumn[] = [
-  { key: "job", labelKey: "Job", defaultWidth: 120, minWidth: 90 },
+  { key: "job", labelKey: "admin.dataCollection.colJob", defaultWidth: 120, minWidth: 90 },
   { key: "date", labelKey: "alerts.date", defaultWidth: 160, minWidth: 120 },
   { key: "scope", labelKey: "admin.dataCollection.scopeLabel", defaultWidth: 140, minWidth: 100 },
   { key: "stage", labelKey: "admin.dataCollection.metric.stage", defaultWidth: 120, minWidth: 90 },
@@ -715,7 +715,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                       </div>
                       {celeryTaskId ? (
                         <div className="rounded-md border p-3 text-sm md:col-span-2">
-                          <p className="text-muted-foreground">Celery task</p>
+                          <p className="text-muted-foreground">{t("admin.dataCollection.celeryTask")}</p>
                           <p className="font-mono text-xs">{celeryTaskId}</p>
                         </div>
                       ) : null}
@@ -880,7 +880,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                                     <TableHead>{t("products.marketplace")}</TableHead>
                                     <TableHead>{t("common.status")}</TableHead>
                                     <TableHead>{t("common.price")}</TableHead>
-                                    <TableHead>URL</TableHead>
+                                    <TableHead>{t("admin.marketOverview.urlColumn")}</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -971,9 +971,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                           className="select-none"
                         >
                           <span className="block truncate pr-2">
-                            {column.labelKey.startsWith("admin.") || column.labelKey.startsWith("alerts.") || column.labelKey.startsWith("common.")
-                              ? t(column.labelKey)
-                              : column.labelKey}
+                            {t(column.labelKey)}
                           </span>
                           <button
                             type="button"

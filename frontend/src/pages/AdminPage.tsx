@@ -254,11 +254,11 @@ export function AdminPage() {
         is_active: createUserForm.is_active,
         is_superuser: createUserForm.is_superuser,
       });
-      toast.success("User created");
+      toast.success(t("admin.users.createdToast"));
       setCreateUserForm(DEFAULT_USER_FORM);
       setIsCreateUserOpen(false);
     } catch (error) {
-      toast.error(extractErrorMessage(error, "Failed to create user"));
+      toast.error(extractErrorMessage(error, t("admin.users.createFailed")));
     }
   };
 
@@ -278,11 +278,11 @@ export function AdminPage() {
           is_superuser: editUserForm.is_superuser,
         },
       });
-      toast.success("User updated");
+      toast.success(t("admin.users.updatedToast"));
       setIsEditUserOpen(false);
       setSelectedUser(null);
     } catch (error) {
-      toast.error(extractErrorMessage(error, "Failed to update user"));
+      toast.error(extractErrorMessage(error, t("admin.users.updateFailed")));
     }
   };
 
@@ -294,13 +294,13 @@ export function AdminPage() {
         new_password: newPassword,
         force_password_change: forcePasswordChange,
       });
-      toast.success("Password reset");
+      toast.success(t("admin.users.passwordResetToast"));
       setNewPassword("");
       setForcePasswordChange(true);
       setIsResetPasswordOpen(false);
       setSelectedUser(null);
     } catch (error) {
-      toast.error(extractErrorMessage(error, "Failed to reset password"));
+      toast.error(extractErrorMessage(error, t("admin.users.passwordResetFailed")));
     }
   };
 
@@ -326,9 +326,9 @@ export function AdminPage() {
 
       <Tabs defaultValue="data-collection" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="overview">Market Overview</TabsTrigger>
-          <TabsTrigger value="data-collection">Data Collection</TabsTrigger>
-          <TabsTrigger value="users-management">Users Management</TabsTrigger>
+          <TabsTrigger value="overview">{t("admin.tabs.marketOverview")}</TabsTrigger>
+          <TabsTrigger value="data-collection">{t("admin.tabs.dataCollection")}</TabsTrigger>
+          <TabsTrigger value="users-management">{t("admin.tabs.usersManagement")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -429,7 +429,7 @@ export function AdminPage() {
                       <TableHead>{t("products.marketplace")}</TableHead>
                       <TableHead>{t("admin.marketOverview.urlColumn")}</TableHead>
                       <TableHead>{t("admin.pool.productsInPool")}</TableHead>
-                      <TableHead>Active listings</TableHead>
+                      <TableHead>{t("admin.marketplaces.activeListings")}</TableHead>
                       <TableHead>{t("admin.marketplaces.lastScrape")}</TableHead>
                       <TableHead>{t("admin.marketplaces.successRate")}</TableHead>
                       <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
@@ -449,7 +449,7 @@ export function AdminPage() {
                         <TableCell>{formatDateTime(item.last_discovery_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
                         <TableCell>
                           <Badge variant={item.is_active ? "default" : "destructive"}>
-                            {item.is_active ? "active" : "inactive"}
+                            {t(item.is_active ? "admin.marketplaces.statusActive" : "admin.marketplaces.statusInactive")}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -505,7 +505,7 @@ export function AdminPage() {
               <CardHeader className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <CardTitle>Users Management</CardTitle>
+                    <CardTitle>{t("admin.users.title")}</CardTitle>
                     <CardDescription>{t("admin.users.managementDescription")}</CardDescription>
                   </div>
                   <Button
@@ -515,24 +515,24 @@ export function AdminPage() {
                     }}
                   >
                     <Plus className="mr-2 size-4" />
-                    Add user
+                    {t("admin.users.add")}
                   </Button>
                 </div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                   <div className="rounded border p-3">
-                    <p className="text-xs text-muted-foreground">Total users</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.users.totalUsers")}</p>
                     <p className="text-xl font-semibold">{usersSummary.total}</p>
                   </div>
                   <div className="rounded border p-3">
-                    <p className="text-xs text-muted-foreground">Active users</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.users.activeUsers")}</p>
                     <p className="text-xl font-semibold">{usersSummary.active}</p>
                   </div>
                   <div className="rounded border p-3">
-                    <p className="text-xs text-muted-foreground">Superusers</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.users.superusers")}</p>
                     <p className="text-xl font-semibold">{usersSummary.superusers}</p>
                   </div>
                   <div className="rounded border p-3">
-                    <p className="text-xs text-muted-foreground">Trial users</p>
+                    <p className="text-xs text-muted-foreground">{t("admin.users.trialUsers")}</p>
                     <p className="text-xl font-semibold">{usersSummary.trial}</p>
                   </div>
                 </div>
@@ -543,17 +543,17 @@ export function AdminPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       className="pl-9"
-                      placeholder="Search by email/name/company"
+                      placeholder={t("admin.users.searchPlaceholder")}
                       value={userSearch}
                       onChange={(event) => setUserSearch(event.target.value)}
                     />
                   </div>
                   <Select value={userPlanFilter} onValueChange={setUserPlanFilter}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Plan filter" />
+                      <SelectValue placeholder={t("admin.users.planFilter")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All plans</SelectItem>
+                      <SelectItem value="all">{t("admin.users.allPlans")}</SelectItem>
                       {USER_PLAN_OPTIONS.map((plan) => (
                         <SelectItem key={plan} value={plan}>
                           {plan}
@@ -569,12 +569,12 @@ export function AdminPage() {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Status" />
+                        <SelectValue placeholder={t("admin.users.statusFilter")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All status</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
+                        <SelectItem value="all">{t("admin.users.allStatus")}</SelectItem>
+                        <SelectItem value="active">{t("admin.users.statusActive")}</SelectItem>
+                        <SelectItem value="inactive">{t("admin.users.statusInactive")}</SelectItem>
                       </SelectContent>
                     </Select>
                     <Select
@@ -584,12 +584,12 @@ export function AdminPage() {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Role" />
+                        <SelectValue placeholder={t("admin.users.roleFilter")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All roles</SelectItem>
-                        <SelectItem value="superuser">Superuser</SelectItem>
-                        <SelectItem value="regular">Regular</SelectItem>
+                        <SelectItem value="all">{t("admin.users.allRoles")}</SelectItem>
+                        <SelectItem value="superuser">{t("admin.users.roleSuperuser")}</SelectItem>
+                        <SelectItem value="regular">{t("admin.users.roleRegular")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -598,21 +598,21 @@ export function AdminPage() {
                 {usersDetailedQuery.isLoading ? (
                   <Skeleton className="h-56 w-full" />
                 ) : filteredUsers.length === 0 ? (
-                  <EmptyState title={t("common.noData")} description="Users Management" />
+                  <EmptyState title={t("common.noData")} description={t("admin.users.title")} />
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead>Plan</TableHead>
-                        <TableHead>Language</TableHead>
-                        <TableHead>Tracked</TableHead>
-                        <TableHead>Logins</TableHead>
-                        <TableHead>Last login</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Superuser</TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead>{t("admin.users.colUser")}</TableHead>
+                        <TableHead>{t("admin.users.colPlan")}</TableHead>
+                        <TableHead>{t("admin.users.colLanguage")}</TableHead>
+                        <TableHead>{t("admin.users.colTracked")}</TableHead>
+                        <TableHead>{t("admin.users.colLogins")}</TableHead>
+                        <TableHead>{t("admin.users.colLastLogin")}</TableHead>
+                        <TableHead>{t("admin.users.colCreated")}</TableHead>
+                        <TableHead>{t("admin.users.colStatus")}</TableHead>
+                        <TableHead>{t("admin.users.colSuperuser")}</TableHead>
+                        <TableHead>{t("admin.users.colActions")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -650,14 +650,14 @@ export function AdminPage() {
                                       userId: userRow.id,
                                       is_active: checked,
                                     });
-                                    toast.success(`User ${checked ? "activated" : "deactivated"}`);
+                                    toast.success(t(checked ? "admin.users.activatedToast" : "admin.users.deactivatedToast"));
                                   } catch (error) {
-                                    toast.error(extractErrorMessage(error, "Failed to update status"));
+                                    toast.error(extractErrorMessage(error, t("admin.users.statusUpdateFailed")));
                                   }
                                 }}
                               />
                               <Badge variant={userRow.is_active ? "default" : "destructive"}>
-                                {userRow.is_active ? "active" : "inactive"}
+                                {t(userRow.is_active ? "admin.users.statusActive" : "admin.users.statusInactive")}
                               </Badge>
                             </div>
                           </TableCell>
@@ -672,16 +672,16 @@ export function AdminPage() {
                                       userId: userRow.id,
                                       is_superuser: checked,
                                     });
-                                    toast.success(`Role updated: ${checked ? "superuser" : "regular"}`);
+                                    toast.success(t(checked ? "admin.users.roleSuperuserToast" : "admin.users.roleRegularToast"));
                                   } catch (error) {
-                                    toast.error(extractErrorMessage(error, "Failed to update role"));
+                                    toast.error(extractErrorMessage(error, t("admin.users.roleUpdateFailed")));
                                   }
                                 }}
                               />
                               {userRow.is_superuser ? (
                                 <Shield className="size-4 text-primary" />
                               ) : (
-                                <span className="text-xs text-muted-foreground">regular</span>
+                                <span className="text-xs text-muted-foreground">{t("admin.users.rowRegular")}</span>
                               )}
                             </div>
                           </TableCell>
@@ -716,16 +716,16 @@ export function AdminPage() {
                                 onClick={async () => {
                                   if (
                                     !window.confirm(
-                                      `Delete user ${userRow.email}? This operation is permanent.`,
+                                      t("admin.users.deleteConfirm", { email: userRow.email }),
                                     )
                                   ) {
                                     return;
                                   }
                                   try {
                                     await deleteUserMutation.mutateAsync(userRow.id);
-                                    toast.success("User deleted");
+                                    toast.success(t("admin.users.deletedToast"));
                                   } catch (error) {
-                                    toast.error(extractErrorMessage(error, "Failed to delete user"));
+                                    toast.error(extractErrorMessage(error, t("admin.users.deleteFailed")));
                                   }
                                 }}
                               >
@@ -747,19 +747,19 @@ export function AdminPage() {
       <Dialog open={isCreateUserOpen} onOpenChange={setIsCreateUserOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create user</DialogTitle>
+            <DialogTitle>{t("admin.users.createTitle")}</DialogTitle>
             <DialogDescription>{t("admin.users.createDescription")}</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3">
             <Input
-              placeholder="Email"
+              placeholder={t("admin.users.email")}
               value={createUserForm.email}
               onChange={(event) =>
                 setCreateUserForm((prev) => ({ ...prev, email: event.target.value }))
               }
             />
             <Input
-              placeholder="Temporary password"
+              placeholder={t("admin.users.tempPassword")}
               type="password"
               value={createUserForm.password}
               onChange={(event) =>
@@ -767,14 +767,14 @@ export function AdminPage() {
               }
             />
             <Input
-              placeholder="Name"
+              placeholder={t("admin.users.name")}
               value={createUserForm.name}
               onChange={(event) =>
                 setCreateUserForm((prev) => ({ ...prev, name: event.target.value }))
               }
             />
             <Input
-              placeholder="Company"
+              placeholder={t("admin.users.company")}
               value={createUserForm.company_name}
               onChange={(event) =>
                 setCreateUserForm((prev) => ({ ...prev, company_name: event.target.value }))
@@ -788,7 +788,7 @@ export function AdminPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Plan" />
+                  <SelectValue placeholder={t("admin.users.plan")} />
                 </SelectTrigger>
                 <SelectContent>
                   {USER_PLAN_OPTIONS.map((plan) => (
@@ -805,7 +805,7 @@ export function AdminPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Language" />
+                  <SelectValue placeholder={t("admin.users.language")} />
                 </SelectTrigger>
                 <SelectContent>
                   {USER_LANGUAGE_OPTIONS.map((language) => (
@@ -816,7 +816,7 @@ export function AdminPage() {
                 </SelectContent>
               </Select>
               <Input
-                placeholder="Timezone"
+                placeholder={t("admin.users.timezone")}
                 value={createUserForm.timezone}
                 onChange={(event) =>
                   setCreateUserForm((prev) => ({ ...prev, timezone: event.target.value }))
@@ -825,7 +825,7 @@ export function AdminPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 rounded border p-3">
               <label className="flex items-center justify-between gap-2 text-sm">
-                <span>Active account</span>
+                <span>{t("admin.users.activeAccount")}</span>
                 <Switch
                   checked={createUserForm.is_active}
                   onCheckedChange={(checked) =>
@@ -834,7 +834,7 @@ export function AdminPage() {
                 />
               </label>
               <label className="flex items-center justify-between gap-2 text-sm">
-                <span>Superuser</span>
+                <span>{t("admin.users.superuserToggle")}</span>
                 <Switch
                   checked={createUserForm.is_superuser}
                   onCheckedChange={(checked) =>
@@ -861,7 +861,7 @@ export function AdminPage() {
               ) : (
                 <Plus className="mr-2 size-4" />
               )}
-              Create
+              {t("admin.users.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -876,26 +876,26 @@ export function AdminPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit user</DialogTitle>
+            <DialogTitle>{t("admin.users.editTitle")}</DialogTitle>
             <DialogDescription>{selectedUser?.email ?? t("common.dash")}</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3">
             <Input
-              placeholder="Email"
+              placeholder={t("admin.users.email")}
               value={editUserForm.email}
               onChange={(event) =>
                 setEditUserForm((prev) => ({ ...prev, email: event.target.value }))
               }
             />
             <Input
-              placeholder="Name"
+              placeholder={t("admin.users.name")}
               value={editUserForm.name}
               onChange={(event) =>
                 setEditUserForm((prev) => ({ ...prev, name: event.target.value }))
               }
             />
             <Input
-              placeholder="Company"
+              placeholder={t("admin.users.company")}
               value={editUserForm.company_name}
               onChange={(event) =>
                 setEditUserForm((prev) => ({ ...prev, company_name: event.target.value }))
@@ -907,7 +907,7 @@ export function AdminPage() {
                 onValueChange={(value) => setEditUserForm((prev) => ({ ...prev, plan: value as UserPlan }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Plan" />
+                  <SelectValue placeholder={t("admin.users.plan")} />
                 </SelectTrigger>
                 <SelectContent>
                   {USER_PLAN_OPTIONS.map((plan) => (
@@ -924,7 +924,7 @@ export function AdminPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Language" />
+                  <SelectValue placeholder={t("admin.users.language")} />
                 </SelectTrigger>
                 <SelectContent>
                   {USER_LANGUAGE_OPTIONS.map((language) => (
@@ -935,7 +935,7 @@ export function AdminPage() {
                 </SelectContent>
               </Select>
               <Input
-                placeholder="Timezone"
+                placeholder={t("admin.users.timezone")}
                 value={editUserForm.timezone}
                 onChange={(event) =>
                   setEditUserForm((prev) => ({ ...prev, timezone: event.target.value }))
@@ -944,7 +944,7 @@ export function AdminPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 rounded border p-3">
               <label className="flex items-center justify-between gap-2 text-sm">
-                <span>Active account</span>
+                <span>{t("admin.users.activeAccount")}</span>
                 <Switch
                   checked={editUserForm.is_active}
                   onCheckedChange={(checked) =>
@@ -953,7 +953,7 @@ export function AdminPage() {
                 />
               </label>
               <label className="flex items-center justify-between gap-2 text-sm">
-                <span>Superuser</span>
+                <span>{t("admin.users.superuserToggle")}</span>
                 <Switch
                   checked={editUserForm.is_superuser}
                   onCheckedChange={(checked) =>
@@ -976,7 +976,7 @@ export function AdminPage() {
               ) : (
                 <Pencil className="mr-2 size-4" />
               )}
-              Save
+              {t("admin.users.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -995,18 +995,18 @@ export function AdminPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reset password</DialogTitle>
+            <DialogTitle>{t("admin.users.resetTitle")}</DialogTitle>
             <DialogDescription>{selectedUser?.email ?? t("common.dash")}</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3">
             <Input
-              placeholder="New password"
+              placeholder={t("admin.users.newPassword")}
               type="password"
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
             />
             <label className="flex items-center justify-between rounded border p-3 text-sm">
-              <span>Force password change on next login</span>
+              <span>{t("admin.users.forcePasswordChange")}</span>
               <Switch checked={forcePasswordChange} onCheckedChange={setForcePasswordChange} />
             </label>
           </div>
@@ -1023,7 +1023,7 @@ export function AdminPage() {
               ) : (
                 <KeyRound className="mr-2 size-4" />
               )}
-              Reset
+              {t("admin.users.reset")}
             </Button>
           </DialogFooter>
         </DialogContent>

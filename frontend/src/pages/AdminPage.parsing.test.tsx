@@ -112,7 +112,7 @@ describe("AdminPage parsing section", () => {
 
   it("renders market overview tab", () => {
     renderPage();
-    expect(screen.getByRole("tab", { name: "Market Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "admin.tabs.marketOverview" })).toBeInTheDocument();
     expect(mockUseParsingMarketplacesDetailed).toHaveBeenCalled();
   });
 
