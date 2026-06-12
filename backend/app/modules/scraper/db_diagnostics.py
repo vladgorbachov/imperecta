@@ -111,7 +111,7 @@ def collect_db_diagnostics(engine: Engine) -> dict[str, Any]:
             listings_sql = """
             SELECT
               fl.id, fl.external_url, fl.last_checked_at, fl.last_error,
-              fl.consecutive_errors, fl.last_price, dm.name AS marketplace,
+              fl.consecutive_errors, fl.failure_streak, fl.last_price, dm.name AS marketplace,
               dp.name AS product_name
             FROM fact_listing fl
             JOIN dim_marketplace dm ON fl.marketplace_id = dm.id

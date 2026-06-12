@@ -321,6 +321,12 @@ class GlobalScrapeService:
             listing_id=str(listing_id),
             url=(listing.external_url or "")[:200],
         )
+        # Pre-flight: clear this-run error state BEFORE the network attempt so a
+        # fresh scrape never carries a previous run's error. failure_streak (the
+        # deactivation counter) is intentionally NOT reset here — it accumulates
+        # across runs and clears only on success (below).
+        listing.consecutive_errors = 0
+        listing.last_error = None
         try:
             result = _run_coro_in_worker(
                 self.pool.scrape_product(
@@ -342,10 +348,10 @@ class GlobalScrapeService:
             )
 
         data = result.data
-        # Legacy cleanup: any successful pool response clears stale error counters.
+        # consecutive_errors/last_error already cleared pre-flight; a success
+        # additionally breaks the deactivation streak.
         if result.success:
-            listing.last_error = None
-            listing.consecutive_errors = 0
+            listing.failure_streak = 0
 
         last_in_stock = _resolve_in_stock(result, data)
         is_partial = bool(result.is_partial)
@@ -355,12 +361,13 @@ class GlobalScrapeService:
             if not result.success:
                 listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
                 listing.last_error = result.error or "scrape_failed"
-                if listing.consecutive_errors >= LISTING_DEACTIVATE_AFTER_ERRORS:
+                listing.failure_streak = (listing.failure_streak or 0) + 1
+                if listing.failure_streak >= LISTING_DEACTIVATE_AFTER_ERRORS:
                     listing.is_active = False
                     logger.warning(
-                        "LISTING_DEACTIVATED listing_id=%s consecutive_errors=%d url=%s",
+                        "LISTING_DEACTIVATED listing_id=%s failure_streak=%d url=%s",
                         listing_id,
-                        listing.consecutive_errors,
+                        listing.failure_streak,
                         listing.external_url,
                     )
             # No ingestion call on failure path; parser commits listing housekeeping

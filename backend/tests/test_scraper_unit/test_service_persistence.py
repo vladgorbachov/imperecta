@@ -11,7 +11,7 @@ from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
-from app.modules.scraper.service import GlobalScrapeService
+from app.modules.scraper.service import GlobalScrapeService, LISTING_DEACTIVATE_AFTER_ERRORS
 
 
 def _session_with_listing(
@@ -165,3 +165,40 @@ def test_fact_price_skipped_without_currency(monkeypatch):
 
     added = [c.args[0] for c in session.add.call_args_list if c.args]
     assert not any(isinstance(x, FactPrice) for x in added)
+
+
+def test_failure_streak_deactivates_listing_at_threshold(monkeypatch):
+    """failure_streak (not consecutive_errors) drives listing deactivation."""
+    listing_id = uuid.uuid4()
+    product_id = uuid.uuid4()
+    marketplace_id = uuid.uuid4()
+    session, listing = _session_with_listing(
+        listing_id=listing_id,
+        product_id=product_id,
+        marketplace_id=marketplace_id,
+    )
+
+    def failing_worker(coro):
+        import inspect
+
+        if inspect.iscoroutine(coro):
+            coro.close()
+        return PoolScrapeResult(
+            success=False,
+            url=listing.external_url,
+            error="fetch_failed:httpx",
+        )
+
+    monkeypatch.setattr(
+        "app.modules.scraper.service._run_coro_in_worker", failing_worker
+    )
+    svc = GlobalScrapeService(session, MagicMock(spec=ScraperPool))
+
+    for i in range(1, LISTING_DEACTIVATE_AFTER_ERRORS + 1):
+        listing.is_active = True
+        svc.scrape_product(listing_id)
+        assert listing.failure_streak == i
+        assert listing.consecutive_errors == 1
+        if i < LISTING_DEACTIVATE_AFTER_ERRORS:
+            assert listing.is_active is True
+    assert listing.is_active is False
