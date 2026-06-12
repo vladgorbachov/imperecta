@@ -299,7 +299,7 @@ class GlobalScrapeService:
 
         mp = self.db.get(DimMarketplace, listing.marketplace_id)
         requires_js = bool(mp.requires_js) if mp else False
-        scrape_tier = int(getattr(mp, "scrape_tier", 1)) if mp else 1
+        scrape_tier = int(mp.scrape_tier) if mp and mp.scrape_tier is not None else 1
 
         # Per-shop custom_selectors (legacy extractor input) — Phase 5 universality
         # registry item: remove together with the marketplace.custom_*_selector
