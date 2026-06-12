@@ -397,6 +397,30 @@ class TestToFrontendStatus:
         assert ParsingAdminService._to_frontend_status("cancelled") == "failed"
 
 
+class TestMarketplaceHealth:
+    """Pure derivation of health bucket from (success_rate, total_runs).
+
+    Separate from last-run `status`: expresses historical reliability. None
+    when total_runs==0 (no signal — must not read as 'failing').
+    """
+
+    def test_healthy_at_and_above_80(self):
+        assert ParsingAdminService._health_from_success_rate(80.0, 10) == "healthy"
+        assert ParsingAdminService._health_from_success_rate(95.0, 10) == "healthy"
+
+    def test_degraded_between_50_and_80(self):
+        assert ParsingAdminService._health_from_success_rate(79.99, 10) == "degraded"
+        assert ParsingAdminService._health_from_success_rate(50.0, 10) == "degraded"
+
+    def test_failing_below_50(self):
+        assert ParsingAdminService._health_from_success_rate(49.99, 10) == "failing"
+        assert ParsingAdminService._health_from_success_rate(0.0, 10) == "failing"
+
+    def test_no_runs_is_none_not_failing(self):
+        assert ParsingAdminService._health_from_success_rate(0.0, 0) is None
+        assert ParsingAdminService._health_from_success_rate(100.0, 0) is None
+
+
 async def _cleanup_full_pipeline_jobs(session) -> None:
     """Wipe every full_pipeline_test row so latest-job tests see a clean slate."""
     from sqlalchemy import delete as sa_delete

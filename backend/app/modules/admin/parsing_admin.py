@@ -154,6 +154,7 @@ class ParsingAdminService:
                     "products_in_pool": int(row["products_in_pool"] or 0),
                     "last_successful_scrape": self._to_iso(row["last_successful_scrape"]),
                     "success_rate": round(success_rate, 2),
+                    "health": self._health_from_success_rate(success_rate, total_runs),
                     "last_run": self._to_iso(row["last_run"]),
                     "status": self._normalize_marketplace_status(
                         latest_job_status=row["job_status"],
@@ -484,6 +485,7 @@ class ParsingAdminService:
                     "success_runs": success_runs,
                     "error_runs": max(0, total_runs - success_runs),
                     "success_rate": round(success_rate, 2),
+                    "health": self._health_from_success_rate(success_rate, total_runs),
                     "last_error_message": row["last_error_message"],
                 }
             )
@@ -786,6 +788,22 @@ class ParsingAdminService:
         if raw_status in {"pending"}:
             return "running"
         return "failed"
+
+    @staticmethod
+    def _health_from_success_rate(
+        success_rate: float, total_runs: int
+    ) -> str | None:
+        """Historical reliability bucket for a marketplace, separate from the
+        last-run `status`. Returns None when there are no runs yet (no signal
+        - must NOT read as 'failing'). Thresholds: healthy>=80, degraded>=50,
+        else failing."""
+        if total_runs <= 0:
+            return None
+        if success_rate >= 80.0:
+            return "healthy"
+        if success_rate >= 50.0:
+            return "degraded"
+        return "failing"
 
     @staticmethod
     def _normalize_marketplace_status(
