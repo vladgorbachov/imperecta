@@ -1,10 +1,10 @@
 """γ-full orchestrator tick: short, re-enqueuing state-machine step for a
 distributed full-pipeline parent job.
 
-Discovery is fanned out as one child task per marketplace
-(``discover_one_marketplace``). The tick owns dispatch, parallelism, inline
-reaping of its own stale children, and progress metadata. Scrape phase still
-runs the monolithic pool scrape inside the tick (O4 parallelizes that).
+Both discovery and scrape are fanned out as one child task per marketplace
+(``discover_one_marketplace`` / ``scrape_one_marketplace``). The tick owns
+dispatch, parallelism, inline reaping of its own stale children, and progress
+metadata for both phases.
 
 State lives entirely in ``scrape_jobs`` — the tick itself is stateless and
 re-enqueues itself via Celery ``apply_async(countdown=...)`` until terminal.
@@ -54,6 +54,13 @@ CHILD_PENDING_RECONCILE_SECONDS = 120
 # the global reaper threshold but lives inside the tick so freed slots are
 # reused immediately instead of waiting up to ~5 min for the Beat reaper.
 CHILD_RUNNING_REAP_SECONDS = DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS + 120
+
+# Scrape child reap: a running scrape child older than this is presumed
+# dead and marked failed. Mirrors discovery reap but sized to the scrape
+# child time_limit (scrape_one_marketplace has time_limit=960), not to the
+# discovery budget. Margin beyond time_limit so a child finishing right at
+# the limit is not preemptively reaped.
+SCRAPE_CHILD_RUNNING_REAP_SECONDS = 960 + 120
 
 
 def _next_backoff(current: float, *, dispatched: bool) -> float:
@@ -207,6 +214,133 @@ async def _reconcile_pending_children(
     return len(ids)
 
 
+# ---------------------------------------------------------------------------
+# Scrape sibling helpers (O4b): mirror the discovery helpers above, scoped to
+# job_type='scrape'. Discovery helpers are intentionally untouched so their
+# tests stay green.
+# ---------------------------------------------------------------------------
+
+
+async def _count_active_scrape_children(
+    db: AsyncSession, parent_id: UUID
+) -> int:
+    """Pending+running scrape children of this parent (uses
+    ``idx_scrape_jobs_parent_status``)."""
+    result = await db.execute(
+        select(func.count(ScrapeJob.id)).where(
+            ScrapeJob.parent_job_id == parent_id,
+            ScrapeJob.job_type == "scrape",
+            ScrapeJob.status.in_(("pending", "running")),
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def _create_pending_scrape_child(
+    db: AsyncSession, parent_id: UUID, marketplace_code: str
+) -> UUID | None:
+    """Insert a pending scrape child for ``marketplace_code``.
+
+    Caller commits before ``apply_async`` so the worker can never see a phantom
+    job_id that the DB rolled back. Returns ``None`` when the marketplace was
+    deactivated between queue snapshot and dispatch (silently skipped).
+    """
+    result = await db.execute(
+        select(DimMarketplace).where(
+            DimMarketplace.marketplace_code == marketplace_code,
+            DimMarketplace.is_active.is_(True),
+        )
+    )
+    marketplace = result.scalar_one_or_none()
+    if marketplace is None:
+        return None
+    job = ScrapeJob(
+        job_type="scrape",
+        status="pending",
+        parent_job_id=parent_id,
+        marketplace_id=marketplace.id,
+        config={"domain": (marketplace.domain or "").strip()},
+    )
+    db.add(job)
+    await db.flush()
+    return job.id
+
+
+async def _reap_stale_scrape_children(
+    db: AsyncSession, parent_id: UUID
+) -> int:
+    """Mark this parent's overrun running scrape children failed.
+
+    Single statement (asyncpg requirement). Commits to free MAX_PARALLEL_SCRAPE
+    slots for the same tick's dispatch loop. Cutoff is sized to the scrape
+    child time_limit (SCRAPE_CHILD_RUNNING_REAP_SECONDS), not the discovery
+    budget.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=SCRAPE_CHILD_RUNNING_REAP_SECONDS)
+    result = await db.execute(
+        text(
+            """
+            UPDATE scrape_jobs
+            SET status = 'failed',
+                completed_at = :now,
+                duration_ms = (EXTRACT(
+                    EPOCH FROM (:now - COALESCE(started_at, :now))
+                )::int) * 1000
+            WHERE parent_job_id = :pid
+              AND job_type = 'scrape'
+              AND status = 'running'
+              AND started_at < :cutoff
+            RETURNING id
+            """
+        ),
+        {"now": now, "pid": parent_id, "cutoff": cutoff},
+    )
+    reaped_ids = [row[0] for row in result.all()]
+    if reaped_ids:
+        await db.commit()
+        slog.warning(
+            "tick_reaped_stale_scrape_children",
+            parent_id=str(parent_id),
+            count=len(reaped_ids),
+            child_ids=[str(cid) for cid in reaped_ids[:20]],
+        )
+    return len(reaped_ids)
+
+
+async def _reconcile_pending_scrape_children(
+    db: AsyncSession, parent_id: UUID
+) -> int:
+    """Re-dispatch pending scrape children older than the reconcile threshold.
+
+    Their initial ``apply_async`` was lost (tick crash before broker write or
+    broker drop). Row is reused — no duplicate insert.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=CHILD_PENDING_RECONCILE_SECONDS)
+    result = await db.execute(
+        select(ScrapeJob.id).where(
+            ScrapeJob.parent_job_id == parent_id,
+            ScrapeJob.job_type == "scrape",
+            ScrapeJob.status == "pending",
+            ScrapeJob.created_at < cutoff,
+        )
+    )
+    ids = [row[0] for row in result.all()]
+    if not ids:
+        return 0
+    from app.modules.scraper.tasks import scrape_one_marketplace
+
+    for child_id in ids:
+        scrape_one_marketplace.apply_async([str(child_id)])
+    slog.info(
+        "tick_reconciled_pending_scrape_children",
+        parent_id=str(parent_id),
+        count=len(ids),
+    )
+    return len(ids)
+
+
 async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
     """One short state-machine step for a tick-mode pipeline parent.
 
@@ -296,22 +430,64 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
         }
 
     if phase == "scrape":
-        # O3: monolithic scrape inside the tick (O4 parallelizes). The
-        # underlying _run_scrape_all_pool is SYNC; off-load it to a worker
-        # thread so the tick coroutine and DB session stay responsive.
-        await store.touch(job, metadata, stage="scrape")
-        from app.modules.scraper.tasks import _run_scrape_all_pool
+        # O4b: per-marketplace scrape fan-out, mirror of the discovery phase.
+        # Each scrape child owns a ScrapeJob row (job_type='scrape') and runs
+        # the marketplace-scoped sync scrape internally; the tick only does
+        # dispatch/reap/reconcile + heartbeat metadata.
+        if metadata.get("scrape_queue") is None:
+            scrape_codes = await _load_active_marketplace_codes(
+                db, PipelineMetadataStore.marketplace_codes_filter(metadata)
+            )
+            metadata["scrape_queue"] = scrape_codes
+            metadata["scrape_total"] = len(scrape_codes)
 
-        codes = PipelineMetadataStore.marketplace_codes_filter(metadata)
-        scrape_result = await asyncio.to_thread(
-            _run_scrape_all_pool, parent_job_id, marketplace_codes=codes
+        await _reap_stale_scrape_children(db, parent_job_id)
+        reapplied_s = await _reconcile_pending_scrape_children(db, parent_job_id)
+        if reapplied_s > 0:
+            dispatched = True
+
+        active = await _count_active_scrape_children(db, parent_job_id)
+        queue: list[str] = list(metadata.get("scrape_queue", []))
+        from app.modules.scraper.tasks import scrape_one_marketplace
+
+        while active < MAX_PARALLEL_SCRAPE and queue:
+            code = queue.pop(0)
+            child_id = await _create_pending_scrape_child(
+                db, parent_job_id, code
+            )
+            if child_id is None:
+                continue
+            await db.commit()
+            scrape_one_marketplace.apply_async([str(child_id)])
+            active += 1
+            dispatched = True
+
+        metadata["scrape_queue"] = queue
+        finished = metadata["scrape_total"] - len(queue) - active
+        metadata["scrape_marketplace_total"] = metadata["scrape_total"]
+        metadata["scrape_marketplace_done"] = max(0, finished)
+
+        if not queue and active == 0:
+            metadata["phase"] = "complete"
+            metadata["backoff_s"] = TICK_MIN_SECONDS
+            await store.touch(job, metadata, stage="persist")
+            _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+            return {"status": "phase_advanced", "phase": "complete"}
+
+        backoff = _next_backoff(
+            float(metadata.get("backoff_s", TICK_MIN_SECONDS)),
+            dispatched=dispatched,
         )
-        if isinstance(scrape_result, dict) and scrape_result.get("error"):
-            metadata["scrape_error"] = str(scrape_result["error"])[:500]
-        metadata["phase"] = "complete"
-        await store.touch(job, metadata, stage="persist")
-        _reenqueue(parent_job_id, TICK_MIN_SECONDS)
-        return {"status": "phase_advanced", "phase": "complete"}
+        metadata["backoff_s"] = backoff
+        await store.touch(job, metadata, stage="scrape")
+        _reenqueue(parent_job_id, backoff)
+        return {
+            "status": "ticking",
+            "phase": "scrape",
+            "queue_left": len(queue),
+            "active": active,
+            "backoff_s": backoff,
+        }
 
     if phase == "complete":
         from app.modules.scraper.pipeline.child_aggregation import (

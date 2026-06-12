@@ -16,6 +16,7 @@ import pytest
 from app.modules.scraper.pipeline import tick_orchestrator as tick_mod
 from app.modules.scraper.pipeline.tick_orchestrator import (
     MAX_PARALLEL_DISCOVERY,
+    MAX_PARALLEL_SCRAPE,
     TICK_BACKOFF_FACTOR,
     TICK_MAX_SECONDS,
     TICK_MIN_SECONDS,
@@ -272,13 +273,75 @@ async def test_tick_advances_to_scrape_when_discovery_drained(monkeypatch):
     assert reenqueue.call_args.args[1] == TICK_MIN_SECONDS
 
 
-# ---------- 6.6 scrape phase calls pool then advances to complete ----------
+# ---------- 6.6 scrape phase fan-out (O4b) ---------------------------------
 
 
 @pytest.mark.asyncio
-async def test_tick_scrape_phase_runs_pool_then_complete(monkeypatch):
+async def test_tick_scrape_phase_dispatches_children(monkeypatch):
+    """Scrape phase mirrors discovery: dispatches up to MAX_PARALLEL_SCRAPE
+    scrape_one_marketplace children per tick and shrinks scrape_queue."""
+    parent_id = uuid4()
     job = _make_job("running")
-    metadata: dict = {"phase": "scrape"}
+    metadata: dict = {
+        "phase": "scrape",
+        "scrape_queue": ["a", "b", "c"],
+        "scrape_total": 3,
+        "backoff_s": TICK_MIN_SECONDS,
+    }
+    store = _StoreStub(job, metadata)
+    _install_store(monkeypatch, store)
+
+    # Top-of-tick discovery reap/reconcile is a no-op during scrape phase.
+    monkeypatch.setattr(
+        tick_mod, "_reap_stale_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod, "_reconcile_pending_children", AsyncMock(return_value=0)
+    )
+    # Scrape sibling helpers are the active path.
+    monkeypatch.setattr(
+        tick_mod, "_reap_stale_scrape_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_reconcile_pending_scrape_children",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        tick_mod, "_count_active_scrape_children", AsyncMock(return_value=0)
+    )
+    created_ids = [uuid4() for _ in range(MAX_PARALLEL_SCRAPE)]
+    create_mock = AsyncMock(side_effect=created_ids)
+    monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
+    apply_async = MagicMock()
+    monkeypatch.setattr(
+        "app.modules.scraper.tasks.scrape_one_marketplace.apply_async",
+        apply_async,
+    )
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+
+    result = await run_tick(_mock_db(), parent_id)
+
+    assert create_mock.await_count == MAX_PARALLEL_SCRAPE
+    assert apply_async.call_count == MAX_PARALLEL_SCRAPE
+    assert metadata["scrape_queue"] == ["c"]
+    assert metadata["scrape_marketplace_total"] == 3
+    reenqueue.assert_called_once()
+    assert reenqueue.call_args.args[1] == TICK_MIN_SECONDS
+    assert result["status"] == "ticking"
+    assert result["phase"] == "scrape"
+
+
+@pytest.mark.asyncio
+async def test_tick_scrape_phase_advances_to_complete_when_drained(monkeypatch):
+    """Empty scrape queue with no active children flips phase to 'complete'."""
+    job = _make_job("running")
+    metadata: dict = {
+        "phase": "scrape",
+        "scrape_queue": [],
+        "scrape_total": 0,
+    }
     store = _StoreStub(job, metadata)
     _install_store(monkeypatch, store)
 
@@ -288,30 +351,60 @@ async def test_tick_scrape_phase_runs_pool_then_complete(monkeypatch):
     monkeypatch.setattr(
         tick_mod, "_reconcile_pending_children", AsyncMock(return_value=0)
     )
-    pool_mock = MagicMock(return_value={})
     monkeypatch.setattr(
-        "app.modules.scraper.tasks._run_scrape_all_pool", pool_mock
+        tick_mod, "_reap_stale_scrape_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_reconcile_pending_scrape_children",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        tick_mod, "_count_active_scrape_children", AsyncMock(return_value=0)
+    )
+    create_mock = AsyncMock()
+    monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
+    apply_async = MagicMock()
+    monkeypatch.setattr(
+        "app.modules.scraper.tasks.scrape_one_marketplace.apply_async",
+        apply_async,
     )
     reenqueue = MagicMock()
     monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
 
     result = await run_tick(_mock_db(), uuid4())
 
-    pool_mock.assert_called_once()
+    assert result == {"status": "phase_advanced", "phase": "complete"}
     assert metadata["phase"] == "complete"
     assert store.touch_calls[-1]["stage"] == "persist"
+    create_mock.assert_not_awaited()
+    apply_async.assert_not_called()
     reenqueue.assert_called_once()
     assert reenqueue.call_args.args[1] == TICK_MIN_SECONDS
-    assert result == {"status": "phase_advanced", "phase": "complete"}
 
 
 @pytest.mark.asyncio
-async def test_tick_scrape_phase_captures_error(monkeypatch):
+async def test_tick_scrape_phase_first_tick_builds_queue(monkeypatch):
+    """On the first scrape tick (no scrape_queue yet) the work list is loaded
+    from _load_active_marketplace_codes and immediately dispatched.
+
+    NOTE (O4b contract change): the monolithic scrape phase used to capture a
+    hard scrape error into metadata['scrape_error']. Per-child scrape has no
+    such concept — failures live on each child's ScrapeJob row + ScrapeLog,
+    surfaced by complete_pipeline_job's existing aggregation. No assertion on
+    scrape_error here.
+    """
+    parent_id = uuid4()
     job = _make_job("running")
-    metadata: dict = {"phase": "scrape"}
+    metadata: dict = {"phase": "scrape"}  # no scrape_queue
     store = _StoreStub(job, metadata)
     _install_store(monkeypatch, store)
 
+    monkeypatch.setattr(
+        tick_mod,
+        "_load_active_marketplace_codes",
+        AsyncMock(return_value=["a", "b"]),
+    )
     monkeypatch.setattr(
         tick_mod, "_reap_stale_children", AsyncMock(return_value=0)
     )
@@ -319,14 +412,31 @@ async def test_tick_scrape_phase_captures_error(monkeypatch):
         tick_mod, "_reconcile_pending_children", AsyncMock(return_value=0)
     )
     monkeypatch.setattr(
-        "app.modules.scraper.tasks._run_scrape_all_pool",
-        MagicMock(return_value={"error": "broker_unreachable"}),
+        tick_mod, "_reap_stale_scrape_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_reconcile_pending_scrape_children",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        tick_mod, "_count_active_scrape_children", AsyncMock(return_value=0)
+    )
+    created_ids = [uuid4() for _ in range(2)]
+    create_mock = AsyncMock(side_effect=created_ids)
+    monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
+    apply_async = MagicMock()
+    monkeypatch.setattr(
+        "app.modules.scraper.tasks.scrape_one_marketplace.apply_async",
+        apply_async,
     )
     monkeypatch.setattr(tick_mod, "_reenqueue", MagicMock())
 
-    await run_tick(_mock_db(), uuid4())
+    await run_tick(_mock_db(), parent_id)
 
-    assert metadata["scrape_error"] == "broker_unreachable"
+    assert metadata["scrape_total"] == 2
+    assert apply_async.call_count == MAX_PARALLEL_SCRAPE  # 2 dispatched
+    assert "scrape_error" not in metadata
 
 
 # ---------- 6.7 complete phase finalizes + stops ---------------------------
