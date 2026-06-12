@@ -6,6 +6,7 @@ from uuid import UUID
 from jose import jwt
 from passlib.context import CryptContext
 
+from app.common.security import decode_token  # noqa: F401  re-exported for callers
 from app.config import Settings
 
 settings = Settings()
@@ -43,8 +44,3 @@ def create_refresh_token(user_id: UUID, persistent: bool = False) -> tuple[str, 
     }
     token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     return token, expire
-
-
-def decode_token(token: str) -> dict:
-    """Decode and validate JWT token."""
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])

@@ -8,8 +8,8 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.security import decode_token
 from app.database import get_db
-from app.modules.auth.service import decode_token
 from app.models.core import User
 
 security = HTTPBearer(auto_error=False)
