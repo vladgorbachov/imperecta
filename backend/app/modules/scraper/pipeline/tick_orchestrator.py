@@ -40,6 +40,11 @@ TICK_BACKOFF_FACTOR = 2.0
 # proxy/quota pressure predictable and to avoid blowing the worker pool.
 MAX_PARALLEL_DISCOVERY = 2
 
+# Per-parent scrape concurrency for the upcoming O4b fan-out. Mirrors
+# MAX_PARALLEL_DISCOVERY's intent. Not yet read by anything; O4a only
+# defines it so O4b is a pure tick rewire.
+MAX_PARALLEL_SCRAPE = 2
+
 # A pending child whose apply_async was lost (tick crashed between commit and
 # dispatch, or broker dropped the message) is re-dispatched after this many
 # seconds. Existing row is reused; we never insert a duplicate.

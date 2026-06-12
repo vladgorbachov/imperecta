@@ -973,7 +973,7 @@ class ParsingAdminService:
             await self.db.commit()
 
     async def _repair_scrape_job_type_constraint(self) -> bool:
-        """Allow full_pipeline_test in scrape_jobs.job_type CHECK constraint."""
+        """Allow full_pipeline_test and scrape in scrape_jobs.job_type CHECK constraint."""
         try:
             await self.db.execute(
                 text("ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_job_type")
@@ -982,7 +982,7 @@ class ParsingAdminService:
                 text(
                     "ALTER TABLE scrape_jobs "
                     "ADD CONSTRAINT ck_scrape_jobs_job_type "
-                    "CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test'))"
+                    "CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test','scrape'))"
                 )
             )
             await self.db.commit()

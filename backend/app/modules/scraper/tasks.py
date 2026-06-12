@@ -494,6 +494,99 @@ def _run_scrape_all_pool_impl(
     }
 
 
+@celery_app.task(
+    name="scrape_one_marketplace",
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=900,
+    time_limit=960,
+)
+def scrape_one_marketplace(self, child_job_id: str):
+    """O4 child task: scrape ONE marketplace whose pending ScrapeJob
+    (child_job_id, job_type='scrape') was created by the orchestrator tick.
+
+    Owns the job row: marks running -> runs the SYNC scrape scoped to the
+    marketplace's marketplace_code via _run_scrape_all_pool -> writes
+    successful/failed counters -> marks completed/failed -> commits.
+    Idempotent under acks_late: terminal jobs are skipped; a 'running' row
+    (prior worker died mid-flight) is owned again — the underlying scrape is
+    listing-level resilient and re-entrant.
+
+    NOT wired to the tick in O4a; the existing asyncio.to_thread bridge in
+    tick_orchestrator.run_tick remains the live scrape path until O4b.
+    """
+
+    async def _own_and_scrape() -> dict:
+        engine, session_factory = _make_session_factory()
+        try:
+            async with session_factory() as db:
+                job_uuid = UUID(str(child_job_id))
+                job = await db.get(ScrapeJob, job_uuid)
+                if job is None:
+                    return {
+                        "status": "not_found",
+                        "child_job_id": str(child_job_id),
+                    }
+                if job.status in ("completed", "failed", "partial", "cancelled"):
+                    return {
+                        "status": "skipped",
+                        "job_status": job.status,
+                        "child_job_id": str(child_job_id),
+                    }
+                marketplace = await db.get(DimMarketplace, job.marketplace_id)
+                if marketplace is None:
+                    job.status = "failed"
+                    job.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    return {
+                        "status": "marketplace_not_found",
+                        "child_job_id": str(child_job_id),
+                    }
+                code = marketplace.marketplace_code
+                job.status = "running"
+                job.started_at = datetime.now(timezone.utc)
+                await db.commit()
+                # _run_scrape_all_pool is SYNC and opens its own sync session
+                # internally; off-load so it doesn't block the async owner loop.
+                scrape_result = await asyncio.to_thread(
+                    _run_scrape_all_pool,
+                    job_uuid,
+                    marketplace_codes=[code],
+                )
+                ok = (
+                    int(scrape_result.get("scraped_ok", 0))
+                    if isinstance(scrape_result, dict)
+                    else 0
+                )
+                failed = (
+                    int(scrape_result.get("scraped_failed", 0))
+                    if isinstance(scrape_result, dict)
+                    else 0
+                )
+                hard_error = (
+                    scrape_result.get("error")
+                    if isinstance(scrape_result, dict)
+                    else None
+                )
+                job.successful = ok
+                job.failed = failed
+                job.completed_at = datetime.now(timezone.utc)
+                job.status = "failed" if hard_error else "completed"
+                await db.commit()
+                return {
+                    "status": job.status,
+                    "child_job_id": str(child_job_id),
+                    "marketplace_id": str(marketplace.id),
+                    "scraped_ok": ok,
+                    "scraped_failed": failed,
+                }
+        finally:
+            await engine.dispose()
+
+    return _run_async(_own_and_scrape())
+
+
 def _extract_pipeline_metadata(config: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         return ParsingAdminService._build_initial_metadata()
