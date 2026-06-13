@@ -463,6 +463,13 @@ async def test_tick_complete_phase_finalizes_and_stops(monkeypatch):
         "app.modules.scraper.pipeline.child_aggregation.aggregate_discovery_children",
         aggregator,
     )
+    # O5a: tick now also calls aggregate_scrape_children + merge_phase_seeds.
+    # Empty scrape seed -> merge yields the discovery seed by value.
+    scrape_aggregator = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        "app.modules.scraper.pipeline.child_aggregation.aggregate_scrape_children",
+        scrape_aggregator,
+    )
     completer = AsyncMock(return_value={})
     monkeypatch.setattr(
         "app.modules.scraper.pipeline.job_completion.complete_pipeline_job",
@@ -475,7 +482,8 @@ async def test_tick_complete_phase_finalizes_and_stops(monkeypatch):
 
     completer.assert_awaited_once()
     kwargs = completer.await_args.kwargs
-    assert kwargs["per_marketplace_seed"] is per_mp
+    # Loosened from `is` to `==` because merge_phase_seeds returns a new dict.
+    assert kwargs["per_marketplace_seed"] == per_mp
     reenqueue.assert_not_called()
     assert result["status"] == "complete"
 

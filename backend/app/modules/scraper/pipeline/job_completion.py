@@ -27,6 +27,32 @@ def _touch_metadata(
     return metadata
 
 
+def decide_parent_status(
+    seed_statuses: list[str], hard_error: str | None
+) -> str:
+    """Derive the parent ScrapeJob status from per-marketplace SEED verdicts.
+
+    Pure function (no I/O), unit-testable. Rules (in order):
+    - Any ``hard_error`` short-circuits to ``"failed"``.
+    - Empty seed list (no marketplaces touched at all) -> ``"failed"`` —
+      treated as an anomaly, never silently ``"completed"``.
+    - All children ``"completed"``                       -> ``"completed"``.
+    - All children non-``"completed"`` (>=1)             -> ``"failed"``.
+    - Mixed (>=1 completed AND >=1 non-completed)        -> ``"partial"``.
+    """
+    if hard_error:
+        return "failed"
+    if not seed_statuses:
+        return "failed"
+    completed_n = sum(1 for s in seed_statuses if s == "completed")
+    noncompleted_n = len(seed_statuses) - completed_n
+    if noncompleted_n == 0:
+        return "completed"
+    if completed_n == 0:
+        return "failed"
+    return "partial"
+
+
 async def complete_pipeline_job(
     db: AsyncSession,
     job: ScrapeJob,
@@ -64,8 +90,9 @@ async def complete_pipeline_job(
         merged_entry["errors_count"] = int(
             merged_entry["errors_count"] + stats.get("errors_count", 0)
         )
-        if merged_entry["errors_count"] > 0 and merged_entry["status"] != "running":
-            merged_entry["status"] = "failed"
+        # O5a: per-MP status stays the child's SEED verdict (partial-aware).
+        # Log-derived errors update counters only — they no longer escalate the
+        # status. Parent rollup uses these seed verdicts.
         merged.append(merged_entry)
 
     missing_marketplace_ids = set(stats_by_marketplace) - set(per_marketplace_seed)
@@ -95,11 +122,15 @@ async def complete_pipeline_job(
     errors_count = int(sum(item["errors_count"] for item in merged))
     total_ms = int(discovery_ms + scrape_ms + persist_ms)
 
+    parent_status = decide_parent_status(
+        [item["status"] for item in merged], hard_error
+    )
+
     metadata = PipelineMetadataStore.extract(job.config)
     _touch_metadata(metadata)
     metadata.update(
         {
-            "current_stage": "failed" if hard_error else "completed",
+            "current_stage": parent_status,
             "timings": {
                 "discovery_ms": int(discovery_ms),
                 "scrape_ms": int(scrape_ms),
@@ -122,7 +153,7 @@ async def complete_pipeline_job(
     job.total_listings = listings_created
     job.successful = prices_saved
     job.failed = errors_count
-    job.status = "failed" if hard_error else "completed"
+    job.status = parent_status
     job.config = {"metadata": deepcopy(metadata)}
     flag_modified(job, "config")
     await db.commit()

@@ -492,14 +492,16 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
     if phase == "complete":
         from app.modules.scraper.pipeline.child_aggregation import (
             aggregate_discovery_children,
+            aggregate_scrape_children,
+            merge_phase_seeds,
         )
         from app.modules.scraper.pipeline.job_completion import (
             complete_pipeline_job,
         )
 
-        per_marketplace = await aggregate_discovery_children(
-            db, parent_job_id
-        )
+        discovery_seed = await aggregate_discovery_children(db, parent_job_id)
+        scrape_seed = await aggregate_scrape_children(db, parent_job_id)
+        per_marketplace = merge_phase_seeds(discovery_seed, scrape_seed)
         hard_error = metadata.get("scrape_error")
         await complete_pipeline_job(
             db,

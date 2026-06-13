@@ -572,7 +572,17 @@ def scrape_one_marketplace(self, child_job_id: str):
                 job.successful = ok
                 job.failed = failed
                 job.completed_at = datetime.now(timezone.utc)
-                job.status = "failed" if hard_error else "completed"
+                # Partial-aware terminal status (O5a): hard_error trumps;
+                # otherwise mixed ok+failed = partial, all-failed = failed,
+                # all-ok = completed.
+                if hard_error:
+                    job.status = "failed"
+                elif ok > 0 and failed > 0:
+                    job.status = "partial"
+                elif failed > 0:
+                    job.status = "failed"
+                else:
+                    job.status = "completed"
                 await db.commit()
                 return {
                     "status": job.status,
