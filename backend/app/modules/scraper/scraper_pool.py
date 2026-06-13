@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 from app.config import Settings
+from app.modules.classifier import classify_page_role_for_discovery
 from app.modules.scraper.extractors import (
     ExtractedProduct,
     detect_next_page,
@@ -65,6 +66,34 @@ _NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit"}
 # marketplaces fail loudly rather than silently falling back to tier 1 behavior.
 _SUPPORTED_SCRAPE_TIERS = frozenset({1})
 _KNOWN_SCRAPE_TIERS = frozenset({1, 2, 3})
+
+
+def _would_escalate_shell(
+    *,
+    scrape_tier: int,
+    used_layer: str | None,
+    merged_currency: str | None,
+    role: str,
+) -> bool:
+    """Pure structural predicate for the Z-JSDETECT shell detector.
+
+    Observe-only today; ENFORCE may flip the call site to actually escalate.
+    A scrape_product result on a Tier-1 httpx fetch is treated as a likely
+    JS-shell when the extractor produced NO currency AND the page does not
+    classify as a product. Both signals empty = genuine shell; either signal
+    present = the page yielded structured product data, no escalation needed.
+
+    Universal/structural — keys only off scrape_tier (policy gate), used_layer
+    (the free layer we'd escalate FROM), merged.currency (extractor verdict),
+    and the classifier's page-role (DOM verdict). No marketplace names, no
+    per-shop branching.
+    """
+    return (
+        scrape_tier == 1
+        and used_layer == "httpx"
+        and merged_currency is None
+        and role != "product"
+    )
 
 
 @dataclass
@@ -191,6 +220,47 @@ class ScraperPool:
                 duration_ms=duration_ms,
                 raw_html=raw_debug,
             )
+
+        # Z-JSDETECT (observe-only): structural shell detector. On a Tier-1
+        # httpx fetch with no extracted currency AND a non-product page-role,
+        # we WOULD escalate to a JS-capable layer — but in observe mode we
+        # only log. No escalation, no re-fetch, no result mutation. The parse
+        # is gated behind cheap pre-checks so the common path pays nothing.
+        # The broad except wraps pure diagnostics: observe-only logging must
+        # NEVER affect a real scrape outcome.
+        try:
+            if (
+                scrape_tier == 1
+                and used_layer == "httpx"
+                and merged.currency is None
+            ):
+                probe_soup = BeautifulSoup(html, "html.parser")
+                role = classify_page_role_for_discovery(probe_soup, url)
+                if _would_escalate_shell(
+                    scrape_tier=scrape_tier,
+                    used_layer=used_layer,
+                    merged_currency=merged.currency,
+                    role=role,
+                ):
+                    remaining = [
+                        layer
+                        for layer in layers
+                        if layers.index(layer) > layers.index(used_layer)
+                    ]
+                    next_layer = remaining[0] if remaining else None
+                    logger.info(
+                        "js_shell_would_escalate observe_only=1 url=%s "
+                        "marketplace_layer=%s next_layer=%s role=%s "
+                        "title_present=%s price_present=%s",
+                        url[:200],
+                        used_layer,
+                        next_layer,
+                        role,
+                        bool(merged.title),
+                        merged.price is not None,
+                    )
+        except Exception:
+            pass
 
         if merged.price is not None and merged.price > MAX_VALID_PRICE:
             logger.warning(
