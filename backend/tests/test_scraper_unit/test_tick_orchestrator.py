@@ -683,6 +683,59 @@ async def test_create_pending_child_inserts_and_returns_id():
 # ---------- _reenqueue uses apply_async with countdown ---------------------
 
 
+# ---------- O5b: advisory-lock serialization -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tick_skips_when_lock_held(monkeypatch):
+    """Loser branch: advisory lock not acquired → return locked, no _reenqueue.
+
+    The lock probe is the very first db.execute in run_tick, before
+    store.load(); so a single execute return_value with scalar_one()=False
+    suffices to drive the loser path.
+    """
+    db = _mock_db()
+    locked_result = MagicMock()
+    locked_result.scalar_one = MagicMock(return_value=False)
+    db.execute = AsyncMock(return_value=locked_result)
+
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+
+    result = await run_tick(db, uuid4())
+
+    assert result == {"status": "locked"}
+    reenqueue.assert_not_called()
+    # Only the lock-probe executed; no body work happened (no unlock either,
+    # because the loser never entered the try-block).
+    assert db.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tick_releases_lock_on_stopped_parent(monkeypatch):
+    """Holder branch with a 'stopped' parent: guard inside try → finally
+    unlocks. db.execute is awaited at least twice: lock acquire + unlock.
+    """
+    job = _make_job("cancelled")
+    metadata: dict = {"phase": "discovery", "mp_queue": ["a"], "mp_total": 1}
+    store = _StoreStub(job, metadata)
+    _install_store(monkeypatch, store)
+
+    db = _mock_db()  # default truthy execute → scalar_one() truthy → acquired
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+
+    result = await run_tick(db, uuid4())
+
+    assert result == {"status": "stopped", "job_status": "cancelled"}
+    reenqueue.assert_not_called()
+    # Acquire (1st execute) + unlock (last execute in finally) = at least 2.
+    assert db.execute.await_count >= 2
+    # The last call must carry the unlock SQL (proves finally ran).
+    last_sql = str(db.execute.await_args_list[-1].args[0])
+    assert "pg_advisory_unlock" in last_sql
+
+
 def test_reenqueue_uses_apply_async_with_countdown(monkeypatch):
     apply_async = MagicMock()
     monkeypatch.setattr(

@@ -45,6 +45,15 @@ MAX_PARALLEL_DISCOVERY = 2
 # defines it so O4b is a pure tick rewire.
 MAX_PARALLEL_SCRAPE = 2
 
+# Advisory-lock namespace tag for orchestrator ticks (O5b). pg_try_advisory_lock
+# is two-arg: (namespace_tag, deterministic bigint key). Combined with
+# hashtextextended(parent_uuid::text, 0) this gives a per-parent lock that is
+# disjoint from any other advisory-lock user. Session-level (NOT _xact_lock)
+# because run_tick has 4 explicit db.commit() sites + store.touch commits, and
+# an xact lock releases at the first commit — long before the dispatch loop
+# that needs serializing.
+_TICK_LOCK_NAMESPACE = 2
+
 # A pending child whose apply_async was lost (tick crashed between commit and
 # dispatch, or broker dropped the message) is re-dispatched after this many
 # seconds. Existing row is reused; we never insert a duplicate.
@@ -344,6 +353,13 @@ async def _reconcile_pending_scrape_children(
 async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
     """One short state-machine step for a tick-mode pipeline parent.
 
+    Serialized per-parent via a SESSION-level Postgres advisory lock; a
+    concurrent tick observing the lock held returns ``{"status":"locked"}``
+    and does NOT re-enqueue (the holder re-enqueues at the end of its own
+    tick). Session-level — not xact-level — because run_tick has multiple
+    explicit commits and store.touch commits; an xact lock would release at
+    the first commit and leave the dispatch loop unprotected.
+
     Returns a small status dict (for logging/tests). Side effects:
     - dispatches up to ``MAX_PARALLEL_DISCOVERY`` child tasks per call,
     - reaps stale own children + reconciles lost pending,
@@ -352,174 +368,199 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
       unknown_phase — caller logs the latter).
     """
     store = PipelineMetadataStore(db, parent_job_id)
-    job, metadata = await store.load()
-    if job is None:
-        return {"status": "not_found"}
-    if job.status != "running":
-        # Cancelled, completed, partial, or failed elsewhere → stop the tick
-        # loop. No re-enqueue, no dispatch. The parent has a terminal status,
-        # so admin UI shows the right thing.
-        return {"status": "stopped", "job_status": job.status}
-
-    # Lazy init on first tick — snapshot active marketplaces into the queue so
-    # all subsequent decisions are deterministic and don't re-query DimMarketplace
-    # on every tick.
-    phase = metadata.get("phase")
-    if phase is None:
-        active_codes = await _load_active_marketplace_codes(
-            db, PipelineMetadataStore.marketplace_codes_filter(metadata)
+    locked = (
+        await db.execute(
+            text(
+                "SELECT pg_try_advisory_lock(:ns, "
+                "hashtextextended(:pid, 0))"
+            ),
+            {"ns": _TICK_LOCK_NAMESPACE, "pid": str(parent_job_id)},
         )
-        phase = "discovery"
-        metadata["phase"] = phase
-        metadata["mp_queue"] = active_codes
-        metadata["mp_total"] = len(active_codes)
-        metadata["tick_count"] = 0
-        metadata["backoff_s"] = TICK_MIN_SECONDS
-        metadata["resume_attempts"] = 0
+    ).scalar_one()
+    if not locked:
+        # Another tick for this parent is in flight; the holder will
+        # re-enqueue itself. Re-enqueueing here would deepen the broker
+        # queue and re-trigger the same race.
+        return {"status": "locked"}
+    try:
+        job, metadata = await store.load()
+        if job is None:
+            return {"status": "not_found"}
+        if job.status != "running":
+            # Cancelled, completed, partial, or failed elsewhere → stop the
+            # tick loop. No re-enqueue, no dispatch. The parent has a
+            # terminal status, so admin UI shows the right thing.
+            return {"status": "stopped", "job_status": job.status}
 
-    metadata["tick_count"] = int(metadata.get("tick_count", 0)) + 1
-
-    # Self-reap + reconcile run BEFORE the dispatch loop so freed slots are
-    # reused this tick (no extra round-trip).
-    await _reap_stale_children(db, parent_job_id)
-    reapplied = await _reconcile_pending_children(db, parent_job_id)
-    dispatched = reapplied > 0
-
-    if phase == "discovery":
-        active = await _count_active_children(db, parent_job_id)
-        queue: list[str] = list(metadata.get("mp_queue", []))
-        from app.modules.scraper.tasks import discover_one_marketplace
-
-        while active < MAX_PARALLEL_DISCOVERY and queue:
-            code = queue.pop(0)
-            child_id = await _create_pending_child(
-                db, parent_job_id, code
-            )
-            if child_id is None:
-                continue
-            await db.commit()
-            discover_one_marketplace.apply_async([str(child_id)])
-            active += 1
-            dispatched = True
-
-        metadata["mp_queue"] = queue
-        finished = metadata["mp_total"] - len(queue) - active
-        metadata["discovery_marketplace_total"] = metadata["mp_total"]
-        metadata["discovery_marketplace_done"] = max(0, finished)
-
-        if not queue and active == 0:
-            metadata["phase"] = "scrape"
-            metadata["backoff_s"] = TICK_MIN_SECONDS
-            await store.touch(job, metadata, stage="scrape")
-            _reenqueue(parent_job_id, TICK_MIN_SECONDS)
-            return {"status": "phase_advanced", "phase": "scrape"}
-
-        backoff = _next_backoff(
-            float(metadata.get("backoff_s", TICK_MIN_SECONDS)),
-            dispatched=dispatched,
-        )
-        metadata["backoff_s"] = backoff
-        await store.touch(job, metadata, stage="discovery")
-        _reenqueue(parent_job_id, backoff)
-        return {
-            "status": "ticking",
-            "phase": "discovery",
-            "queue_left": len(queue),
-            "active": active,
-            "backoff_s": backoff,
-        }
-
-    if phase == "scrape":
-        # O4b: per-marketplace scrape fan-out, mirror of the discovery phase.
-        # Each scrape child owns a ScrapeJob row (job_type='scrape') and runs
-        # the marketplace-scoped sync scrape internally; the tick only does
-        # dispatch/reap/reconcile + heartbeat metadata.
-        if metadata.get("scrape_queue") is None:
-            scrape_codes = await _load_active_marketplace_codes(
+        # Lazy init on first tick — snapshot active marketplaces into the
+        # queue so all subsequent decisions are deterministic and don't
+        # re-query DimMarketplace on every tick.
+        phase = metadata.get("phase")
+        if phase is None:
+            active_codes = await _load_active_marketplace_codes(
                 db, PipelineMetadataStore.marketplace_codes_filter(metadata)
             )
-            metadata["scrape_queue"] = scrape_codes
-            metadata["scrape_total"] = len(scrape_codes)
-
-        await _reap_stale_scrape_children(db, parent_job_id)
-        reapplied_s = await _reconcile_pending_scrape_children(db, parent_job_id)
-        if reapplied_s > 0:
-            dispatched = True
-
-        active = await _count_active_scrape_children(db, parent_job_id)
-        queue: list[str] = list(metadata.get("scrape_queue", []))
-        from app.modules.scraper.tasks import scrape_one_marketplace
-
-        while active < MAX_PARALLEL_SCRAPE and queue:
-            code = queue.pop(0)
-            child_id = await _create_pending_scrape_child(
-                db, parent_job_id, code
-            )
-            if child_id is None:
-                continue
-            await db.commit()
-            scrape_one_marketplace.apply_async([str(child_id)])
-            active += 1
-            dispatched = True
-
-        metadata["scrape_queue"] = queue
-        finished = metadata["scrape_total"] - len(queue) - active
-        metadata["scrape_marketplace_total"] = metadata["scrape_total"]
-        metadata["scrape_marketplace_done"] = max(0, finished)
-
-        if not queue and active == 0:
-            metadata["phase"] = "complete"
+            phase = "discovery"
+            metadata["phase"] = phase
+            metadata["mp_queue"] = active_codes
+            metadata["mp_total"] = len(active_codes)
+            metadata["tick_count"] = 0
             metadata["backoff_s"] = TICK_MIN_SECONDS
-            await store.touch(job, metadata, stage="persist")
-            _reenqueue(parent_job_id, TICK_MIN_SECONDS)
-            return {"status": "phase_advanced", "phase": "complete"}
+            metadata["resume_attempts"] = 0
 
-        backoff = _next_backoff(
-            float(metadata.get("backoff_s", TICK_MIN_SECONDS)),
-            dispatched=dispatched,
-        )
-        metadata["backoff_s"] = backoff
-        await store.touch(job, metadata, stage="scrape")
-        _reenqueue(parent_job_id, backoff)
-        return {
-            "status": "ticking",
-            "phase": "scrape",
-            "queue_left": len(queue),
-            "active": active,
-            "backoff_s": backoff,
-        }
+        metadata["tick_count"] = int(metadata.get("tick_count", 0)) + 1
 
-    if phase == "complete":
-        from app.modules.scraper.pipeline.child_aggregation import (
-            aggregate_discovery_children,
-            aggregate_scrape_children,
-            merge_phase_seeds,
-        )
-        from app.modules.scraper.pipeline.job_completion import (
-            complete_pipeline_job,
-        )
+        # Self-reap + reconcile run BEFORE the dispatch loop so freed slots
+        # are reused this tick (no extra round-trip).
+        await _reap_stale_children(db, parent_job_id)
+        reapplied = await _reconcile_pending_children(db, parent_job_id)
+        dispatched = reapplied > 0
 
-        discovery_seed = await aggregate_discovery_children(db, parent_job_id)
-        scrape_seed = await aggregate_scrape_children(db, parent_job_id)
-        per_marketplace = merge_phase_seeds(discovery_seed, scrape_seed)
-        hard_error = metadata.get("scrape_error")
-        await complete_pipeline_job(
-            db,
-            job,
-            discovery_ms=0,
-            scrape_ms=0,
-            persist_ms=0,
-            per_marketplace_seed=per_marketplace,
-            hard_error=hard_error,
-        )
-        return {"status": "complete", "job_status": job.status}
+        if phase == "discovery":
+            active = await _count_active_children(db, parent_job_id)
+            queue: list[str] = list(metadata.get("mp_queue", []))
+            from app.modules.scraper.tasks import discover_one_marketplace
 
-    # Unknown phase value — fail safe: stop ticking without re-enqueue. The
-    # global Beat reaper will eventually mark the parent failed if it stays
-    # running too long; the orchestrator will not loop forever in here.
-    slog.error(
-        "tick_unknown_phase",
-        parent_id=str(parent_job_id),
-        phase=phase,
-    )
-    return {"status": "unknown_phase", "phase": phase}
+            while active < MAX_PARALLEL_DISCOVERY and queue:
+                code = queue.pop(0)
+                child_id = await _create_pending_child(
+                    db, parent_job_id, code
+                )
+                if child_id is None:
+                    continue
+                await db.commit()
+                discover_one_marketplace.apply_async([str(child_id)])
+                active += 1
+                dispatched = True
+
+            metadata["mp_queue"] = queue
+            finished = metadata["mp_total"] - len(queue) - active
+            metadata["discovery_marketplace_total"] = metadata["mp_total"]
+            metadata["discovery_marketplace_done"] = max(0, finished)
+
+            if not queue and active == 0:
+                metadata["phase"] = "scrape"
+                metadata["backoff_s"] = TICK_MIN_SECONDS
+                await store.touch(job, metadata, stage="scrape")
+                _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+                return {"status": "phase_advanced", "phase": "scrape"}
+
+            backoff = _next_backoff(
+                float(metadata.get("backoff_s", TICK_MIN_SECONDS)),
+                dispatched=dispatched,
+            )
+            metadata["backoff_s"] = backoff
+            await store.touch(job, metadata, stage="discovery")
+            _reenqueue(parent_job_id, backoff)
+            return {
+                "status": "ticking",
+                "phase": "discovery",
+                "queue_left": len(queue),
+                "active": active,
+                "backoff_s": backoff,
+            }
+
+        if phase == "scrape":
+            # O4b: per-marketplace scrape fan-out, mirror of the discovery
+            # phase. Each scrape child owns a ScrapeJob row
+            # (job_type='scrape') and runs the marketplace-scoped sync
+            # scrape internally; the tick only does dispatch/reap/reconcile
+            # + heartbeat metadata.
+            if metadata.get("scrape_queue") is None:
+                scrape_codes = await _load_active_marketplace_codes(
+                    db, PipelineMetadataStore.marketplace_codes_filter(metadata)
+                )
+                metadata["scrape_queue"] = scrape_codes
+                metadata["scrape_total"] = len(scrape_codes)
+
+            await _reap_stale_scrape_children(db, parent_job_id)
+            reapplied_s = await _reconcile_pending_scrape_children(db, parent_job_id)
+            if reapplied_s > 0:
+                dispatched = True
+
+            active = await _count_active_scrape_children(db, parent_job_id)
+            queue: list[str] = list(metadata.get("scrape_queue", []))
+            from app.modules.scraper.tasks import scrape_one_marketplace
+
+            while active < MAX_PARALLEL_SCRAPE and queue:
+                code = queue.pop(0)
+                child_id = await _create_pending_scrape_child(
+                    db, parent_job_id, code
+                )
+                if child_id is None:
+                    continue
+                await db.commit()
+                scrape_one_marketplace.apply_async([str(child_id)])
+                active += 1
+                dispatched = True
+
+            metadata["scrape_queue"] = queue
+            finished = metadata["scrape_total"] - len(queue) - active
+            metadata["scrape_marketplace_total"] = metadata["scrape_total"]
+            metadata["scrape_marketplace_done"] = max(0, finished)
+
+            if not queue and active == 0:
+                metadata["phase"] = "complete"
+                metadata["backoff_s"] = TICK_MIN_SECONDS
+                await store.touch(job, metadata, stage="persist")
+                _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+                return {"status": "phase_advanced", "phase": "complete"}
+
+            backoff = _next_backoff(
+                float(metadata.get("backoff_s", TICK_MIN_SECONDS)),
+                dispatched=dispatched,
+            )
+            metadata["backoff_s"] = backoff
+            await store.touch(job, metadata, stage="scrape")
+            _reenqueue(parent_job_id, backoff)
+            return {
+                "status": "ticking",
+                "phase": "scrape",
+                "queue_left": len(queue),
+                "active": active,
+                "backoff_s": backoff,
+            }
+
+        if phase == "complete":
+            from app.modules.scraper.pipeline.child_aggregation import (
+                aggregate_discovery_children,
+                aggregate_scrape_children,
+                merge_phase_seeds,
+            )
+            from app.modules.scraper.pipeline.job_completion import (
+                complete_pipeline_job,
+            )
+
+            discovery_seed = await aggregate_discovery_children(db, parent_job_id)
+            scrape_seed = await aggregate_scrape_children(db, parent_job_id)
+            per_marketplace = merge_phase_seeds(discovery_seed, scrape_seed)
+            hard_error = metadata.get("scrape_error")
+            await complete_pipeline_job(
+                db,
+                job,
+                discovery_ms=0,
+                scrape_ms=0,
+                persist_ms=0,
+                per_marketplace_seed=per_marketplace,
+                hard_error=hard_error,
+            )
+            return {"status": "complete", "job_status": job.status}
+
+        # Unknown phase value — fail safe: stop ticking without re-enqueue.
+        # The global Beat reaper will eventually mark the parent failed if
+        # it stays running too long; the orchestrator will not loop forever
+        # in here.
+        slog.error(
+            "tick_unknown_phase",
+            parent_id=str(parent_job_id),
+            phase=phase,
+        )
+        return {"status": "unknown_phase", "phase": phase}
+    finally:
+        await db.execute(
+            text(
+                "SELECT pg_advisory_unlock(:ns, "
+                "hashtextextended(:pid, 0))"
+            ),
+            {"ns": _TICK_LOCK_NAMESPACE, "pid": str(parent_job_id)},
+        )
