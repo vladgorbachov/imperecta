@@ -22,6 +22,7 @@ from app.modules.scraper.extractors import (
     extract_auto_detect,
     extract_from_jsonld,
     extract_from_meta_tags,
+    extract_from_microdata,
     extract_product_links,
     extract_with_custom_selectors,
     merge_and_finalize,
@@ -732,6 +733,12 @@ class ScraperPool:
     ) -> ExtractedProduct:
         soup = BeautifulSoup(html, "html.parser")
         jsonld = extract_from_jsonld(soup, url)
+        # Level 1.5: HTML5 Microdata. Inserted BEFORE auto-detect so a
+        # microdata-only Product page is structurally extracted instead of
+        # falling through to the body-text fallback (which produces glued
+        # currency_raw and gets gate-rejected). Order: jsonld > microdata >
+        # meta > custom > auto.
+        microdata = extract_from_microdata(soup, url)
         meta = extract_from_meta_tags(soup, url)
         custom = (
             extract_with_custom_selectors(soup, custom_selectors, url)
@@ -739,4 +746,6 @@ class ScraperPool:
             else ExtractedProduct()
         )
         auto = extract_auto_detect(soup, url)
-        return merge_and_finalize(soup, url, jsonld, meta, custom, auto)
+        return merge_and_finalize(
+            soup, url, jsonld, microdata, meta, custom, auto
+        )

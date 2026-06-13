@@ -298,6 +298,189 @@ def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedPro
     return ep
 
 
+# ---------------------------------------------------------------------------
+# Level 1.5: HTML5 Microdata (schema.org/Product via itemscope/itemprop).
+#
+# Mirrors :func:`extract_from_jsonld` for pages that emit schema.org as
+# Microdata only (no JSON-LD <script>, no OG meta). Reads itemprop from the
+# top-level Product subtree and its nested Offer using the W3C Microdata value
+# rule (``meta`` → content, ``a/link/area`` → href, media tags → src,
+# ``object`` → data, otherwise → text). Structural and universal — keys ONLY
+# off DOM (itemscope/itemtype/itemprop) + schema.org vocabulary; no marketplace
+# names, no per-shop branching.
+# ---------------------------------------------------------------------------
+
+_MICRODATA_PRODUCT_TYPES = (
+    "http://schema.org/Product",
+    "https://schema.org/Product",
+)
+_MICRODATA_OFFER_TYPES = (
+    "http://schema.org/Offer",
+    "https://schema.org/Offer",
+)
+
+
+def _toplevel_itemscope_nodes(soup: BeautifulSoup, type_urls: tuple[str, ...]) -> list:
+    """Return itemscope tags whose ``itemtype`` is in ``type_urls`` AND which
+    have no ancestor with ``itemscope`` (top-level only — excludes nested
+    Product cards inside an ItemList). Mirrors the classifier's ancestor-walk
+    semantics but returns the tags, not the type set.
+    """
+    nodes = []
+    for tag in soup.find_all(attrs={"itemtype": True}):
+        itype = (tag.get("itemtype") or "").strip()
+        if itype not in type_urls:
+            continue
+        ancestor = tag.parent
+        nested = False
+        while ancestor is not None:
+            a_attrs = getattr(ancestor, "attrs", None)
+            if a_attrs is not None and "itemscope" in a_attrs:
+                nested = True
+                break
+            ancestor = ancestor.parent
+        if not nested:
+            nodes.append(tag)
+    return nodes
+
+
+def _itemprop_value(tag) -> str | None:
+    """W3C Microdata value extraction by element kind.
+
+    ``meta`` → content, ``a/link/area`` → href, media (img/audio/embed/iframe/
+    source/track/video) → src, ``object`` → data, anything else → text content.
+    Returns the stripped string or ``None`` if empty/missing.
+    """
+    name = getattr(tag, "name", None)
+    if name == "meta":
+        v = tag.get("content")
+    elif name in ("a", "link", "area"):
+        v = tag.get("href")
+    elif name in ("img", "audio", "embed", "iframe", "source", "track", "video"):
+        v = tag.get("src")
+    elif name == "object":
+        v = tag.get("data")
+    else:
+        v = tag.get_text(strip=True)
+    if v is None:
+        return None
+    v = str(v).strip()
+    return v or None
+
+
+def _find_itemprop(scope, prop_name: str):
+    """Return the first descendant of ``scope`` carrying ``itemprop==prop_name``
+    that is NOT inside a deeper nested itemscope below ``scope`` (so a
+    Product's own price isn't shadowed by a related-product card). Returns the
+    tag or ``None``.
+    """
+    for cand in scope.find_all(attrs={"itemprop": True}):
+        props = cand.get("itemprop")
+        props_list = props if isinstance(props, list) else str(props).split()
+        if prop_name not in props_list:
+            continue
+        anc = cand.parent
+        nested_below_scope = False
+        while anc is not None and anc is not scope:
+            a_attrs = getattr(anc, "attrs", None)
+            if a_attrs is not None and "itemscope" in a_attrs:
+                nested_below_scope = True
+                break
+            anc = anc.parent
+        if nested_below_scope:
+            continue
+        return cand
+    return None
+
+
+def extract_from_microdata(
+    soup: BeautifulSoup, page_url: str = ""
+) -> ExtractedProduct:
+    """Level 1.5: HTML5 Microdata (schema.org/Product via itemscope/itemprop).
+
+    Universal, structural strategy. Same field set + truncation limits as
+    :func:`extract_from_jsonld` (currency_raw[:20], currency.upper()[:3],
+    price_raw_text[:500], description[:2000]). Reads price/priceCurrency from
+    the nested Offer subtree when present, else from the Product scope itself.
+    Never raises; non-Product / malformed pages return an empty
+    :class:`ExtractedProduct` (with the title fallback applied for parity).
+    """
+    products = _toplevel_itemscope_nodes(soup, _MICRODATA_PRODUCT_TYPES)
+    for product in products:
+        name_tag = _find_itemprop(product, "name")
+        title = _itemprop_value(name_tag) if name_tag else None
+
+        image_tag = _find_itemprop(product, "image")
+        image_raw = _itemprop_value(image_tag) if image_tag else None
+        image_url = urljoin(page_url, image_raw) if image_raw else None
+
+        desc_tag = _find_itemprop(product, "description")
+        description = _itemprop_value(desc_tag) if desc_tag else None
+        if isinstance(description, str) and len(description) > 2000:
+            description = description[:2000]
+
+        # Prefer a nested Offer scope for price/currency, else the Product itself.
+        offer_scopes = [
+            off
+            for off in product.find_all(attrs={"itemtype": True})
+            if (off.get("itemtype") or "").strip() in _MICRODATA_OFFER_TYPES
+        ]
+        price_scope = offer_scopes[0] if offer_scopes else product
+
+        price = None
+        original_price = None
+        raw_price: str | None = None
+        price_tag = _find_itemprop(price_scope, "price")
+        if price_tag:
+            raw_price = (_itemprop_value(price_tag) or "")[:500]
+            price = parse_price_text(raw_price)
+        if price is None:
+            low_tag = _find_itemprop(price_scope, "lowPrice")
+            if low_tag:
+                raw_price = (_itemprop_value(low_tag) or "")[:500]
+                price = parse_price_text(raw_price)
+                high_tag = _find_itemprop(price_scope, "highPrice")
+                if high_tag:
+                    original_price = parse_price_text(
+                        _itemprop_value(high_tag) or ""
+                    )
+        if price is None:
+            high_only = _find_itemprop(price_scope, "highPrice")
+            if high_only:
+                raw_price = (_itemprop_value(high_only) or "")[:500]
+                price = parse_price_text(raw_price)
+
+        currency = None
+        currency_raw_val: str | None = None
+        cur_tag = _find_itemprop(price_scope, "priceCurrency")
+        cur_val = _itemprop_value(cur_tag) if cur_tag else None
+        if cur_val:
+            currency_raw_val = cur_val[:20]
+            currency = cur_val.upper()[:3]
+        elif raw_price:
+            detected = _detect_currency(raw_price)
+            if detected:
+                currency = detected
+                currency_raw_val = raw_price[:20]
+
+        if any([title, price, image_url, currency]):
+            ep = ExtractedProduct(
+                title=title,
+                price=price,
+                original_price=original_price,
+                currency=currency,
+                image_url=image_url,
+                description=description if isinstance(description, str) else None,
+                price_raw_text=raw_price,
+                currency_raw=currency_raw_val,
+            )
+            _ensure_title(ep, soup, page_url)
+            return ep
+    ep = ExtractedProduct()
+    _ensure_title(ep, soup, page_url)
+    return ep
+
+
 def extract_from_meta_tags(soup: BeautifulSoup, page_url: str = "") -> ExtractedProduct:
     """Level 2: OpenGraph + meta."""
     result = ExtractedProduct()
