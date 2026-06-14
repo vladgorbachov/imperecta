@@ -60,8 +60,6 @@ def test_determine_log_status_failed_variants():
     assert svc._determine_log_status(r) == "error"
     r = PoolScrapeResult(success=False, url="u", error="exception:RuntimeError:fail")
     assert svc._determine_log_status(r) == "technical_error"
-    r = PoolScrapeResult(success=False, url="u", error="price_overflow")
-    assert svc._determine_log_status(r) == "technical_error"
 
 
 def test_determine_log_status_success_paths():

@@ -31,7 +31,6 @@ from app.modules.scraper.extractors import (
 
 logger = logging.getLogger(__name__)
 settings = Settings()
-MAX_VALID_PRICE = 9_999_999_999.99  # Max for Numeric(12,2)
 
 # Per-layer fetch: retries (timeouts / transient failures) before trying next layer.
 FETCH_ATTEMPTS_PER_LAYER = 3
@@ -262,22 +261,6 @@ class ScraperPool:
         except Exception:
             pass
 
-        if merged.price is not None and merged.price > MAX_VALID_PRICE:
-            logger.warning(
-                "Price overflow %.2f for %s, discarding",
-                merged.price,
-                url[:80],
-            )
-            return PoolScrapeResult(
-                success=False,
-                url=url,
-                error="price_overflow",
-                data=None,
-                scraper_layer=used_layer,
-                duration_ms=duration_ms,
-                is_empty=not bool(merged.title),
-                raw_html=raw_debug,
-            )
         if merged.price is not None and merged.price <= 0:
             merged.price = None
         if merged.price is None:

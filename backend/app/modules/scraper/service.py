@@ -498,8 +498,6 @@ class GlobalScrapeService:
             error = (result.error or "").lower()
             if error.startswith("exception:"):
                 return "technical_error"
-            if "price_overflow" in error:
-                return "technical_error"
             if "parse_error" in error:
                 return "parse_error"
             if "price_not_found" in error:

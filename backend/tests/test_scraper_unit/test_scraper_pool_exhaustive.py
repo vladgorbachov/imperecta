@@ -44,7 +44,14 @@ async def test_scrape_product_parse_error_in_extract(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_scrape_product_price_overflow_discarded(monkeypatch):
+async def test_scrape_product_oversized_price_not_found(monkeypatch):
+    """An oversized JSON-LD price (above the 5M parser clamp in
+    ``app.common.html_parsing._MAX_REALISTIC_PRICE``) is rejected at the parser
+    layer: ``parse_price_text`` returns ``None`` for any value above 5M, so the
+    extractor produces ``merged.price is None`` and ``scrape_product`` surfaces
+    the result as ``price_not_found``. There is no separate ``price_overflow``
+    code path — the 5M clamp is the single, authoritative price cap.
+    """
     pool = ScraperPool()
     html = """
     <script type="application/ld+json">
@@ -57,7 +64,7 @@ async def test_scrape_product_price_overflow_discarded(monkeypatch):
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
     r = await pool.scrape_product("https://x.com/p")
-    assert not r.success and r.error == "price_overflow"
+    assert not r.success and r.error == "price_not_found"
 
 
 @pytest.mark.asyncio

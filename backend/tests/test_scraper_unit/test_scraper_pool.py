@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import app.modules.scraper.scraper_pool as sp
-from app.modules.scraper.scraper_pool import MAX_VALID_PRICE, ScraperPool
+from app.modules.scraper.scraper_pool import ScraperPool
 
 
 @pytest.mark.asyncio
@@ -70,21 +70,3 @@ async def test_raw_html_only_when_decodo_disabled(monkeypatch):
     r2 = await pool.scrape_product("https://example.com/p")
     assert r2.success
     assert r2.raw_html is None
-
-
-@pytest.mark.asyncio
-async def test_price_at_max_boundary_ok(monkeypatch):
-    pool = ScraperPool()
-    price_str = f"{MAX_VALID_PRICE:.2f}"
-    html = f"""
-    <script type="application/ld+json">
-    {{"@type":"Product","name":"P","offers":{{"price":"{price_str}","priceCurrency":"USD"}}}}
-    </script>
-    """
-
-    async def fake_layer(layer: str, url: str):
-        return html, None
-
-    monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
-    r = await pool.scrape_product("https://x.com/p")
-    assert r.success and r.data and r.data.price == pytest.approx(MAX_VALID_PRICE)
