@@ -24,7 +24,11 @@ from app.modules.scraper.discovery import (
     DiscoveryCrawler,
 )
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as _finalize_full_pipeline_job
-from app.modules.scraper.pipeline.activity_pulse import pulse_job_activity_sync
+from app.modules.scraper.pipeline.activity_pulse import (
+    discovery_activity_callback,
+    pulse_job_activity_sync,
+)
+from app.modules.scraper.pipeline.worker_log_relay import pipeline_worker_log_relay
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 from app.workers.celery_app import celery_app
@@ -281,15 +285,28 @@ def discover_one_marketplace(self, child_job_id: str):
                         "status": "marketplace_not_found",
                         "child_job_id": str(child_job_id),
                     }
-                crawler = DiscoveryCrawler(db, ScraperPool())
-                deadline = (
-                    time.monotonic() + DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
-                )
-                res = await crawler.discover(
-                    marketplace,
-                    deadline_monotonic=deadline,
-                    inner_job=job,
-                )
+                # Stamp relay lines under the PARENT job_id (the admin live
+                # monitor polls the parent's stream). Falls back to the child
+                # id only if parent linkage is missing — defensive, the
+                # orchestrator-tick path always sets parent_job_id.
+                parent_id = job.parent_job_id or job_uuid
+
+                async def _on_activity(line: str) -> None:
+                    await discovery_activity_callback(db, parent_id, line)
+
+                with pipeline_worker_log_relay(parent_id):
+                    crawler = DiscoveryCrawler(
+                        db, ScraperPool(), on_activity=_on_activity,
+                    )
+                    deadline = (
+                        time.monotonic()
+                        + DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+                    )
+                    res = await crawler.discover(
+                        marketplace,
+                        deadline_monotonic=deadline,
+                        inner_job=job,
+                    )
                 return {
                     "status": res.status,
                     "child_job_id": str(child_job_id),
@@ -547,13 +564,21 @@ def scrape_one_marketplace(self, child_job_id: str):
                 job.status = "running"
                 job.started_at = datetime.now(timezone.utc)
                 await db.commit()
+                # Stamp scrape relay lines under the PARENT id. The pulse
+                # calls inside _run_scrape_all_pool stamp the CHILD id (the
+                # scrape job_uuid) — that is intentional and unchanged: the
+                # CM-attached handler captures structlog INFO records under
+                # the parent so the live monitor sees scrape progress without
+                # rethreading every pulse call site (minimal blast radius).
+                parent_id = job.parent_job_id or job_uuid
                 # _run_scrape_all_pool is SYNC and opens its own sync session
                 # internally; off-load so it doesn't block the async owner loop.
-                scrape_result = await asyncio.to_thread(
-                    _run_scrape_all_pool,
-                    job_uuid,
-                    marketplace_codes=[code],
-                )
+                with pipeline_worker_log_relay(parent_id):
+                    scrape_result = await asyncio.to_thread(
+                        _run_scrape_all_pool,
+                        job_uuid,
+                        marketplace_codes=[code],
+                    )
                 ok = (
                     int(scrape_result.get("scraped_ok", 0))
                     if isinstance(scrape_result, dict)

@@ -543,6 +543,11 @@ class DiscoveryCrawler:
             listing_urls = []
         fallback_seeds = ["/catalog", "/categories", "/shop", "/store", "/all"]
 
+        # Heartbeat cadence inside the BFS: emit every Nth iteration (NOT per
+        # fetch) so the worker_log_tail stays summary-level and DB-touch churn
+        # stays bounded under should_pulse_db's own 15s window.
+        recon_emit_every = 25
+        bfs_iterations = 0
         while queue:
             if (
                 deadline_monotonic is not None
@@ -566,6 +571,12 @@ class DiscoveryCrawler:
             current_url, depth = queue.popleft()
             if depth > RECON_BFS_MAX_DEPTH:
                 continue
+            bfs_iterations += 1
+            if bfs_iterations % recon_emit_every == 0:
+                await self._emit_activity(
+                    f"discovery recon visited={len(visited)} "
+                    f"listing={len(listing_urls)}"
+                )
             _html, soup = await self.pool.scrape_page_for_analysis(
                 current_url,
                 static_fetch=True,
@@ -862,10 +873,19 @@ class DiscoveryCrawler:
 
             sitemap_product_urls: list[str] = []
             if self._should_run_sitemap_harvest(marketplace):
+                await self._emit_activity(
+                    f"discovery sitemap harvest start "
+                    f"domain={marketplace.domain or marketplace.base_url}"
+                )
                 try:
                     sitemap_product_urls = await asyncio.wait_for(
                         self._phase0_sitemap_harvest(marketplace),
                         timeout=SITEMAP_PHASE_BUDGET_SECONDS,
+                    )
+                    await self._emit_activity(
+                        f"discovery sitemap harvest done raw="
+                        f"{len(sitemap_product_urls)} useful="
+                        f"{len(sitemap_product_urls) >= SITEMAP_MIN_USEFUL_URLS}"
                     )
                 except asyncio.TimeoutError:
                     # Sitemap phase exhausted its budget. Treat as unavailable for
