@@ -234,7 +234,11 @@ def test_run_scrape_all_pool_impl_listing_failure_persists(monkeypatch):
     )
     persisted: list[tuple] = []
 
-    def capture_persist(uid, tb):
+    # Mirror the production signature so the except handler's call
+    #   _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
+    # binds cleanly. The test still records (uid, tb) since scrape_job_id is
+    # not asserted here.
+    def capture_persist(uid, tb, scrape_job_id=None):
         persisted.append((uid, tb))
 
     monkeypatch.setattr(scraper_tasks, "_persist_technical_error_log", capture_persist)

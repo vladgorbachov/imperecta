@@ -31,8 +31,25 @@ def test_merge_results():
 
 
 def test_merge_and_finalize_fills_title_from_document():
-    """merge_and_finalize applies DOM fallback when all extractors omit title."""
-    html = "<html><head><title>Doc Title</title></head><body></body></html>"
+    """merge_and_finalize applies DOM fallback when all extractors omit title.
+
+    The body carries one price token so ``classify_page_role_for_discovery``
+    returns ``"product"`` (price_count==1, no repeated structure), letting
+    ``merge_and_finalize`` reach the ``_ensure_title`` fallback that pulls
+    ``<title>``. An empty body classifies as ``"hub"`` and is short-circuited
+    to an empty result before the fallback runs — that path is exercised by
+    the role-short-circuit tests, not this one.
+
+    The ``$19.99`` token only drives classification to ``"product"``; it does
+    not affect the title assertion (the input ``ExtractedProduct()`` has
+    ``price=None``, so the body-text currency scan is gated off and
+    ``soup.title.string == "Doc Title"`` is returned verbatim — no
+    ``|`` / ``—`` / ``-`` separator to strip).
+    """
+    html = (
+        "<html><head><title>Doc Title</title></head>"
+        "<body><h1>Item</h1><p>$19.99</p></body></html>"
+    )
     soup = BeautifulSoup(html, "html.parser")
     merged = merge_and_finalize(soup, "https://shop.example/p/item-one", ExtractedProduct())
     assert merged.title == "Doc Title"

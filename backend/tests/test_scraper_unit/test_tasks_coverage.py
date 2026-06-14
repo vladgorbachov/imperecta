@@ -34,7 +34,19 @@ def test_discover_single_marketplace_unknown_id():
 
 
 def test_run_scrape_all_pool_outer_technical_error(monkeypatch):
-    monkeypatch.setattr(scraper_tasks, "_run_scrape_all_pool_impl", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    # Mock signature mirrors production exactly:
+    #   _run_scrape_all_pool_impl(scrape_job_id=None, *, marketplace_codes=None)
+    # so that the production call site (which passes scrape_job_id and
+    # marketplace_codes by keyword) reaches the lambda body and raises
+    # RuntimeError("boom"); the outer-except path then surfaces
+    # error="technical_error" with "boom" in the traceback.
+    monkeypatch.setattr(
+        scraper_tasks,
+        "_run_scrape_all_pool_impl",
+        lambda scrape_job_id=None, *, marketplace_codes=None: (
+            _ for _ in ()
+        ).throw(RuntimeError("boom")),
+    )
     out = scraper_tasks._run_scrape_all_pool()
     assert out.get("error") == "technical_error" and "boom" in (out.get("traceback") or "")
 

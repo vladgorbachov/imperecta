@@ -195,10 +195,16 @@ class TestResumableSitemap:
             mp_id, urls, deadline_monotonic=deadline,
         )
 
+        # Deadline is checked once per batch (SAVE_PRODUCT_URLS_BATCH_SIZE
+        # URLs == 500), AFTER each commit. With a 0.5s budget and 0.3s/commit,
+        # two batches commit (t=0.3 < 0.5 → continue; t=0.6 >= 0.5 → stop), so
+        # the resume offset lands at 2 batches. Pinning the per-batch cadence
+        # here would catch a regression that moved the deadline check to
+        # per-URL — production timing is correct as-is.
         assert exhausted is True
-        assert next_offset == disc.SAVE_PRODUCT_URLS_BATCH_SIZE
-        assert new_count == disc.SAVE_PRODUCT_URLS_BATCH_SIZE
-        assert db.commit.await_count >= 1
+        assert next_offset == 2 * disc.SAVE_PRODUCT_URLS_BATCH_SIZE
+        assert new_count == 2 * disc.SAVE_PRODUCT_URLS_BATCH_SIZE
+        assert db.commit.await_count >= 2
 
     @pytest.mark.asyncio
     async def test_save_product_urls_resumes_from_offset(self):
