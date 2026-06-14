@@ -45,14 +45,18 @@ MAX_PARALLEL_DISCOVERY = 2
 # defines it so O4b is a pure tick rewire.
 MAX_PARALLEL_SCRAPE = 2
 
-# Advisory-lock namespace tag for orchestrator ticks (O5b). pg_try_advisory_lock
-# is two-arg: (namespace_tag, deterministic bigint key). Combined with
-# hashtextextended(parent_uuid::text, 0) this gives a per-parent lock that is
-# disjoint from any other advisory-lock user. Session-level (NOT _xact_lock)
-# because run_tick has 4 explicit db.commit() sites + store.touch commits, and
-# an xact lock releases at the first commit — long before the dispatch loop
+# Per-parent advisory lock (O5b, single-key form). Postgres exposes only
+# pg_try_advisory_lock(bigint) and pg_try_advisory_lock(int4, int4); the
+# (int4, bigint) two-arg signature does NOT exist, so we use the single-key
+# bigint form via hashtextextended(text, 0)->bigint:
+#   pg_try_advisory_lock(hashtextextended('orchestrator_tick:' || <uuid>, 0))
+# The 'orchestrator_tick:' prefix namespaces this lock away from any other
+# advisory-lock user in the 64-bit single-key space (vs. the (int4, int4)
+# form's 32-bit collision space). Session-level (NOT _xact_lock) because
+# run_tick has 4 explicit db.commit() sites + store.touch commits, and an
+# xact lock releases at the first commit — long before the dispatch loop
 # that needs serializing.
-_TICK_LOCK_NAMESPACE = 2
+_TICK_LOCK_KEY_PREFIX = "orchestrator_tick:"
 
 # A pending child whose apply_async was lost (tick crashed between commit and
 # dispatch, or broker dropped the message) is re-dispatched after this many
@@ -368,15 +372,27 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
       unknown_phase — caller logs the latter).
     """
     store = PipelineMetadataStore(db, parent_job_id)
-    locked = (
-        await db.execute(
-            text(
-                "SELECT pg_try_advisory_lock(:ns, "
-                "hashtextextended(:pid, 0))"
-            ),
-            {"ns": _TICK_LOCK_NAMESPACE, "pid": str(parent_job_id)},
+    try:
+        locked = (
+            await db.execute(
+                text(
+                    "SELECT pg_try_advisory_lock("
+                    "hashtextextended(:key, 0))"
+                ),
+                {"key": _TICK_LOCK_KEY_PREFIX + str(parent_job_id)},
+            )
+        ).scalar_one()
+    except Exception:
+        # A lock-acquire failure (transient DB/network, asyncpg reset, etc.)
+        # must NOT silently kill the tick. Log and re-enqueue so the state
+        # machine recovers on the next tick instead of stalling until the
+        # global stale-job reaper kicks in minutes later.
+        slog.exception(
+            "tick_advisory_acquire_failed",
+            parent_job_id=str(parent_job_id),
         )
-    ).scalar_one()
+        _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+        return {"status": "lock_error"}
     if not locked:
         # Another tick for this parent is in flight; the holder will
         # re-enqueue itself. Re-enqueueing here would deepen the broker
@@ -557,10 +573,18 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
         )
         return {"status": "unknown_phase", "phase": phase}
     finally:
-        await db.execute(
-            text(
-                "SELECT pg_advisory_unlock(:ns, "
-                "hashtextextended(:pid, 0))"
-            ),
-            {"ns": _TICK_LOCK_NAMESPACE, "pid": str(parent_job_id)},
-        )
+        try:
+            await db.execute(
+                text(
+                    "SELECT pg_advisory_unlock("
+                    "hashtextextended(:key, 0))"
+                ),
+                {"key": _TICK_LOCK_KEY_PREFIX + str(parent_job_id)},
+            )
+        except Exception:
+            # Session-level lock auto-releases on connection close; a failed
+            # explicit unlock must not mask the tick's real result/exception.
+            slog.exception(
+                "tick_advisory_unlock_failed",
+                parent_job_id=str(parent_job_id),
+            )

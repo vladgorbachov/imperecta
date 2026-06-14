@@ -736,6 +736,81 @@ async def test_tick_releases_lock_on_stopped_parent(monkeypatch):
     assert "pg_advisory_unlock" in last_sql
 
 
+@pytest.mark.asyncio
+async def test_tick_acquire_failure_reenqueues_and_returns_lock_error(monkeypatch):
+    """O5b-FIX regression: a transient lock-acquire failure (real-PG raised
+    UndefinedFunctionError on the broken (int4, bigint) signature, but the
+    same recovery applies to ANY transient DB/network failure) must NOT
+    silently kill the tick. The tick logs, re-enqueues itself for the next
+    iteration, and returns a non-fatal ``lock_error`` status. The body never
+    runs (no store.load, no dispatch).
+    """
+    db = _mock_db()
+    db.execute = AsyncMock(side_effect=RuntimeError("advisory boom"))
+
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+
+    # Install a store stub that would fail loudly if reached — proves the body
+    # never ran (acquire failure short-circuits before store.load()).
+    store = _StoreStub(_make_job("running"), {"phase": "discovery"})
+    _install_store(monkeypatch, store)
+
+    result = await run_tick(db, uuid4())
+
+    assert result == {"status": "lock_error"}
+    reenqueue.assert_called_once()
+    # The acquire was attempted exactly once; the unlock branch is in the
+    # body's finally, which never ran (acquire failed before entering try).
+    assert db.execute.await_count == 1
+    # The body never reached store.touch(...) (proves the lock_error path
+    # short-circuited before any phase work).
+    assert store.touch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_tick_lock_sql_is_single_key_form(monkeypatch):
+    """SQL-shape guard: pin the single-key ``pg_try_advisory_lock(
+    hashtextextended(:key, 0))`` form so a future refactor can't silently
+    regress to the broken two-arg ``(:ns, hashtextextended(:pid, 0))`` form
+    that real PostgreSQL rejects with UndefinedFunctionError.
+
+    Mocks cannot catch SQL-signature errors at runtime (``scalar_one()`` is
+    always truthy on a MagicMock), so this test is the cheap substitute: we
+    capture the SQL text on the lock probe and assert the shape directly.
+    """
+    captured: dict = {}
+
+    async def capture_execute(sql, params=None):
+        captured.setdefault("sql", str(sql))
+        captured.setdefault("params", params)
+        result = MagicMock()
+        result.scalar_one = MagicMock(return_value=True)
+        return result
+
+    db = _mock_db()
+    db.execute = AsyncMock(side_effect=capture_execute)
+
+    # Cancelled parent → run_tick returns "stopped" right after acquire,
+    # keeping this test focused on the lock SQL only.
+    store = _StoreStub(_make_job("cancelled"), {"phase": "discovery"})
+    _install_store(monkeypatch, store)
+
+    await run_tick(db, uuid4())
+
+    sql_compact = captured["sql"].replace(" ", "").replace("\n", "")
+    # Single-key form present:
+    assert "pg_try_advisory_lock(hashtextextended(" in sql_compact
+    # Old broken two-arg form absent:
+    assert "pg_try_advisory_lock(:ns" not in sql_compact
+    assert ":ns" not in sql_compact
+    # Param shape: a single ``key`` carrying the namespace prefix + UUID.
+    assert "key" in (captured["params"] or {})
+    assert (captured["params"] or {}).get("key", "").startswith(
+        "orchestrator_tick:"
+    )
+
+
 def test_reenqueue_uses_apply_async_with_countdown(monkeypatch):
     apply_async = MagicMock()
     monkeypatch.setattr(
