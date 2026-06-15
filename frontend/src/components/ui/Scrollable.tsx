@@ -3,9 +3,12 @@
  * auto-hiding overlay scrollbar on top of it (see `useAutoHideScrollbar`).
  *
  * Layout contract:
- * - Outer wrapper: `position: relative`. Caller may pass `outerClassName` to
- *   shape it (e.g. `absolute inset-0 h-full w-full`); by default it follows
- *   block flow and matches the inner scroll container's bounding box.
+ * - Outer wrapper: `position: relative` (applied by the component). Do NOT
+ *   pass `relative` / `absolute` / `fixed` via `outerClassName` — under
+ *   tailwind-merge they conflict with the base `relative` and break thumb
+ *   positioning. To fill a parent, make that parent a flex/grid container
+ *   (e.g. `flex flex-col min-h-0 min-w-0 overflow-hidden`) and pass
+ *   `outerClassName="flex-1 min-h-0 min-w-0"` (or grid equivalents).
  * - Inner scroll container: receives `className`, `style`, and any other div
  *   props. The caller is responsible for the `overflow-*` rules that make it
  *   scroll (same as before adoption — only the visual scrollbar changes).
