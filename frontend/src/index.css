@@ -75,6 +75,10 @@
   --border: rgba(255, 255, 255, 0.08);
   --border-focus: rgba(56, 189, 248, 0.6);
 
+  /* === Auto-hiding overlay scrollbar (Scrollable / useAutoHideScrollbar) === */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(56, 189, 248, 0.5);
+
   /* === Chart line colors === */
   --chart-1: #38bdf8;
   --chart-2: #818cf8;
@@ -203,6 +207,9 @@
   --border: rgba(148, 163, 184, 0.2);
   --border-focus: rgba(2, 132, 199, 0.5);
 
+  --scrollbar-thumb: rgba(15, 23, 42, 0.22);
+  --scrollbar-thumb-hover: rgba(2, 132, 199, 0.5);
+
   --chart-1: #0284c7;
   --chart-2: #6366f1;
   --chart-3: #059669;
@@ -301,6 +308,30 @@
     width: 0;
     height: 0;
     display: none;
+  }
+
+  /* Auto-hiding overlay scrollbar thumb (rendered by <Scrollable />). */
+  .imp-scroll-thumb {
+    position: absolute;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    opacity: 0;
+    transition: opacity 0.25s ease, background-color 0.2s ease;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .imp-scroll-thumb[data-visible="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .imp-scroll-thumb[data-visible="true"]:hover,
+  .imp-scroll-thumb[data-dragging="true"] {
+    background: var(--scrollbar-thumb-hover);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .imp-scroll-thumb {
+      transition: none;
+    }
   }
 
   /* Selection */

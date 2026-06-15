@@ -1,0 +1,31 @@
+---
+description: Architecture Principles document is immutable. Never edit ARCHITECTURE_PRINCIPLES.md.
+alwaysApply: true
+---
+
+# ARCHITECTURE_PRINCIPLES.md is immutable
+
+`ARCHITECTURE_PRINCIPLES.md` at the repository root is the **authoritative, immutable** source of architecture rules. It is the ruler against which every refactor, module, and prompt is measured.
+
+## Hard rules
+
+- **NEVER modify `ARCHITECTURE_PRINCIPLES.md`** under any circumstance — no edits, no reformatting, no fixups, no "small clarifications".
+- **NEVER delete or rename** this file.
+- **NEVER stage `ARCHITECTURE_PRINCIPLES.md` for commit.** If `git status` shows it as modified, restore it: `git checkout -- ARCHITECTURE_PRINCIPLES.md`.
+- The four companion documents (`Imperecta_Architecture.md`, `Imperecta_Backend.md`, `Imperecta_Database.md`, `Imperecta_Frontend.md`) **describe** the implementation; `ARCHITECTURE_PRINCIPLES.md` **prescribes** the rules. Update the four; never the principles.
+
+## When the user asks to amend principles
+
+Treat any request to "fix", "update", "rephrase", or "extend" `ARCHITECTURE_PRINCIPLES.md` as a policy change. **Stop and ask explicitly**:
+
+> Файл `ARCHITECTURE_PRINCIPLES.md` помечен как иммутабельный. Подтверди, что хочешь изменить именно его (а не один из четырёх описательных документов), и сформулируй точную правку.
+
+Only after explicit, unambiguous confirmation in the same session may the file be touched. Default action is **refuse and ask**.
+
+## When refactoring conflicts with the document
+
+Per the document itself (Section 0): "When a proposed design conflicts with this document, the design is wrong, not the document — unless the document is explicitly amended first." Bring the conflict to the user; do not silently bend the document.
+
+## Reading allowed, writing forbidden
+
+You may read `ARCHITECTURE_PRINCIPLES.md` freely to ground decisions, generate code, or explain trade-offs. You may quote it. You may not write to it.

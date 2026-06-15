@@ -17,6 +17,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { usePoolProducts, usePoolCategories } from "@/hooks/usePoolProducts";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
+import { Scrollable } from "@/components/ui/Scrollable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -200,7 +201,10 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
           </div>
         ) : (
           <>
-            <div className="max-h-[55vh] overflow-x-auto overflow-y-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]">
+            <Scrollable
+              axis="both"
+              className="max-h-[55vh] overflow-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]"
+            >
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
@@ -272,7 +276,7 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                   ))}
                 </TableBody>
               </Table>
-            </div>
+            </Scrollable>
           </>
         )}
       </div>

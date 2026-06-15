@@ -537,6 +537,8 @@
   "settings.codeInstruction": "Надішли код боту {{bot}}",
   "settings.getCodeInstruction": "Отримай 6-значний код для прив'язки облікового запису.",
   "settings.notifications": "Сповіщення",
+  "settings.ticker.title": "Рядок котирувань",
+  "settings.ticker.description": "Виберіть, які ринкові інструменти відображаються в рядку котирувань.",
   "settings.notificationsDescription": "Налаштуйте канал у правилах алертів. Час дайджесту: скоро.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

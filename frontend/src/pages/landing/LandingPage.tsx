@@ -17,6 +17,7 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
+import { Logo } from "@/components/layout/Logo";
 
 const LANDING_GRADIENT = "linear-gradient(135deg, #050810 0%, #0a0e1a 25%, #0d1525 50%, #0a1628 100%)";
 const LANDING_ACCENT = "#38bdf8";
@@ -26,7 +27,7 @@ function LandingHeader() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 backdrop-blur-md">
       <div className="flex items-center gap-2">
-        <img src="/images/logo_dark.png" alt="Imperecta" className="h-8 w-auto" />
+        <Logo />
       </div>
       <div className="flex items-center gap-4">
         <Link
@@ -508,7 +509,7 @@ function LandingFooter() {
         <div className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <img src="/images/logo_dark.png" alt="Imperecta" className="h-6 w-auto" />
+              <Logo />
             </div>
             <p className="mt-3 max-w-xs text-sm text-white/55">
               AI Market Intelligence for e-commerce teams. Faster visibility, sharper competitive context, more confident commercial decisions.

@@ -12,6 +12,7 @@ import { Header } from "./Header";
 import { MobileSidebar } from "./MobileSidebar";
 import { BottomNavigation } from "./BottomNavigation";
 import { SessionExpiryWarning } from "@/components/SessionExpiryWarning";
+import { Scrollable } from "@/components/ui/Scrollable";
 import { useSidebar } from "@/hooks/useSidebar";
 
 export function DashboardLayout() {
@@ -35,7 +36,7 @@ export function DashboardLayout() {
         <Sidebar collapsed={isCollapsed} onToggle={toggle} />
       </aside>
       <Header onMenuClick={() => setMobileSheetOpen(true)} />
-      <main className="relative z-10 col-span-1 min-h-0 overflow-auto p-2.5 pb-16 safe-area-bottom-margin sm:pb-2.5">
+      <main className="relative z-10 col-span-1 min-h-0">
         {/* Ambient background — decorative only */}
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <div
@@ -48,19 +49,25 @@ export function DashboardLayout() {
           />
         </div>
 
-        <div className="relative z-[1] w-full">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
-        </div>
+        <Scrollable
+          axis="y"
+          outerClassName="absolute inset-0"
+          className="h-full w-full overflow-y-auto p-2.5 pb-16 safe-area-bottom-margin sm:pb-2.5"
+        >
+          <div className="relative z-[1] w-full">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={location.pathname}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Outlet />
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </Scrollable>
       </main>
       <MobileSidebar open={mobileSheetOpen} onOpenChange={setMobileSheetOpen} />
       <BottomNavigation />

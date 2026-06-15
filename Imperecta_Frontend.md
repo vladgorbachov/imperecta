@@ -1,7 +1,21 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-07 (head `e2369b8`; WIP: γ-orchestrator UI wiring)  
+**Актуально на:** 2026-06-14 (head `ff781a9`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
+
+> Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию UI; принципы не дублирует.
+
+## 0. Недавние правки (head контекст)
+
+| Commit | Суть |
+|--------|------|
+| `291e38f` | Drop discover() unit tests (backend) |
+| `50a93e3` | Relocate `decode_token` → `common/security` (Tier-0) |
+| `1f972f5` | i18n: admin hardcoded UI keys → translations |
+| `9e96cf3` | Complete locale coverage (8 языков), prune dead keys |
+| `cbe9f71` | Remove dead pool bulk-delete UI (frontend + `productsApi.bulkDeletePool`) |
+| `d92d604` | Prune orphan components + tsc fixes (`Sparkline`, `PriceSparkline`, `AuthProvider`/`authContext`, `DeleteConfirmDialog`, `SelectionActionBar`, `useRowSelection`) |
+| `cc6bf68` | Drop dead avatar delete; fix `AIAnalystPage.handleSend` arity; remove unused `useEntitlements.getLimit` |
 
 ---
 
@@ -30,7 +44,9 @@ frontend/src/
 
 **`main.tsx`:** `setupAuth` → `i18n` → `AppWithInit` (session restore) → `App`.
 
-**Providers:** QueryClient → AuthProvider → ThemeProvider (dark default) → Tooltip → Suspense → Router → Toaster (sonner: glass + `imperecta-sonner-*` classes; centered layout overrides in `styles/components.css`).
+**Providers:** QueryClient → ThemeProvider (dark default) → Tooltip → Suspense → Router → Toaster (sonner: glass + `imperecta-sonner-*` classes; centered layout overrides in `styles/components.css`).
+
+> **Auth state:** только Zustand `authStore` (см. §9). React-context `AuthProvider`/`authContext` удалены как dead code (`d92d604`); компоненты используют `useAuthStore` напрямую через тонкий `hooks/useAuth.ts`.
 
 ---
 
@@ -278,7 +294,8 @@ frontend/src/
 
 ## 13. Products UI
 
-- **`MyProductsTab` / `PoolProductsTab`:** pagination 20/50/100, row selection, bulk delete.
+- **`MyProductsTab`:** pagination 20/50/100; per-row actions; **bulk-delete функциональность удалена** (`cbe9f71`) — backend endpoint `DELETE /pool/products/bulk` отсутствовал, UI использовал `string[]` UUID на типизированный `number[]` API; вместе с UI убраны `DeleteConfirmDialog`, `SelectionActionBar`, `useRowSelection`, `productsApi.bulkDeletePool`.
+- **`PoolProductsTab`:** pagination 20/50/100; одиночный просмотр; без bulk-delete.
 - **`ProductDetailPage`:** charts, run parsing action.
 - Plan limits: `PlanLimitBanner`, `usePlanLimits`.
 
@@ -303,9 +320,11 @@ frontend/src/
 
 ## 16. Тесты
 
-- **Vitest:** `cd frontend && npm test`
-- `AdminPage.parsing.test.tsx`, `MarketsOverviewSection.test.tsx`, `marketplaceLabel.test.ts`, `usePipelineStatus.test.tsx`
-- i18n tests under `src/i18n/__tests__/`
+- **Vitest:** `cd frontend && pnpm test --run`
+- `AdminPage.parsing.test.tsx`, `MarketsOverviewSection.test.tsx`, `marketplaceLabel.test.ts`, `usePipelineStatus.test.tsx`, `useAdmin.parsing.test.tsx`, `sanitize.test.ts`, `tickerBarData.test.ts`
+- i18n tests: `src/i18n/__tests__/translation-coverage.test.ts`, `guard.test.ts`, `language-access.test.tsx`
+- Удалённые тесты (вместе с компонентами, `d92d604`): `Sparkline.test.tsx`
+- **Известное ограничение:** Vitest `setupFiles` не настроен → `i18next` не инициализирован для тестов; `MarketsOverviewSection.test.tsx` ассертит сырые i18n-ключи (`market.overview.kpi.totalPool` и т.п.). Тест проходит, но не валидирует переведённый текст.
 - **Playwright E2E:** `e2e/` — smoke против Cloudflare/Railway URL в CI
 - **Backend pytest:** см. `Imperecta_Backend.md` §12 — требует `backend/.env` + Postgres `imperecta_test`
 
@@ -327,7 +346,9 @@ frontend/src/
 |------|-----------|
 | `/competitors`, `/alerts` | Pages + API clients; no routes |
 | Backend `/api/alerts` | Router not in main |
-| Sidebar i18n keys for competitors/alerts | Legacy comments in App.tsx |
+| Sidebar i18n keys for competitors/alerts | Legacy comments в App.tsx |
+| Vitest i18n init | `setupFiles` не настроен → тесты ассертят сырые ключи, не переведённый текст (см. §16) |
+| `bulkDeletePool` | Удалён вместе с UI (`cbe9f71`); если потребуется, нужен backend `DELETE /pool/products/bulk` с `product_ids: list[UUID]` |
 
 ---
 
@@ -346,10 +367,11 @@ frontend/src/
 
 | Элемент | Логика |
 |---------|--------|
-| `authStore` | Zustand: user, tokens, login/logout actions |
+| `authStore` | Zustand: user, tokens, login/logout actions — единственный источник истины |
 | `authStorage` | Abstraction over localStorage keys |
 | `setupAuth.ts` | Inject Bearer; on 401 → refresh once → retry or logout |
-| Route guards | `ProtectedRoute`, `AdminRoute`, `AIAnalystRoute`, `LandingRoute` |
+| `hooks/useAuth.ts` | Тонкий селектор над `authStore` (заменил `AuthProvider`/`AuthContext`, удалённые в `d92d604`) |
+| Route guards | `ProtectedRoute`, `SuperuserRoute`, `AIAnalystRoute`, `PublicAuthRoute`, `ChangePasswordRoute` |
 
 ---
 
@@ -446,7 +468,7 @@ frontend/src/
 
 | Tab | Логика |
 |-----|--------|
-| **Market Overview** | Stats cards; marketplaces CRUD paginated 20/50/100; ingest trigger |
+| **Market Overview** | Stats cards; marketplaces CRUD paginated 20/50/100; ingest trigger; все строки UI через i18n (`1f972f5`) — ключи `admin.marketOverview.*` присутствуют во всех 8 локалях (`9e96cf3`) |
 | **Data Collection** | Delegates to `DataCollectionTab` |
 | **Users Management** | Table + dialogs; plans trial→enterprise; languages all 8 |
 
@@ -484,4 +506,4 @@ frontend/src/
 | Auth | `frontend/src/stores/authStore.ts` |
 | Marketplace labels | `frontend/src/lib/marketplaceLabel.ts`, `hooks/useMarketplaceLabel.ts` |
 
-Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Backend.md`, `Imperecta_Parsing.md`.
+Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Backend.md` (Часть II — parsing), `Imperecta_Database.md`.

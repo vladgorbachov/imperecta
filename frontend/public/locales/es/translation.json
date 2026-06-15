@@ -515,6 +515,8 @@
   "settings.codeInstruction": "Envíe el código al bot {{bot}}",
   "settings.getCodeInstruction": "Obtenga un código de 6 dígitos para vincular la cuenta.",
   "settings.notifications": "Notificaciones",
+  "settings.ticker.title": "Cinta de cotizaciones",
+  "settings.ticker.description": "Elige qué instrumentos de mercado aparecen en la cinta de cotizaciones.",
   "settings.notificationsDescription": "Configure el canal en las reglas de alertas. Hora del digest: próximamente.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

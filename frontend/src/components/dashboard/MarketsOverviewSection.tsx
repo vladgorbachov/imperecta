@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Scrollable } from "@/components/ui/Scrollable";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DisplayCurrencySelector } from "@/components/ui/DisplayCurrencySelector";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
@@ -414,7 +415,7 @@ export function MarketsOverviewSection() {
             className="h-8 pl-8 text-xs"
           />
         </div>
-        <div className="max-h-56 space-y-1 overflow-auto pr-1">
+        <Scrollable axis="y" className="max-h-56 space-y-1 overflow-y-auto pr-1">
           {visibleMarketplaces.map((item) => {
             const checked = selectedMarketplaces.includes(item.marketplace_domain);
             return (
@@ -437,7 +438,7 @@ export function MarketsOverviewSection() {
               </label>
             );
           })}
-        </div>
+        </Scrollable>
       </FilterSection>
 
       <FilterSection title={t("market.filters.price")}>

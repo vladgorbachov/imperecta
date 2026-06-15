@@ -6,7 +6,6 @@
 
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   Package,
@@ -19,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -48,25 +48,18 @@ function SidebarLogo({
   onNavigate?: () => void;
 }) {
   const showLabels = !collapsed || isMobile;
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
-  const logoSrc = isDark ? "/images/logo_dark.png" : "/images/logo_light.png";
 
   return (
     <Link
       to="/dashboard"
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "flex h-[84px] shrink-0 items-stretch border-b px-0 transition-colors",
+        "flex h-[84px] shrink-0 items-center border-b px-[17px] transition-colors",
         "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
-        showLabels ? "justify-start" : "justify-center"
+        showLabels ? "justify-start" : "justify-center px-0"
       )}
     >
-      <img
-        src={logoSrc}
-        alt="Imperecta"
-        className="h-full w-full object-fill object-left"
-      />
+      <Logo collapsed={collapsed && !isMobile} />
     </Link>
   );
 }

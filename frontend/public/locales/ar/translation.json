@@ -515,6 +515,8 @@
   "settings.codeInstruction": "أرسل الرمز للبوت {{bot}}",
   "settings.getCodeInstruction": "احصل على رمز 6 أرقام لربط الحساب.",
   "settings.notifications": "الإشعارات",
+  "settings.ticker.title": "شريط الأسعار",
+  "settings.ticker.description": "اختر أدوات السوق التي تظهر في شريط الأسعار.",
   "settings.notificationsDescription": "تكوين القناة في قواعد التنبيهات. وقت الملخص: قريباً.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

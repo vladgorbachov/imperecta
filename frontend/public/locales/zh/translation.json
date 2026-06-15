@@ -515,6 +515,8 @@
   "settings.codeInstruction": "将码发送给机器人 {{bot}}",
   "settings.getCodeInstruction": "获取6位码以绑定账户。",
   "settings.notifications": "通知",
+  "settings.ticker.title": "行情滚动条",
+  "settings.ticker.description": "选择在行情滚动条中显示的市场标的。",
   "settings.notificationsDescription": "在提醒规则中配置渠道。摘要时间：即将推出。",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

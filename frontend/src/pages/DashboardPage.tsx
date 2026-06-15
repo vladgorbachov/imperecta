@@ -3,7 +3,6 @@
  */
 
 import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
-import { MarketsTickerBar } from "@/components/dashboard/MarketsTickerBar";
 import { MarketsOverviewSection } from "@/components/dashboard/MarketsOverviewSection";
 import { MarketsAnalyticsSection } from "@/components/dashboard/MarketsAnalyticsSection";
 
@@ -14,8 +13,6 @@ export function DashboardPage() {
       style={{ background: "var(--gradient-accent-subtle)" }}
     >
       <PlanLimitBanner className="mb-2" />
-
-      <MarketsTickerBar />
 
       <MarketsOverviewSection />
 

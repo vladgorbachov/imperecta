@@ -515,6 +515,8 @@
   "settings.codeInstruction": "Envoyez le code au bot {{bot}}",
   "settings.getCodeInstruction": "Obtenez un code à 6 chiffres pour lier le compte.",
   "settings.notifications": "Notifications",
+  "settings.ticker.title": "Bandeau de cotations",
+  "settings.ticker.description": "Choisissez les instruments de marché affichés dans le bandeau.",
   "settings.notificationsDescription": "Configurez le canal dans les règles d'alertes. Heure du digest: bientôt.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

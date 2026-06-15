@@ -543,6 +543,8 @@
   "settings.codeInstruction": "Send code to bot {{bot}}",
   "settings.getCodeInstruction": "Get a 6-digit code to link your account.",
   "settings.notifications": "Notifications",
+  "settings.ticker.title": "Ticker bar",
+  "settings.ticker.description": "Choose which market instruments appear in the ticker bar.",
   "settings.notificationsDescription": "Configure channel per alert rule. Digest time coming soon.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

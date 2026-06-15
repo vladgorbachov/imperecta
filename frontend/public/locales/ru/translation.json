@@ -534,6 +534,8 @@
   "settings.codeInstruction": "Отправьте код боту {{bot}}",
   "settings.getCodeInstruction": "Получите 6-значный код для привязки аккаунта.",
   "settings.notifications": "Уведомления",
+  "settings.ticker.title": "Бегущая строка",
+  "settings.ticker.description": "Выберите, какие рыночные инструменты отображаются в бегущей строке.",
   "settings.notificationsDescription": "Настройте канал в правилах алертов. Время дайджеста: скоро.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",

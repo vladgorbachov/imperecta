@@ -522,6 +522,8 @@
   "settings.codeInstruction": "Trimite codul la bot {{bot}}",
   "settings.getCodeInstruction": "Obține un cod de 6 cifre pentru a conecta contul.",
   "settings.notifications": "Notificări",
+  "settings.ticker.title": "Bandă de cotații",
+  "settings.ticker.description": "Alege ce instrumente de piață apar în banda de cotații.",
   "settings.notificationsDescription": "Configurați canalul în regulile de alerte. Oră rezumat: în curând.",
   "settings.channelEmail": "Email",
   "settings.channelTelegram": "Telegram",
