@@ -218,6 +218,29 @@ def classify_page_role_for_discovery(soup: BeautifulSoup, base_url: str) -> str:
         if og_type in _OG_TYPES_PRODUCT:
             return "product"
         if og_type in _OG_TYPES_HUB:
+            # og:type=website is a weak CMS-default signal, not semantic intent
+            # (many shops emit it on every page regardless of content). A
+            # stronger structured signal — JSON-LD or microdata — overrides
+            # the hub verdict so PDPs (->product) AND category pages
+            # (->listing) that ship default og:type=website still classify
+            # correctly instead of short-circuiting to 'hub'. Product is
+            # checked BEFORE Listing (a PDP with a coexisting CollectionPage/
+            # Breadcrumb must win as 'product', matching Layer 2's own
+            # priority at the JSON-LD/microdata branches below). With no
+            # stronger structured signal the page stays 'hub' — the genuine-
+            # hub guarantee is preserved.
+            ld_types_for_hub = _get_jsonld_root_types(soup)
+            md_top_types_for_hub = _get_microdata_toplevel_types(soup)
+            if (
+                ld_types_for_hub & _JSONLD_TYPES_PRODUCT
+                or md_top_types_for_hub & _MICRODATA_TYPES_PRODUCT
+            ):
+                return "product"
+            if (
+                ld_types_for_hub & _JSONLD_TYPES_LISTING
+                or md_top_types_for_hub & _MICRODATA_TYPES_LISTING
+            ):
+                return "listing"
             return "hub"
         if og_type in _OG_TYPES_LISTING:
             return "listing"

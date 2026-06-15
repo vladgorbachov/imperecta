@@ -86,3 +86,143 @@ def test_is_category_url_standalone_numeric_pdp():
 
 def test_is_category_url_html_pdp():
     assert _is_category_url("/laptop-name.html") is False
+
+
+# ---------------------------------------------------------------------------
+# CLASSIFIER-OG-WEBSITE-PRIORITY: a strong structured signal (JSON-LD or
+# microdata Product/Listing type) overrides the weak og:type=website
+# CMS-default short-circuit. Many shops (bomba.md and similar) emit
+# og:type=website on EVERY page; a Product-only override would still leave
+# their category pages classified as 'hub' and Phase 2 starved. So Product
+# AND Listing must both be recognised under og:type=website. The
+# regress-guard test below pins the genuine-hub case.
+# ---------------------------------------------------------------------------
+
+
+def test_layer1_website_with_jsonld_product_returns_product():
+    """og:type=website + JSON-LD @type=Product → 'product' (real bomba PDP shape)."""
+    pdp = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '<script type="application/ld+json">'
+        '{"@type":"Product","name":"X"}'
+        '</script>'
+        '</head><body></body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(pdp, "https://shop.test/p/1")
+        == "product"
+    )
+
+
+def test_layer1_website_with_jsonld_collectionpage_returns_listing():
+    """og:type=website + JSON-LD @type=CollectionPage → 'listing'.
+
+    THE category shape that feeds Phase 2 (discovery): without this override,
+    bomba-style category pages stay 'hub' → never added to
+    discovered_category_urls → Phase 2 has nothing to harvest.
+    """
+    category = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '<script type="application/ld+json">'
+        '{"@type":"CollectionPage","name":"Bass guitars"}'
+        '</script>'
+        '</head><body></body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(category, "https://shop.test/c/bass")
+        == "listing"
+    )
+
+
+def test_layer1_website_with_microdata_product_returns_product():
+    """og:type=website + top-level itemtype Product (microdata-only shops)."""
+    pdp = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '</head>'
+        '<body>'
+        '<div itemscope itemtype="https://schema.org/Product">'
+        '<span itemprop="name">X</span></div>'
+        '</body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(pdp, "https://shop.test/p/1")
+        == "product"
+    )
+
+
+def test_layer1_website_with_microdata_collectionpage_returns_listing():
+    """og:type=website + top-level itemtype CollectionPage."""
+    category = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '</head>'
+        '<body>'
+        '<div itemscope itemtype="https://schema.org/CollectionPage">'
+        '<span itemprop="name">Bass</span></div>'
+        '</body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(category, "https://shop.test/c/bass")
+        == "listing"
+    )
+
+
+def test_layer1_website_product_wins_over_coexisting_listing():
+    """Inside the website branch, Product is checked BEFORE Listing — a PDP
+    that ships a coexisting CollectionPage/Breadcrumb must still classify as
+    'product' (matching Layer 2's own JSON-LD priority).
+    """
+    pdp = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '<script type="application/ld+json">'
+        '[{"@type":"CollectionPage","name":"X"},{"@type":"Product","name":"Y"}]'
+        '</script>'
+        '</head><body></body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(pdp, "https://shop.test/p/1")
+        == "product"
+    )
+
+
+def test_layer1_website_without_structured_still_hub():
+    """REGRESS-GUARD: og:type=website with no stronger structured signal (or
+    only hub-typed JSON-LD like WebPage / FAQPage) MUST still return 'hub'.
+
+    The fix is "website yields to a stronger signal", not "website is no
+    longer a hub". This test pins universality so no future change accidentally
+    drops genuine hubs into 'unknown'/'listing'.
+    """
+    bare = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '</head><body></body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(bare, "https://shop.test/")
+        == "hub"
+    )
+
+    webpage = BeautifulSoup(
+        '<html><head>'
+        '<meta property="og:type" content="website">'
+        '<script type="application/ld+json">'
+        '{"@type":"WebPage","name":"Home"}'
+        '</script>'
+        '</head><body></body></html>',
+        "html.parser",
+    )
+    assert (
+        classify_page_role_for_discovery(webpage, "https://shop.test/")
+        == "hub"
+    )
