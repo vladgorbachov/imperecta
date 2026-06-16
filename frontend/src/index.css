@@ -149,7 +149,7 @@
 .light {
   color-scheme: light;
 
-  --background: #f0f4ff;
+  --background: #eaf2ff;
   --background-mid: #ffffff;
   --background-surface: #f8faff;
   --background-elevated: #ffffff;
@@ -306,6 +306,15 @@
       linear-gradient(168deg, #03060f 0%, #050b1c 50%, #02040c 100%);
     background-repeat: no-repeat;
     background-color: #050b1c;
+  }
+
+  /* Sky background — light only (mirrors the dark Ink rule; no grain in light) */
+  html.light body {
+    background:
+      radial-gradient(120% 120% at 50% 0%, transparent 62%, rgba(2, 132, 199, 0.05) 100%),
+      linear-gradient(180deg, #e9f2ff 0%, #f4f9ff 55%, #ffffff 100%);
+    background-repeat: no-repeat;
+    background-color: #eaf2ff;
   }
 
   /* Film grain overlay — dark only, sits behind app content, blends with the gradient */
