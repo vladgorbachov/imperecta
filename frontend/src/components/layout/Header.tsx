@@ -50,7 +50,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
   return (
     <header
       className={cn(
-        "flex h-12 min-h-[44px] shrink-0 items-center justify-between px-3 backdrop-blur-xl safe-area-top sm:h-14 sm:px-4 md:px-5",
+        "flex h-12 min-h-[44px] min-w-0 shrink-0 items-center justify-between overflow-hidden px-3 backdrop-blur-xl safe-area-top sm:h-14 sm:px-4 md:px-5",
         "bg-[var(--background-mid)] border-b border-[var(--glass-border)]"
       )}
     >
