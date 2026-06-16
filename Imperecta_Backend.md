@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-14 (head `ff781a9`)  
+**Актуально на:** 2026-06-15 (head `8ec2ff4`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию backend; принципы не дублирует.
@@ -148,10 +148,10 @@
 
 - `DiscoveryCrawler.discover(deadline_monotonic?)` — cooperative 900s budget, inner job type `discovery`.
 - **Phase 0:** sitemap (300s budget) + content-aware filter.
-- **Phase 1:** category recon (BFS, schema-aware classifier).
+- **Phase 1:** category recon (BFS, schema-aware classifier); **batch publish** (`CATEGORY_PUBLISH_BATCH=60`) → Phase 2 same tick (`5d3eb26`).
 - **Phase 2:** product harvest + `CATEGORY_CONVERGENCE_STREAK=3`.
 - **Resumable save:** `sitemap_resume_offset` (`016`), `recon_frontier_state` (`017`), `category_resume_index` (`018`); batch 500; inner job `partial` (`019`).
-- **Phase 2 cooperative deadline:** `_headroom_deadline`, `_phase2_product_harvest` → `exhausted_budget`; `partial_budget` на category path.
+- **Phase 2 cooperative deadline:** `_headroom_deadline`, `_phase2_product_harvest` → `(next_index, more_remaining)`; `partial_budget` на category path.
 - **Tick mode:** `parent_job_id`, `inner_job`; `discover_one_marketplace` + `orchestrator_tick`.
 - Timeouts: `SITEMAP_PHASE_BUDGET_SECONDS=300`, `DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`, `SITEMAP_TIMEOUT_COOLDOWN_HOURS=24`.
 
@@ -160,11 +160,11 @@
 - `scrape_page_for_analysis(url, static_fetch=True)` — HTML + BeautifulSoup для discovery.
 - `fetch_sitemap_candidates(base_url)` — robots.txt, nested sitemaps, XML validation, Playwright fallback.
 
-**Classification (`extractors.py`):**
+**Classification (`classifier/service.py` + re-export in `extractors.py`):**
 
 | Function | Used by | Strategy |
 |----------|---------|----------|
-| `classify_page_role_for_discovery` | `discovery.py`; **`merge_and_finalize`** (scrape) | Layer 1: `og:type`; Layer 2: JSON-LD `@type`; Layer 2.5: microdata top-level `itemtype`; Layer 3: structural fallback |
+| `classify_page_role_for_discovery` | `discovery.py`; **`merge_and_finalize`** (scrape) | Layer 1: `og:type` (website = weak hub — overridden by Layer 2/2.5 Product/Listing, `08c23f2`); Layer 2: JSON-LD `@type`; Layer 2.5: microdata top-level `itemtype`; Layer 3: structural fallback |
 | `classify_page_role` | Layer 3 fallback only | JSON-LD + DOM repetition + price density |
 
 **`merge_and_finalize`:** если role `listing`/`hub` → `merge_skipped_non_pdp_page`, пустой extract (раньше structural classifier давал false listing на PDP с блоками «похожие товары»).
@@ -187,13 +187,12 @@ Monolith-путь (`run_full_pipeline_test`, `FullPipelineOrchestrator`, `_run_s
 | Файл | Роль |
 |------|------|
 | `tick_orchestrator.py` | `run_tick` — единственная state-machine pipeline-а; serialized per-parent через session-level `pg_advisory_lock` (O5b, `a82fa48`/`ff781a9`) |
-| `discovery_phase.py` | Single-MP discovery worker для `discover_one_marketplace`; `deadline_monotonic`; Z1 reap safety net |
 | `job_completion.py` | Финализация parent job; `partial`-aware rollup из children (O5a, `09f1dc2`) |
 | `metadata_store.py` | Read/write `scrape_jobs.config["metadata"]`, `touch(stage=…)`, `marketplace_codes_filter` |
 | `cancellation.py` | Cancel checks, revoke task |
-| `activity_pulse.py` | Heartbeat в metadata |
-| `worker_log_relay.py` | Redis relay + logging handler |
-| `child_aggregation.py` | `aggregate_discovery_children` — seed для `complete_pipeline_job` на complete-фазе |
+| `activity_pulse.py` | Heartbeat в metadata + `discovery_activity_callback` |
+| `worker_log_relay.py` | Redis relay + logging handler; CM wired в child tasks (`ef11075`) |
+| `child_aggregation.py` | `aggregate_discovery_children` + `aggregate_scrape_children` — seed для `complete_pipeline_job` |
 
 ### 4.4 Остальные модули
 
@@ -349,7 +348,9 @@ GlobalScrapeService.scrape_product(listing_id)
 **Migration `015`:** `fact_price_202606` … `fact_price_202612` + `fact_price_default` (DEFAULT partition — safety net).  
 **Migration `016`–`018`:** resumable discovery columns on `dim_marketplace`.  
 **Migration `019`:** `partial` in `scrape_jobs.status`.  
-**Migration `020`:** `parent_job_id` self-FK on `scrape_jobs` (head).
+**Migration `020`:** `parent_job_id` self-FK on `scrape_jobs`.  
+**Migration `021`:** `fact_listing.failure_streak`.  
+**Migration `022`:** `job_type='scrape'` in CHECK (head).
 
 **Celery `ensure_fact_price_partitions`:** создаёт партиции на **следующие 3 календарных месяца** (`CREATE TABLE IF NOT EXISTS`). Beat: daily 00:00 (`scheduler.py`).
 
@@ -428,13 +429,13 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 
 | Файл | Ответственность |
 |------|-----------------|
-| `orchestrator.py` | End-to-end async+sync flow |
-| `discovery_phase.py` | Per-MP discovery + **Z1 reap** |
-| `job_completion.py` | Parent job finalize (не Z1) |
-| `cancellation.py` | Cancel detection + Celery revoke (не Z1) |
+| `tick_orchestrator.py` | Distributed tick state machine (`run_tick`) |
+| `job_completion.py` | Parent job finalize |
+| `cancellation.py` | Cancel detection + Celery revoke |
 | `metadata_store.py` | JSONB read/write/touch |
-| `activity_pulse.py` | Heartbeat 15s throttle |
-| `worker_log_relay.py` | Redis 500-line buffer |
+| `activity_pulse.py` | Heartbeat 15s throttle + discovery activity callback |
+| `worker_log_relay.py` | Redis 500-line buffer; CM in child tasks |
+| `child_aggregation.py` | Aggregate child discovery/scrape jobs |
 
 ---
 
@@ -443,8 +444,8 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Task | Логика |
 |------|--------|
 | `orchestrator_tick` | Single tick state-machine; `_run_async(run_tick(...))`; единственный dispatch pipeline-а |
-| `discover_one_marketplace` | Owns child `ScrapeJob` (`job_type='discovery'`); запускает `DiscoveryCrawler.discover` со scoped session |
-| `scrape_one_marketplace` | Owns child `ScrapeJob` (`job_type='scrape'`); идемпотентен (терминальные skip; `running` re-owned); внутри — sync `_run_scrape_marketplace_pool` scoped по `marketplace_code` |
+| `discover_one_marketplace` | Owns child `ScrapeJob` (`job_type='discovery'`); `pipeline_worker_log_relay(parent_id)` + `discovery_activity_callback` |
+| `scrape_one_marketplace` | Owns child `ScrapeJob` (`job_type='scrape'`); `pipeline_worker_log_relay(parent_id)` around `_run_scrape_all_pool` |
 | `discover_all_marketplaces` | Async loop all active MP, no per-MP 900s wrapper (standalone, **не** часть pipeline) |
 | `discover_single_marketplace` | One UUID (standalone) |
 | `scrape_pool_product` | Single listing, soft 120s / hard 150s |
@@ -490,7 +491,9 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | `discover_one_marketplace` | Celery O2 — runs discover on pre-created child job |
 | `_save_product_urls` | Batch 500; `(new_count, next_offset, exhausted)`; resume offset |
 | `_filter_urls_by_role` | Sample/trust/reject sitemap filter |
-| `_phase2_product_harvest` | Pagination + convergence + cooperative deadline → `exhausted_budget` |
+| `_publish_category_batch` | Replace `discovered_category_urls` with current batch; reset `category_resume_index`; persist/clear frontier (`5d3eb26`) |
+| `_phase1_category_recon` | BFS + batch publish at `CATEGORY_PUBLISH_BATCH` or deadline-with-findings |
+| `_phase2_product_harvest` | Pagination + convergence + cursor state machine → `(total_saved, next_index, more_remaining)` |
 | `_should_run_sitemap_harvest` | True if `sitemap_resume_offset > 0` or stale harvest |
 
 ---
@@ -533,7 +536,7 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Pipeline | `backend/app/modules/scraper/pipeline/` |
 | Celery | `backend/app/workers/celery_app.py` |
 | Partitions task | `backend/app/workers/maintenance_tasks.py` |
-| Migrations 015–020 | `backend/alembic/versions/015_*.py` … `020_*.py` |
+| Migrations 015–022 | `backend/alembic/versions/015_*.py` … `022_*.py` |
 | Reaper | `backend/app/workers/reaper_tasks.py` |
 | Pipeline status | `parsing_admin.get_pipeline_status`, `api_parsing` GET `/pipeline-status` |
 | Display currency | `backend/app/common/currency.py`, `marketplace_locale.py` |
@@ -576,15 +579,13 @@ backend/app/modules/scraper/
 ├── proxy_manager.py
 ├── api.py                  # NOT in main.py
 └── pipeline/
-    ├── orchestrator.py
-    ├── discovery_phase.py
+    ├── tick_orchestrator.py      # run_tick state machine
     ├── job_completion.py
     ├── metadata_store.py
     ├── cancellation.py
     ├── activity_pulse.py
     ├── worker_log_relay.py
-    ├── child_aggregation.py      # aggregate child discovery jobs
-    └── tick_orchestrator.py      # run_tick state machine
+    └── child_aggregation.py
 
 backend/app/modules/admin/
 ├── api_parsing.py
@@ -705,7 +706,7 @@ On API read: jobs idle >30 min (running), >5 min (queued), >10 min (dispatch) �
 
 ### Admin pipeline status API
 
-`GET /api/admin/parsing/pipeline-status` — running → latest terminal → idle; `partial` → frontend `completed` (`_to_frontend_status`). UI: `PipelineStatusPanel` + `usePipelineStatus` (5s).
+`GET /api/admin/parsing/pipeline-status` — running → latest terminal → idle; `partial` → frontend `completed` (`_to_frontend_status`). UI: endpoint существует; **`PipelineStatusPanel` не импортируется** — live monitor в `DataCollectionTab` использует `useParsingJobStatus`.
 
 ---
 
@@ -715,14 +716,19 @@ On API read: jobs idle >30 min (running), >5 min (queued), >10 min (dispatch) �
 |----------|-------|
 | Redis key | `pipeline:worker_deploy_log` |
 | Max lines | 500 |
-| Loggers | `app.modules.scraper`, `celery.*` |
+| Loggers | `app.modules.scraper`, `celery`, `celery.task`, `celery.worker` |
 | Line max len | 480 chars |
+
+**Wiring (`ef11075`):** child tasks wrap work in `pipeline_worker_log_relay(parent_job_id)`:
+
+- `discover_one_marketplace` — relay under parent id; `discovery_activity_callback` → `pulse_job_activity_async` + relay line
+- `scrape_one_marketplace` — relay under parent id; structlog INFO from scraper modules captured for live monitor
 
 **API:** `GET /worker-log-relay?after=&limit=&job_id=`  
 - Filters lines by `job_id` when provided  
 - Response `visible_lines: 3`  
 
-**Frontend:** `WorkerLogRelayPanel` — 2s poll, cursor buffer 120 lines.
+**Frontend:** `WorkerLogRelayPanel` in `DataCollectionTab` — 2s poll, cursor buffer 120 lines.
 
 ---
 
@@ -735,7 +741,7 @@ On API read: jobs idle >30 min (running), >5 min (queued), >10 min (dispatch) �
 1. Inner `scrape_jobs` (`job_type=discovery`): insert `running` (legacy) или promote `inner_job` из `pending` (γ-orchestrator, `parent_job_id`).
 2. Quota: `product_quota` / `discovery_no_quota_limit`.
 3. **Phase 0** sitemap (budget 300 s) → если ≥10 PDP URLs → **sitemap path** с resumable save.
-4. Иначе **category path**: Phase 1 recon + Phase 2 harvest (convergence streak).
+4. Иначе **category path**: Phase 1 recon (batch publish) + Phase 2 harvest (convergence streak, resumable cursor).
 5. Статусы: `completed`, `partial`, `partial_budget`, `error`, `no_categories`.
 6. Обновляет `last_discovery_*`, `products_in_pool`, `sitemap_resume_offset`, inner job.
 
@@ -767,7 +773,7 @@ On API read: jobs idle >30 min (running), >5 min (queued), >10 min (dispatch) �
 Category crawl получил тот же cooperative budget, что и sitemap save:
 
 1. **`_headroom_deadline(deadline_monotonic)`** — статический helper; уменьшает hard deadline на `SAVE_BUDGET_HEADROOM_FRACTION` (0.85). Вызывается в `discover()` **один раз** перед Phase 2 / sitemap save; внутри фаз deadline **не** сжимается повторно.
-2. **`_phase2_product_harvest(..., deadline_monotonic)`** → `(total_saved, exhausted_budget)`.
+2. **`_phase2_product_harvest(..., deadline_monotonic)`** → `(total_saved, next_index, more_remaining)`.
 3. Проверки deadline: перед каждой category URL; перед каждой pagination page; после `_save_product_urls` если `save_exhausted`.
 4. При `exhausted=True` → `discover()` ставит `partial_budget` (как при незавершённом sitemap offset).
 5. Логи: `discovery_phase2_budget_exhausted`, `discovery_phase2_converged` (convergence — отдельный early exit).
@@ -814,7 +820,7 @@ only role == 'product' → save path
 
 | Layer | Signal | Mapping |
 |-------|--------|---------|
-| 1 | Open Graph `og:type` | `product` / `product.group` / `product.item` → **product**; `website` → **hub**; `article` / `blog` / `news` → **listing**; иное → layer 2 |
+| 1 | Open Graph `og:type` | `product` / `product.group` / `product.item` → **product**; `website` → **weak hub** — перед возвратом hub проверяются Layer 2/2.5: Product → **product**, Listing types → **listing** (`08c23f2`); без structured signal → **hub**; `article` / `blog` / `news` → **listing**; иное → layer 2 |
 | 2 | JSON-LD root `@type` only | `Product`, `IndividualProduct`, `ProductModel` → **product** (побеждает Breadcrumb на PDP); `CollectionPage`, `ItemList`, `SearchResultsPage`, `Article`, … → **listing**; `WebPage`, `AboutPage`, … → **hub** |
 | 2.5 | HTML5 Microdata top-level `itemtype` (`5d6d4fa`) | `_get_microdata_toplevel_types` — только itemscope без внешнего itemscope-родителя; Product → **product**; ItemList/OfferCatalog → **listing** |
 | 3 | Fallback | `classify_page_role()` — DOM repetition + price density |
@@ -850,19 +856,25 @@ only role == 'product' → save path
 - BFS depth ≤ `RECON_BFS_MAX_DEPTH` (3) от `base_url`.
 - Каждая страница: `classify_page_role_for_discovery` (не structural-only).
 - Hub/unknown → follow internal links; `listing` → save category URL.
+- **Batch publish (`5d3eb26`):** при `len(listing_urls) >= CATEGORY_PUBLISH_BATCH` (60) или deadline с findings → `_publish_category_batch()`:
+  - **Replace** (не append) `discovered_category_urls` текущим batch; `category_resume_index = 0`
+  - Frontier: если queue non-empty → `recon_frontier_state` с пустым `listing_urls` для resume BFS; иначе clean completion
+  - Return `(batch, exhausted=False)` → Phase 2 в том же tick
+- `exhausted=True` только если deadline без findings (ничего не опубликовано).
 - Fallback seeds: `/catalog`, `/categories`, `/shop`, …
-- Пишет `discovered_category_urls`, `last_category_recon_at`.
 - Stale: `CATEGORY_RECON_STALE_DAYS` = 7.
+- **Gating:** `category_resume_index > 0` блокирует Phase 1 (harvest in progress); `recon_frontier_state` non-empty форсирует resume.
 
 ### 6.5 Phase 2 — product harvest (`_phase2_product_harvest`)
 
-- Сигнатура: `(marketplace, category_urls, *, deadline_monotonic=None) → (total_saved, exhausted_budget)`.
-- До `MAX_CATEGORY_URLS_PER_RUN` (60) category URLs.
+- Сигнатура: `(marketplace, category_urls, *, start_index=0, deadline_monotonic=None) → (total_saved, next_index, more_remaining)`.
+- Окно: `category_urls[start_index : start_index + MAX_CATEGORY_URLS_PER_RUN]` (60).
 - До `MAX_PAGES_PER_CATEGORY` (50) pagination (`detect_next_page`).
 - Links: `extract_links_from_repeated_structure` → fallback `extract_product_links`.
 - PDP links сохраняются через `_save_product_urls` с тем же cooperative deadline.
-- **Cooperative budget (`4d42623`):** deadline проверяется между category/page; `exhausted_budget=True` → parent `partial_budget`.
-- **Convergence (`3309259`):** `CATEGORY_CONVERGENCE_STREAK = 3` — после 3 подряд category без новых PDP → early exit (`discovery_phase2_converged`).
+- **Cooperative budget (`4d42623`):** deadline → `more_remaining=True`, `next_index=absolute_idx`; parent `partial_budget`.
+- **Convergence (`3309259`):** `CATEGORY_CONVERGENCE_STREAK = 3` — **per-run** `empty_streak` (не persisted); 3 подряд category без новых PDP → `next_index=0`, `more_remaining=False` (harvest done for current list).
+- **Cursor:** `category_resume_index` persisted on `dim_marketplace`; indexes `[base_url] + discovered_category_urls`.
 
 ### 6.6 Persistence
 
@@ -1122,11 +1134,12 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A[run-pipeline API] --> B[scrape_jobs]
-    B --> C[Celery orchestrator]
-    C --> D[discovery_phase]
-    D --> E[scrape batch]
-    E --> F[job_completion]
+    A[run-pipeline API] --> B[scrape_jobs parent]
+    B --> C[orchestrator_tick / run_tick]
+    C --> D[discover_one_marketplace]
+    C --> E[scrape_one_marketplace]
+    D --> F[child_aggregation + job_completion]
+    E --> F
     C --> R[Redis log relay]
 ```
 
@@ -1139,7 +1152,8 @@ flowchart TD
     D[discover marketplace] --> S{Phase 0 sitemap}
     S -->|>= 10 PDP URLs| SP[sitemap path save]
     S -->|< 10 useful| C[Phase 1 category recon]
-    C --> H[Phase 2 product harvest]
+    C -->|batch publish| H[Phase 2 product harvest]
+    C -->|same tick| H
     SP --> Done[update marketplace stats]
     H --> Done
 ```
@@ -1173,15 +1187,15 @@ flowchart TD
 
 Формат описания: **где живёт** → **назначение** → **триггеры** → **входы/выходы** → **алгоритм** → **связи** → **edge cases**.
 
-> **Важно про Z1:** логика **Z1 reap** (очистка zombie inner discovery jobs) — **`discovery_phase.py`**, блок `except asyncio.TimeoutError`. **Не** в `cancellation.py` / `job_completion.py`. С `4bad080` основной budget — **cooperative** `deadline_monotonic` внутри `discover()`; Z1 остаётся **defense-in-depth** для внешних отмен (SIGTERM, OOM, worker shutdown).
+> **Важно про Z1 (historical):** логика **Z1 reap** жила в удалённом `discovery_phase.py` (O4c, `868251a`). Сейчас zombie inner jobs закрываются per-tick `_reap_stale_discovery_children` в `tick_orchestrator.run_tick` + Beat `reap_orphan_jobs`. Основной budget — cooperative `deadline_monotonic` внутри `discover()`.
 
-### 18.1 Z1 reap — zombie inner discovery jobs
+### 18.1 Z1 reap — zombie inner discovery jobs (historical → tick reaper)
 
 | | |
 |---|---|
-| **Где живёт** | `backend/app/modules/scraper/pipeline/discovery_phase.py` → `run_discovery_phase()`, блок `except asyncio.TimeoutError` |
-| **Назначение** | Пометить «осиротевшие» inner `scrape_jobs` (`job_type='discovery'`, `status='running'`) как `failed`, когда `discover()` прерван внешне до финализации |
-| **Триггер (редкий)** | `asyncio.TimeoutError` — внешний cancel / edge case; нормальный budget → cooperative `partial_budget` + finalize inner job |
+| **Было** | `pipeline/discovery_phase.py` → `except asyncio.TimeoutError` → SQL UPDATE inner `discovery` jobs |
+| **Сейчас** | `tick_orchestrator.run_tick` → `_reap_stale_discovery_children` (cutoff `DISCOVERY_CHILD_RUNNING_REAP_SECONDS`) + `reap_orphan_jobs` Beat (300s) |
+| **Назначение** | Пометить «осиротевшие» inner `scrape_jobs` (`job_type='discovery'`, `status='running'`) как `failed` после worker loss / stale runtime |
 
 **Проблема без Z1:** при жёсткой отмене mid-flight финальный блок `discover()` не выполняется → inner job остаётся `running`.
 
@@ -1198,7 +1212,7 @@ flowchart TD
 7. Записать seed в `per_marketplace` со `status='timeout_skipped'`, `errors_count=1`.
 8. **Продолжить** следующий marketplace (не abort всего pipeline).
 
-**Связи:** `discover_one_marketplace` (Celery child) → `discovery_phase.run_for_marketplace(...)` (бывший `run_discovery_phase`). Дополняет **batch save** + **`sitemap_resume_offset`** (`016`) — прогресс переживает budget и cancel.
+**Связи:** `discover_one_marketplace` (Celery child) → `DiscoveryCrawler.discover(...)`. Дополняет **batch save** + **`sitemap_resume_offset`** (`016`) + **batch category publish** (`5d3eb26`).
 
 **Edge cases:** committed batches + offset durable; `partial_budget` status в per_marketplace; parent pipeline продолжает следующие MP.
 
@@ -1218,7 +1232,7 @@ flowchart TD
 - `job_type != full_pipeline_test` → `False` (не admin pipeline).
 - Иначе: `ParsingAdminService._normalize_job_status(job.status) != "running"` → `True`.
 
-**Использование:** `discovery_phase` проверяет **перед каждым marketplace**; при cancel → `errors.append("pipeline_job_cancelled")`, `break`.
+**Использование:** `run_tick` проверяет cancel между фазами; `discover_one_marketplace` / `scrape_one_marketplace` — через parent metadata. При admin cancel → `errors.append("pipeline_job_cancelled")`.
 
 **`revoke_celery_task`:** best-effort `celery_app.control.revoke(..., terminate=True, SIGTERM)`. Вызывается из `ParsingAdminService.cancel_active_pipeline_job` и `_fail_stale_running_pipeline_jobs`.
 
@@ -1231,7 +1245,7 @@ flowchart TD
 | | |
 |---|---|
 | **Где живёт** | `backend/app/modules/scraper/pipeline/job_completion.py` → `complete_pipeline_job()` |
-| **Вызывается из** | `orchestrator.py` (success, cancel, exception paths) |
+| **Вызывается из** | `tick_orchestrator.run_tick` complete-фаза → `complete_pipeline_job()` |
 
 **Входы:** `discovery_ms`, `scrape_ms`, `persist_ms`, `per_marketplace_seed` (dict из discovery), опционально `hard_error`.
 
@@ -1318,7 +1332,7 @@ flowchart TD
 
 | Функция | Логика |
 |---------|--------|
-| `pipeline_worker_log_relay(job_id)` | Context manager: bind `_active_job_id`, attach `PipelineWorkerLogHandler` к loggers `app.modules.scraper`, `celery.*` |
+| `pipeline_worker_log_relay(job_id)` | Context manager: bind `_active_job_id`, attach handler; **wired in** `discover_one_marketplace` + `scrape_one_marketplace` (`ef11075`) |
 | `push_relay_line` | JSON `{seq, at, line, job_id}`, rpush + ltrim 500 |
 | `fetch_relay_lines(after, limit)` | Filter seq > after, sort, return cursor |
 | `should_pulse_db` | Rate-limit DB heartbeats 15 s |
@@ -1327,17 +1341,15 @@ flowchart TD
 
 ---
 
-### 18.8 `discovery_phase.py` — обёртка discovery для pipeline
+### 18.8 `discover_one_marketplace` — Celery child discovery (O2)
 
-Помимо Z1 reap (§18.1):
+1. Load child `ScrapeJob` by id; skip if terminal.
+2. `parent_id = job.parent_job_id or child_id` — relay streams under parent.
+3. `with pipeline_worker_log_relay(parent_id):` → `DiscoveryCrawler(db, ScraperPool(), on_activity=discovery_activity_callback)`.
+4. `discover(marketplace, deadline_monotonic=now+900s, inner_job=job)`.
+5. Return `{status, child_job_id, marketplace_id, products_new}`.
 
-1. SELECT active `dim_marketplace` (optional `marketplace_code IN (...)`), order by code.
-2. Init metadata counters: `discovery_marketplace_total/done`, `discovery_current_domain`.
-3. Loop: cancel check → touch → `discover(mp, deadline_monotonic=now+900s)` → `_map_discovery_status` (вкл. `partial_budget`).
-4. После каждого MP: update `per_marketplace` + summary в metadata.
-5. Return `(per_marketplace dict, errors list)`.
-
-**Отличие от standalone `discover_all_marketplaces`:** cooperative deadline, parent metadata, cancel checks, Z1 safety net.
+**Отличие от standalone `discover_all_marketplaces`:** cooperative deadline, parent metadata linkage, worker log relay, activity pulses to parent.
 
 ---
 
@@ -1353,10 +1365,10 @@ flowchart TD
 2. Quota: `remaining = quota - pool_count` или `discovery_no_quota_limit` если quota=0.
 3. **Phase 0** (if stale sitemap): `_phase0_sitemap_harvest` с budget `SITEMAP_PHASE_BUDGET_SECONDS`; timeout → cooldown 24h, fall through.
 4. Если ≥ `SITEMAP_MIN_USEFUL_URLS` (10) PDP → **sitemap path**: `_save_product_urls(batch, deadline=_headroom_deadline(...))`; offset / `partial_budget`.
-5. Иначе **category path**: Phase 1 recon (if stale) → Phase 2 harvest с `_headroom_deadline` + convergence + `exhausted_budget`.
+5. Иначе **category path**: Phase 1 recon (batch publish `CATEGORY_PUBLISH_BATCH=60`, `5d3eb26`) → Phase 2 harvest с `_headroom_deadline` + convergence + `category_resume_index`.
 6. Finalize inner job status, `dim_marketplace.last_discovery_*`, `products_in_pool`, commit.
 
-**При hard cancel mid-flight (Z1):** шаг 6 **не выполняется** → reap в `discovery_phase`.
+**При worker loss mid-flight:** inner job может остаться `running` до tick reaper / `reap_orphan_jobs`.
 
 ---
 
@@ -1389,11 +1401,11 @@ flowchart TD
 
 **Selection (внутри MP):** `is_active=true` AND (`last_checked_at IS NULL` OR `< now-6h`) AND `marketplace_code = <code>`.
 
-**Loop:** batches до `scrape_pool_max_listings_per_run` (200k), batch size `scrape_pool_batch_size` (1000). Каждый listing → `GlobalScrapeService.scrape_product(lid)` sync (с `scrape_job_id=child.id` для стэмпинга `fact_price.scrape_job_id`, `1acd749`). Pulse каждые 10 listings.
+**Loop:** `asyncio.to_thread(_run_scrape_all_pool, job_uuid, marketplace_codes=[code])` inside `pipeline_worker_log_relay(parent_id)`. Batches до `scrape_pool_max_listings_per_run` (200k), batch size `scrape_pool_batch_size` (1000). Каждый listing → `GlobalScrapeService.scrape_product(lid)` sync (с `scrape_job_id=child.id`).
 
-**Return:** `{queued, scraped_ok, scraped_failed, error?}`. Финализация: `successful`/`failed` counters → `status` = `completed` или `failed` (legacy `partial`-like rollup в parent через `complete_pipeline_job`).
+**Return:** `{queued, scraped_ok, scraped_failed, error?}`. Child status: `completed` / `partial` / `failed` based on ok+failed counts.
 
-> Прежняя monolith-функция `_run_scrape_all_pool` (single-shot scrape всего pool в одном task'е) удалена в O4c (`868251a`); standalone `scrape_all_pool_products` остаётся как батч-задача вне pipeline.
+> Standalone `scrape_all_pool_products` остаётся как батч-задача вне pipeline (full pool, no `marketplace_codes` scope).
 
 ---
 
@@ -1453,7 +1465,7 @@ flowchart TD
 
 **Пороги:** `discovery` — 900s budget + 300s grace; `full_pipeline_test` — heartbeat stale 600s; прочие — 3600s max runtime.
 
-**Отличие от Z1:** Z1 — inner `discovery` jobs при `TimeoutError` в `discovery_phase`; reaper — любые типы job'ов, внешний periodic scan.
+**Отличие от historical Z1:** Z1 жил в удалённом `discovery_phase.py`; сейчас tick reaper + `reap_orphan_jobs` — любые типы job'ов, внешний periodic scan.
 
 ---
 
@@ -1466,10 +1478,11 @@ flowchart TD
 | Tasks | `backend/app/modules/scraper/tasks.py` |
 | Service / gates | `backend/app/modules/scraper/service.py` |
 | Pool | `backend/app/modules/scraper/scraper_pool.py` |
-| Extractors + classifier | `backend/app/modules/scraper/extractors.py` |
+| Classifier (Tier-1) | `backend/app/modules/classifier/service.py` |
+| Extractors + re-export | `backend/app/modules/scraper/extractors.py` |
 | Schema-aware tests | `backend/tests/test_scraper_unit/test_schema_aware_discovery.py` |
 | Tiered scrape tests | `backend/tests/test_scraper_unit/test_tiered_scrape_strategy.py` |
-| Discovery phase + Z1 | `backend/app/modules/scraper/pipeline/discovery_phase.py` |
+| Tick orchestrator | `backend/app/modules/scraper/pipeline/tick_orchestrator.py` |
 | Child aggregation (O3) | `backend/app/modules/scraper/pipeline/child_aggregation.py` |
 | Reaper | `backend/app/workers/reaper_tasks.py` |
 | Relay | `backend/app/modules/scraper/pipeline/worker_log_relay.py` |

@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-14 (head `ff781a9`)  
+**Актуально на:** 2026-06-15 (head `8ec2ff4`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию UI; принципы не дублирует.
@@ -9,13 +9,13 @@
 
 | Commit | Суть |
 |--------|------|
-| `291e38f` | Drop discover() unit tests (backend) |
-| `50a93e3` | Relocate `decode_token` → `common/security` (Tier-0) |
-| `1f972f5` | i18n: admin hardcoded UI keys → translations |
-| `9e96cf3` | Complete locale coverage (8 языков), prune dead keys |
-| `cbe9f71` | Remove dead pool bulk-delete UI (frontend + `productsApi.bulkDeletePool`) |
-| `d92d604` | Prune orphan components + tsc fixes (`Sparkline`, `PriceSparkline`, `AuthProvider`/`authContext`, `DeleteConfirmDialog`, `SelectionActionBar`, `useRowSelection`) |
-| `cc6bf68` | Drop dead avatar delete; fix `AIAnalystPage.handleSend` arity; remove unused `useEntitlements.getLimit` |
+| `8ec2ff4` | Header flex overflow fix на узких viewport |
+| `5d3eb26` | Backend: Phase 1 batch publish categories (`CATEGORY_PUBLISH_BATCH=60`) |
+| `2325052` | `:root font-size: 100%` — rem = browser default |
+| `08c23f2` | Classifier: structured Product/Listing beats `og:type=website` hub |
+| `3134cef` | Dashboard scroll-area overflow regression fix |
+| `ef11075` | Worker-log relay revived in child Celery tasks |
+| `783cece` | Docs + dashboard layout refresh |
 
 ---
 
@@ -89,7 +89,20 @@ frontend/src/
 
 ## 4. Layout
 
-**`DashboardLayout`:** sidebar + header + scroll `main` + `Outlet`; motion on path change; `MobileSidebar`, `BottomNavigation`, `SessionExpiryWarning`.
+**`DashboardLayout`:** CSS Grid `h-[100dvh]`, sidebar + header + scroll `main` + `Outlet`; motion on path change; `MobileSidebar`, `BottomNavigation`, `SessionExpiryWarning`.
+
+**Scroll contract (`3134cef`):**
+
+| Element | Classes / behavior |
+|---------|-------------------|
+| `main` | `flex min-h-0 min-w-0 flex-col overflow-hidden` |
+| `Scrollable` outer | `min-h-0 min-w-0 flex-1` (не `absolute inset-0`) |
+| `Scrollable` inner | `overflow-auto`; content wrapper `min-w-0` |
+| Overlay scrollbar | `useAutoHideScrollbar` + `.imp-scroll-thumb`; native scrollbars hidden globally |
+
+**Typography (`2325052`):** `:root { font-size: 100%; }` — base rem = browser default (16px); respects user a11y font-size. `body` uses `--text-sm` (0.875rem).
+
+**`Header` (`8ec2ff4`):** `min-w-0 overflow-hidden` — ticker не ломает flex на узких экранах.
 
 **Навигация:** Dashboard, Products, Digests, Import, Analytics, AI (entitlement), Admin (superuser). Settings — из Header.
 
@@ -261,10 +274,9 @@ frontend/src/
 
 **Pipeline status panel** (`PipelineStatusPanel.tsx`):
 
-- `GET /api/admin/parsing/pipeline-status` via `api/pipeline.ts` + `usePipelineStatus` (poll **5s**).
-- Contract: `{ job_id, status: idle|running|completed|failed, current_stage, metadata, discovery, … }`.
-- Backend maps internal `partial` → frontend `completed` (`_to_frontend_status`).
-- Standalone component + Vitest (`usePipelineStatus.test.tsx`); интеграция в `DataCollectionTab` — по мере wiring γ-orchestrator.
+- **Orphan:** компонент существует, но **не импортируется** ни в `AdminPage`, ни в `DataCollectionTab`.
+- `GET /api/admin/parsing/pipeline-status` via `api/pipeline.ts` + `usePipelineStatus` (poll **5s**) — endpoint жив, UI не подключён.
+- Live monitor в `DataCollectionTab` использует `useParsingJobStatus` (`/admin/parsing/job-status/{id}`) + `WorkerLogRelayPanel`.
 
 **History:**
 
@@ -349,6 +361,7 @@ frontend/src/
 | Sidebar i18n keys for competitors/alerts | Legacy comments в App.tsx |
 | Vitest i18n init | `setupFiles` не настроен → тесты ассертят сырые ключи, не переведённый текст (см. §16) |
 | `bulkDeletePool` | Удалён вместе с UI (`cbe9f71`); если потребуется, нужен backend `DELETE /pool/products/bulk` с `product_ids: list[UUID]` |
+| `PipelineStatusPanel` | Orphan component — `usePipelineStatus` + `/pipeline-status` не используются в live UI (`DataCollectionTab` → `useParsingJobStatus`) |
 
 ---
 
@@ -375,13 +388,13 @@ frontend/src/
 
 ---
 
-### 20.3 Pipeline status (`PipelineStatusPanel`)
+### 20.3 Pipeline status (`PipelineStatusPanel` — orphan)
 
 | Элемент | Логика |
 |---------|--------|
 | `getPipelineStatus` | `api/pipeline.ts` — typed `PipelineStatusResponse` |
 | `usePipelineStatus` | TanStack Query; `refetchInterval` default 5000 ms; `staleTime: 0` |
-| `PipelineStatusPanel` | Badge by status; progress bar from `metadata` stage; discovery sub-progress |
+| `PipelineStatusPanel` | **Orphan** — не импортируется в `AdminPage` / `DataCollectionTab`; live UI uses `useParsingJobStatus` |
 | Status mapping | Backend normalizes DB `partial` → UI `completed` |
 
 ---

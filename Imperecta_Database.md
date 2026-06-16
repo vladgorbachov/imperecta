@@ -1,6 +1,6 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-06-14 (alembic head `022`; app `ff781a9`)  
+**Актуально на:** 2026-06-15 (alembic head `022`; app `8ec2ff4`)  
 **Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию схемы; принципы не дублирует.
@@ -90,7 +90,7 @@
 | `dim_product` | DimProduct |
 | `dim_seller` | DimSeller |
 
-**`dim_marketplace` (parsing + scrape):** **`marketplace_code`** (unique, scoped pipeline filter), `code`, `base_url`, `is_active`, `requires_js`, **`scrape_tier`** (1–3, default 1), `scraper_config` JSONB, `product_quota`, `products_in_pool`, `last_discovery_*`, `discovered_category_urls` (JSONB), `last_category_recon_at`, `sitemap_url`, `last_sitemap_harvest_at`, **`sitemap_resume_offset`** (`016`), **`recon_frontier_state`** JSONB (`017`), **`category_resume_index`** (`018`).
+**`dim_marketplace` (parsing + scrape):** **`marketplace_code`** (unique, scoped pipeline filter), `code`, `base_url`, `is_active`, `requires_js`, **`scrape_tier`** (1–3, default 1), `scraper_config` JSONB, `product_quota`, `products_in_pool`, `last_discovery_*`, `discovered_category_urls` (JSONB — **replace per batch**, не append; пишется `_publish_category_batch`, `5d3eb26`), `last_category_recon_at`, `sitemap_url`, `last_sitemap_harvest_at`, **`sitemap_resume_offset`** (`016`), **`recon_frontier_state`** JSONB (`017` — queue/visited/listing_urls; при batch publish `listing_urls` сбрасывается в `[]`), **`category_resume_index`** (`018` — absolute index в `[base_url]+discovered_category_urls`).
 
 **Scoped pipeline:** `POST run-pipeline { marketplace_codes }` → orchestrator фильтрует listings через `dim_marketplace.marketplace_code IN (...)`.
 
@@ -174,9 +174,9 @@ Indexes: `idx_listing_url_hash` UNIQUE, `idx_listing_active` partial, marketplac
 
 #### `scrape_jobs`
 
-- `job_type`: `full_pipeline_test`, `discovery`, `scheduled`, `manual`, `retry`, `backfill`
+- `job_type`: `full_pipeline_test`, `discovery`, **`scrape`** (`022`), `scheduled`, `manual`, `retry`, `backfill`
 - `status`: `pending`, `running`, `completed`, `failed`, `cancelled`, **`partial`** (`019`)
-- `parent_job_id` (UUID, nullable, self-FK — **`020` WIP**): child discovery job → parent pipeline job
+- `parent_job_id` (UUID, nullable, self-FK — **`020`**): child discovery/scrape jobs → parent pipeline job
 - `config` JSONB: metadata (stage, timings, per_marketplace, celery_task_id)
 - Index `idx_scrape_jobs_parent_status` on `(parent_job_id, status)` (`020`)
 
@@ -482,8 +482,8 @@ discovery save → dim_product + fact_listing (url_hash unique)
 scrape success → fact_listing.last_* + optional fact_price (partitioned, stamped with scrape_job_id when called from pipeline)
 scrape fail (failure_streak ×15) → fact_listing.is_active=false (021)
 pipeline complete → scrape_jobs counters from scrape_logs + discovery seed
-stale parent → scrape_jobs.failed via parsing_admin (not Z1)
-Z1 hard cancel → inner discovery jobs.failed via discovery_phase SQL
+stale parent → scrape_jobs.failed via parsing_admin (not tick reaper)
+tick reaper → stale running children.failed via tick_orchestrator._reap_stale_* 
 reaper (Beat 300s) → stuck running jobs.failed via reaper_tasks (external SIGTERM/OOM)
 partial_budget / partial status → resume columns preserved; cooperative deadline exit
 child jobs → parent_job_id links discovery children to pipeline parent (020)
@@ -1420,5 +1420,5 @@ Migration `012`: `ENABLE ROW LEVEL SECURITY` на public business tables для 
 | Область | Путь |
 |---------|------|
 | ORM | `backend/app/models/*.py` |
-| Migrations | `backend/alembic/versions/001`–`020` |
+| Migrations | `backend/alembic/versions/001`–`022` |
 | Обзор | `Imperecta_Database.md` |

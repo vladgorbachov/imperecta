@@ -21,14 +21,13 @@ export function DashboardLayout() {
   const location = useLocation();
   const { resolvedTheme } = useTheme();
   const isLight = resolvedTheme === "light";
-  const blobOpacity1 = isLight ? "0.04" : "0.06";
-  const blobOpacity2 = isLight ? "0.02" : "0.04";
+  const blobOpacity1 = isLight ? "0.04" : "0.10";
+  const blobOpacity2 = isLight ? "0.02" : "0.07";
 
   return (
     <div
       className="grid h-[100dvh] min-h-screen grid-cols-[auto_1fr] grid-rows-[auto_1fr]"
       style={{
-        background: "var(--background)",
         color: "var(--foreground)",
       }}
     >
