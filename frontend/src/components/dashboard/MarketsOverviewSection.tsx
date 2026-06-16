@@ -82,8 +82,13 @@ function seededRank(id: string, seed: number): number {
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border bg-[var(--glass-bg)] p-3">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
+      <p className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p
+        className="mt-1 text-2xl font-bold tabular-nums"
+        style={{ fontFamily: "var(--font-display)" }}
+      >
+        {value}
+      </p>
     </div>
   );
 }
@@ -182,7 +187,7 @@ function ProductCard({
           conversionAvailable={item.conversion_available}
         />
         <div className="flex items-center justify-between gap-2">
-          <Badge variant="outline" className="max-w-[60%] truncate text-[10px]">
+          <Badge variant="outline" className="max-w-[60%] truncate text-2xs">
             {marketplaceLabel || t("dashboard.market.marketplace")}
           </Badge>
           {changeValue != null && (

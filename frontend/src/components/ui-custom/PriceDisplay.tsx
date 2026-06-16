@@ -49,13 +49,13 @@ export function PriceDisplay({
 
   return (
     <span className={cn("inline-flex items-center gap-1", className)}>
-      <span>{formatted}</span>
+      <span className="font-mono tabular-nums">{formatted}</span>
       {resolved.noRate && (
         <TooltipProvider delayDuration={200}>
           <Tooltip>
             <TooltipTrigger asChild>
               <span
-                className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground"
+                className="inline-flex items-center gap-0.5 text-2xs text-muted-foreground"
                 aria-label={t("displayCurrency.noRate")}
               >
                 <AlertTriangle className="size-3 shrink-0" aria-hidden />

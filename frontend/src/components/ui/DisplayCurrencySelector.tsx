@@ -112,18 +112,18 @@ export function DisplayCurrencySelector({
                   <span className="flex items-center gap-2">
                     {t(option.labelKey)}
                     {!enabled && option.value !== "local" && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         ({t("displayCurrency.backendPending")})
                       </span>
                     )}
                     {localDisabled && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         ({t("displayCurrency.localUnavailableShort")})
                       </span>
                     )}
                   </span>
                   {!compact && (
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-2xs text-muted-foreground">
                       {t(option.hintKey)}
                     </span>
                   )}

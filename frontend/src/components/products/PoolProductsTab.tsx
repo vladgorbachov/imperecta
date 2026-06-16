@@ -247,7 +247,7 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                           size="sm"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-right">
                         <PriceDisplay
                           localAmount={item.price}
                           localCurrency={item.currency}
@@ -256,11 +256,11 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                           conversionAvailable={item.conversion_available}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-right">
                         {item.price_change_pct != null ? (
                           <span
                             className={cn(
-                              "font-medium",
+                              "font-medium font-mono tabular-nums text-right",
                               item.price_change_pct > 0 && "text-green-500",
                               item.price_change_pct < 0 && "text-red-500"
                             )}

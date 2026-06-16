@@ -75,11 +75,11 @@ export function TickerItem({
   return (
     <span className="inline-flex shrink-0 items-center gap-2">
       <span className="text-xs font-medium">{label}</span>
-      <span className="font-mono text-sm">{value}</span>
+      <span className="font-mono text-sm tabular-nums">{value}</span>
       {item.change_24h != null && (
         <span
           className={cn(
-            "text-xs font-mono",
+            "text-xs font-mono tabular-nums",
             isZero
               ? "text-muted-foreground"
               : isPositive

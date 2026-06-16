@@ -99,7 +99,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           {notificationCount > 0 && (
             <span
               className={cn(
-                "absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white",
+                "absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-bold text-white",
                 notificationCount > 0 && "glow-pulse"
               )}
               style={{

@@ -62,7 +62,7 @@ export function StatCard({
           <div className="h-4 w-24 animate-pulse rounded bg-[var(--glass-bg)]" />
         ) : (
           <span
-            className="text-xs font-medium uppercase tracking-wider"
+            className="text-2xs font-medium uppercase tracking-wider"
             style={{ color: "var(--foreground-muted)" }}
           >
             {t(title)}
@@ -92,7 +92,7 @@ export function StatCard({
         <div className="mb-2 h-8 w-16 animate-pulse rounded bg-[var(--glass-bg)]" />
       ) : (
         <div
-          className="text-3xl font-bold"
+          className="text-2xl font-bold tabular-nums"
           style={{ color: "var(--foreground)", fontFamily: "var(--font-display)" }}
         >
           {value}
