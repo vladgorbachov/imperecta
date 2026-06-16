@@ -284,8 +284,10 @@ async def test_tick_scrape_phase_dispatches_children(monkeypatch):
     job = _make_job("running")
     metadata: dict = {
         "phase": "scrape",
+        "scrape_marketplace_codes": ["a", "b", "c"],
         "scrape_queue": ["a", "b", "c"],
         "scrape_total": 3,
+        "scrape_phase_started_at": "2026-01-01T00:00:00+00:00",
         "backoff_s": TICK_MIN_SECONDS,
     }
     store = _StoreStub(job, metadata)
@@ -309,6 +311,11 @@ async def test_tick_scrape_phase_dispatches_children(monkeypatch):
     )
     monkeypatch.setattr(
         tick_mod, "_count_active_scrape_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_build_scrape_dispatch_queue",
+        AsyncMock(return_value=(["a", "b", "c"], 0)),
     )
     created_ids = [uuid4() for _ in range(MAX_PARALLEL_SCRAPE)]
     create_mock = AsyncMock(side_effect=created_ids)
@@ -339,8 +346,9 @@ async def test_tick_scrape_phase_advances_to_complete_when_drained(monkeypatch):
     job = _make_job("running")
     metadata: dict = {
         "phase": "scrape",
+        "scrape_marketplace_codes": [],
         "scrape_queue": [],
-        "scrape_total": 0,
+        "scrape_phase_started_at": "2026-01-01T00:00:00+00:00",
     }
     store = _StoreStub(job, metadata)
     _install_store(monkeypatch, store)
@@ -361,6 +369,11 @@ async def test_tick_scrape_phase_advances_to_complete_when_drained(monkeypatch):
     )
     monkeypatch.setattr(
         tick_mod, "_count_active_scrape_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_build_scrape_dispatch_queue",
+        AsyncMock(return_value=([], 0)),
     )
     create_mock = AsyncMock()
     monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
@@ -422,6 +435,11 @@ async def test_tick_scrape_phase_first_tick_builds_queue(monkeypatch):
     monkeypatch.setattr(
         tick_mod, "_count_active_scrape_children", AsyncMock(return_value=0)
     )
+    monkeypatch.setattr(
+        tick_mod,
+        "_build_scrape_dispatch_queue",
+        AsyncMock(return_value=(["a", "b"], 0)),
+    )
     created_ids = [uuid4() for _ in range(2)]
     create_mock = AsyncMock(side_effect=created_ids)
     monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
@@ -435,6 +453,8 @@ async def test_tick_scrape_phase_first_tick_builds_queue(monkeypatch):
     await run_tick(_mock_db(), parent_id)
 
     assert metadata["scrape_total"] == 2
+    assert metadata.get("scrape_phase_started_at")
+    assert metadata.get("scrape_marketplace_codes") == ["a", "b"]
     assert apply_async.call_count == MAX_PARALLEL_SCRAPE  # 2 dispatched
     assert "scrape_error" not in metadata
 

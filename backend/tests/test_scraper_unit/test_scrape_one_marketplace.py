@@ -53,6 +53,7 @@ async def test_scrape_one_marketplace_runs_and_owns_job(monkeypatch):
     pending_job.id = child_id
     pending_job.status = "pending"
     pending_job.marketplace_id = mp_id
+    pending_job.parent_job_id = None
 
     marketplace = MagicMock()
     marketplace.id = mp_id
@@ -64,7 +65,13 @@ async def test_scrape_one_marketplace_runs_and_owns_job(monkeypatch):
 
     captured: dict = {}
 
-    def fake_run_scrape_all_pool(scrape_job_id, *, marketplace_codes=None):
+    def fake_run_scrape_all_pool(
+        scrape_job_id,
+        *,
+        marketplace_codes=None,
+        stale_before=None,
+        deadline_monotonic=None,
+    ):
         captured["scrape_job_id"] = scrape_job_id
         captured["marketplace_codes"] = marketplace_codes
         return {"scraped_ok": 5, "scraped_failed": 1, "queued": 6}
@@ -114,6 +121,7 @@ async def test_scrape_one_marketplace_partial_aware_status(
     pending_job.id = child_id
     pending_job.status = "pending"
     pending_job.marketplace_id = mp_id
+    pending_job.parent_job_id = None
 
     marketplace = MagicMock()
     marketplace.id = mp_id
@@ -123,7 +131,13 @@ async def test_scrape_one_marketplace_partial_aware_status(
         monkeypatch, get_results=[pending_job, marketplace]
     )
 
-    def fake_run_scrape_all_pool(scrape_job_id, *, marketplace_codes=None):
+    def fake_run_scrape_all_pool(
+        scrape_job_id,
+        *,
+        marketplace_codes=None,
+        stale_before=None,
+        deadline_monotonic=None,
+    ):
         result = {"scraped_ok": scraped_ok, "scraped_failed": scraped_failed}
         if error is not None:
             result["error"] = error
@@ -191,6 +205,7 @@ async def test_scrape_one_marketplace_marketplace_not_found(monkeypatch):
     pending_job.id = child_id
     pending_job.status = "pending"
     pending_job.marketplace_id = mp_id
+    pending_job.parent_job_id = None
 
     engine, db = _wire_session_factory(
         monkeypatch, get_results=[pending_job, None]

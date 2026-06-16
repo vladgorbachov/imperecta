@@ -64,15 +64,28 @@ async def complete_pipeline_job(
     hard_error: str | None = None,
 ) -> dict[str, Any]:
     """Merge discovery/scrape stats into job metadata and mark completed/failed."""
-    log_stats = await db.execute(
-        select(
-            ScrapeLog.marketplace_id,
-            func.sum(case((ScrapeLog.status == "success", 1), else_=0)).label("prices_saved"),
-            func.sum(case((ScrapeLog.status != "success", 1), else_=0)).label("errors_count"),
+    child_ids_result = await db.execute(
+        select(ScrapeJob.id).where(
+            ScrapeJob.parent_job_id == job.id,
+            ScrapeJob.job_type == "scrape",
         )
-        .where(ScrapeLog.scrape_job_id == job.id)
-        .group_by(ScrapeLog.marketplace_id)
     )
+    child_scrape_ids = [row[0] for row in child_ids_result.all()]
+
+    log_stats_query = select(
+        ScrapeLog.marketplace_id,
+        func.sum(case((ScrapeLog.status == "success", 1), else_=0)).label("prices_saved"),
+        func.sum(case((ScrapeLog.status != "success", 1), else_=0)).label("errors_count"),
+    ).group_by(ScrapeLog.marketplace_id)
+
+    if child_scrape_ids:
+        log_stats_query = log_stats_query.where(
+            ScrapeLog.scrape_job_id.in_(child_scrape_ids)
+        )
+    else:
+        log_stats_query = log_stats_query.where(ScrapeLog.scrape_job_id.is_(None))
+
+    log_stats = await db.execute(log_stats_query)
 
     stats_by_marketplace = {
         row.marketplace_id: {

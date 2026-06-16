@@ -23,6 +23,10 @@ from app.modules.scraper.discovery import (
     DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
     DiscoveryCrawler,
 )
+
+# ~85% of scrape_one_marketplace soft_time_limit=900 — cooperative exit before
+# Celery soft(900)/hard(960) kill so finalization writes counters + partial status.
+SCRAPE_PER_MARKETPLACE_BUDGET_SECONDS = 765
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as _finalize_full_pipeline_job
 from app.modules.scraper.pipeline.activity_pulse import (
     discovery_activity_callback,
@@ -356,17 +360,29 @@ def _run_scrape_all_pool(
     scrape_job_id: UUID | None = None,
     *,
     marketplace_codes: list[str] | None = None,
+    stale_before: datetime | None = None,
+    deadline_monotonic: float | None = None,
 ) -> dict:
     """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers).
 
     When marketplace_codes is provided, restricts the scrape to listings whose
     marketplace.marketplace_code is in the list. When None (default), processes
     the entire active pool — required for the standalone scheduled task.
+
+    ``stale_before``: listings with ``last_checked_at IS NULL OR < stale_before``
+    are eligible. Pipeline passes the parent's ``scrape_phase_started_at`` cohort
+    anchor; standalone passes ``None`` (defaults to now-6h).
+
+    ``deadline_monotonic``: when set, the loop exits cleanly once
+    ``time.monotonic() >= deadline_monotonic``, returning partial counters with
+    ``deadline_exhausted=True``.
     """
     try:
         return _run_scrape_all_pool_impl(
             scrape_job_id=scrape_job_id,
             marketplace_codes=marketplace_codes,
+            stale_before=stale_before,
+            deadline_monotonic=deadline_monotonic,
         )
     except Exception:
         tb = traceback.format_exc()
@@ -384,20 +400,33 @@ def _run_scrape_all_pool_impl(
     scrape_job_id: UUID | None = None,
     *,
     marketplace_codes: list[str] | None = None,
+    stale_before: datetime | None = None,
+    deadline_monotonic: float | None = None,
 ) -> dict:
     scraper_pool = ScraperPool()
     settings = Settings()
-    threshold = datetime.now(timezone.utc) - timedelta(hours=6)
+    threshold = (
+        stale_before
+        if stale_before is not None
+        else datetime.now(timezone.utc) - timedelta(hours=6)
+    )
     batch_size = max(int(settings.scrape_pool_batch_size or 1000), 1)
     max_listings_per_run = max(int(settings.scrape_pool_max_listings_per_run or 200000), 1)
     queued_total = 0
     processed_ids: set[UUID] = set()
     ok = 0
     failed = 0
+    deadline_exhausted = False
     db = sync_session_factory()
     try:
         svc = GlobalScrapeService(db, scraper_pool, scrape_job_id=scrape_job_id)
         while queued_total < max_listings_per_run:
+            if (
+                deadline_monotonic is not None
+                and time.monotonic() >= deadline_monotonic
+            ):
+                deadline_exhausted = True
+                break
             stmt = (
                 select(FactListing.id)
                 .where(FactListing.is_active.is_(True))
@@ -449,6 +478,12 @@ def _run_scrape_all_pool_impl(
                 )
 
             for index, lid in enumerate(stale_ids):
+                if (
+                    deadline_monotonic is not None
+                    and time.monotonic() >= deadline_monotonic
+                ):
+                    deadline_exhausted = True
+                    break
                 try:
                     listing_row = db.get(FactListing, lid)
                     url_hint = (listing_row.external_url if listing_row else "")[:160]
@@ -494,6 +529,8 @@ def _run_scrape_all_pool_impl(
                             force_db=True,
                         )
                     failed += 1
+            if deadline_exhausted:
+                break
     finally:
         db.close()
 
@@ -503,11 +540,13 @@ def _run_scrape_all_pool_impl(
         ok=ok,
         failed=failed,
         marketplace_codes=marketplace_codes,
+        deadline_exhausted=deadline_exhausted,
     )
     return {
         "queued": queued_total,
         "scraped_ok": ok,
         "scraped_failed": failed,
+        "deadline_exhausted": deadline_exhausted,
     }
 
 
@@ -571,6 +610,37 @@ def scrape_one_marketplace(self, child_job_id: str):
                 # the parent so the live monitor sees scrape progress without
                 # rethreading every pulse call site (minimal blast radius).
                 parent_id = job.parent_job_id or job_uuid
+                cohort_anchor: datetime | None = None
+                if job.parent_job_id is not None:
+                    parent_job = await db.get(ScrapeJob, job.parent_job_id)
+                    if parent_job is not None:
+                        from app.modules.scraper.pipeline.metadata_store import (
+                            PipelineMetadataStore,
+                        )
+
+                        parent_meta = PipelineMetadataStore.extract(parent_job.config)
+                        anchor_raw = parent_meta.get("scrape_phase_started_at")
+                        if isinstance(anchor_raw, str) and anchor_raw.strip():
+                            try:
+                                cohort_anchor = datetime.fromisoformat(
+                                    anchor_raw.replace("Z", "+00:00")
+                                )
+                                if cohort_anchor.tzinfo is None:
+                                    cohort_anchor = cohort_anchor.replace(
+                                        tzinfo=timezone.utc
+                                    )
+                            except ValueError:
+                                slog.warning(
+                                    "scrape_cohort_anchor_unparseable",
+                                    parent_id=str(parent_id),
+                                    anchor=anchor_raw[:64],
+                                )
+                        else:
+                            slog.warning(
+                                "scrape_cohort_anchor_missing",
+                                parent_id=str(parent_id),
+                            )
+                deadline = time.monotonic() + SCRAPE_PER_MARKETPLACE_BUDGET_SECONDS
                 # _run_scrape_all_pool is SYNC and opens its own sync session
                 # internally; off-load so it doesn't block the async owner loop.
                 with pipeline_worker_log_relay(parent_id):
@@ -578,6 +648,8 @@ def scrape_one_marketplace(self, child_job_id: str):
                         _run_scrape_all_pool,
                         job_uuid,
                         marketplace_codes=[code],
+                        stale_before=cohort_anchor,
+                        deadline_monotonic=deadline,
                     )
                 ok = (
                     int(scrape_result.get("scraped_ok", 0))
@@ -594,14 +666,20 @@ def scrape_one_marketplace(self, child_job_id: str):
                     if isinstance(scrape_result, dict)
                     else None
                 )
+                deadline_exhausted = bool(
+                    isinstance(scrape_result, dict)
+                    and scrape_result.get("deadline_exhausted")
+                )
                 job.successful = ok
                 job.failed = failed
                 job.completed_at = datetime.now(timezone.utc)
                 # Partial-aware terminal status (O5a): hard_error trumps;
-                # otherwise mixed ok+failed = partial, all-failed = failed,
-                # all-ok = completed.
+                # budget exit with progress = partial; mixed ok+failed = partial;
+                # all-failed = failed; cohort drained = completed.
                 if hard_error:
                     job.status = "failed"
+                elif deadline_exhausted and ok > 0:
+                    job.status = "partial"
                 elif ok > 0 and failed > 0:
                     job.status = "partial"
                 elif failed > 0:

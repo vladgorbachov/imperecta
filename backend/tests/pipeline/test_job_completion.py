@@ -50,9 +50,19 @@ async def test_complete_pipeline_job_updates_metadata_and_duration():
         session.add(job)
         await session.flush()
 
+        child_scrape = ScrapeJob(
+            job_type="scrape",
+            status="completed",
+            parent_job_id=job.id,
+            marketplace_id=marketplace.id,
+            config={"domain": marketplace.domain},
+        )
+        session.add(child_scrape)
+        await session.flush()
+
         session.add(
             ScrapeLog(
-                scrape_job_id=job.id,
+                scrape_job_id=child_scrape.id,
                 listing_id=listing.id,
                 marketplace_id=marketplace.id,
                 status="success",
@@ -62,7 +72,7 @@ async def test_complete_pipeline_job_updates_metadata_and_duration():
         )
         session.add(
             ScrapeLog(
-                scrape_job_id=job.id,
+                scrape_job_id=child_scrape.id,
                 listing_id=listing.id,
                 marketplace_id=marketplace.id,
                 status="error",
@@ -177,9 +187,19 @@ async def test_complete_pipeline_job_includes_marketplaces_from_logs_when_seed_e
         session.add(job)
         await session.flush()
 
+        child_scrape = ScrapeJob(
+            job_type="scrape",
+            status="completed",
+            parent_job_id=job.id,
+            marketplace_id=marketplace.id,
+            config={"domain": marketplace.domain},
+        )
+        session.add(child_scrape)
+        await session.flush()
+
         session.add(
             ScrapeLog(
-                scrape_job_id=job.id,
+                scrape_job_id=child_scrape.id,
                 listing_id=listing.id,
                 marketplace_id=marketplace.id,
                 status="success",

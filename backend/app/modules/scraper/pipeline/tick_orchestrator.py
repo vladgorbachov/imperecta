@@ -20,11 +20,12 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
+from app.models.facts import FactListing
 from app.modules.scraper.discovery import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
@@ -354,6 +355,88 @@ async def _reconcile_pending_scrape_children(
     return len(ids)
 
 
+def _parse_cohort_anchor(metadata: dict[str, Any]) -> datetime | None:
+    """Parse scrape_phase_started_at ISO string from parent metadata."""
+    raw = metadata.get("scrape_phase_started_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None
+
+
+async def _cohort_remainder(
+    db: AsyncSession,
+    marketplace_code: str,
+    cohort_anchor: datetime | None,
+) -> int:
+    """Count active listings still in the scrape start-cohort for one MP.
+
+    Uses the same predicate as pipeline scrape selection:
+    ``last_checked_at IS NULL OR last_checked_at < cohort_anchor``.
+    When ``cohort_anchor`` is missing, falls back to now-6h (standalone parity).
+    """
+    threshold = (
+        cohort_anchor
+        if cohort_anchor is not None
+        else datetime.now(timezone.utc) - timedelta(hours=6)
+    )
+    result = await db.execute(
+        select(func.count(FactListing.id))
+        .join(DimMarketplace, DimMarketplace.id == FactListing.marketplace_id)
+        .where(
+            DimMarketplace.marketplace_code == marketplace_code,
+            FactListing.is_active.is_(True),
+            or_(
+                FactListing.last_checked_at.is_(None),
+                FactListing.last_checked_at < threshold,
+            ),
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def _active_scrape_marketplace_codes(
+    db: AsyncSession, parent_id: UUID
+) -> set[str]:
+    """Marketplace codes with pending/running scrape children for this parent."""
+    result = await db.execute(
+        select(DimMarketplace.marketplace_code)
+        .join(ScrapeJob, ScrapeJob.marketplace_id == DimMarketplace.id)
+        .where(
+            ScrapeJob.parent_job_id == parent_id,
+            ScrapeJob.job_type == "scrape",
+            ScrapeJob.status.in_(("pending", "running")),
+        )
+    )
+    return {row[0] for row in result.all()}
+
+
+async def _build_scrape_dispatch_queue(
+    db: AsyncSession,
+    parent_id: UUID,
+    all_codes: list[str],
+    cohort_anchor: datetime | None,
+) -> tuple[list[str], int]:
+    """Return (eligible codes for dispatch, count of cohort-drained MPs)."""
+    active_codes = await _active_scrape_marketplace_codes(db, parent_id)
+    eligible: list[str] = []
+    drained = 0
+    for code in all_codes:
+        remainder = await _cohort_remainder(db, code, cohort_anchor)
+        if remainder == 0:
+            drained += 1
+            continue
+        if code in active_codes:
+            continue
+        eligible.append(code)
+    return eligible, drained
+
+
 async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
     """One short state-machine step for a tick-mode pipeline parent.
 
@@ -486,8 +569,19 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 scrape_codes = await _load_active_marketplace_codes(
                     db, PipelineMetadataStore.marketplace_codes_filter(metadata)
                 )
-                metadata["scrape_queue"] = scrape_codes
+                metadata["scrape_marketplace_codes"] = scrape_codes
+                metadata["scrape_queue"] = list(scrape_codes)
                 metadata["scrape_total"] = len(scrape_codes)
+                metadata["scrape_phase_started_at"] = datetime.now(
+                    timezone.utc
+                ).isoformat()
+
+            cohort_anchor = _parse_cohort_anchor(metadata)
+            all_codes: list[str] = list(
+                metadata.get("scrape_marketplace_codes")
+                or metadata.get("scrape_queue")
+                or []
+            )
 
             await _reap_stale_scrape_children(db, parent_job_id)
             reapplied_s = await _reconcile_pending_scrape_children(db, parent_job_id)
@@ -495,7 +589,9 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 dispatched = True
 
             active = await _count_active_scrape_children(db, parent_job_id)
-            queue: list[str] = list(metadata.get("scrape_queue", []))
+            queue, drained_count = await _build_scrape_dispatch_queue(
+                db, parent_job_id, all_codes, cohort_anchor
+            )
             from app.modules.scraper.tasks import scrape_one_marketplace
 
             while active < MAX_PARALLEL_SCRAPE and queue:
@@ -511,11 +607,11 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 dispatched = True
 
             metadata["scrape_queue"] = queue
-            finished = metadata["scrape_total"] - len(queue) - active
-            metadata["scrape_marketplace_total"] = metadata["scrape_total"]
-            metadata["scrape_marketplace_done"] = max(0, finished)
+            metadata["scrape_marketplace_total"] = len(all_codes)
+            metadata["scrape_marketplace_done"] = drained_count
 
-            if not queue and active == 0:
+            cohorts_drained = len(all_codes) == 0 or drained_count == len(all_codes)
+            if not queue and active == 0 and cohorts_drained:
                 metadata["phase"] = "complete"
                 metadata["backoff_s"] = TICK_MIN_SECONDS
                 await store.touch(job, metadata, stage="persist")
