@@ -130,8 +130,13 @@ async def test_scrape_one_marketplace_opens_cm_under_parent_id(monkeypatch):
     marketplace.id = mp_id
     marketplace.marketplace_code = "rozetka_com_ua"
 
+    parent_job = MagicMock()
+    parent_job.config = {
+        "metadata": {"scrape_phase_started_at": "2026-01-01T00:00:00+00:00"}
+    }
+
     _wire_session_factory(
-        monkeypatch, get_results=[pending_job, marketplace]
+        monkeypatch, get_results=[pending_job, marketplace, parent_job]
     )
 
     cm_calls: list[UUID] = []
