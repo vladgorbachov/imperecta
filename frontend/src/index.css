@@ -128,6 +128,8 @@
   --color-marketplace-custom: #64748b;
 
   /* Type scale */
+  --text-2xs: 0.6875rem;            /* 11px — smallest legitimate label size */
+  --text-2xs--line-height: 1rem;    /* 16px */
   --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;
   --text-sm: 0.875rem;
@@ -265,6 +267,8 @@
   --font-body: var(--font-body);
   --font-sans: var(--font-body);
   --font-mono: var(--font-mono);
+  --text-2xs: var(--text-2xs);
+  --text-2xs--line-height: var(--text-2xs--line-height);
   --text-xs: var(--text-xs);
   --text-xs--line-height: var(--text-xs--line-height);
   --text-sm: var(--text-sm);

@@ -31,7 +31,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
     >
       <div className="space-y-0.5">
         <h1
-          className="text-lg font-semibold tracking-tight sm:text-xl md:text-2xl"
+          className="text-xl font-semibold tracking-tight sm:text-2xl"
           style={{
             fontFamily: "var(--font-display)",
             ...(isLight

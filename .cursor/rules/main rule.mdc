@@ -8,6 +8,7 @@ alwaysApply: true
 
 # Commit message
 Commit message limited by 5 to 7 words
+Любой агент при получении запроса на коммит и пуш обязан коммитить ВСЕ изменения, независимо от того, он делал их или другой агент. 
 
 # Commit trailers (forbidden)
 
