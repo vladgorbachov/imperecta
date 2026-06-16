@@ -3,7 +3,7 @@
 
 :root {
   color-scheme: dark;
-  font-size: 127.05%;
+  font-size: 100%; /* base rem scale = browser default (16px); respects user a11y font-size */
 
   /* === Backgrounds === */
   --background: #0a0e1a;
