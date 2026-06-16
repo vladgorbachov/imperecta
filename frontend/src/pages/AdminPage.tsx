@@ -45,7 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuthStore } from "@/stores/authStore";
-import type { ParsingDetailedMarketplace, ParsingDetailedUser } from "@/api/admin";
+import type { ParsingDetailedMarketplace, ParsingDetailedUser, ParsingPipelineJobStatus } from "@/api/admin";
 import {
   useAddMarketplace,
   useAdminStats,
@@ -129,16 +129,22 @@ function formatDuration(seconds: number | null, fallback: string): string {
   return `${mm}:${ss}`;
 }
 
-function statusBadgeVariant(status: "running" | "completed" | "failed") {
+function statusBadgeVariant(status: ParsingPipelineJobStatus) {
   if (status === "completed") return "default";
   if (status === "failed") return "destructive";
+  if (status === "partial") return "outline";
+  if (status === "cancelled") return "secondary";
+  if (status === "running") return "secondary";
   return "secondary";
 }
 
-function statusLabelKey(status: "running" | "completed" | "failed"): string {
+function statusLabelKey(status: ParsingPipelineJobStatus): string {
   if (status === "completed") return "admin.marketplaces.status.success";
   if (status === "failed") return "admin.marketplaces.status.error";
-  return "common.loading";
+  if (status === "partial") return "admin.dataCollection.stageStatus.partial";
+  if (status === "cancelled") return "admin.dataCollection.stageStatus.cancelled";
+  if (status === "running") return "admin.dataCollection.stageStatus.inProgress";
+  return "admin.dataCollection.stageStatus.unknown";
 }
 
 export function AdminPage() {

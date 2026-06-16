@@ -89,6 +89,14 @@ export interface ParsingRunCreateResponse {
   started_at: string;
 }
 
+/** Top-level pipeline job status returned by /active-job, /job-status, run history, and live feed. */
+export type ParsingPipelineJobStatus =
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "cancelled";
+
 export interface ParsingPipelineRun {
   job_id: string;
   started_at: string | null;
@@ -99,7 +107,7 @@ export interface ParsingPipelineRun {
   listings_created: number;
   prices_saved: number;
   errors_count: number;
-  status: "running" | "completed" | "failed";
+  status: ParsingPipelineJobStatus;
   error_message: string | null;
   summary_pending: boolean;
 }
@@ -161,7 +169,7 @@ export interface ParsingDiscoveryProgress {
 
 export interface ParsingJobStatus {
   job_id: string;
-  status: "running" | "completed" | "failed";
+  status: ParsingPipelineJobStatus;
   current_stage: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -233,7 +241,7 @@ export interface ParsingLiveStep {
 
 export interface ParsingJobLiveFeed {
   job_id: string;
-  status: "running" | "completed" | "failed";
+  status: ParsingPipelineJobStatus;
   current_stage: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -266,7 +274,7 @@ export interface ParsingJobLiveFeed {
 export interface ParsingActiveJobResponse {
   active_job: {
     job_id: string;
-    status: "running" | "completed" | "failed";
+    status: ParsingPipelineJobStatus;
     current_stage: string | null;
     started_at: string | null;
     metadata: ParsingJobMetadata | null;

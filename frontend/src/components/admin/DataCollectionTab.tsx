@@ -41,7 +41,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ParsingJobStatus, ParsingLiveStep, ParsingMarketplaceBreakdown, ParsingPipelineRun } from "@/api/admin";
+import type {
+  ParsingJobStatus,
+  ParsingLiveStep,
+  ParsingMarketplaceBreakdown,
+  ParsingPipelineJobStatus,
+  ParsingPipelineRun,
+} from "@/api/admin";
 import {
   useCancelParsingActiveJob,
   useParsingActiveJob,
@@ -104,20 +110,32 @@ function formatDuration(seconds: number | null, fallback: string): string {
   return `${mm}:${ss}`;
 }
 
-function statusBadgeVariant(status: "running" | "completed" | "failed") {
+function statusBadgeVariant(status: ParsingPipelineJobStatus) {
   if (status === "completed") return "outline";
   if (status === "failed") return "destructive";
+  if (status === "partial") return "outline";
+  if (status === "cancelled") return "secondary";
+  if (status === "running") return "secondary";
   return "secondary";
 }
 
-function statusBadgeClassName(status: "running" | "completed" | "failed"): string {
+function statusBadgeClassName(status: ParsingPipelineJobStatus): string {
   if (status === "completed") {
     return "border-green-500/40 bg-green-500/15 text-green-700 dark:text-green-300";
   }
   if (status === "running") {
     return "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200";
   }
-  return "";
+  if (status === "partial") {
+    return "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200";
+  }
+  if (status === "cancelled") {
+    return "border-muted bg-muted/40 text-muted-foreground";
+  }
+  if (status === "failed") {
+    return "";
+  }
+  return "border-muted bg-muted/40 text-muted-foreground";
 }
 
 function collectionStageClassName(status: CollectionStageStatus): string {
@@ -231,10 +249,13 @@ function computeAvgLatencyMs(
   return row.duration_ms ?? 0;
 }
 
-function statusLabelKey(status: "running" | "completed" | "failed"): string {
+function statusLabelKey(status: ParsingPipelineJobStatus): string {
   if (status === "completed") return "admin.dataCollection.stageStatus.completed";
+  if (status === "partial") return "admin.dataCollection.stageStatus.partial";
   if (status === "failed") return "admin.dataCollection.stageStatus.failed";
-  return "admin.dataCollection.stageStatus.inProgress";
+  if (status === "cancelled") return "admin.dataCollection.stageStatus.cancelled";
+  if (status === "running") return "admin.dataCollection.stageStatus.inProgress";
+  return "admin.dataCollection.stageStatus.unknown";
 }
 
 function stageLabelKey(stage: string | null | undefined): string {
@@ -308,7 +329,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
 
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [monitorJobId, setMonitorJobId] = useState<string | null>(null);
-  const previousActiveStatus = useRef<"running" | "completed" | "failed" | null>(null);
+  const previousActiveStatus = useRef<ParsingPipelineJobStatus | null>(null);
   const [runHistoryColumnWidths, setRunHistoryColumnWidths] = useState<Record<string, number>>(() =>
     Object.fromEntries(RUN_HISTORY_COLUMNS.map((col) => [col.key, col.defaultWidth])),
   );
@@ -619,14 +640,21 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
           <CardHeader className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle>{t("admin.dataCollection.liveMonitor")}</CardTitle>
-              {monitorStatus ? (
-                <Badge
-                  variant={statusBadgeVariant(monitorStatus.status)}
-                  className={statusBadgeClassName(monitorStatus.status)}
-                >
-                  {t(statusLabelKey(monitorStatus.status))}
-                </Badge>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {monitorStatus && monitorStatus.status !== "running" ? (
+                  <span className="text-xs text-muted-foreground">
+                    {t("admin.dataCollection.historicalRun")}
+                  </span>
+                ) : null}
+                {monitorStatus ? (
+                  <Badge
+                    variant={statusBadgeVariant(monitorStatus.status)}
+                    className={statusBadgeClassName(monitorStatus.status)}
+                  >
+                    {t(statusLabelKey(monitorStatus.status))}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
             <CardDescription>
               {t(stageLabelKey(currentStage))}
@@ -944,6 +972,14 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                 </Tabs>
               </>
             )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!monitorJobId && !activeJobId ? (
+        <Card>
+          <CardContent className="pt-6">
+            <EmptyState title={t("admin.dataCollection.noActiveRun")} description="" />
           </CardContent>
         </Card>
       ) : null}
