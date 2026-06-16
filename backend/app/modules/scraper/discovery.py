@@ -36,6 +36,12 @@ MAX_PAGES_PER_CATEGORY = 50
 # This is a universal mechanism, not tuned to any specific marketplace —
 # small/exhausted shops converge quickly, large shops continue iterating.
 CATEGORY_CONVERGENCE_STREAK = 3
+# Phase 1 publishes discovered categories in batches of this size instead of
+# waiting for the full BFS to complete. Large marketplaces whose BFS never
+# converges within one budget would otherwise never reach Phase 2. Sized to
+# MAX_CATEGORY_URLS_PER_RUN so a published batch fits exactly one Phase 2
+# window. Universal — small shops still complete in one (sub-threshold) batch.
+CATEGORY_PUBLISH_BATCH = 60
 # Persist batch size for _save_product_urls. Large sitemaps (e.g., 20k+ URLs)
 # cannot be saved in a single transaction within DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS —
 # the monolithic flush takes >14 minutes and gets cancelled by the circuit breaker,
@@ -495,6 +501,40 @@ class DiscoveryCrawler:
         age = (datetime.now(tz=timezone.utc) - marketplace.last_category_recon_at).days
         return age >= CATEGORY_RECON_STALE_DAYS
 
+    def _publish_category_batch(
+        self,
+        marketplace: DimMarketplace,
+        listing_urls: list[str],
+        queue,
+        visited: set[str],
+    ) -> list[str]:
+        """Publish the current batch to discovered_category_urls for Phase 2.
+
+        Keeps the BFS frontier (queue/visited) for continuation when the queue
+        is non-empty (resets listing_urls for the next batch); does a true clean
+        completion when the queue is empty (frontier cleared). Replaces
+        discovered_category_urls with this batch (not append) so
+        category_resume_index=0 indexes the fresh work-list.
+        """
+        seen: set[str] = set()
+        unique: list[str] = []
+        for url in listing_urls:
+            if url not in seen:
+                seen.add(url)
+                unique.append(url)
+        marketplace.discovered_category_urls = unique
+        marketplace.category_resume_index = 0
+        marketplace.last_category_recon_at = datetime.now(tz=timezone.utc)
+        if queue:
+            marketplace.recon_frontier_state = {
+                "queue": [[u, d] for (u, d) in queue],
+                "visited": list(visited),
+                "listing_urls": [],
+            }
+        else:
+            marketplace.recon_frontier_state = None
+        return unique
+
     async def _phase1_category_recon(
         self,
         marketplace: DimMarketplace,
@@ -503,13 +543,14 @@ class DiscoveryCrawler:
     ) -> tuple[list[str], bool]:
         """Phase 1: BFS traversal to discover category/listing URLs.
 
-        Returns (listing_urls, exhausted_budget). On deadline expiry the
-        BFS frontier (queue, visited, listing_urls) is persisted to
-        marketplace.recon_frontier_state and the method returns
-        (current_listing_urls, True); a later run resumes from the
-        frontier. On natural completion the frontier is cleared (None)
-        and discovered_category_urls is written. The incoming deadline
-        is already headroom-adjusted by discover() — do not shrink again.
+        Returns (listing_urls, exhausted_budget). Publishes found categories in
+        CATEGORY_PUBLISH_BATCH-sized batches so Phase 2 can harvest before the
+        full BFS completes. On batch publish (threshold or deadline-with-findings)
+        returns (batch, False) so discover() runs Phase 2 the same tick.
+        exhausted=True means nothing was found this tick (no Phase 2 work).
+        On true BFS completion (empty queue) publishes the final batch and
+        clears the frontier. The incoming deadline is already headroom-adjusted
+        by discover() — do not shrink again.
         """
         from collections import deque
 
@@ -553,10 +594,24 @@ class DiscoveryCrawler:
                 deadline_monotonic is not None
                 and time.monotonic() >= deadline_monotonic
             ):
+                if listing_urls:
+                    unique = self._publish_category_batch(
+                        marketplace, listing_urls, queue, visited,
+                    )
+                    await self.db.flush()
+                    logger.info(
+                        "category_recon_deadline_published marketplace_id=%s "
+                        "published=%d queue=%d visited=%d",
+                        marketplace.id,
+                        len(unique),
+                        len(queue),
+                        len(visited),
+                    )
+                    return unique, False
                 marketplace.recon_frontier_state = {
                     "queue": [[u, d] for (u, d) in queue],
                     "visited": list(visited),
-                    "listing_urls": listing_urls,
+                    "listing_urls": [],
                 }
                 await self.db.flush()
                 logger.info(
@@ -599,6 +654,20 @@ class DiscoveryCrawler:
                         if link not in visited:
                             visited.add(link)
                             queue.append((link, depth + 1))
+                if len(listing_urls) >= CATEGORY_PUBLISH_BATCH:
+                    unique = self._publish_category_batch(
+                        marketplace, listing_urls, queue, visited,
+                    )
+                    await self.db.flush()
+                    logger.info(
+                        "category_recon_batch_published marketplace_id=%s "
+                        "published=%d queue_remaining=%d visited=%d",
+                        marketplace.id,
+                        len(unique),
+                        len(queue),
+                        len(visited),
+                    )
+                    return unique, False
             elif role in ("hub", "unknown"):
                 for link in extract_internal_links_all(soup, marketplace.base_url):
                     if link not in visited:
@@ -620,17 +689,9 @@ class DiscoveryCrawler:
                 if role in ("listing", "hub"):
                     listing_urls.append(fallback_url)
 
-        seen: set[str] = set()
-        unique: list[str] = []
-        for url in listing_urls:
-            if url not in seen:
-                seen.add(url)
-                unique.append(url)
-
-        marketplace.discovered_category_urls = unique
-        marketplace.last_category_recon_at = datetime.now(tz=timezone.utc)
-        marketplace.recon_frontier_state = None
-        marketplace.category_resume_index = 0
+        unique = self._publish_category_batch(
+            marketplace, listing_urls, queue, visited,
+        )
         await self.db.flush()
         logger.info(
             "category_recon_done marketplace_id=%s listing_urls_found=%d",
@@ -956,9 +1017,10 @@ class DiscoveryCrawler:
                 block_deadline = self._headroom_deadline(deadline_monotonic)
                 phase1_exhausted = False
                 if self._should_run_category_recon(marketplace):
-                    # phase1 writes discovered_category_urls itself on completion;
-                    # on exhaust we deliberately ignore the partial listing list and
-                    # skip phase2 this run.
+                    # Phase 1 publishes found categories in batches (it returns
+                    # exhausted=False on a publish so Phase 2 harvests the batch
+                    # this tick). exhausted=True now means Phase 1 found NOTHING
+                    # this tick (empty batch) → no Phase 2 work, skip.
                     _phase1_partial_urls, phase1_exhausted = (
                         await self._phase1_category_recon(
                             marketplace,

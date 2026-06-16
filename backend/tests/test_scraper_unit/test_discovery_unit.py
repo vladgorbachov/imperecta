@@ -714,6 +714,174 @@ class TestPhase1FrontierResume:
         assert mp.category_resume_index == 0
 
 
+class TestPhase1BatchPublish:
+    """Phase 1 publishes categories in batches so Phase 2 starts before BFS ends."""
+
+    @pytest.mark.asyncio
+    async def test_phase1_publishes_batch_at_threshold(self):
+        batch = disc.CATEGORY_PUBLISH_BATCH
+        listing = [f"https://shop.example/c/{i}" for i in range(batch - 1)]
+        mp = _make_marketplace(
+            base_url="https://shop.example/",
+            recon_frontier_state={
+                "queue": [
+                    ["https://shop.example/c/last", 1],
+                    ["https://shop.example/c/next", 1],
+                ],
+                "visited": ["https://shop.example/"] + listing,
+                "listing_urls": listing,
+            },
+        )
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock(return_value=("<html></html>", MagicMock()))
+        db = AsyncMock()
+        db.flush = AsyncMock()
+
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        with patch(
+            "app.modules.classifier.classify_page_role_for_discovery",
+            return_value="listing",
+        ), patch(
+            "app.modules.scraper.extractors.extract_internal_links_all",
+            return_value=[],
+        ):
+            urls, exhausted = await crawler._phase1_category_recon(
+                mp, deadline_monotonic=None,
+            )
+
+        assert exhausted is False
+        assert len(urls) == batch
+        assert mp.discovered_category_urls == urls
+        assert mp.category_resume_index == 0
+        assert mp.recon_frontier_state is not None
+        assert mp.recon_frontier_state["listing_urls"] == []
+        assert len(mp.recon_frontier_state["queue"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_phase1_deadline_with_findings_publishes(self):
+        listing = ["https://shop.example/c/1", "https://shop.example/c/2"]
+        mp = _make_marketplace(
+            base_url="https://shop.example/",
+            recon_frontier_state={
+                "queue": [["https://shop.example/c/pending", 1]],
+                "visited": ["https://shop.example/"],
+                "listing_urls": listing,
+            },
+        )
+        pool = MagicMock()
+        db = AsyncMock()
+        db.flush = AsyncMock()
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        with patch(
+            "app.modules.scraper.discovery.time.monotonic",
+            return_value=5000.0,
+        ):
+            urls, exhausted = await crawler._phase1_category_recon(
+                mp, deadline_monotonic=4000.0,
+            )
+
+        assert exhausted is False
+        assert urls == listing
+        assert mp.discovered_category_urls == listing
+        assert mp.recon_frontier_state is not None
+        assert mp.recon_frontier_state["listing_urls"] == []
+
+    @pytest.mark.asyncio
+    async def test_phase1_deadline_with_no_findings_preserves_frontier_exhausted(self):
+        mp = _make_marketplace(recon_frontier_state=None)
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock()
+        db = AsyncMock()
+        db.flush = AsyncMock()
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        with patch(
+            "app.modules.scraper.discovery.time.monotonic",
+            return_value=5000.0,
+        ):
+            urls, exhausted = await crawler._phase1_category_recon(
+                mp, deadline_monotonic=4000.0,
+            )
+
+        assert (urls, exhausted) == ([], True)
+        assert mp.discovered_category_urls == []
+        assert isinstance(mp.recon_frontier_state, dict)
+        assert mp.recon_frontier_state["listing_urls"] == []
+
+    @pytest.mark.asyncio
+    async def test_phase1_empty_queue_clean_completion(self):
+        mp = _make_marketplace(
+            base_url="https://x/",
+            recon_frontier_state={
+                "queue": [],
+                "visited": ["https://x/"],
+                "listing_urls": [],
+            },
+        )
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock(return_value=(None, None))
+        db = AsyncMock()
+        db.flush = AsyncMock()
+        crawler = disc.DiscoveryCrawler(db, pool)
+
+        urls, exhausted = await crawler._phase1_category_recon(
+            mp, deadline_monotonic=None,
+        )
+
+        assert exhausted is False
+        assert mp.recon_frontier_state is None
+        assert mp.discovered_category_urls == urls
+
+    @pytest.mark.asyncio
+    async def test_discover_runs_phase2_after_batch_publish(self):
+        mp = _make_marketplace()
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+        published = [f"https://x/c/{i}" for i in range(3)]
+
+        async def fake_phase1(_mp, *, deadline_monotonic=None):
+            _mp.discovered_category_urls = list(published)
+            return (published, False)
+
+        async def fake_phase2(_mp, urls, *, start_index=0, deadline_monotonic=None):
+            assert urls == [_mp.base_url] + published
+            return (2, 0, False)
+
+        with patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_should_run_category_recon",
+            return_value=True,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_phase1_category_recon",
+            side_effect=fake_phase1,
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_phase2_product_harvest",
+            side_effect=fake_phase2,
+        ) as phase2_mock:
+            result = await crawler.discover(
+                mp, deadline_monotonic=time.monotonic() + 60,
+            )
+
+        phase2_mock.assert_awaited_once()
+        assert result.status == "completed"
+
+
 class TestPhase2CategoryResume:
     """Cursor state machine for resumable category harvest in _phase2."""
 
