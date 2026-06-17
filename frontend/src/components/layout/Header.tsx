@@ -63,7 +63,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
             <Menu className="size-4" />
           </Button>
         )}
-        <HeaderTicker className="flex-1 pe-2 sm:pe-3" />
+        <HeaderTicker className="flex-1 pe-4 sm:pe-6" />
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <Button

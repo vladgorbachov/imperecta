@@ -121,34 +121,34 @@ function statusBadgeVariant(status: ParsingPipelineJobStatus) {
 
 function statusBadgeClassName(status: ParsingPipelineJobStatus): string {
   if (status === "completed") {
-    return "border-green-500/50 bg-green-500/20 text-green-800 dark:text-green-300";
+    return "border-green-500/50 bg-green-500/20 text-black dark:text-white";
   }
   if (status === "running") {
-    return "border-amber-500/50 bg-amber-500/25 text-amber-900 dark:text-amber-200";
+    return "border-amber-500/50 bg-amber-500/25 text-black dark:text-white";
   }
   if (status === "partial") {
-    return "border-amber-500/50 bg-amber-500/25 text-amber-900 dark:text-amber-200";
+    return "border-amber-500/50 bg-amber-500/25 text-black dark:text-white";
   }
   if (status === "cancelled") {
-    return "border-border bg-muted/60 text-foreground/80 dark:text-muted-foreground";
+    return "border-border bg-muted/60 text-black dark:text-white";
   }
   if (status === "failed") {
-    return "border-red-500/50 bg-red-500/20 text-red-800 dark:text-red-300";
+    return "border-red-500/50 bg-red-500/20 text-black dark:text-white";
   }
-  return "border-border bg-muted/60 text-foreground/80 dark:text-muted-foreground";
+  return "border-border bg-muted/60 text-black dark:text-white";
 }
 
 function collectionStageClassName(status: CollectionStageStatus): string {
   if (status === "completed") {
-    return "border-green-500/50 bg-green-500/20 text-green-800 dark:text-green-300";
+    return "border-green-500/50 bg-green-500/20 text-black dark:text-white";
   }
   if (status === "failed") {
-    return "border-red-500/50 bg-red-500/20 text-red-800 dark:text-red-300";
+    return "border-red-500/50 bg-red-500/20 text-black dark:text-white";
   }
   if (status === "in_progress") {
-    return "border-amber-500/50 bg-amber-500/25 text-amber-900 dark:text-amber-200";
+    return "border-amber-500/50 bg-amber-500/25 text-black dark:text-white";
   }
-  return "border-border bg-muted/60 text-foreground/80 dark:text-muted-foreground";
+  return "border-border bg-muted/60 text-black dark:text-white";
 }
 
 function collectionStageLabelKey(status: CollectionStageStatus): string {

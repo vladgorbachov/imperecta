@@ -117,17 +117,17 @@ export function HeaderTicker({ className }: HeaderTickerProps) {
   }
 
   return (
-    <div className={cn("group min-w-0 overflow-hidden", className)}>
+    <div
+      className={cn("group min-w-0 overflow-hidden", className)}
+      style={{
+        maskImage: "linear-gradient(to right, transparent 0, #000 6%, #000 94%, transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to right, transparent 0, #000 6%, #000 94%, transparent 100%)",
+      }}
+    >
       <div className="flex animate-marquee gap-7 whitespace-nowrap group-hover:[animation-play-state:paused]">
         {[...items, ...items].map((item, i) => (
-          <span key={`${item.symbol}-${i}`} className="flex shrink-0 items-center gap-2">
+          <span key={`${item.symbol}-${i}`} className="flex shrink-0 items-center">
             <TickerItem item={item} locale={locale} />
-            <span
-              className="shrink-0 text-[var(--foreground-subtle)]"
-              style={{ width: 40 }}
-            >
-              |
-            </span>
           </span>
         ))}
       </div>
