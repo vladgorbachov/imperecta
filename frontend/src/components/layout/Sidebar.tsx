@@ -55,8 +55,7 @@ function SidebarLogo({
   return (
     <div
       className={cn(
-        "relative flex h-[84px] shrink-0 border-b",
-        "border-[var(--glass-border)]",
+        "relative flex h-[84px] shrink-0",
         showLabels
           ? "flex-row items-center justify-between px-[17px]"
           : "flex-col items-center justify-center gap-0.5 px-0"

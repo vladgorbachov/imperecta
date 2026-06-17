@@ -92,7 +92,6 @@
   /* === Shadows & glows === */
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
   --shadow-hover: 0 8px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
-  --shadow-accent: 0 0 20px var(--accent-glow), 0 0 60px rgba(56, 189, 248, 0.1);
   --shadow-glow-sm: 0 0 12px var(--accent-glow);
 
   /* === Border radius === */
@@ -152,10 +151,10 @@
 .light {
   color-scheme: light;
 
-  --background: #eaf2ff;
-  --background-mid: #ffffff;
-  --background-surface: #f8faff;
-  --background-elevated: #ffffff;
+  --background: #e3edff;
+  --background-mid: #f0f5ff;
+  --background-surface: #f4f8ff;
+  --background-elevated: #fbfdff;
 
   --glass-bg: rgba(255, 255, 255, 0.7);
   --glass-bg-hover: rgba(255, 255, 255, 0.85);
@@ -224,7 +223,6 @@
 
   --shadow-card: 0 2px 16px rgba(15, 23, 42, 0.08), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
   --shadow-hover: 0 8px 32px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
-  --shadow-accent: 0 0 20px var(--accent-glow), 0 4px 12px rgba(2, 132, 199, 0.1);
   --shadow-glow-sm: 0 0 8px var(--accent-glow);
 
   --card: var(--background-surface);
@@ -317,10 +315,10 @@
   /* Sky background — light only (mirrors the dark Ink rule; no grain in light) */
   html.light body {
     background:
-      radial-gradient(120% 120% at 50% 0%, transparent 62%, rgba(2, 132, 199, 0.05) 100%),
-      linear-gradient(180deg, #e9f2ff 0%, #f4f9ff 55%, #ffffff 100%);
+      radial-gradient(120% 120% at 50% 0%, transparent 55%, rgba(37, 99, 235, 0.07) 100%),
+      linear-gradient(168deg, #dce9ff 0%, #e8f1ff 50%, #eef4ff 100%);
     background-repeat: no-repeat;
-    background-color: #eaf2ff;
+    background-color: #e3edff;
   }
 
   /* Film grain overlay — dark only, sits behind app content, blends with the gradient */
