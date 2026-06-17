@@ -102,7 +102,7 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-[14px] rounded-md py-[10px] text-[16px] leading-[23px] transition-all duration-200",
+        "group relative flex items-center gap-[14px] rounded-md py-[10px] text-sm transition-all duration-200",
         showLabels ? "ps-[17px] pe-[17px]" : "justify-center ps-[14px] pe-[14px]",
         isActive
           ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
@@ -167,7 +167,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
       {showLabels && (
         <div className="flex w-full items-center justify-between gap-[9px] py-[10px]">
           <CollapsibleTrigger
-            className="flex flex-1 items-center text-left text-[14px] font-medium uppercase tracking-[0.08em] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            className="flex flex-1 items-center text-left text-2xs font-medium uppercase tracking-wider text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
             {label}
           </CollapsibleTrigger>
@@ -208,7 +208,7 @@ function SidebarFooter({
         <div className="glass-card overflow-hidden p-[21px]">
           <p
             className={cn(
-              "mb-[14px] text-[16px] leading-[23px] text-[var(--foreground-muted)]",
+              "mb-[14px] text-sm text-[var(--foreground-muted)]",
               !showLabels && "text-center"
             )}
           >
@@ -230,7 +230,7 @@ function SidebarFooter({
             />
           </div>
           <Button
-            className="h-[51px] w-full text-[16px] font-semibold"
+            className="h-[51px] w-full font-semibold"
             style={{
               background: "linear-gradient(135deg, var(--accent-dim), var(--accent))",
               boxShadow: "0 0 16px var(--accent-glow)",
@@ -241,17 +241,6 @@ function SidebarFooter({
             {t("layout.upgrade")}
           </Button>
         </div>
-      )}
-      {!isMobile && collapsed && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-[51px] w-full text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
-          onClick={onToggle}
-          aria-label={t("common.expand")}
-        >
-          <ChevronRight className="size-[23px]" />
-        </Button>
       )}
     </div>
   );
@@ -281,7 +270,7 @@ export function Sidebar({
     >
       <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
 
-      <nav className="flex flex-1 flex-col gap-[10px] overflow-y-auto py-[17px] text-[16px]">
+      <nav className="flex flex-1 flex-col gap-[10px] overflow-y-auto py-[17px] text-sm">
         <SidebarSection
           label={t("nav.section.core")}
           collapsed={collapsed}
