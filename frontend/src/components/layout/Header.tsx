@@ -134,7 +134,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-56 border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-xl"
+            className="w-56 surface-overlay"
           >
             <div className="px-2 py-2">
               <p className="truncate text-sm font-medium text-[var(--foreground)]">

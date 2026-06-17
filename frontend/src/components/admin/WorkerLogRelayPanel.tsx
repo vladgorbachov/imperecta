@@ -72,7 +72,8 @@ export function WorkerLogRelayPanel({ jobId, enabled }: WorkerLogRelayPanelProps
       <div
         className={cn(
           "overflow-hidden rounded-md border bg-zinc-950 px-3 py-2 font-mono text-xs leading-5 text-emerald-400",
-          animating && "ring-1 ring-emerald-500/40",
+          "[.light_&]:bg-[#0b2447] [.light_&]:text-sky-100 [.light_&]:border-[#13315c]",
+          animating && "ring-1 ring-emerald-500/40 [.light_&]:ring-sky-400/40",
         )}
         aria-live="polite"
         aria-label={t("admin.dataCollection.workerLogRelay")}
@@ -88,8 +89,8 @@ export function WorkerLogRelayPanel({ jobId, enabled }: WorkerLogRelayPanelProps
               key={`${index}-${line.slice(0, 24)}-${bufferRef.current.length}`}
               className={cn(
                 "truncate whitespace-nowrap",
-                !line && "text-zinc-600",
-                line && index === padded.length - 1 && animating && "text-emerald-300",
+                !line && "text-zinc-600 [.light_&]:text-sky-300/60",
+                line && index === padded.length - 1 && animating && "text-emerald-300 [.light_&]:text-sky-50",
               )}
             >
               {line || t("admin.dataCollection.workerLogRelayWaiting")}

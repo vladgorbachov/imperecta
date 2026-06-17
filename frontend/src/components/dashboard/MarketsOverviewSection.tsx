@@ -81,7 +81,7 @@ function seededRank(id: string, seed: number): number {
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-[var(--glass-bg)] p-3">
+    <div className="surface-base rounded-lg p-3">
       <p className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</p>
       <p
         className="mt-1 text-2xl font-bold tabular-nums"
@@ -158,7 +158,7 @@ function ProductCard({
   );
 
   return (
-    <article className="flex flex-col gap-2 rounded-xl border border-border bg-[var(--glass-bg)] p-3 transition-colors hover:border-[var(--glass-border-hover)]">
+    <article className="surface-base is-interactive flex flex-col gap-2 rounded-xl p-3">
       {externalHref ? (
         <a
           href={externalHref}

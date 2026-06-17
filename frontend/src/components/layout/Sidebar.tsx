@@ -243,10 +243,7 @@ function SidebarFooter({
               ? t("layout.trialDaysLeft", { count: trialDaysLeft })
               : trialDaysLeft}
           </p>
-          <div
-            className="mb-[21px] h-[10px] w-full overflow-hidden rounded-full bg-[var(--glass-bg)]"
-            style={{ border: "1px solid var(--glass-border)" }}
-          >
+          <div className="surface-sunken mb-[21px] h-[10px] w-full overflow-hidden rounded-full">
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{

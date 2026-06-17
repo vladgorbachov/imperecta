@@ -131,10 +131,7 @@ function AnalyticsBlock({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="rounded-xl p-4"
-      style={{ background: "var(--glass-bg)", border: "1px solid var(--glass-border)" }}
-    >
+    <div className="surface-base rounded-xl p-4">
       <h4 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </h4>

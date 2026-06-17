@@ -72,7 +72,12 @@ tbody tr[data-trend="down"]:hover {
 
 /* Sidebar */
 [data-sidebar] {
-  background: var(--background-mid) !important;
+  background: linear-gradient(
+    to bottom,
+    var(--background-mid) 0%,
+    var(--background-mid) 80%,
+    transparent 100%
+  ) !important;
   border-right: 1px solid var(--glass-border) !important;
 }
 
