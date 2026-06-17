@@ -163,6 +163,7 @@ async def test_scrape_child_partial_on_deadline(monkeypatch):
         marketplace_codes=None,
         stale_before=None,
         deadline_monotonic=None,
+        parent_job_id=None,
     ):
         return {
             "scraped_ok": 12,

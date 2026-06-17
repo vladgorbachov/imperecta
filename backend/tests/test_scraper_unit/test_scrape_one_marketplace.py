@@ -71,6 +71,7 @@ async def test_scrape_one_marketplace_runs_and_owns_job(monkeypatch):
         marketplace_codes=None,
         stale_before=None,
         deadline_monotonic=None,
+        parent_job_id=None,
     ):
         captured["scrape_job_id"] = scrape_job_id
         captured["marketplace_codes"] = marketplace_codes
@@ -137,6 +138,7 @@ async def test_scrape_one_marketplace_partial_aware_status(
         marketplace_codes=None,
         stale_before=None,
         deadline_monotonic=None,
+        parent_job_id=None,
     ):
         result = {"scraped_ok": scraped_ok, "scraped_failed": scraped_failed}
         if error is not None:
