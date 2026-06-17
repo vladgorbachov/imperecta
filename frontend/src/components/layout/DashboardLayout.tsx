@@ -26,7 +26,7 @@ export function DashboardLayout() {
 
   return (
     <div
-      className="grid h-[100dvh] min-h-screen grid-cols-[auto_1fr] grid-rows-[auto_1fr]"
+      className="grid h-[100dvh] min-h-screen grid-cols-1 grid-rows-[auto_1fr] md:grid-cols-[auto_1fr]"
       style={{
         color: "var(--foreground)",
       }}
@@ -35,7 +35,7 @@ export function DashboardLayout() {
         <Sidebar collapsed={isCollapsed} onToggle={toggle} />
       </aside>
       <Header onMenuClick={() => setMobileSheetOpen(true)} />
-      <main className="relative z-10 col-span-1 flex min-h-0 min-w-0 flex-col overflow-hidden">
+      <main className="relative z-10 col-span-1 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden md:row-auto">
         {/* Ambient background — decorative only */}
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <div
