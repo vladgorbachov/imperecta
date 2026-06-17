@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from uuid import UUID
 
 import structlog
 from sqlalchemy import select, text
@@ -110,6 +111,51 @@ def _should_reap_job(
     return age > REAPER_DEFAULT_MAX_RUNTIME_SECONDS, age
 
 
+def _child_liveness_ref(
+    *,
+    started_at: datetime | None,
+    config: dict | None,
+) -> datetime | None:
+    """Best-effort freshness timestamp for a child job row."""
+    cfg = config if isinstance(config, dict) else {}
+    metadata = cfg.get("metadata", {}) if isinstance(cfg, dict) else {}
+    raw_la = metadata.get("last_activity_at") if isinstance(metadata, dict) else None
+    if isinstance(raw_la, str):
+        try:
+            return datetime.fromisoformat(raw_la)
+        except ValueError:
+            pass
+    return started_at
+
+
+async def _parent_has_live_child(
+    db: AsyncSession,
+    parent_id: UUID,
+    *,
+    now: datetime,
+    stale_seconds: int,
+) -> bool:
+    """True when a pending/running child has a fresh liveness signal."""
+    result = await db.execute(
+        select(
+            ScrapeJob.started_at,
+            ScrapeJob.config,
+        ).where(
+            ScrapeJob.parent_job_id == parent_id,
+            ScrapeJob.job_type.in_(("scrape", "discovery")),
+            ScrapeJob.status.in_(("pending", "running")),
+        )
+    )
+    for started_at, config in result.all():
+        ref = _child_liveness_ref(started_at=started_at, config=config)
+        if ref is None:
+            continue
+        age = int((now - ref).total_seconds())
+        if age <= stale_seconds:
+            return True
+    return False
+
+
 async def _reap_orphan_jobs_async() -> dict[str, int]:
     """Mark stale `status='running'` jobs as failed.
 
@@ -157,6 +203,21 @@ async def _reap_orphan_jobs_async() -> dict[str, int]:
                     now=now,
                 )
                 if should:
+                    if (
+                        row.job_type == _PIPELINE_JOB_TYPE
+                        and await _parent_has_live_child(
+                            db,
+                            row.id,
+                            now=now,
+                            stale_seconds=REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS,
+                        )
+                    ):
+                        slog.info(
+                            "reaper_sparing_parent_with_live_child",
+                            job_id=str(row.id),
+                            age_s=age,
+                        )
+                        continue
                     reap_ids.append(row.id)
                     slog.warning(
                         "reaper_marking_orphan",

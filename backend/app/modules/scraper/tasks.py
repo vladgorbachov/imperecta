@@ -31,6 +31,7 @@ from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as
 from app.modules.scraper.pipeline.activity_pulse import (
     discovery_activity_callback,
     pulse_job_activity_sync,
+    pulse_parent_heartbeat_sync,
 )
 from app.modules.scraper.pipeline.worker_log_relay import pipeline_worker_log_relay
 from app.modules.scraper.scraper_pool import ScraperPool
@@ -116,6 +117,24 @@ def _make_session_factory() -> tuple:
         autoflush=False,
     )
     return engine, factory
+
+
+def _pulse_scrape_activity(
+    scrape_job_id: UUID,
+    line: str,
+    *,
+    parent_job_id: UUID | None = None,
+    force_db: bool = False,
+) -> None:
+    """Child scrape pulse plus optional parent heartbeat refresh."""
+    pulse_job_activity_sync(
+        scrape_job_id,
+        line,
+        stage="scrape",
+        force_db=force_db,
+    )
+    if parent_job_id is not None:
+        pulse_parent_heartbeat_sync(parent_job_id, force=force_db)
 
 
 def _persist_technical_error_log(
@@ -362,6 +381,7 @@ def _run_scrape_all_pool(
     marketplace_codes: list[str] | None = None,
     stale_before: datetime | None = None,
     deadline_monotonic: float | None = None,
+    parent_job_id: UUID | None = None,
 ) -> dict:
     """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers).
 
@@ -383,6 +403,7 @@ def _run_scrape_all_pool(
             marketplace_codes=marketplace_codes,
             stale_before=stale_before,
             deadline_monotonic=deadline_monotonic,
+            parent_job_id=parent_job_id,
         )
     except Exception:
         tb = traceback.format_exc()
@@ -402,6 +423,7 @@ def _run_scrape_all_pool_impl(
     marketplace_codes: list[str] | None = None,
     stale_before: datetime | None = None,
     deadline_monotonic: float | None = None,
+    parent_job_id: UUID | None = None,
 ) -> dict:
     scraper_pool = ScraperPool()
     settings = Settings()
@@ -470,10 +492,10 @@ def _run_scrape_all_pool_impl(
                 marketplace_codes=marketplace_codes,
             )
             if scrape_job_id is not None:
-                pulse_job_activity_sync(
+                _pulse_scrape_activity(
                     scrape_job_id,
                     f"scrape batch {len(stale_ids)} listings (queued {queued_total})",
-                    stage="scrape",
+                    parent_job_id=parent_job_id,
                     force_db=True,
                 )
 
@@ -497,10 +519,10 @@ def _run_scrape_all_pool_impl(
                     )
                     if scrape_job_id is not None:
                         status_label = "ok" if r.success else "fail"
-                        pulse_job_activity_sync(
+                        _pulse_scrape_activity(
                             scrape_job_id,
                             f"scrape {status_label} {url_hint}",
-                            stage="scrape",
+                            parent_job_id=parent_job_id,
                             force_db=index % 10 == 0,
                         )
                     if r.success:
@@ -522,10 +544,10 @@ def _run_scrape_all_pool_impl(
                         slog.exception("rollback_after_listing_failure", listing_id=str(lid))
                     _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
                     if scrape_job_id is not None:
-                        pulse_job_activity_sync(
+                        _pulse_scrape_activity(
                             scrape_job_id,
                             f"scrape error {str(lid)[:8]}",
-                            stage="scrape",
+                            parent_job_id=parent_job_id,
                             force_db=True,
                         )
                     failed += 1
@@ -650,6 +672,7 @@ def scrape_one_marketplace(self, child_job_id: str):
                         marketplace_codes=[code],
                         stale_before=cohort_anchor,
                         deadline_monotonic=deadline,
+                        parent_job_id=parent_id,
                     )
                 ok = (
                     int(scrape_result.get("scraped_ok", 0))

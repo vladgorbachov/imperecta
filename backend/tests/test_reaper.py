@@ -138,12 +138,20 @@ class _FakeRow:
         self.config = config
 
 
-def _build_factory_mock(rows: list[_FakeRow]):
-    """Return (engine, factory, db, update_calls) wired to yield `rows`."""
+def _build_factory_mock(rows: list[_FakeRow], *, child_rows: list[tuple] | None = None):
+    """Return (engine, factory, db, update_calls) wired to yield `rows`.
+
+    ``child_rows`` supplies (started_at, config) tuples for the live-child query.
+    Defaults to empty (no live children).
+    """
     update_calls: list[dict] = []
+    select_calls = {"count": 0}
 
     select_result = MagicMock()
     select_result.all.return_value = rows
+
+    child_result = MagicMock()
+    child_result.all.return_value = child_rows or []
 
     db = MagicMock()
 
@@ -151,7 +159,10 @@ def _build_factory_mock(rows: list[_FakeRow]):
         if params is not None:
             update_calls.append(dict(params))
             return MagicMock()
-        return select_result
+        select_calls["count"] += 1
+        if select_calls["count"] == 1:
+            return select_result
+        return child_result
 
     db.execute = AsyncMock(side_effect=fake_execute)
     db.commit = AsyncMock()
@@ -231,6 +242,167 @@ async def test_reap_orphan_jobs_async_marks_stale_rows(monkeypatch):
     db.commit.assert_awaited_once()
     db.rollback.assert_not_called()
     engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_parent_has_live_child_fresh_activity():
+    now = datetime.now(tz=timezone.utc)
+    parent_id = uuid4()
+    db = MagicMock()
+    child_result = MagicMock()
+    child_result.all.return_value = [
+        (
+            now - timedelta(seconds=100),
+            {
+                "metadata": {
+                    "last_activity_at": (now - timedelta(seconds=100)).isoformat()
+                }
+            },
+        )
+    ]
+    db.execute = AsyncMock(return_value=child_result)
+
+    live = await reaper_tasks._parent_has_live_child(
+        db,
+        parent_id,
+        now=now,
+        stale_seconds=reaper_tasks.REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS,
+    )
+    assert live is True
+
+
+@pytest.mark.asyncio
+async def test_parent_has_live_child_stale_running_child_not_live():
+    """A running child with stale heartbeat must not spare the parent."""
+    now = datetime.now(tz=timezone.utc)
+    parent_id = uuid4()
+    db = MagicMock()
+    child_result = MagicMock()
+    child_result.all.return_value = [
+        (
+            now - timedelta(seconds=2000),
+            {
+                "metadata": {
+                    "last_activity_at": (now - timedelta(seconds=900)).isoformat()
+                }
+            },
+        )
+    ]
+    db.execute = AsyncMock(return_value=child_result)
+
+    live = await reaper_tasks._parent_has_live_child(
+        db,
+        parent_id,
+        now=now,
+        stale_seconds=reaper_tasks.REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS,
+    )
+    assert live is False
+
+
+@pytest.mark.asyncio
+async def test_reaper_spares_parent_with_live_child(monkeypatch):
+    now = datetime.now(tz=timezone.utc)
+    stale_pipeline_id = uuid4()
+    fresh_child_started = now - timedelta(seconds=100)
+    fresh_child_config = {
+        "metadata": {
+            "last_activity_at": (now - timedelta(seconds=100)).isoformat()
+        }
+    }
+
+    rows = [
+        _FakeRow(
+            id=stale_pipeline_id,
+            job_type=_PIPELINE,
+            status="running",
+            started_at=now - timedelta(seconds=2000),
+            config={
+                "metadata": {
+                    "last_activity_at": (now - timedelta(seconds=700)).isoformat()
+                }
+            },
+        ),
+    ]
+
+    engine, factory, db, update_calls = _build_factory_mock(
+        rows,
+        child_rows=[(fresh_child_started, fresh_child_config)],
+    )
+    monkeypatch.setattr(
+        reaper_tasks, "_make_session_factory", lambda: (engine, factory)
+    )
+
+    result = await reaper_tasks._reap_orphan_jobs_async()
+
+    assert result == {"scanned": 1, "reaped": 0}
+    assert update_calls == []
+    db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reaper_reaps_parent_with_no_live_child(monkeypatch):
+    now = datetime.now(tz=timezone.utc)
+    stale_pipeline_id = uuid4()
+    stale_child_started = now - timedelta(seconds=2000)
+    stale_child_config = {
+        "metadata": {
+            "last_activity_at": (now - timedelta(seconds=900)).isoformat()
+        }
+    }
+
+    rows = [
+        _FakeRow(
+            id=stale_pipeline_id,
+            job_type=_PIPELINE,
+            status="running",
+            started_at=now - timedelta(seconds=2000),
+            config={
+                "metadata": {
+                    "last_activity_at": (now - timedelta(seconds=700)).isoformat()
+                }
+            },
+        ),
+    ]
+
+    engine, factory, db, update_calls = _build_factory_mock(
+        rows,
+        child_rows=[(stale_child_started, stale_child_config)],
+    )
+    monkeypatch.setattr(
+        reaper_tasks, "_make_session_factory", lambda: (engine, factory)
+    )
+
+    result = await reaper_tasks._reap_orphan_jobs_async()
+
+    assert result == {"scanned": 1, "reaped": 1}
+    assert set(update_calls[0]["ids"]) == {stale_pipeline_id}
+
+
+@pytest.mark.asyncio
+async def test_reaper_untouched_for_non_pipeline(monkeypatch):
+    """Standalone discovery overrun reaping is unchanged by child-awareness."""
+    now = datetime.now(tz=timezone.utc)
+    stale_discovery_id = uuid4()
+
+    rows = [
+        _FakeRow(
+            id=stale_discovery_id,
+            job_type="discovery",
+            status="running",
+            started_at=now - timedelta(seconds=1300),
+            config={},
+        ),
+    ]
+
+    engine, factory, db, update_calls = _build_factory_mock(rows)
+    monkeypatch.setattr(
+        reaper_tasks, "_make_session_factory", lambda: (engine, factory)
+    )
+
+    result = await reaper_tasks._reap_orphan_jobs_async()
+
+    assert result == {"scanned": 1, "reaped": 1}
+    assert set(update_calls[0]["ids"]) == {stale_discovery_id}
 
 
 @pytest.mark.asyncio

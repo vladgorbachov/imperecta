@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -18,6 +19,8 @@ from app.modules.scraper.pipeline.worker_log_relay import (
     push_relay_line,
     should_pulse_db,
 )
+
+slog = structlog.get_logger(__name__)
 
 WORKER_LOG_TAIL_MAX = 20
 
@@ -56,6 +59,39 @@ def pulse_job_activity_sync(
         job.config = {"metadata": deepcopy(metadata)}
         flag_modified(job, "config")
         db.commit()
+    finally:
+        db.close()
+
+
+def pulse_parent_heartbeat_sync(
+    parent_job_id: UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Refresh parent pipeline heartbeat under a distinct throttle key.
+
+    Called from long-running scrape children so the parent survives reaper
+    checks even when orchestrator_tick cannot run. Failures are logged and
+    swallowed — a heartbeat must never abort scraping.
+    """
+    if not should_pulse_db(parent_job_id, force=force):
+        return
+
+    db = sync_session_factory()
+    try:
+        job = db.get(ScrapeJob, parent_job_id)
+        if job is None:
+            return
+        metadata = PipelineMetadataStore.extract(job.config)
+        metadata["last_activity_at"] = datetime.now(UTC).isoformat()
+        job.config = {"metadata": deepcopy(metadata)}
+        flag_modified(job, "config")
+        db.commit()
+    except Exception:
+        slog.exception(
+            "parent_heartbeat_pulse_failed",
+            parent_job_id=str(parent_job_id),
+        )
     finally:
         db.close()
 
