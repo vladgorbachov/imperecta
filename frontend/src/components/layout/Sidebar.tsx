@@ -229,7 +229,7 @@ function SidebarFooter({
   const progress = Math.min(100, (trialDaysLeft / maxDays) * 100);
 
   return (
-    <div className="shrink-0 border-t border-[var(--glass-border)] p-[21px]">
+    <div className="shrink-0 p-[21px]">
       {isTrial && (
         <div className="surface-base overflow-hidden p-[21px]">
           <p
