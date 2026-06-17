@@ -510,7 +510,7 @@ export function MarketsOverviewSection() {
 
       <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
         <aside className="hidden lg:block">
-          <div className="liquid-glass sticky top-2.5 rounded-xl border border-border bg-[var(--glass-bg)] p-3.5">
+          <div className="surface-base surface-liquid sticky top-2.5 rounded-xl p-3.5">
             <div className="relative mb-3">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -525,7 +525,7 @@ export function MarketsOverviewSection() {
         </aside>
 
         <div className="min-w-0">
-          <div className="liquid-glass rounded-xl border border-border bg-[var(--glass-bg)] p-3.5">
+          <div className="surface-base surface-liquid rounded-xl p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">
                 {t("market.found", { count: Number(kpis.total) })}

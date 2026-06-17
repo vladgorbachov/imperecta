@@ -42,25 +42,52 @@ function SidebarLogo({
   collapsed,
   isMobile,
   onNavigate,
+  onToggle,
 }: {
   collapsed: boolean;
   isMobile?: boolean;
   onNavigate?: () => void;
+  onToggle?: () => void;
 }) {
+  const { t } = useTranslation();
   const showLabels = !collapsed || isMobile;
 
   return (
-    <Link
-      to="/dashboard"
-      onClick={isMobile ? onNavigate : undefined}
+    <div
       className={cn(
-        "flex h-[84px] shrink-0 items-center border-b px-[17px] transition-colors",
-        "border-[var(--glass-border)] hover:bg-[var(--glass-bg-hover)]",
-        showLabels ? "justify-start" : "justify-center px-0"
+        "relative flex h-[84px] shrink-0 border-b",
+        "border-[var(--glass-border)]",
+        showLabels
+          ? "flex-row items-center justify-between px-[17px]"
+          : "flex-col items-center justify-center gap-0.5 px-0"
       )}
     >
-      <Logo collapsed={collapsed && !isMobile} />
-    </Link>
+      <Link
+        to="/dashboard"
+        onClick={isMobile ? onNavigate : undefined}
+        className={cn(
+          "flex items-center rounded-md transition-colors hover:bg-[var(--glass-bg-hover)]",
+          showLabels ? "justify-start" : "justify-center"
+        )}
+      >
+        <Logo collapsed={collapsed && !isMobile} />
+      </Link>
+      {!isMobile && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-[38px] w-[38px] min-w-[38px] shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+          onClick={onToggle}
+          aria-label={collapsed ? t("common.expand") : t("common.collapse")}
+        >
+          {collapsed ? (
+            <ChevronRight className="size-[20px]" />
+          ) : (
+            <ChevronLeft className="size-[20px]" />
+          )}
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -268,30 +295,15 @@ export function Sidebar({
         isMobile ? "w-full" : collapsed ? "w-[80px]" : "w-[264px]"
       )}
     >
-      <SidebarLogo collapsed={collapsed} isMobile={isMobile} onNavigate={onNavigate} />
+      <SidebarLogo
+        collapsed={collapsed}
+        isMobile={isMobile}
+        onNavigate={onNavigate}
+        onToggle={onToggle}
+      />
 
       <nav className="flex flex-1 flex-col gap-[10px] overflow-y-auto py-[17px] text-sm">
-        <SidebarSection
-          label={t("nav.section.core")}
-          collapsed={collapsed}
-          rightAction={
-            !isMobile ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-[38px] w-[38px] min-w-[38px] shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
-                onClick={onToggle}
-                aria-label={collapsed ? t("common.expand") : t("common.collapse")}
-              >
-                {collapsed ? (
-                  <ChevronRight className="size-[23px]" />
-                ) : (
-                  <ChevronLeft className="size-[23px]" />
-                )}
-              </Button>
-            ) : undefined
-          }
-        >
+        <SidebarSection label={t("nav.section.core")} collapsed={collapsed}>
           <SidebarItem
             icon={LayoutDashboard}
             label={t("nav.markets")}
