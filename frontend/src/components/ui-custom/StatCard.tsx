@@ -45,7 +45,7 @@ export function StatCard({
     <div
       style={style}
       className={cn(
-        "glass-card relative overflow-hidden rounded-xl p-5",
+        "surface-base is-interactive relative overflow-hidden rounded-xl p-5",
         isLoading && "shimmer",
         className
       )}

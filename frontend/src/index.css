@@ -16,6 +16,7 @@
   --glass-bg-hover: rgba(255, 255, 255, 0.07);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-border-hover: rgba(255, 255, 255, 0.15);
+  --surface-sunken-bg: rgba(255, 255, 255, 0.02); /* below base — tracks/skeletons/chips */
 
   /* === Brand / Accent === */
   --accent: #38bdf8;
@@ -160,6 +161,7 @@
   --glass-bg-hover: rgba(255, 255, 255, 0.85);
   --glass-border: rgba(148, 163, 184, 0.25);
   --glass-border-hover: rgba(56, 189, 248, 0.4);
+  --surface-sunken-bg: rgba(15, 23, 42, 0.03); /* subtle inset on Sky */
 
   --accent: #0284c7;
   --accent-bright: #0ea5e9;

@@ -24,7 +24,7 @@ export function ProductsPage() {
         onValueChange={(v) => setActiveTab(v as "pool" | "my")}
         className="mt-3 flex flex-1 flex-col"
       >
-        <TabsList className="glass-card mb-3 w-fit rounded-lg p-1">
+        <TabsList className="surface-base mb-3 w-fit rounded-lg p-1">
           <TabsTrigger value="pool" className="rounded-md px-3 text-xs">
             {t("products.tabs.all")}
           </TabsTrigger>

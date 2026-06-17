@@ -1,3 +1,80 @@
+/* === Surface elevation system (U4) === */
+
+/* Level 0 — sunken: tracks, skeletons, inset chips */
+.surface-sunken {
+  background: var(--surface-sunken-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* Level 1 — base: default card surface */
+.surface-base {
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+}
+
+/* Level 2 — raised: hover/active cards, prominent panels */
+.surface-raised {
+  position: relative;
+  background: var(--glass-bg-hover);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-hover);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+}
+/* base → raised affordance on hover (opt-in via .surface-base.is-interactive) */
+.surface-base.is-interactive:hover {
+  border-color: var(--glass-border-hover);
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+/* Level 3 — overlay: dialogs, popovers, dropdowns, toasts */
+.surface-overlay {
+  background: var(--background-elevated);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-hover);
+}
+
+/* Level 4 — chrome: structural frame (header, sidebar) */
+.surface-chrome {
+  background: var(--background-mid);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-color: var(--glass-border);
+}
+
+/* Modifier — liquid: premium radial wash + specular sweep (compose with surface-base/raised) */
+.surface-liquid {
+  overflow: hidden;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 45%),
+    radial-gradient(120% 120% at 100% 100%, rgba(125, 211, 252, 0.08) 0%, transparent 40%),
+    var(--glass-bg);
+  border: 1px solid color-mix(in srgb, var(--glass-border) 80%, white 20%);
+}
+.surface-liquid::after {
+  content: "";
+  position: absolute;
+  inset: -35% -20% auto;
+  height: 60%;
+  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.2) 50%, transparent 80%);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 /* Base glass card */
 .glass-card {
   position: relative;

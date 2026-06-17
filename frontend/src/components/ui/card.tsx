@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 const Card = ({ className, ...props }: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "card glass-card rounded-lg border bg-card text-card-foreground shadow-sm",
+      "surface-base text-card-foreground",
       className
     )}
     {...props}

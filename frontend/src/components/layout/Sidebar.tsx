@@ -142,7 +142,7 @@ function SidebarItem({
     return (
       <Tooltip>
         <TooltipTrigger asChild>{content}</TooltipTrigger>
-        <TooltipContent side="right" className="glass-card border-[var(--glass-border)]">
+        <TooltipContent side="right" className="surface-overlay">
           {label}
         </TooltipContent>
       </Tooltip>
@@ -205,7 +205,7 @@ function SidebarFooter({
   return (
     <div className="shrink-0 border-t border-[var(--glass-border)] p-[21px]">
       {isTrial && (
-        <div className="glass-card overflow-hidden p-[21px]">
+        <div className="surface-base overflow-hidden p-[21px]">
           <p
             className={cn(
               "mb-[14px] text-sm text-[var(--foreground-muted)]",

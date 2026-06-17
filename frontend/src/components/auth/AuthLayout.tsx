@@ -1,6 +1,6 @@
 /**
  * Split layout for auth pages: brand panel (desktop) + form area.
- * Left: gradient, glow blobs, SVG grid. Right: glass-card form.
+ * Left: gradient, glow blobs, SVG grid. Right: surface-base form.
  */
 
 import { useTranslation } from "react-i18next";
@@ -67,7 +67,7 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
         </div>
       </div>
 
-      {/* Form area — glass-card centered */}
+      {/* Form area — surface-base centered */}
       <div
         className={cn(
           "flex flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6 sm:py-8 lg:p-12",
@@ -88,7 +88,7 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
             </span>
           </Link>
         </div>
-        <div className="glass-card w-full max-w-md rounded-xl p-6 sm:p-8">{children}</div>
+        <div className="surface-base w-full max-w-md rounded-xl p-6 sm:p-8">{children}</div>
       </div>
     </div>
   );

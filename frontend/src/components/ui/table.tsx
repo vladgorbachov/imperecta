@@ -47,7 +47,7 @@ const TableRow = ({
 }: HTMLAttributes<HTMLTableRowElement>) => (
   <tr
     className={cn(
-      "border-b transition-colors duration-150 hover:bg-muted/50 data-[state=selected]:bg-muted dark:hover:bg-muted/50",
+      "border-b transition-colors duration-150 hover:bg-[var(--glass-bg-hover)] data-[state=selected]:bg-[var(--accent-bg-subtle)]",
       className
     )}
     {...props}
@@ -61,7 +61,7 @@ const TableHead = ({
 }: HTMLAttributes<HTMLTableCellElement>) => (
   <th
     className={cn(
-      "h-9 px-3 text-left align-middle text-2xs font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
+      "h-8 px-3 text-left align-middle text-2xs font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0",
       className
     )}
     {...props}
@@ -76,7 +76,7 @@ const TableCell = ({
 }: HTMLAttributes<HTMLTableCellElement> & { colSpan?: number }) => (
   <td
     colSpan={colSpan}
-    className={cn("px-3 py-2.5 align-middle [&:has([role=checkbox])]:pr-0", className)}
+    className={cn("px-3 py-2 align-middle [&:has([role=checkbox])]:pr-0", className)}
     {...props}
   />
 );

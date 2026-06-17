@@ -112,7 +112,7 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
   return (
     <div className="flex flex-col gap-4">
       {/* Toolbar */}
-      <div className="glass-card flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:flex-wrap sm:items-center">
+      <div className="surface-base flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:flex-wrap sm:items-center">
         <div className="relative flex-1 lg:max-w-72">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -170,7 +170,7 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
       </div>
 
       {/* Table */}
-      <div className="glass-card overflow-hidden rounded-xl">
+      <div className="surface-base overflow-hidden rounded-xl">
         {isLoading ? (
           <div className="p-4">
             <div className="space-y-2">
@@ -219,7 +219,14 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                   {items.map((item) => (
                     <TableRow
                       key={item.id}
-                      className={cn("cursor-pointer transition-colors", "hover:bg-muted/50")}
+                      className="cursor-pointer transition-colors"
+                      data-trend={
+                        item.price_change_pct != null && item.price_change_pct > 0
+                          ? "up"
+                          : item.price_change_pct != null && item.price_change_pct < 0
+                            ? "down"
+                            : undefined
+                      }
                       onClick={() => {
                         if (item.url) window.open(item.url, "_blank");
                       }}

@@ -1,23 +1,5 @@
 /* shadcn component overrides — glassmorphism design system */
 
-/* Card */
-.card {
-  background: var(--glass-bg) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border) !important;
-  border-radius: var(--radius-lg) !important;
-  box-shadow: var(--shadow-card) !important;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.25s ease;
-}
-.card:hover {
-  border-color: var(--glass-border-hover) !important;
-  box-shadow: var(--shadow-hover) !important;
-  transform: translateY(-1px);
-}
-
 /* Button — primary / default */
 .btn-primary,
 button[data-variant="default"],
@@ -65,14 +47,19 @@ thead th {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--border);
 }
-tbody tr {
-  border-bottom: 1px solid var(--border);
-  transition: background 0.15s;
+/* Sign-based row tint (opt-in via data-trend on the row) */
+tbody tr[data-trend="up"] {
+  background: var(--row-tint-green);
 }
-tbody tr:hover {
-  background: var(--glass-bg-hover);
+tbody tr[data-trend="down"] {
+  background: var(--row-tint-red);
+}
+tbody tr[data-trend="up"]:hover {
+  background: color-mix(in srgb, var(--row-tint-green) 55%, var(--glass-bg-hover));
+}
+tbody tr[data-trend="down"]:hover {
+  background: color-mix(in srgb, var(--row-tint-red) 55%, var(--glass-bg-hover));
 }
 
 /* Badge */
