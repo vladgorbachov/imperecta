@@ -39,7 +39,7 @@ export function Logo({ collapsed = false, className }: LogoProps) {
       </span>
       {!collapsed && (
         <span
-          className="text-[16px] font-bold tracking-[-0.01em] text-[var(--foreground)]"
+          className="text-[18px] font-bold tracking-[-0.01em] text-[var(--foreground)]"
           style={{ fontFamily: "var(--font-display)" }}
         >
           Imperecta

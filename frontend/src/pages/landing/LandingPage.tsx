@@ -448,7 +448,7 @@ function TestimonialsSection() {
               key={i}
               className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-xl"
             >
-              <p className="text-[15px] leading-relaxed text-white/85">&ldquo;{t.quote}&rdquo;</p>
+              <p className="text-[17px] leading-relaxed text-white/85">&ldquo;{t.quote}&rdquo;</p>
               <p className="mt-5 text-xs font-medium text-white/50">{t.role}</p>
             </div>
           ))}

@@ -508,7 +508,7 @@ export function MarketsOverviewSection() {
         <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
+      <div className="grid items-start gap-3 lg:grid-cols-[260px_1fr]">
         <aside className="hidden lg:block">
           <div className="surface-base surface-liquid sticky top-2.5 rounded-xl p-3.5">
             <div className="relative mb-3">
