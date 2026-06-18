@@ -121,34 +121,34 @@ function statusBadgeVariant(status: ParsingPipelineJobStatus) {
 
 function statusBadgeClassName(status: ParsingPipelineJobStatus): string {
   if (status === "completed") {
-    return "border-green-500/50 bg-green-500/20 text-black dark:text-white";
+    return "border-green-500/50 bg-green-500/20 text-[var(--foreground)]";
   }
   if (status === "running") {
-    return "border-amber-500/50 bg-amber-500/25 text-black dark:text-white";
+    return "border-amber-500/50 bg-amber-500/25 text-[var(--foreground)]";
   }
   if (status === "partial") {
-    return "border-amber-500/50 bg-amber-500/25 text-black dark:text-white";
+    return "border-amber-500/50 bg-amber-500/25 text-[var(--foreground)]";
   }
   if (status === "cancelled") {
-    return "border-border bg-muted/60 text-black dark:text-white";
+    return "border-border bg-muted/60 text-[var(--foreground)]";
   }
   if (status === "failed") {
-    return "border-red-500/50 bg-red-500/20 text-black dark:text-white";
+    return "border-red-500/50 bg-red-500/20 text-[var(--foreground)]";
   }
-  return "border-border bg-muted/60 text-black dark:text-white";
+  return "border-border bg-muted/60 text-[var(--foreground)]";
 }
 
 function collectionStageClassName(status: CollectionStageStatus): string {
   if (status === "completed") {
-    return "border-green-500/50 bg-green-500/20 text-black dark:text-white";
+    return "border-green-500/50 bg-green-500/20 text-[var(--foreground)]";
   }
   if (status === "failed") {
-    return "border-red-500/50 bg-red-500/20 text-black dark:text-white";
+    return "border-red-500/50 bg-red-500/20 text-[var(--foreground)]";
   }
   if (status === "in_progress") {
-    return "border-amber-500/50 bg-amber-500/25 text-black dark:text-white";
+    return "border-amber-500/50 bg-amber-500/25 text-[var(--foreground)]";
   }
-  return "border-border bg-muted/60 text-black dark:text-white";
+  return "border-border bg-muted/60 text-[var(--foreground)]";
 }
 
 function collectionStageLabelKey(status: CollectionStageStatus): string {
