@@ -12,6 +12,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.reaper_tasks.reap_orphan_jobs",
         "schedule": 300.0,
     },
+    "pipeline-tick-watchdog": {
+        "task": "app.workers.reaper_tasks.revive_stalled_pipeline_ticks",
+        "schedule": 60.0,
+    },
     "ensure-fact-price-partitions": {
         "task": "ensure_fact_price_partitions",
         "schedule": crontab(hour=0, minute=0),

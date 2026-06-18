@@ -34,6 +34,7 @@ REAPER_DISCOVERY_MAX_RUNTIME_SECONDS = (
     _DISCOVERY_BUDGET_SECONDS + REAPER_DISCOVERY_GRACE_SECONDS
 )
 REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS = 600
+WATCHDOG_REVIVE_FLOOR_SECONDS = 120
 REAPER_DEFAULT_MAX_RUNTIME_SECONDS = 3600
 _PIPELINE_JOB_TYPE = "full_pipeline_test"
 
@@ -156,6 +157,86 @@ async def _parent_has_live_child(
     return False
 
 
+def _should_revive_pipeline_tick(age_s: int) -> bool:
+    """True when a running pipeline parent's heartbeat is stale enough to
+    revive but not yet old enough for the reaper to own."""
+    return (
+        WATCHDOG_REVIVE_FLOOR_SECONDS < age_s < REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS
+    )
+
+
+def _pipeline_heartbeat_age(
+    *,
+    started_at: datetime | None,
+    last_activity_at: datetime | None,
+    now: datetime,
+) -> int | None:
+    """Elapsed seconds since the pipeline parent's liveness signal."""
+    ref = last_activity_at or started_at
+    if ref is None:
+        return None
+    return int((now - ref).total_seconds())
+
+
+async def _revive_stalled_pipeline_ticks_async() -> dict[str, int]:
+    """Re-enqueue orchestrator_tick for running pipeline parents with a
+    stalled-but-not-yet-reaped heartbeat. Does not mutate job status."""
+    now = datetime.now(tz=timezone.utc)
+    engine, session_factory = _make_session_factory()
+    revived = 0
+    try:
+        async with session_factory() as db:
+            result = await db.execute(
+                select(
+                    ScrapeJob.id,
+                    ScrapeJob.started_at,
+                    ScrapeJob.config,
+                ).where(
+                    ScrapeJob.status == "running",
+                    ScrapeJob.job_type == _PIPELINE_JOB_TYPE,
+                )
+            )
+            rows = result.all()
+            from app.modules.scraper.tasks import orchestrator_tick
+
+            for row in rows:
+                cfg = row.config if isinstance(row.config, dict) else {}
+                metadata = cfg.get("metadata", {}) if isinstance(cfg, dict) else {}
+                raw_la = (
+                    metadata.get("last_activity_at")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                last_activity_at: datetime | None = None
+                if isinstance(raw_la, str):
+                    try:
+                        last_activity_at = datetime.fromisoformat(raw_la)
+                    except ValueError:
+                        last_activity_at = None
+                age = _pipeline_heartbeat_age(
+                    started_at=row.started_at,
+                    last_activity_at=last_activity_at,
+                    now=now,
+                )
+                if age is None or not _should_revive_pipeline_tick(age):
+                    continue
+                orchestrator_tick.apply_async([str(row.id)])
+                revived += 1
+                slog.info(
+                    "pipeline_tick_revived",
+                    parent_job_id=str(row.id),
+                    age_s=age,
+                )
+            slog.info(
+                "pipeline_tick_watchdog_done",
+                scanned=len(rows),
+                revived=revived,
+            )
+            return {"scanned": len(rows), "revived": revived}
+    finally:
+        await engine.dispose()
+
+
 async def _reap_orphan_jobs_async() -> dict[str, int]:
     """Mark stale `status='running'` jobs as failed.
 
@@ -264,3 +345,13 @@ async def _reap_orphan_jobs_async() -> dict[str, int]:
 def reap_orphan_jobs() -> dict[str, int]:
     """Celery entrypoint: run the async reaper with a hard 90s ceiling."""
     return _run_async(_reap_orphan_jobs_async())
+
+
+@celery_app.task(
+    name="app.workers.reaper_tasks.revive_stalled_pipeline_ticks",
+    soft_time_limit=60,
+    time_limit=90,
+)
+def revive_stalled_pipeline_ticks() -> dict[str, int]:
+    """Celery Beat entrypoint: revive stalled pipeline tick chains."""
+    return _run_async(_revive_stalled_pipeline_ticks_async())

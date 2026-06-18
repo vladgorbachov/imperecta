@@ -418,3 +418,93 @@ async def test_reap_orphan_jobs_async_noop_when_nothing_running(monkeypatch):
     assert update_calls == []
     db.commit.assert_not_called()
     engine.dispose.assert_awaited_once()
+
+
+def test_should_revive_pipeline_tick_window():
+    assert reaper_tasks._should_revive_pipeline_tick(120) is False
+    assert reaper_tasks._should_revive_pipeline_tick(121) is True
+    assert reaper_tasks._should_revive_pipeline_tick(599) is True
+    assert reaper_tasks._should_revive_pipeline_tick(600) is False
+
+
+@pytest.mark.asyncio
+async def test_watchdog_revives_stalled_parent(monkeypatch):
+    now = datetime.now(tz=timezone.utc)
+    parent_id = uuid4()
+    rows = [
+        _FakeRow(
+            id=parent_id,
+            job_type=_PIPELINE,
+            status="running",
+            started_at=now - timedelta(seconds=500),
+            config={
+                "metadata": {
+                    "last_activity_at": (
+                        now - timedelta(seconds=200)
+                    ).isoformat()
+                }
+            },
+        )
+    ]
+    engine, factory, _db, _ = _build_factory_mock(rows)
+    monkeypatch.setattr(
+        reaper_tasks, "_make_session_factory", lambda: (engine, factory)
+    )
+    apply_async = MagicMock()
+    monkeypatch.setattr(
+        "app.modules.scraper.tasks.orchestrator_tick.apply_async",
+        apply_async,
+    )
+
+    result = await reaper_tasks._revive_stalled_pipeline_ticks_async()
+
+    assert result == {"scanned": 1, "revived": 1}
+    apply_async.assert_called_once_with([str(parent_id)])
+    engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_skips_healthy_and_reaper_owned(monkeypatch):
+    now = datetime.now(tz=timezone.utc)
+    rows = [
+        _FakeRow(
+            id=uuid4(),
+            job_type=_PIPELINE,
+            status="running",
+            started_at=now - timedelta(seconds=500),
+            config={
+                "metadata": {
+                    "last_activity_at": (
+                        now - timedelta(seconds=60)
+                    ).isoformat()
+                }
+            },
+        ),
+        _FakeRow(
+            id=uuid4(),
+            job_type=_PIPELINE,
+            status="running",
+            started_at=now - timedelta(seconds=2000),
+            config={
+                "metadata": {
+                    "last_activity_at": (
+                        now - timedelta(seconds=650)
+                    ).isoformat()
+                }
+            },
+        ),
+    ]
+    engine, factory, _db, _ = _build_factory_mock(rows)
+    monkeypatch.setattr(
+        reaper_tasks, "_make_session_factory", lambda: (engine, factory)
+    )
+    apply_async = MagicMock()
+    monkeypatch.setattr(
+        "app.modules.scraper.tasks.orchestrator_tick.apply_async",
+        apply_async,
+    )
+
+    result = await reaper_tasks._revive_stalled_pipeline_ticks_async()
+
+    assert result == {"scanned": 2, "revived": 0}
+    apply_async.assert_not_called()

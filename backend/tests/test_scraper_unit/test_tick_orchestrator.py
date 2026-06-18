@@ -707,13 +707,10 @@ async def test_create_pending_child_inserts_and_returns_id():
 
 
 @pytest.mark.asyncio
-async def test_tick_skips_when_lock_held(monkeypatch):
-    """Loser branch: advisory lock not acquired → return locked, no _reenqueue.
-
-    The lock probe is the very first db.execute in run_tick, before
-    store.load(); so a single execute return_value with scalar_one()=False
-    suffices to drive the loser path.
-    """
+async def test_locked_branch_reenqueues_with_max_backoff(monkeypatch):
+    """L1 loser branch: advisory lock not acquired → return locked AND
+    _reenqueue with TICK_MAX_SECONDS (inverted from the old
+    test_tick_skips_when_lock_held which asserted assert_not_called)."""
     db = _mock_db()
     locked_result = MagicMock()
     locked_result.scalar_one = MagicMock(return_value=False)
@@ -725,9 +722,8 @@ async def test_tick_skips_when_lock_held(monkeypatch):
     result = await run_tick(db, uuid4())
 
     assert result == {"status": "locked"}
-    reenqueue.assert_not_called()
-    # Only the lock-probe executed; no body work happened (no unlock either,
-    # because the loser never entered the try-block).
+    reenqueue.assert_called_once()
+    assert reenqueue.call_args.args[1] == TICK_MAX_SECONDS
     assert db.execute.await_count == 1
 
 
@@ -829,6 +825,131 @@ async def test_tick_lock_sql_is_single_key_form(monkeypatch):
     assert (captured["params"] or {}).get("key", "").startswith(
         "orchestrator_tick:"
     )
+
+
+@pytest.mark.asyncio
+async def test_finally_reenqueue_on_exception_after_touch(monkeypatch):
+    """L2: exception after store.touch but before normal _reenqueue → finally
+    schedules the next tick for a running non-terminal parent."""
+    job = _make_job("running")
+    metadata: dict = {
+        "phase": "discovery",
+        "mp_queue": ["a"],
+        "mp_total": 2,
+        "backoff_s": 5.0,
+    }
+    store = _StoreStub(job, metadata)
+    _install_store(monkeypatch, store)
+
+    monkeypatch.setattr(
+        tick_mod, "_reap_stale_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod, "_reconcile_pending_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_count_active_children",
+        AsyncMock(return_value=MAX_PARALLEL_DISCOVERY),
+    )
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+    monkeypatch.setattr(
+        tick_mod,
+        "_next_backoff",
+        MagicMock(side_effect=RuntimeError("boom after touch")),
+    )
+
+    with pytest.raises(RuntimeError, match="boom after touch"):
+        await run_tick(_mock_db(), uuid4())
+
+    reenqueue.assert_called_once()
+    assert reenqueue.call_args.args[1] == TICK_MIN_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_finally_no_reenqueue_on_terminal(monkeypatch):
+    """L2: terminal returns (complete / stopped / not_found) must not finally
+    re-enqueue."""
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+
+    # not_found
+    store_nf = _StoreStub(None, {})
+    _install_store(monkeypatch, store_nf)
+    assert await run_tick(_mock_db(), uuid4()) == {"status": "not_found"}
+    reenqueue.assert_not_called()
+
+    # stopped
+    job = _make_job("cancelled")
+    store_stopped = _StoreStub(job, {"phase": "discovery", "mp_queue": ["a"]})
+    _install_store(monkeypatch, store_stopped)
+    assert (
+        await run_tick(_mock_db(), uuid4())
+        == {"status": "stopped", "job_status": "cancelled"}
+    )
+    reenqueue.assert_not_called()
+
+    # complete phase (finalizes without re-enqueue)
+    parent_id = uuid4()
+    job_running = _make_job("running")
+    store_complete = _StoreStub(job_running, {"phase": "complete"})
+    _install_store(monkeypatch, store_complete)
+    monkeypatch.setattr(
+        tick_mod, "_reap_stale_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod, "_reconcile_pending_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        "app.modules.scraper.pipeline.child_aggregation.aggregate_discovery_children",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        "app.modules.scraper.pipeline.child_aggregation.aggregate_scrape_children",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        "app.modules.scraper.pipeline.job_completion.complete_pipeline_job",
+        AsyncMock(return_value={}),
+    )
+    assert (await run_tick(_mock_db(), parent_id))["status"] == "complete"
+    reenqueue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_finally_no_double_reenqueue_on_normal_path(monkeypatch):
+    """L2 flag guard: a normal ticking return schedules exactly one re-enqueue."""
+    job = _make_job("running")
+    metadata: dict = {
+        "phase": "discovery",
+        "mp_queue": ["a", "b"],
+        "mp_total": 4,
+        "backoff_s": 5.0,
+    }
+    store = _StoreStub(job, metadata)
+    _install_store(monkeypatch, store)
+
+    monkeypatch.setattr(
+        tick_mod, "_reap_stale_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod, "_reconcile_pending_children", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        tick_mod,
+        "_count_active_children",
+        AsyncMock(return_value=MAX_PARALLEL_DISCOVERY),
+    )
+    create_mock = AsyncMock()
+    monkeypatch.setattr(tick_mod, "_create_pending_child", create_mock)
+    reenqueue = MagicMock()
+    monkeypatch.setattr(tick_mod, "_reenqueue", reenqueue)
+
+    await run_tick(_mock_db(), uuid4())
+
+    create_mock.assert_not_awaited()
+    reenqueue.assert_called_once()
 
 
 def test_reenqueue_uses_apply_async_with_countdown(monkeypatch):

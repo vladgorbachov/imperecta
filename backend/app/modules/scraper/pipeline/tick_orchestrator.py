@@ -437,13 +437,16 @@ async def _build_scrape_dispatch_queue(
     return eligible, drained
 
 
+_NON_TERMINAL_TICK_PHASES = frozenset({"discovery", "scrape"})
+
+
 async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
     """One short state-machine step for a tick-mode pipeline parent.
 
     Serialized per-parent via a SESSION-level Postgres advisory lock; a
-    concurrent tick observing the lock held returns ``{"status":"locked"}``
-    and does NOT re-enqueue (the holder re-enqueues at the end of its own
-    tick). Session-level — not xact-level — because run_tick has multiple
+    concurrent tick observing the lock held re-enqueues with TICK_MAX_SECONDS
+    (safety net behind the holder) and returns ``{"status":"locked"}``.
+    Session-level — not xact-level — because run_tick has multiple
     explicit commits and store.touch commits; an xact lock would release at
     the first commit and leave the dispatch loop unprotected.
 
@@ -455,6 +458,15 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
       unknown_phase — caller logs the latter).
     """
     store = PipelineMetadataStore(db, parent_job_id)
+    reenqueued = False
+    job: ScrapeJob | None = None
+    phase: str | None = None
+
+    def _schedule_next_tick(countdown_s: float) -> None:
+        nonlocal reenqueued
+        _reenqueue(parent_job_id, countdown_s)
+        reenqueued = True
+
     try:
         locked = (
             await db.execute(
@@ -474,12 +486,16 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
             "tick_advisory_acquire_failed",
             parent_job_id=str(parent_job_id),
         )
-        _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+        _schedule_next_tick(TICK_MIN_SECONDS)
         return {"status": "lock_error"}
     if not locked:
-        # Another tick for this parent is in flight; the holder will
-        # re-enqueue itself. Re-enqueueing here would deepen the broker
-        # queue and re-trigger the same race.
+        # A concurrent tick holds the lock. Normally the holder re-enqueues the
+        # next tick; if the holder dies before _reenqueue, the chain would stall
+        # permanently. Re-enqueue with MAX backoff (well behind the holder's own
+        # re-enqueue) as a self-healing safety net. The advisory lock serializes
+        # and the tick is idempotent, so the later message simply finds the
+        # state already advanced.
+        _schedule_next_tick(TICK_MAX_SECONDS)
         return {"status": "locked"}
     try:
         job, metadata = await store.load()
@@ -541,7 +557,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 metadata["phase"] = "scrape"
                 metadata["backoff_s"] = TICK_MIN_SECONDS
                 await store.touch(job, metadata, stage="scrape")
-                _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+                _schedule_next_tick(TICK_MIN_SECONDS)
                 return {"status": "phase_advanced", "phase": "scrape"}
 
             backoff = _next_backoff(
@@ -550,7 +566,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
             )
             metadata["backoff_s"] = backoff
             await store.touch(job, metadata, stage="discovery")
-            _reenqueue(parent_job_id, backoff)
+            _schedule_next_tick(backoff)
             return {
                 "status": "ticking",
                 "phase": "discovery",
@@ -615,7 +631,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 metadata["phase"] = "complete"
                 metadata["backoff_s"] = TICK_MIN_SECONDS
                 await store.touch(job, metadata, stage="persist")
-                _reenqueue(parent_job_id, TICK_MIN_SECONDS)
+                _schedule_next_tick(TICK_MIN_SECONDS)
                 return {"status": "phase_advanced", "phase": "complete"}
 
             backoff = _next_backoff(
@@ -624,7 +640,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
             )
             metadata["backoff_s"] = backoff
             await store.touch(job, metadata, stage="scrape")
-            _reenqueue(parent_job_id, backoff)
+            _schedule_next_tick(backoff)
             return {
                 "status": "ticking",
                 "phase": "scrape",
@@ -684,3 +700,19 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 "tick_advisory_unlock_failed",
                 parent_job_id=str(parent_job_id),
             )
+        # Safety net: if an exception fired after store.touch but before the
+        # normal _reenqueue (silent death window b), and the parent is still
+        # running on a non-terminal phase, schedule the next tick.
+        if (
+            not reenqueued
+            and job is not None
+            and job.status == "running"
+            and (phase is None or phase in _NON_TERMINAL_TICK_PHASES)
+        ):
+            try:
+                _schedule_next_tick(TICK_MIN_SECONDS)
+            except Exception:
+                slog.exception(
+                    "tick_finally_reenqueue_failed",
+                    parent_job_id=str(parent_job_id),
+                )
