@@ -823,6 +823,19 @@ def _is_category_url(path: str) -> bool:
     return False
 
 
+def _has_path_facet(path: str) -> bool:
+    """True if any path segment contains a facet parameter (key=value).
+
+    Faceted catalog/filter URLs embed '=' inside a path segment
+    (e.g. '/c80196/strana-proizvoditelj-90098=675621/'); real product
+    slugs never do. Structural, marketplace-agnostic.
+    """
+    for segment in path.split("/"):
+        if "=" in segment:
+            return True
+    return False
+
+
 def _is_excluded_link(url: str) -> bool:
     lowered = url.lower()
     return any(hint in lowered for hint in _EXCLUDED_LINK_HINTS)
@@ -856,6 +869,8 @@ def extract_product_links(
         if _is_excluded_link(full_url):
             continue
         if _is_category_url(parsed.path):
+            continue
+        if _has_path_facet(parsed.path):
             continue
         if not _looks_like_product_url(parsed.path):
             continue
@@ -1013,6 +1028,8 @@ def extract_links_from_repeated_structure(
         if _is_excluded_link(url):
             continue
         if _is_category_url(path):
+            continue
+        if _has_path_facet(path):
             continue
         if not _looks_like_product_url(path):
             continue
