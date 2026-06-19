@@ -80,16 +80,36 @@ function seededRank(id: string, seed: number): number {
   return hash;
 }
 
-function KpiCard({ label, value }: { label: string; value: string }) {
+function KpiCard({
+  label,
+  value,
+  error,
+}: {
+  label: string;
+  value: string;
+  error?: { onRetry: () => void; title: string };
+}) {
   return (
     <div className="surface-base rounded-lg p-3">
       <p className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p
-        className="mt-1 text-2xl font-bold tabular-nums"
-        style={{ fontFamily: "var(--font-display)" }}
-      >
-        {value}
-      </p>
+      <div className="mt-1 flex items-center gap-1.5">
+        <p
+          className="text-2xl font-bold tabular-nums"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          {value}
+        </p>
+        {error && (
+          <button
+            type="button"
+            onClick={error.onRetry}
+            title={error.title}
+            className="shrink-0 text-destructive transition-colors hover:text-destructive/80"
+          >
+            <AlertTriangle className="size-3.5" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -259,12 +279,20 @@ export function MarketsOverviewSection() {
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
-  const { data: marketplaceStats = [] } = useQuery({
+  const {
+    data: marketplaceStats,
+    isError: mpStatsError,
+    refetch: refetchMpStats,
+  } = useQuery({
     queryKey: marketsQueryKeys.poolMarketplaceStats(),
     queryFn: () => marketsApi.getPoolMarketplaceStats().then((response) => response.data),
     staleTime: 60_000,
   });
-  const { data: poolStats } = useQuery({
+  const {
+    data: poolStats,
+    isError: poolStatsError,
+    refetch: refetchPoolStats,
+  } = useQuery({
     queryKey: marketsQueryKeys.poolStats(),
     queryFn: () => marketsApi.getPoolStats().then((response) => response.data),
     staleTime: 60_000,
@@ -326,13 +354,16 @@ export function MarketsOverviewSection() {
       0,
     );
     return {
-      total: String(poolStats?.total_products ?? data?.total ?? filteredItems.length),
       updated24h: String(updated24h),
       changedMore5: String(changedMore5),
       avgVolatility: `${averageVolatility.toFixed(2)}%`,
       lastUpdate: lastUpdate ? new Date(lastUpdate).toLocaleString(locale) : t("common.dash"),
     };
-  }, [data?.total, filteredItems, locale, poolStats?.total_products, t]);
+  }, [filteredItems, locale, t]);
+
+  const totalPoolKpi = poolStatsError
+    ? null
+    : poolStats?.total_products ?? null;
 
   useEffect(() => {
     setVisibleCount(MARKET_OVERVIEW_INITIAL_VISIBLE);
@@ -365,11 +396,12 @@ export function MarketsOverviewSection() {
   }, [selectedMarketplaces, rawItems]);
 
   const visibleMarketplaces = useMemo(() => {
+    const stats = marketplaceStats ?? [];
     const query = marketplaceSearch.trim().toLowerCase();
     if (!query) {
-      return marketplaceStats;
+      return stats;
     }
-    return marketplaceStats.filter((item) => {
+    return stats.filter((item) => {
       const label = formatMarketplaceLabel({
         name: item.marketplace_name,
         domain: item.marketplace_domain,
@@ -422,28 +454,39 @@ export function MarketsOverviewSection() {
           />
         </div>
         <Scrollable axis="y" className="max-h-56 space-y-1 overflow-y-auto pr-1">
-          {visibleMarketplaces.map((item) => {
-            const checked = selectedMarketplaces.includes(item.marketplace_domain);
-            return (
-              <label
-                key={item.marketplace_domain}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-xs hover:bg-[var(--glass-bg-hover)]"
-              >
-                <Checkbox
-                  checked={checked}
-                  onCheckedChange={() => toggleMarketplace(item.marketplace_domain)}
-                />
-                <span className="min-w-0 flex-1 truncate text-foreground">
-                  {formatMarketplaceLabel({
-                    name: item.marketplace_name,
-                    domain: item.marketplace_domain,
-                    countryCode: item.country_code,
-                  }) || item.marketplace_domain}
-                </span>
-                <span className="shrink-0 text-muted-foreground">{item.product_count}</span>
-              </label>
-            );
-          })}
+          {mpStatsError ? (
+            <button
+              type="button"
+              onClick={() => refetchMpStats()}
+              className="flex items-center gap-1.5 px-1 py-1 text-2xs text-destructive transition-colors hover:text-destructive/80"
+            >
+              <AlertTriangle className="size-3.5" />
+              {t("common.error")} · {t("common.refresh")}
+            </button>
+          ) : (
+            visibleMarketplaces.map((item) => {
+              const checked = selectedMarketplaces.includes(item.marketplace_domain);
+              return (
+                <label
+                  key={item.marketplace_domain}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-xs hover:bg-[var(--glass-bg-hover)]"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={() => toggleMarketplace(item.marketplace_domain)}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-foreground">
+                    {formatMarketplaceLabel({
+                      name: item.marketplace_name,
+                      domain: item.marketplace_domain,
+                      countryCode: item.country_code,
+                    }) || item.marketplace_domain}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">{item.product_count}</span>
+                </label>
+              );
+            })
+          )}
         </Scrollable>
       </FilterSection>
 
@@ -499,7 +542,15 @@ export function MarketsOverviewSection() {
   return (
     <section className="space-y-3">
       <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
-        <KpiCard label={t("market.overview.kpi.totalPool")} value={kpis.total} />
+        <KpiCard
+          label={t("market.overview.kpi.totalPool")}
+          value={totalPoolKpi == null ? t("common.dash") : String(totalPoolKpi)}
+          error={
+            poolStatsError
+              ? { onRetry: () => refetchPoolStats(), title: t("common.error") }
+              : undefined
+          }
+        />
         <KpiCard label={t("market.overview.kpi.updated24h")} value={kpis.updated24h} />
         <KpiCard label={t("market.overview.kpi.changedMore5")} value={kpis.changedMore5} />
         <KpiCard label={t("market.overview.kpi.avgVolatility")} value={kpis.avgVolatility} />
@@ -526,7 +577,7 @@ export function MarketsOverviewSection() {
           <div className="surface-base surface-liquid rounded-xl p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">
-                {t("market.found", { count: Number(kpis.total) })}
+                {t("market.found", { count: filteredItems.length })}
               </h3>
               <div className="flex items-center gap-2">
                 <Button
