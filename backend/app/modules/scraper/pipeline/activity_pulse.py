@@ -59,6 +59,8 @@ def pulse_job_activity_sync(
         job.config = {"metadata": deepcopy(metadata)}
         flag_modified(job, "config")
         db.commit()
+    except Exception:
+        slog.exception("job_activity_pulse_failed", job_id=str(job_id))
     finally:
         db.close()
 

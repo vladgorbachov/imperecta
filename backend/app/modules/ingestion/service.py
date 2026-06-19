@@ -26,6 +26,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.dimensions import DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.ingestion.dto import IngestionResult
@@ -352,6 +353,16 @@ class IngestionService:
                 exc_info=True,
             )
             self.db.rollback()
+            if is_read_only_sql_error(exc):
+                invalidate_sync_session(self.db)
+                return IngestionResult(
+                    persisted=False,
+                    log_status=forced_log_status,
+                    skip_reason=outcome.skip_reason,
+                    price_found=price_found,
+                    in_stock_found=in_stock_found,
+                    read_only_failed=True,
+                )
             return IngestionResult(
                 persisted=False,
                 log_status=forced_log_status,

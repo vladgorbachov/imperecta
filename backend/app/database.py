@@ -26,6 +26,42 @@ sync_session_factory = sessionmaker(
     expire_on_commit=False,
 )
 
+
+def is_read_only_sql_error(exc: BaseException) -> bool:
+    """True when ``exc`` is a Postgres read-only transaction rejection."""
+    seen: set[int] = set()
+
+    def _walk(err: BaseException | None) -> bool:
+        if err is None or id(err) in seen:
+            return False
+        seen.add(id(err))
+        if err.__class__.__name__ == "ReadOnlySqlTransaction":
+            return True
+        pgcode = getattr(err, "pgcode", None) or getattr(err, "sqlstate", None)
+        if pgcode == "25006":
+            return True
+        message = str(err).lower()
+        if "read-only transaction" in message:
+            return True
+        if getattr(err, "__cause__", None) is not None and _walk(err.__cause__):
+            return True
+        if getattr(err, "orig", None) is not None and _walk(err.orig):
+            return True
+        return False
+
+    return _walk(exc)
+
+
+def invalidate_sync_session(db) -> None:
+    """Discard a broken sync connection so pool_pre_ping checks out a fresh one."""
+    try:
+        db.connection().invalidate()
+    except Exception:
+        try:
+            db.invalidate()
+        except Exception:
+            pass
+
 # Disable asyncpg statement cache for PgBouncer (Supabase pooler) transaction mode.
 _connect_args: dict = {
     "statement_cache_size": 0,

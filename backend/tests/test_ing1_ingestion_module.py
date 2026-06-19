@@ -187,6 +187,7 @@ def test_ingestion_result_is_frozen_dto() -> None:
         "price_found",
         "in_stock_found",
         "persist_failed",
+        "read_only_failed",
     }
     result = IngestionResult(
         persisted=True,

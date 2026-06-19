@@ -23,6 +23,7 @@ import structlog
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
@@ -167,6 +168,43 @@ def _optional_in_stock(extracted: object | None) -> bool | None:
     return None
 
 
+def _is_read_only_error(exc: BaseException) -> bool:
+    """Detect Postgres read-only transaction errors (SQLSTATE 25006)."""
+    return is_read_only_sql_error(exc)
+
+
+def _invalidate_session(db: Session) -> None:
+    """Return a broken sync connection to the pool for discard."""
+    invalidate_sync_session(db)
+
+
+def _is_honest_absent_scrape_result(result: PoolScrapeResult) -> bool:
+    """Scrape reached an honest no-price / gone verdict (not a write failure)."""
+    if result.success:
+        return False
+    err = (result.error or "").lower()
+    if "price_not_found" in err:
+        return True
+    if "not_found" in err:
+        return True
+    if "product_gone" in err or "product gone" in err:
+        return True
+    return False
+
+
+def _read_only_retriable_result(
+    *,
+    url: str,
+    data: object | None = None,
+) -> PoolScrapeResult:
+    return PoolScrapeResult(
+        success=False,
+        url=url,
+        data=data,
+        error="read_only_retriable",
+    )
+
+
 class GlobalScrapeService:
     """Orchestrate ScraperPool fetch + ingestion + scrape_logs write.
 
@@ -198,6 +236,36 @@ class GlobalScrapeService:
         return IngestionService._should_skip_price_record(
             listing, new_price, new_currency, new_in_stock
         )
+
+    def _persist_listing_housekeeping_or_fail(
+        self,
+        listing: FactListing,
+        *,
+        url: str,
+        data: object | None = None,
+    ) -> PoolScrapeResult | None:
+        """Flush+commit listing error/checked state; return a result on failure."""
+        try:
+            self.db.flush()
+            self.db.commit()
+        except Exception as exc:
+            logger.error(
+                "scrape failure-path persist rollback listing_id=%s err=%s",
+                listing.id,
+                exc,
+                exc_info=True,
+            )
+            self.db.rollback()
+            if _is_read_only_error(exc):
+                _invalidate_session(self.db)
+                return _read_only_retriable_result(url=url, data=data)
+            return PoolScrapeResult(
+                success=False,
+                url=url,
+                data=data,
+                error="persist_failed",
+            )
+        return None
 
     def _build_scrape_log_entry(
         self,
@@ -295,7 +363,6 @@ class GlobalScrapeService:
             return PoolScrapeResult(success=False, url="", error="listing_not_found")
 
         now = datetime.now(timezone.utc)
-        listing.last_checked_at = now
 
         mp = self.db.get(DimMarketplace, listing.marketplace_id)
         requires_js = bool(mp.requires_js) if mp else False
@@ -370,28 +437,19 @@ class GlobalScrapeService:
                         listing.failure_streak,
                         listing.external_url,
                     )
-            # No ingestion call on failure path; parser commits listing housekeeping
-            # changes (last_checked_at, error counters, deactivation) below.
-            try:
-                self.db.flush()
-                self.db.commit()
-            except Exception as exc:
-                logger.error(
-                    "scrape failure-path persist rollback listing_id=%s err=%s",
-                    listing_id,
-                    exc,
-                    exc_info=True,
-                )
-                self.db.rollback()
-                return PoolScrapeResult(
-                    success=False,
-                    url=listing.external_url,
-                    data=data,
-                    error="persist_failed",
-                )
+            if _is_honest_absent_scrape_result(result):
+                listing.last_checked_at = now
+            persist_fail = self._persist_listing_housekeeping_or_fail(
+                listing,
+                url=listing.external_url,
+                data=data,
+            )
+            if persist_fail is not None:
+                return persist_fail
         else:
-            # Success+data: delegate ingestion (gate + FactPrice + enrichment +
-            # listing denorm + commit) to IngestionService.
+            # Success+data: advance last_checked_at in the same transaction
+            # ingestion commits so a read-only rollback does not strand the row.
+            listing.last_checked_at = now
             product_name_ok = bool(
                 getattr(data, "product_name", None)
                 or getattr(data, "title", None),
@@ -411,6 +469,11 @@ class GlobalScrapeService:
             )
             forced_log_status = ing_result.log_status
 
+            if ing_result.read_only_failed:
+                return _read_only_retriable_result(
+                    url=listing.external_url,
+                    data=data,
+                )
             if ing_result.persist_failed:
                 return PoolScrapeResult(
                     success=False,

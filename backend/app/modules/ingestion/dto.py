@@ -31,3 +31,4 @@ class IngestionResult:
     price_found: float | None = None
     in_stock_found: bool | None = None
     persist_failed: bool = False
+    read_only_failed: bool = False
