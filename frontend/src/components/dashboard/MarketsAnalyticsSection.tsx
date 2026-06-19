@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
+import { EmptyState } from "@/components/ui-custom/EmptyState";
+import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -9,7 +12,12 @@ export function MarketsAnalyticsSection() {
   const locale = i18n.language || "en";
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
 
-  const { data: marketplaceStats, isLoading: statsLoading } = useQuery({
+  const {
+    data: marketplaceStats,
+    isLoading: statsLoading,
+    isError: statsError,
+    refetch: refetchStats,
+  } = useQuery({
     queryKey: marketsQueryKeys.poolMarketplaceStats(),
     queryFn: async () => {
       const { data } = await marketsApi.getPoolMarketplaceStats();
@@ -18,7 +26,12 @@ export function MarketsAnalyticsSection() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: poolStats, isLoading: poolLoading } = useQuery({
+  const {
+    data: poolStats,
+    isLoading: poolLoading,
+    isError: poolError,
+    refetch: refetchPool,
+  } = useQuery({
     queryKey: marketsQueryKeys.poolStats(),
     queryFn: async () => {
       const { data } = await marketsApi.getPoolStats();
@@ -29,6 +42,22 @@ export function MarketsAnalyticsSection() {
 
   const rows = marketplaceStats ?? [];
   const isLoading = statsLoading || poolLoading;
+  const isError = statsError || poolError;
+
+  if (isError) {
+    return (
+      <ErrorState
+        title="common.error"
+        retry={{
+          label: "common.refresh",
+          onClick: () => {
+            void refetchStats();
+            void refetchPool();
+          },
+        }}
+      />
+    );
+  }
 
   if (isLoading) {
     return (
@@ -42,12 +71,12 @@ export function MarketsAnalyticsSection() {
 
   if (rows.length === 0) {
     return (
-      <div
-        className="rounded-xl p-8 text-center text-sm"
-        style={{ background: "var(--glass-bg)", color: "var(--foreground-muted)" }}
-      >
-        {t("markets.analytics.noMarketplaceData")}
-      </div>
+      <EmptyState
+        bordered
+        icon={AlertTriangle}
+        title="markets.analytics.noMarketplaceData"
+        description=""
+      />
     );
   }
 
@@ -58,7 +87,7 @@ export function MarketsAnalyticsSection() {
           {rows.slice(0, 8).map((item) => (
             <div
               key={item.marketplace_domain}
-              className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-[var(--glass-bg-hover)]"
+              className="flex items-center justify-between rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--glass-bg-hover)]"
             >
               <span className="truncate text-sm font-medium">
                 {formatMarketplaceLabel({
@@ -115,7 +144,7 @@ export function MarketsAnalyticsSection() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">{t("markets.analytics.noStatsData")}</p>
+          <EmptyState title="markets.analytics.noStatsData" description="" />
         )}
       </AnalyticsBlock>
     </div>

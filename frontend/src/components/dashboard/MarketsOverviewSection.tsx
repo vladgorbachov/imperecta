@@ -18,6 +18,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
+import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -488,13 +489,10 @@ export function MarketsOverviewSection() {
 
   if (isError) {
     return (
-      <div className="rounded-xl border border-[var(--color-price-up-border)] bg-[var(--color-price-up-bg)] p-4">
-        <div className="mb-3 flex items-center gap-2 text-[var(--color-price-up)]">
-          <AlertTriangle className="size-4" />
-          {t("market.overview.loadFailed")}
-        </div>
-        <Button onClick={() => refetch()}>{t("common.refresh")}</Button>
-      </div>
+      <ErrorState
+        title="market.overview.loadFailed"
+        retry={{ label: "common.refresh", onClick: () => refetch() }}
+      />
     );
   }
 

@@ -12,6 +12,8 @@ export interface EmptyStateProps {
   action?: { label: string; onClick: () => void };
   /** Optional large icon (muted) */
   icon?: LucideIcon;
+  /** Wrap content in a surface-base panel when true */
+  bordered?: boolean;
   /** Additional CSS classes */
   className?: string;
 }
@@ -25,6 +27,7 @@ export function EmptyState({
   action,
   icon: Icon,
   className,
+  bordered = false,
 }: EmptyStateProps) {
   const { t } = useTranslation();
 
@@ -32,15 +35,17 @@ export function EmptyState({
     <div
       className={cn(
         "flex flex-col items-center justify-center gap-4 px-4 py-12 text-center",
+        "animate-in fade-in-0 slide-in-from-bottom-2 duration-300",
+        bordered && "surface-base rounded-xl",
         className
       )}
     >
       {Icon && (
-        <Icon className="size-16 shrink-0 text-muted-foreground dark:text-muted-foreground" />
+        <Icon className="size-16 shrink-0 text-muted-foreground" />
       )}
       <div className="space-y-2">
         <h3 className="text-lg font-semibold">{t(title)}</h3>
-        <p className="max-w-sm text-sm text-muted-foreground dark:text-muted-foreground">
+        <p className="max-w-sm text-sm text-muted-foreground">
           {t(description)}
         </p>
       </div>

@@ -604,7 +604,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                 return (
                   <label
                     key={mp.id}
-                    className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/40"
+                    className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/40"
                   >
                     <Checkbox
                       checked={checked}

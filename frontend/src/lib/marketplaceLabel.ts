@@ -58,19 +58,6 @@ export function isInternationalMarketplace(domain?: string | null): boolean {
   return parts.length === 2 && parts[1] === "com";
 }
 
-/** Localized country label for marketplace suffixes. */
-export function getCountryDisplayName(code: string, locale?: string): string {
-  const info = getCountryByCode(code);
-  if (!info) {
-    return code.toUpperCase();
-  }
-  const lang = (locale ?? "en").split("-")[0].toLowerCase();
-  if (lang === "ru" && info.name_local) {
-    return info.name_local;
-  }
-  return info.name;
-}
-
 /**
  * Build a user-facing marketplace label.
  * Local pool marketplaces with a country code get a country suffix; global .com stores do not.
@@ -79,7 +66,6 @@ export function formatMarketplaceLabel({
   name,
   domain,
   countryCode,
-  locale,
 }: MarketplaceLabelInput): string {
   const base = (name?.trim() || domain?.trim() || "").replace(/_/g, " ");
   if (!base) {
@@ -89,8 +75,10 @@ export function formatMarketplaceLabel({
     return base;
   }
   if (countryCode) {
-    const country = getCountryDisplayName(countryCode, locale);
-    return `${base} (${country})`;
+    const code = countryCode.trim().toUpperCase();
+    if (code) {
+      return `${base} (${code})`;
+    }
   }
   return base;
 }

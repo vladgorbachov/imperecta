@@ -87,7 +87,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           variant="ghost"
           size="icon"
           className={cn(
-            "relative min-h-9 min-w-9 size-9 touch-manipulation",
+            "relative min-h-9 min-w-9 size-9 touch-manipulation transition-colors",
             "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]"
           )}
           aria-label={t("common.notifications")}

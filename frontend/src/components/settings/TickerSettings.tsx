@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   marketsApi,
@@ -83,7 +84,7 @@ function InstrumentSection({
       />
       <div className="max-h-48 overflow-auto rounded-md border p-2">
         {visible.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("common.noData")}</p>
+          <EmptyState title="common.noData" description="" />
         ) : (
           <div className="flex flex-wrap gap-2">
             {visible.map((item) => {

@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
+import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PoolProductItem } from "@/api/products";
@@ -93,7 +94,7 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
 
   const { data: categories = [] } = usePoolCategories();
-  const { data, isLoading } = usePoolProducts({
+  const { data, isLoading, isError, refetch } = usePoolProducts({
     search: search.length >= 2 ? search : undefined,
     marketplace_id: marketplaceId !== "all" ? marketplaceId : undefined,
     sort: sort as Parameters<typeof usePoolProducts>[0]["sort"],
@@ -171,7 +172,12 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
 
       {/* Table */}
       <div className="surface-base overflow-hidden rounded-xl">
-        {isLoading ? (
+        {isError ? (
+          <ErrorState
+            title="common.error"
+            retry={{ label: "common.refresh", onClick: () => refetch() }}
+          />
+        ) : isLoading ? (
           <div className="p-4">
             <div className="space-y-2">
               {Array.from({ length: 7 }).map((_, i) => (
@@ -186,19 +192,20 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
             icon={Package}
           />
         ) : isEmpty && hasFilters ? (
-          <div className="flex flex-col items-center justify-center gap-4 px-4 py-12">
-            <p className="text-sm text-muted-foreground">{t("products.noResults")}</p>
-            <Button
-              variant="outline"
-              onClick={() => {
+          <EmptyState
+            bordered
+            icon={Package}
+            title="products.noResults"
+            description=""
+            action={{
+              label: "products.clearFilters",
+              onClick: () => {
                 setSearchRaw("");
                 setMarketplaceId("all");
                 setPage(1);
-              }}
-            >
-              {t("products.clearFilters")}
-            </Button>
-          </div>
+              },
+            }}
+          />
         ) : (
           <>
             <Scrollable

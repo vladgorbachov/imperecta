@@ -17,7 +17,7 @@
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+  transition: box-shadow var(--motion-slow) var(--ease-out), border-color var(--motion-slow) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 /* Level 2 — raised: hover/active cards, prominent panels */
@@ -29,7 +29,7 @@
   border: 1px solid var(--glass-border-hover);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-hover);
-  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+  transition: box-shadow var(--motion-slow) var(--ease-out), border-color var(--motion-slow) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 /* base → raised affordance on hover (opt-in via .surface-base.is-interactive) */
 .surface-base.is-interactive:hover {

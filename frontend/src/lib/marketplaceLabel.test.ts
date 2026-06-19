@@ -17,7 +17,7 @@ describe("isInternationalMarketplace", () => {
 });
 
 describe("formatMarketplaceLabel", () => {
-  it("appends country for duplicate local marketplaces", () => {
+  it("appends country code for duplicate local marketplaces", () => {
     expect(
       formatMarketplaceLabel({
         name: "Barbora",
@@ -25,7 +25,7 @@ describe("formatMarketplaceLabel", () => {
         countryCode: "LV",
         locale: "en",
       }),
-    ).toBe("Barbora (Latvia)");
+    ).toBe("Barbora (LV)");
 
     expect(
       formatMarketplaceLabel({
@@ -34,7 +34,7 @@ describe("formatMarketplaceLabel", () => {
         countryCode: "LT",
         locale: "ru",
       }),
-    ).toBe("Barbora (Литва)");
+    ).toBe("Barbora (LT)");
   });
 
   it("keeps international marketplace name without country", () => {
@@ -55,6 +55,6 @@ describe("formatMarketplaceLabel", () => {
         countryCode: "LV",
         locale: "en",
       }),
-    ).toBe("barbora.lv (Latvia)");
+    ).toBe("barbora.lv (LV)");
   });
 });

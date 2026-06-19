@@ -146,6 +146,13 @@
   --text-3xl--line-height: 2.25rem;
   --text-4xl: 2.25rem;
   --text-4xl--line-height: 2.5rem;
+
+  /* === Motion === */
+  --motion-fast: 150ms; /* color/background/opacity hovers, small feedback */
+  --motion-base: 200ms; /* transforms, surface hover-lift, controls */
+  --motion-slow: 300ms; /* entrances, overlays, larger transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* gentle deceleration */
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
 }
 
 .light {
@@ -350,7 +357,7 @@
     border-radius: 999px;
     background: var(--scrollbar-thumb);
     opacity: 0;
-    transition: opacity 0.25s ease, background-color 0.2s ease;
+    transition: opacity var(--motion-base) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
     pointer-events: none;
     z-index: 5;
   }
@@ -479,4 +486,24 @@
 
 .animate-marquee {
   animation: marquee 30s linear infinite;
+}
+
+/* Respect the user's reduced-motion preference (a11y; matches Ink "motion off") */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-marquee,
+  .glow-pulse,
+  .animate-shimmer,
+  .animate-grid-pulse,
+  .animate-bounce {
+    animation: none !important;
+  }
 }

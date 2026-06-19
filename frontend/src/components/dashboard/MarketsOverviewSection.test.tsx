@@ -146,8 +146,8 @@ describe("MarketsOverviewSection", () => {
     await screen.findByText("Смартфон X");
 
     expect(screen.getByText("market.filters.marketplaces")).toBeInTheDocument();
-    expect(screen.getAllByText(/Barbora \(Latvia\)/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Barbora \(Lithuania\)/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Store Beta \(Ukraine\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Barbora \(LV\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Barbora \(LT\)/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Store Beta \(UA\)/i).length).toBeGreaterThan(0);
   });
 });

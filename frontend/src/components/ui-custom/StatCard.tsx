@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TrendBadge } from "./TrendBadge";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +27,7 @@ export interface StatCardProps {
 
 /**
  * Dashboard stat card with glassmorphism design.
- * Ambient glow, display font value, TrendBadge, shimmer loading.
+ * Ambient glow, display font value, TrendBadge, Skeleton loading.
  */
 export function StatCard({
   title,
@@ -46,7 +47,6 @@ export function StatCard({
       style={style}
       className={cn(
         "surface-base is-interactive relative overflow-hidden rounded-xl p-5",
-        isLoading && "shimmer",
         className
       )}
     >
@@ -59,7 +59,7 @@ export function StatCard({
       {/* Top row: title + icon */}
       <div className="mb-3 flex items-center justify-between">
         {isLoading ? (
-          <div className="h-4 w-24 animate-pulse rounded bg-[var(--glass-bg)]" />
+          <Skeleton className="h-4 w-24" />
         ) : (
           <span
             className="text-2xs font-medium uppercase tracking-wider"
@@ -89,7 +89,7 @@ export function StatCard({
 
       {/* Value — large, display font */}
       {isLoading ? (
-        <div className="mb-2 h-8 w-16 animate-pulse rounded bg-[var(--glass-bg)]" />
+        <Skeleton className="mb-2 h-8 w-16" />
       ) : (
         <div
           className="text-2xl font-bold tabular-nums"

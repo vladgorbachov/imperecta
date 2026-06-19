@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" role="img" aria-label="Imperecta">
+  <defs>
+    <linearGradient id="imperecta-mark-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="55%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+  </defs>
+  <rect width="30" height="30" rx="9" ry="9" fill="url(#imperecta-mark-gradient)" />
+  <g
+    transform="translate(6.5 6.5) scale(0.708333)"
+    fill="none"
+    stroke="#fff"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M4 13l4-5 4 3 4-7" />
+  </g>
+</svg>
