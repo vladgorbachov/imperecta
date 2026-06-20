@@ -1,4 +1,4 @@
-"""D6 SCRAPE-PARALLEL: Decodo limiter + batch fetch / sequential persist."""
+"""Parallel fetch backends: limiter + batch fetch / sequential persist."""
 
 from __future__ import annotations
 
@@ -13,14 +13,15 @@ import pytest
 from sqlalchemy.exc import OperationalError
 
 from app.modules.ingestion.dto import IngestionResult
-from app.modules.scraper import decodo_limiter as limiter
+from app.modules.scraper import proxy_provider_limiter as limiter
 from app.modules.scraper import service as scraper_service
 from app.modules.scraper import tasks as scraper_tasks
-from app.modules.scraper.decodo_limiter import (
-    DECODO_BUCKET_CAPACITY,
-    DECODO_MAX_RPS,
-    DECODO_REDIS_KEY,
-    acquire_decodo_token,
+from app.modules.scraper.fetch_backends import BackendId
+from app.modules.scraper.proxy_provider_limiter import (
+    PROXY_PROVIDER_BUCKET_CAPACITY,
+    PROXY_PROVIDER_MAX_RPS,
+    PROXY_PROVIDER_REDIS_KEY,
+    acquire_proxy_provider_token,
     reset_limiter_state_for_tests,
 )
 from app.modules.scraper.extractors import ExtractedProduct
@@ -36,13 +37,13 @@ def _reset_limiter():
 
 
 @pytest.mark.asyncio
-async def test_decodo_limiter_caps_rps(monkeypatch):
+async def test_proxy_provider_limiter_caps_rps(monkeypatch):
     """Atomic acquire path must not grant more than capacity in a tight burst."""
     grants = 0
 
     def fake_eval(*_args, **_kwargs):
         nonlocal grants
-        if grants >= DECODO_MAX_RPS:
+        if grants >= PROXY_PROVIDER_MAX_RPS:
             return 0
         grants += 1
         return 1
@@ -51,13 +52,13 @@ async def test_decodo_limiter_caps_rps(monkeypatch):
     fake_client.eval.side_effect = fake_eval
     monkeypatch.setattr(limiter, "_get_redis", lambda: fake_client)
 
-    results = await asyncio.gather(*[acquire_decodo_token() for _ in range(20)])
-    assert sum(1 for r in results if r) <= DECODO_MAX_RPS
+    results = await asyncio.gather(*[acquire_proxy_provider_token() for _ in range(20)])
+    assert sum(1 for r in results if r) <= PROXY_PROVIDER_MAX_RPS
 
 
 @pytest.mark.asyncio
 async def test_limiter_acquire_respects_deadline():
-    assert await acquire_decodo_token(time.monotonic() - 1.0) is False
+    assert await acquire_proxy_provider_token(time.monotonic() - 1.0) is False
 
 
 @pytest.mark.asyncio
@@ -69,8 +70,8 @@ async def test_limiter_fails_closed_without_redis(monkeypatch):
     )
 
     start = time.monotonic()
-    first = await acquire_decodo_token()
-    second = await acquire_decodo_token()
+    first = await acquire_proxy_provider_token()
+    second = await acquire_proxy_provider_token()
     elapsed = time.monotonic() - start
 
     assert first is True
@@ -117,7 +118,7 @@ def test_scrape_batch_parallel_fetch_sequential_persist(monkeypatch):
         lambda _pool, specs, deadline_monotonic=None: [
             ListingFetchResult(
                 html="<html></html>",
-                used_layer="httpx",
+                used_backend=BackendId.DIRECT_HTTP,
                 last_error="fetch_failed",
                 duration_ms=1,
             )
@@ -170,7 +171,7 @@ def test_scrape_batch_one_fetch_exception_isolated(monkeypatch):
 
     def _parallel_fetch(_pool, specs, *, deadline_monotonic):
         return [
-            ListingFetchResult(html="<html/>", used_layer="httpx", last_error="", duration_ms=1),
+            ListingFetchResult(html="<html/>", used_backend=BackendId.DIRECT_HTTP, last_error="", duration_ms=1),
             RuntimeError("fetch boom"),
         ]
 
@@ -197,37 +198,43 @@ def test_scrape_batch_one_fetch_exception_isolated(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_decodo_gated_httpx_not_gated(monkeypatch):
+async def test_proxy_provider_gated_direct_http_not_gated(monkeypatch):
     acquire_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        "app.modules.scraper.scraper_pool.acquire_decodo_token",
+        "app.modules.scraper.fetch_backends.acquire_proxy_provider_token",
         acquire_mock,
     )
     monkeypatch.setattr(
-        "app.modules.scraper.scraper_pool.settings",
+        "app.modules.scraper.fetch_backends.settings",
         MagicMock(
             decodo_enabled=True,
             decodo_username="user",
             decodo_password="pass",
-            decodo_api_url="http://decodo",
+            decodo_api_url="http://proxy-provider",
         ),
     )
-    pool = ScraperPool()
+    from app.modules.scraper.fetch_backends import DirectHttpBackend, ProxyProviderBackend
 
-    with patch.object(
-        pool,
-        "_fetch_html_httpx",
-        AsyncMock(return_value=("<html>ok</html>", None)),
-    ):
-        await pool._fetch_html_httpx("https://shop.example/p/1")
+    direct = DirectHttpBackend()
+    with patch(
+        "app.modules.scraper.fetch_backends.httpx.AsyncClient",
+    ) as client_cls:
+        response = MagicMock()
+        response.status_code = 200
+        response.text = "<html>ok</html>"
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get = AsyncMock(return_value=response)
+        client_cls.return_value = client
+        html, err = await direct.fetch("https://shop.example/p/1")
+        assert html is not None
+        assert err is None
     acquire_mock.assert_not_called()
 
-    with patch.object(
-        pool,
-        "_fetch_html_decodo",
-        wraps=pool._fetch_html_decodo,
-    ) as decodo_mock, patch(
-        "app.modules.scraper.scraper_pool.httpx.AsyncClient",
+    proxy = ProxyProviderBackend()
+    with patch(
+        "app.modules.scraper.fetch_backends.httpx.AsyncClient",
     ) as client_cls:
         response = MagicMock()
         response.status_code = 200
@@ -237,11 +244,10 @@ async def test_decodo_gated_httpx_not_gated(monkeypatch):
         client.__aexit__ = AsyncMock(return_value=False)
         client.post = AsyncMock(return_value=response)
         client_cls.return_value = client
-        html, err = await pool._fetch_html_decodo("https://shop.example/p/2")
+        html, err = await proxy.fetch("https://shop.example/p/2")
         assert html is not None
         assert err is None
     assert acquire_mock.await_count >= 1
-    decodo_mock.assert_awaited_once()
 
 
 def test_scrape_batch_preserves_d4_last_checked(monkeypatch):
@@ -250,7 +256,7 @@ def test_scrape_batch_preserves_d4_last_checked(monkeypatch):
 
     fetch = ListingFetchResult(
         html="<html><span class='price'>9.99 EUR</span></html>",
-        used_layer="httpx",
+        used_backend=BackendId.DIRECT_HTTP,
         last_error="",
         duration_ms=5,
     )
@@ -261,7 +267,7 @@ def test_scrape_batch_preserves_d4_last_checked(monkeypatch):
         data=MagicMock(price=9.99, currency="EUR", title="T"),
         is_partial=False,
         duration_ms=5,
-        scraper_layer="httpx",
+        fetch_backend="direct_http",
         error=None,
     )
 
@@ -305,7 +311,7 @@ def _readonly_test_session(listing_id):
 
 
 class _FaithfulTokenBucketRedis:
-    """In-memory Redis eval that mirrors decodo_limiter._ACQUIRE_LUA arithmetic.
+    """In-memory Redis eval that mirrors proxy_provider_limiter._ACQUIRE_LUA arithmetic.
 
     A threading lock serializes eval calls the same way Redis Lua does atomically.
     """
@@ -361,9 +367,9 @@ async def test_limiter_lua_bucket_no_overshoot_burst(monkeypatch):
 
     monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
 
-    results = await asyncio.gather(*[acquire_decodo_token() for _ in range(20)])
+    results = await asyncio.gather(*[acquire_proxy_provider_token() for _ in range(20)])
     granted = sum(1 for ok in results if ok)
-    assert granted <= DECODO_BUCKET_CAPACITY
+    assert granted <= PROXY_PROVIDER_BUCKET_CAPACITY
 
 
 @pytest.mark.asyncio
@@ -388,10 +394,10 @@ async def test_limiter_lua_bucket_no_overshoot_refill_window(monkeypatch):
     granted = 0
     end_ms = start_ms + int(window_sec * 1000)
     while clock["ms"] <= end_ms:
-        if await acquire_decodo_token():
+        if await acquire_proxy_provider_token():
             granted += 1
 
-    max_allowed = DECODO_BUCKET_CAPACITY + int(window_sec * DECODO_MAX_RPS) + 1
+    max_allowed = PROXY_PROVIDER_BUCKET_CAPACITY + int(window_sec * PROXY_PROVIDER_MAX_RPS) + 1
     assert granted <= max_allowed
 
 
@@ -460,7 +466,7 @@ def test_parallel_persist_success_advances_last_checked(monkeypatch):
         success=True,
         url=listing.external_url,
         data=ExtractedProduct(title="T", price=10.0, currency="USD"),
-        scraper_layer="httpx",
+        fetch_backend="direct_http",
     )
     monkeypatch.setattr(
         scraper_service.IngestionService,
@@ -476,7 +482,7 @@ def test_parallel_persist_success_advances_last_checked(monkeypatch):
     svc = GlobalScrapeService(session, pool)
     fetch = ListingFetchResult(
         html="<html><span class='price'>10 USD</span></html>",
-        used_layer="httpx",
+        used_backend=BackendId.DIRECT_HTTP,
         last_error="",
         duration_ms=3,
     )
@@ -501,16 +507,16 @@ def test_parallel_persist_read_only_does_not_advance_last_checked(monkeypatch):
     pool.build_scrape_result_from_html.return_value = PoolScrapeResult(
         success=False,
         url=listing.external_url,
-        error="fetch_failed:httpx",
+        error="fetch_failed:direct_http",
         data=None,
-        scraper_layer="httpx",
+        fetch_backend="direct_http",
     )
 
     svc = GlobalScrapeService(session, pool)
     fetch = ListingFetchResult(
         html=None,
-        used_layer="httpx",
-        last_error="fetch_failed:httpx",
+        used_backend=BackendId.DIRECT_HTTP,
+        last_error="fetch_failed:direct_http",
         duration_ms=2,
     )
     out = svc.scrape_listing_from_fetch(listing_id, fetch)
@@ -531,13 +537,13 @@ def test_parallel_persist_honest_absent_advances_last_checked(monkeypatch):
         url=listing.external_url,
         error="price_not_found",
         data=None,
-        scraper_layer="httpx",
+        fetch_backend="direct_http",
     )
 
     svc = GlobalScrapeService(session, pool)
     fetch = ListingFetchResult(
         html="<html>no price</html>",
-        used_layer="httpx",
+        used_backend=BackendId.DIRECT_HTTP,
         last_error="price_not_found",
         duration_ms=4,
     )
@@ -557,16 +563,16 @@ def test_parallel_persist_technical_failure_does_not_advance(monkeypatch):
     pool.build_scrape_result_from_html.return_value = PoolScrapeResult(
         success=False,
         url=listing.external_url,
-        error="fetch_failed:httpx",
+        error="fetch_failed:direct_http",
         data=None,
-        scraper_layer="httpx",
+        fetch_backend="direct_http",
     )
 
     svc = GlobalScrapeService(session, pool)
     fetch = ListingFetchResult(
         html=None,
-        used_layer="httpx",
-        last_error="fetch_failed:httpx",
+        used_backend=BackendId.DIRECT_HTTP,
+        last_error="fetch_failed:direct_http",
         duration_ms=2,
     )
     out = svc.scrape_listing_from_fetch(listing_id, fetch)
@@ -624,7 +630,7 @@ def test_batch_loop_deadline_retains_cohort(monkeypatch):
         lambda _pool, specs, deadline_monotonic=None: [
             ListingFetchResult(
                 html="<html/>",
-                used_layer="httpx",
+                used_backend=BackendId.DIRECT_HTTP,
                 last_error="",
                 duration_ms=1,
             )
@@ -684,14 +690,14 @@ def test_batch_loop_deadline_skipped_fetch_not_counted_failed(monkeypatch):
         lambda _pool, specs, deadline_monotonic=None: [
             ListingFetchResult(
                 html="<html/>",
-                used_layer="httpx",
+                used_backend=BackendId.DIRECT_HTTP,
                 last_error="",
                 duration_ms=1,
             ),
             ListingFetchResult(
                 html=None,
-                used_layer=None,
-                last_error="decodo_deadline",
+                used_backend=None,
+                last_error="proxy_provider_deadline",
                 duration_ms=1,
                 deadline_skipped=True,
             ),

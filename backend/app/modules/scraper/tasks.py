@@ -34,7 +34,7 @@ from app.modules.scraper.pipeline.activity_pulse import (
     pulse_parent_heartbeat_sync,
 )
 from app.modules.scraper.pipeline.worker_log_relay import pipeline_worker_log_relay
-from app.modules.scraper.decodo_limiter import SCRAPE_FETCH_PARALLELISM
+from app.modules.scraper.proxy_provider_limiter import SCRAPE_FETCH_PARALLELISM
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _run_coro_in_worker
 from app.workers.celery_app import celery_app

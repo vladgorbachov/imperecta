@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 from app.modules.scraper import tasks as scraper_tasks
+from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult
 
 
@@ -94,7 +95,7 @@ def test_run_scrape_all_pool_impl_rollback_on_scrape(monkeypatch):
         scraper_tasks,
         "_parallel_fetch_listings",
         lambda _pool, specs, deadline_monotonic=None: [
-            ListingFetchResult(html="<html/>", used_layer="httpx", last_error="", duration_ms=1)
+            ListingFetchResult(html="<html/>", used_backend=BackendId.DIRECT_HTTP, last_error="", duration_ms=1)
             for _ in specs
         ],
     )
@@ -126,7 +127,7 @@ def test_run_scrape_all_impl_scrape_raises_and_rollback_fails(monkeypatch):
         scraper_tasks,
         "_parallel_fetch_listings",
         lambda _pool, specs, deadline_monotonic=None: [
-            ListingFetchResult(html="<html/>", used_layer="httpx", last_error="", duration_ms=1)
+            ListingFetchResult(html="<html/>", used_backend=BackendId.DIRECT_HTTP, last_error="", duration_ms=1)
             for _ in specs
         ],
     )

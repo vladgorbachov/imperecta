@@ -9,11 +9,11 @@ from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 
 
-def test_decodo_tcp_reachable_false_on_bad_url():
-    assert scraper_api._decodo_tcp_reachable("://") is False
+def test_proxy_provider_tcp_reachable_false_on_bad_url():
+    assert scraper_api._proxy_provider_tcp_reachable("://") is False
 
 
-def test_decodo_tcp_reachable_uses_socket():
+def test_proxy_provider_tcp_reachable_uses_socket():
     class _Conn:
         def __enter__(self):
             return self
@@ -22,15 +22,15 @@ def test_decodo_tcp_reachable_uses_socket():
             return None
 
     with patch("app.modules.scraper.api.socket.create_connection", return_value=_Conn()):
-        assert scraper_api._decodo_tcp_reachable("https://example.com:443/") is True
+        assert scraper_api._proxy_provider_tcp_reachable("https://example.com:443/") is True
 
 
-def test_decodo_tcp_reachable_oserror():
+def test_proxy_provider_tcp_reachable_oserror():
     with patch(
         "app.modules.scraper.api.socket.create_connection",
         side_effect=OSError("unreachable"),
     ):
-        assert scraper_api._decodo_tcp_reachable("https://example.com:443/") is False
+        assert scraper_api._proxy_provider_tcp_reachable("https://example.com:443/") is False
 
 
 def test_serialize_pool_result_with_and_without_data():
@@ -41,5 +41,6 @@ def test_serialize_pool_result_with_and_without_data():
     )
     out = scraper_api._serialize_pool_result(r)
     assert out["data"]["title"] == "T"
+    assert "fetch_backend" in out
     r2 = PoolScrapeResult(success=False, url="https://u", error="e")
     assert scraper_api._serialize_pool_result(r2)["data"] is None

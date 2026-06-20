@@ -12,8 +12,8 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
-from app.config import Settings
 from app.database import sync_engine, sync_session_factory
+from app.modules.scraper.fetch_backends import ProxyProviderBackend
 from app.models.app_tables import ScrapeLog
 from app.models.facts import FactListing
 from app.modules.scraper.db_diagnostics import collect_db_diagnostics
@@ -34,8 +34,8 @@ router = APIRouter(
     dependencies=[Depends(get_current_superuser)],
 )
 
-def _decodo_tcp_reachable(api_url: str) -> bool:
-    """Return True if Decodo API host accepts TCP (no mock payload; infrastructure check)."""
+def _proxy_provider_tcp_reachable(api_url: str) -> bool:
+    """Return True if proxy-provider API host accepts TCP (infrastructure check only)."""
     try:
         parsed = urlparse(api_url)
         host = parsed.hostname
@@ -55,7 +55,7 @@ def _serialize_pool_result(r: PoolScrapeResult) -> dict:
         "success": r.success,
         "url": r.url,
         "error": r.error,
-        "scraper_layer": r.scraper_layer,
+        "fetch_backend": r.fetch_backend,
         "duration_ms": r.duration_ms,
         "is_partial": r.is_partial,
         "is_empty": r.is_empty,
@@ -98,7 +98,7 @@ async def _sample_result_from_db(db: DbSession) -> dict | None:
         url=row.url,
         error=None,
         data=data,
-        scraper_layer=row.scraper_type,
+        fetch_backend=row.scraper_type,
         duration_ms=row.duration_ms,
         is_partial=bool(data is not None and data.title is None),
         is_empty=data is None,
@@ -163,8 +163,7 @@ async def get_scrape_diagnostics(
     db: DbSession,
     _current_user: CurrentSuperuser,
 ) -> dict:
-    """Pool metrics, recent logs, Decodo status, last successful scrape shape (DB-backed)."""
-    settings = Settings()
+    """Pool metrics, recent logs, proxy-provider status, last successful scrape shape (DB-backed)."""
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=24)
 
@@ -195,17 +194,18 @@ async def get_scrape_diagnostics(
         for row in log_rows
     ]
 
-    decodo_ready = bool(
-        settings.decodo_enabled
-        and settings.decodo_username
-        and settings.decodo_password,
-    )
+    proxy_provider_ready = ProxyProviderBackend.is_configured()
     healthy = False
-    if decodo_ready:
-        healthy = bool(await run_in_threadpool(_decodo_tcp_reachable, settings.decodo_api_url))
+    if proxy_provider_ready:
+        healthy = bool(
+            await run_in_threadpool(
+                _proxy_provider_tcp_reachable,
+                ProxyProviderBackend.api_url(),
+            )
+        )
 
-    decodo_status = {
-        "enabled": bool(settings.decodo_enabled),
+    proxy_provider_status = {
+        "enabled": ProxyProviderBackend.is_enabled(),
         "healthy": healthy,
     }
 
@@ -215,7 +215,7 @@ async def get_scrape_diagnostics(
         "total_listings": total_listings,
         "with_price_last_24h": with_price_last_24h,
         "last_5_logs": last_5_logs,
-        "decodo_status": decodo_status,
+        "proxy_provider_status": proxy_provider_status,
         "sample_result": sample_result,
     }
 

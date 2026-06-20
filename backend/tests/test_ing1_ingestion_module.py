@@ -509,7 +509,7 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
         success=True,
         url=listing.external_url,
         data=pool_data,
-        scraper_layer="httpx",
+        fetch_backend="direct_http",
         duration_ms=12,
         error=None,
         is_partial=False,

@@ -4,26 +4,36 @@ from __future__ import annotations
 
 import pytest
 
-import app.modules.scraper.scraper_pool as sp
+from app.modules.scraper.fetch_backends import BackendId, ProxyProviderBackend
 from app.modules.scraper.scraper_pool import ScraperPool
 
 
 def test_layer_order_tier1_no_js():
     pool = ScraperPool()
     result = pool._layer_order(requires_js=False, scrape_tier=1)
-    if sp.settings.decodo_enabled and sp.settings.decodo_username and sp.settings.decodo_password:
-        assert result == ["httpx", "decodo", "playwright"]
+    if ProxyProviderBackend.is_configured():
+        assert result == [
+            BackendId.DIRECT_HTTP,
+            BackendId.PROXY_PROVIDER,
+            BackendId.BROWSER_RENDER,
+        ]
     else:
-        assert result == ["httpx", "playwright"]
+        assert result == [BackendId.DIRECT_HTTP, BackendId.BROWSER_RENDER]
 
 
 def test_layer_order_tier1_requires_js_playwright_before_httpx(monkeypatch):
-    monkeypatch.setattr(sp.settings, "decodo_enabled", True)
-    monkeypatch.setattr(sp.settings, "decodo_username", "u")
-    monkeypatch.setattr(sp.settings, "decodo_password", "p")
+    monkeypatch.setattr(
+        ProxyProviderBackend,
+        "is_configured",
+        staticmethod(lambda: True),
+    )
     pool = ScraperPool()
     result = pool._layer_order(requires_js=True, scrape_tier=1)
-    assert result == ["decodo", "playwright", "httpx"]
+    assert result == [
+        BackendId.PROXY_PROVIDER,
+        BackendId.BROWSER_RENDER,
+        BackendId.DIRECT_HTTP,
+    ]
 
 
 def test_layer_order_tier2_raises_not_implemented():

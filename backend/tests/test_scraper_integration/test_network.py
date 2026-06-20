@@ -9,8 +9,9 @@ from app.modules.scraper.extractors import (
     extract_from_meta_tags,
     extract_product_links,
 )
+from app.modules.scraper.fetch_backends import ProxyProviderBackend
+import app.modules.scraper.fetch_backends as fb
 from app.modules.scraper.scraper_pool import ScraperPool
-import app.modules.scraper.scraper_pool as scraper_pool_module
 
 _ECOMMERCE_CATEGORY_URL = (
     "https://webscraper.io/test-sites/e-commerce/static/computers/laptops"
@@ -98,14 +99,14 @@ async def test_extract_product_links():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scraper_pool_failover():
-    """When Decodo is disabled, pool should fetch through fallback layers."""
-    previous = scraper_pool_module.settings.decodo_enabled
-    scraper_pool_module.settings.decodo_enabled = False
+    """When proxy provider is disabled, pool should fetch through fallback backends."""
+    previous = fb.settings.decodo_enabled
     try:
+        fb.settings.decodo_enabled = False
         pool = ScraperPool()
         result = await pool.scrape_product(_ECOMMERCE_PRODUCT_URL)
         if not result.success:
             pytest.skip("Fallback layers could not scrape integration page")
-        assert result.scraper_layer in {"httpx", "playwright"}
+        assert result.fetch_backend in {"direct_http", "browser_render"}
     finally:
-        scraper_pool_module.settings.decodo_enabled = previous
+        fb.settings.decodo_enabled = previous

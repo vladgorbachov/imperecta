@@ -98,7 +98,7 @@ def test_scrape_product_full_success(monkeypatch):
                 success=True,
                 url="https://example.com/item",
                 data=ExtractedProduct(title="Widget A", price=19.99, currency="USD"),
-                scraper_layer="httpx",
+                fetch_backend="direct_http",
             ),
         ),
     )
@@ -141,7 +141,7 @@ def test_scrape_product_price_not_found_partial(monkeypatch):
                 url="https://example.com/item",
                 error="price_not_found",
                 data=None,
-                scraper_layer="httpx",
+                fetch_backend="direct_http",
             ),
         ),
     )
@@ -174,7 +174,7 @@ def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
                 success=True,
                 url="https://example.com/item",
                 data=ExtractedProduct(title="Title Only", price=10.0, currency="EUR"),
-                scraper_layer="httpx",
+                fetch_backend="direct_http",
             ),
         ),
     )
@@ -253,7 +253,7 @@ def test_fact_price_written_only_when_all_required_fields(monkeypatch):
                     success=True,
                     url="https://example.com/item",
                     data=payload,
-                    scraper_layer="httpx",
+                    fetch_backend="direct_http",
                 ),
             ),
         )
@@ -286,7 +286,7 @@ def test_scrape_product_full_success_postgres(pg_session, monkeypatch):
                 success=True,
                 url="https://example.com/p",
                 data=ExtractedProduct(title="Widget A", price=19.99, currency="USD"),
-                scraper_layer="httpx",
+                fetch_backend="direct_http",
             ),
         ),
     )

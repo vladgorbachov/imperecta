@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from app.modules.scraper import tasks as scraper_tasks
+from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.scraper_pool import ListingFetchResult
 from app.modules.scraper.pipeline import activity_pulse
 from app.modules.scraper.pipeline.worker_log_relay import _last_db_pulse
@@ -146,7 +147,7 @@ def test_run_scrape_all_pool_threads_parent_heartbeat(monkeypatch):
         lambda _pool, specs, deadline_monotonic=None: [
             ListingFetchResult(
                 html="<html/>",
-                used_layer="httpx",
+                used_backend=BackendId.DIRECT_HTTP,
                 last_error="",
                 duration_ms=1,
             )

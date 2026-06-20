@@ -1,4 +1,4 @@
-"""Cross-process Decodo outbound rate limiter (fleet-wide token bucket on Redis)."""
+"""Cross-process proxy-provider outbound rate limiter (fleet-wide token bucket on Redis)."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from typing import Any
 
 from app.config import Settings
 
-DECODO_MAX_RPS = 10
-DECODO_BUCKET_CAPACITY = 10
-DECODO_REDIS_KEY = "decodo:ratebucket"
-DECODO_DEADLINE_ERROR = "decodo_deadline"
+PROXY_PROVIDER_MAX_RPS = 10
+PROXY_PROVIDER_BUCKET_CAPACITY = 10
+PROXY_PROVIDER_REDIS_KEY = "proxy_provider:ratebucket"
+PROXY_PROVIDER_DEADLINE_ERROR = "proxy_provider_deadline"
 
-# Concurrent in-flight fetches per scrape child (tunable; Decodo cap is fleet-wide).
+# Concurrent in-flight fetches per scrape child (tunable; provider cap is fleet-wide).
 SCRAPE_FETCH_PARALLELISM = 5
 
-# Fail-closed fallback when Redis is unreachable: at most one Decodo token per
+# Fail-closed fallback when Redis is unreachable: at most one provider token per
 # second per process (2 workers -> <=2 req/s, conservative vs 10/s contract).
 _LOCAL_FALLBACK_MIN_INTERVAL_SEC = 1.0
 
@@ -75,7 +75,7 @@ def _deadline_remaining(deadline_monotonic: float | None) -> float | None:
 
 
 async def _acquire_local_fallback(deadline_monotonic: float | None) -> bool:
-    """Serialize Decodo attempts at 1/s per process when Redis is down."""
+    """Serialize provider attempts at 1/s per process when Redis is down."""
     global _local_fallback_last_monotonic
     async with _local_fallback_lock:
         now = time.monotonic()
@@ -98,17 +98,17 @@ def _redis_acquire_sync() -> bool:
     result = client.eval(
         _ACQUIRE_LUA,
         1,
-        DECODO_REDIS_KEY,
+        PROXY_PROVIDER_REDIS_KEY,
         now_ms,
-        DECODO_MAX_RPS,
-        DECODO_BUCKET_CAPACITY,
+        PROXY_PROVIDER_MAX_RPS,
+        PROXY_PROVIDER_BUCKET_CAPACITY,
         1,
     )
     return int(result) == 1
 
 
-async def acquire_decodo_token(deadline_monotonic: float | None = None) -> bool:
-    """Acquire one Decodo outbound token before issuing a Decodo POST.
+async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) -> bool:
+    """Acquire one proxy-provider outbound token before issuing a provider POST.
 
     Returns False when the cooperative deadline would be exceeded by waiting,
     or when Redis is unavailable and the local fail-closed fallback cannot
@@ -122,8 +122,7 @@ async def acquire_decodo_token(deadline_monotonic: float | None = None) -> bool:
         acquired = await asyncio.to_thread(_redis_acquire_sync)
         if acquired:
             return True
-        # No token right now; estimate wait for one token at max refill rate.
-        wait_sec = 1.0 / DECODO_MAX_RPS
+        wait_sec = 1.0 / PROXY_PROVIDER_MAX_RPS
         if remaining is not None and wait_sec > remaining:
             return False
         await asyncio.sleep(wait_sec)

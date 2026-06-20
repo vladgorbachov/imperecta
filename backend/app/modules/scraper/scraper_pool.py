@@ -1,26 +1,18 @@
 """
 Unified scraping interface with automatic failover and completeness checking.
 
-HTTP layer priority: Decodo API -> httpx -> Playwright
+Fetch backend priority: proxy provider API -> direct HTTP -> browser render
 Data extraction: JSON-LD -> meta -> custom selectors -> auto-detect -> merge
 """
 
 import asyncio
-import base64
 import logging
 import time
 from dataclasses import dataclass, field
 
-import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 
-from app.config import Settings
 from app.modules.classifier import classify_page_role_for_discovery
-from app.modules.scraper.decodo_limiter import (
-    DECODO_DEADLINE_ERROR,
-    acquire_decodo_token,
-)
 from app.modules.scraper.extractors import (
     ExtractedProduct,
     detect_next_page,
@@ -32,39 +24,41 @@ from app.modules.scraper.extractors import (
     extract_with_custom_selectors,
     merge_and_finalize,
 )
+from app.modules.scraper.fetch_backends import (
+    BackendId,
+    ProxyProviderBackend,
+    backend_id_persisted,
+    get_fetch_backend,
+)
+from app.modules.scraper.proxy_provider_limiter import PROXY_PROVIDER_DEADLINE_ERROR
 
 logger = logging.getLogger(__name__)
-settings = Settings()
 
-# Per-layer fetch: retries (timeouts / transient failures) before trying next layer.
+# Per-backend fetch: retries (timeouts / transient failures) before trying next backend.
 FETCH_ATTEMPTS_PER_LAYER = 3
 RETRY_BACKOFF_SEC = 0.45
-HTTP_TIMEOUT_SEC = 25.0
-DECODO_TIMEOUT_SEC = 60.0
-PLAYWRIGHT_GOTO_TIMEOUT_MS = 35_000
-PLAYWRIGHT_WAIT_MS = 2_500
-# Cap raw HTML attached to PoolScrapeResult when Decodo is off (debug only).
+# Cap raw HTML attached to PoolScrapeResult when proxy provider is off (debug only).
 _MAX_DEBUG_RAW_HTML_CHARS = 200_000
 _NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit"}
-# Tiered scrape strategy: which fetch layers are eligible for each tier.
-# Layer order within a tier is determined by _layer_order() based on requires_js
+# Tiered scrape strategy: which fetch backends are eligible for each tier.
+# Backend order within a tier is determined by _layer_order() based on requires_js
 # (kept as a fine-grained hint inside a tier).
 #
 # Tier 1: server-rendered shops. Default for newly-added marketplaces.
-#   Uses the existing decodo / httpx / playwright cascade with current logic.
+#   Uses the existing proxy_provider / direct_http / browser_render cascade.
 #
 # Tier 2: modern SPA shops (placeholder — not implemented yet, see _layer_order).
-#   When activated, this tier will add a "playwright_intercept" layer that
+#   When activated, this tier will add a browser intercept backend that
 #   listens to XHR/fetch responses and extracts price from intercepted JSON
 #   payloads, falling back to DOM if interception yields no result.
 #
 # Tier 3: hostile marketplaces (placeholder — not implemented yet).
-#   Will add "playwright_stealth" with anti-fingerprinting init scripts,
+#   Will add stealth browser render with anti-fingerprinting init scripts,
 #   sticky residential proxy sessions per marketplace, and an LLM-extraction
-#   fallback layer for pages where structured signals are absent.
+#   fallback backend for pages where structured signals are absent.
 #
-# Activating tier 2 or 3 requires (a) implementing the corresponding layer
-# functions in ScraperPool and (b) updating _layer_order to include them.
+# Activating tier 2 or 3 requires (a) implementing the corresponding backend
+# in fetch_backends and (b) updating _layer_order to include them.
 # Until then, requesting tier > 1 raises NotImplementedError so that misconfigured
 # marketplaces fail loudly rather than silently falling back to tier 1 behavior.
 _SUPPORTED_SCRAPE_TIERS = frozenset({1})
@@ -74,26 +68,26 @@ _KNOWN_SCRAPE_TIERS = frozenset({1, 2, 3})
 def _would_escalate_shell(
     *,
     scrape_tier: int,
-    used_layer: str | None,
+    used_backend: BackendId | None,
     merged_currency: str | None,
     role: str,
 ) -> bool:
     """Pure structural predicate for the Z-JSDETECT shell detector.
 
     Observe-only today; ENFORCE may flip the call site to actually escalate.
-    A scrape_product result on a Tier-1 httpx fetch is treated as a likely
+    A scrape_product result on a Tier-1 direct HTTP fetch is treated as a likely
     JS-shell when the extractor produced NO currency AND the page does not
     classify as a product. Both signals empty = genuine shell; either signal
     present = the page yielded structured product data, no escalation needed.
 
-    Universal/structural — keys only off scrape_tier (policy gate), used_layer
-    (the free layer we'd escalate FROM), merged.currency (extractor verdict),
+    Universal/structural — keys only off scrape_tier (policy gate), used_backend
+    (the free backend we'd escalate FROM), merged.currency (extractor verdict),
     and the classifier's page-role (DOM verdict). No marketplace names, no
     per-shop branching.
     """
     return (
         scrape_tier == 1
-        and used_layer == "httpx"
+        and used_backend == BackendId.DIRECT_HTTP
         and merged_currency is None
         and role != "product"
     )
@@ -104,7 +98,7 @@ class ListingFetchResult:
     """Network-only fetch outcome for one listing URL (no extraction)."""
 
     html: str | None
-    used_layer: str | None
+    used_backend: BackendId | None
     last_error: str
     duration_ms: int
     deadline_skipped: bool = False
@@ -117,9 +111,10 @@ class PoolScrapeResult:
     Field groups:
     - System/mandatory: success, url, error
     - Extracted data container: data
-    - Technical: scraper_layer, duration_ms
+    - Technical: fetch_backend, duration_ms
     - Derived quality flags: is_partial, is_empty, extracted_fields, missing_fields
-    - Persistence: log_status (set by GlobalScrapeService); raw_html when debugging without Decodo
+    - Persistence: log_status (set by GlobalScrapeService); raw_html when debugging
+      without proxy provider
     """
 
     # System
@@ -131,7 +126,7 @@ class PoolScrapeResult:
     data: ExtractedProduct | None = None
 
     # Technical
-    scraper_layer: str | None = None
+    fetch_backend: str | None = None
     duration_ms: int | None = None
 
     # Derived quality flags (populated by scraper_pool before return)
@@ -149,15 +144,15 @@ class ListingScrapeResult:
     url: str
     product_urls: list[str] = field(default_factory=list)
     next_page_url: str | None = None
-    scraper_layer: str | None = None
+    fetch_backend: str | None = None
     error: str | None = None
 
 
 class ScraperPool:
-    """Priority: Decodo API -> httpx direct -> Playwright headless.
+    """Priority: proxy provider API -> direct HTTP -> browser render.
 
     Fetches HTML once per URL, runs JSON-LD/meta/custom/auto extractors, and
-    retries each transport with backoff before trying the next layer.
+    retries each transport with backoff before trying the next backend.
     """
 
     async def scrape_product(
@@ -170,8 +165,8 @@ class ScraperPool:
         deadline_monotonic: float | None = None,
     ) -> PoolScrapeResult:
         """
-        Fetch HTML once (Decodo -> httpx -> Playwright), extract once.
-        Do NOT re-fetch via Playwright after Decodo returns HTML.
+        Fetch HTML once (proxy provider -> direct HTTP -> browser render), extract once.
+        Do NOT re-fetch via browser render after proxy provider returns HTML.
         """
         fetch = await self.fetch_listing_html(
             url,
@@ -183,9 +178,9 @@ class ScraperPool:
             return PoolScrapeResult(
                 success=False,
                 url=url,
-                error=DECODO_DEADLINE_ERROR,
+                error=PROXY_PROVIDER_DEADLINE_ERROR,
                 data=None,
-                scraper_layer=None,
+                fetch_backend=None,
                 duration_ms=fetch.duration_ms,
                 is_empty=True,
             )
@@ -193,7 +188,7 @@ class ScraperPool:
             fetch.html,
             url,
             custom_selectors=custom_selectors,
-            used_layer=fetch.used_layer,
+            used_backend=fetch.used_backend,
             duration_ms=fetch.duration_ms,
             last_error=fetch.last_error,
             scrape_tier=scrape_tier,
@@ -210,49 +205,49 @@ class ScraperPool:
     ) -> ListingFetchResult:
         """Fetch HTML for one listing URL without extraction."""
         started = time.perf_counter()
-        layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
+        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
 
         html = None
-        used_layer = None
+        used_backend: BackendId | None = None
         last_error = "fetch_failed"
         deadline_skipped = False
-        for layer_name in layers:
-            layer_started = time.perf_counter()
-            html, layer_err = await self._fetch_layer_with_retries(
-                layer_name,
+        for backend_id in backend_ids:
+            backend_started = time.perf_counter()
+            html, backend_err = await self._fetch_layer_with_retries(
+                backend_id,
                 url,
                 deadline_monotonic=deadline_monotonic,
             )
-            layer_ms = int((time.perf_counter() - layer_started) * 1000)
+            backend_ms = int((time.perf_counter() - backend_started) * 1000)
             logger.info(
-                "scrape_layer layer=%s duration_ms=%s ok=%s error=%s url=%s",
-                layer_name,
-                layer_ms,
+                "scrape_backend backend=%s duration_ms=%s ok=%s error=%s url=%s",
+                backend_id.value,
+                backend_ms,
                 bool(html),
-                (layer_err or "")[:500],
+                (backend_err or "")[:500],
                 url[:120],
             )
             logger.info(
-                "fetch_layer_attempt layer=%s duration_ms=%s ok=%s error_preview=%s url=%s",
-                layer_name,
-                layer_ms,
+                "fetch_backend_attempt backend=%s duration_ms=%s ok=%s error_preview=%s url=%s",
+                backend_id.value,
+                backend_ms,
                 bool(html),
-                ((layer_err or "")[:300] if layer_err else None),
+                ((backend_err or "")[:300] if backend_err else None),
                 url[:200],
             )
-            if layer_err == DECODO_DEADLINE_ERROR:
+            if backend_err == PROXY_PROVIDER_DEADLINE_ERROR:
                 deadline_skipped = True
                 break
             if html:
-                used_layer = layer_name
+                used_backend = backend_id
                 break
-            if layer_err:
-                last_error = layer_err
+            if backend_err:
+                last_error = backend_err
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         return ListingFetchResult(
             html=html,
-            used_layer=used_layer,
+            used_backend=used_backend,
             last_error=last_error,
             duration_ms=duration_ms,
             deadline_skipped=deadline_skipped and not html,
@@ -264,15 +259,16 @@ class ScraperPool:
         url: str,
         *,
         custom_selectors: dict | None,
-        used_layer: str | None,
+        used_backend: BackendId | None,
         duration_ms: int,
         last_error: str = "fetch_failed",
         scrape_tier: int = 1,
         requires_js: bool = False,
     ) -> PoolScrapeResult:
         """Build a PoolScrapeResult from fetched HTML (sync extraction only)."""
+        fetch_backend = backend_id_persisted(used_backend)
         raw_debug: str | None = None
-        if html and not settings.decodo_enabled:
+        if html and not ProxyProviderBackend.is_enabled():
             raw_debug = html[:_MAX_DEBUG_RAW_HTML_CHARS]
 
         if not html:
@@ -281,7 +277,7 @@ class ScraperPool:
                 url=url,
                 error=last_error,
                 data=None,
-                scraper_layer=None,
+                fetch_backend=None,
                 duration_ms=duration_ms,
                 is_empty=True,
                 raw_html=raw_debug,
@@ -296,7 +292,7 @@ class ScraperPool:
                 url=url,
                 error=f"parse_error:{exc.__class__.__name__}",
                 data=None,
-                scraper_layer=used_layer,
+                fetch_backend=fetch_backend,
                 duration_ms=duration_ms,
                 raw_html=raw_debug,
             )
@@ -304,34 +300,35 @@ class ScraperPool:
         try:
             if (
                 scrape_tier == 1
-                and used_layer == "httpx"
+                and used_backend == BackendId.DIRECT_HTTP
                 and merged.currency is None
             ):
                 probe_soup = BeautifulSoup(html, "html.parser")
                 role = classify_page_role_for_discovery(probe_soup, url)
                 if _would_escalate_shell(
                     scrape_tier=scrape_tier,
-                    used_layer=used_layer,
+                    used_backend=used_backend,
                     merged_currency=merged.currency,
                     role=role,
                 ):
-                    layers = self._layer_order(
+                    backend_ids = self._layer_order(
                         requires_js=requires_js,
                         scrape_tier=scrape_tier,
                     )
                     remaining = [
-                        layer
-                        for layer in layers
-                        if used_layer and layers.index(layer) > layers.index(used_layer)
+                        backend
+                        for backend in backend_ids
+                        if used_backend
+                        and backend_ids.index(backend) > backend_ids.index(used_backend)
                     ]
-                    next_layer = remaining[0] if remaining else None
+                    next_backend = remaining[0] if remaining else None
                     logger.info(
                         "js_shell_would_escalate observe_only=1 url=%s "
-                        "marketplace_layer=%s next_layer=%s role=%s "
+                        "marketplace_backend=%s next_backend=%s role=%s "
                         "title_present=%s price_present=%s",
                         url[:200],
-                        used_layer,
-                        next_layer,
+                        used_backend.value if used_backend else None,
+                        next_backend.value if next_backend else None,
                         role,
                         bool(merged.title),
                         merged.price is not None,
@@ -347,7 +344,7 @@ class ScraperPool:
                 url=url,
                 error="price_not_found",
                 data=None,
-                scraper_layer=used_layer,
+                fetch_backend=fetch_backend,
                 duration_ms=duration_ms,
                 is_empty=not bool(merged.title),
                 raw_html=raw_debug,
@@ -370,11 +367,11 @@ class ScraperPool:
         is_empty = merged.price is None and not merged.title
 
         logger.info(
-            "fetch_extract_complete layer=%s duration_ms=%s "
+            "fetch_extract_complete backend=%s duration_ms=%s "
             "fields_extracted=%s fields_missing=%s "
             "price_raw_text=%s currency_raw=%s "
             "detected_currency=%s title_preview=%s price_numeric=%s",
-            used_layer,
+            fetch_backend,
             duration_ms,
             extracted_fields,
             missing_fields,
@@ -385,9 +382,9 @@ class ScraperPool:
             merged.price,
         )
         logger.info(
-            "Scraping %s: layer=%s, title=%s, price=%s",
+            "Scraping %s: backend=%s, title=%s, price=%s",
             url[:80],
-            used_layer,
+            fetch_backend,
             merged.title[:50] if merged.title else None,
             merged.price,
         )
@@ -397,7 +394,7 @@ class ScraperPool:
             url=url,
             error=None,
             data=merged,
-            scraper_layer=used_layer,
+            fetch_backend=fetch_backend,
             duration_ms=duration_ms,
             is_partial=is_partial,
             is_empty=is_empty,
@@ -409,10 +406,10 @@ class ScraperPool:
     async def fetch_html(
         self, url: str, requires_js: bool = False, *, scrape_tier: int = 1
     ) -> str | None:
-        """Fetch raw HTML via Decodo (primary) -> httpx -> Playwright. Used by Discovery."""
-        layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
-        for layer_name in layers:
-            html, _err = await self._fetch_layer_with_retries(layer_name, url)
+        """Fetch raw HTML via fetch backends. Used by Discovery."""
+        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
+        for backend_id in backend_ids:
+            html, _err = await self._fetch_layer_with_retries(backend_id, url)
             if html:
                 return html
         return None
@@ -422,12 +419,12 @@ class ScraperPool:
     ) -> str | None:
         """Fetch and return raw HTML/text for a URL without extraction.
 
-        Tries fetch layers in priority order. Returns None on total failure.
+        Tries fetch backends in priority order. Returns None on total failure.
         """
-        layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
-        for layer_name in layers:
+        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
+        for backend_id in backend_ids:
             try:
-                html, _err = await self._fetch_layer_with_retries(layer_name, url)
+                html, _err = await self._fetch_layer_with_retries(backend_id, url)
                 if html:
                     return html
             except Exception:
@@ -442,29 +439,36 @@ class ScraperPool:
     ) -> str | None:
         """Lightweight fetch for static documents (sitemap, robots, category/listing pages).
 
-        Order: httpx (fast, free) -> decodo_static (anti-bot bypass without JS render).
-        Playwright is intentionally excluded: static content does not need a browser,
-        and if both httpx and Decodo proxy-bypass fail, the document is likely
+        Order: direct HTTP (fast, free) -> proxy provider without JS render.
+        Browser render is intentionally excluded: static content does not need a browser,
+        and if both direct HTTP and proxy-provider bypass fail, the document is likely
         unavailable rather than JS-gated.
         """
         started = time.perf_counter()
-        for layer_name in ("httpx", "decodo_static"):
-            layer_started = time.perf_counter()
-            html, layer_err = await self._fetch_layer_with_retries(layer_name, url)
-            layer_ms = int((time.perf_counter() - layer_started) * 1000)
+        for backend_id, render_js in (
+            (BackendId.DIRECT_HTTP, True),
+            (BackendId.PROXY_PROVIDER, False),
+        ):
+            backend_started = time.perf_counter()
+            html, backend_err = await self._fetch_layer_with_retries(
+                backend_id,
+                url,
+                render_js=render_js,
+            )
+            backend_ms = int((time.perf_counter() - backend_started) * 1000)
             logger.info(
-                "fetch_static_layer layer=%s duration_ms=%s ok=%s error=%s url=%s",
-                layer_name,
-                layer_ms,
+                "fetch_static_backend backend=%s duration_ms=%s ok=%s error=%s url=%s",
+                backend_id.value,
+                backend_ms,
                 bool(html),
-                (layer_err or "")[:300],
+                (backend_err or "")[:300],
                 (log_url_hint or url)[:200],
             )
             if html:
                 total_ms = int((time.perf_counter() - started) * 1000)
                 logger.info(
-                    "fetch_static_done layer_won=%s duration_ms=%s url=%s",
-                    layer_name,
+                    "fetch_static_done backend_won=%s duration_ms=%s url=%s",
+                    backend_id.value,
                     total_ms,
                     (log_url_hint or url)[:200],
                 )
@@ -484,7 +488,7 @@ class ScraperPool:
         return head.startswith("<?xml") or "<urlset" in head or "<sitemapindex" in head
 
     async def _fetch_sitemap_document(self, sitemap_url: str, *, log_hint: str) -> str | None:
-        """Fetch sitemap XML via static layers, then Decodo HTML render as fallback."""
+        """Fetch sitemap XML via static backends, then browser render as fallback."""
         content = await self._fetch_static(sitemap_url, log_url_hint=log_hint)
         if content and self._looks_like_sitemap_xml(content):
             return content
@@ -594,9 +598,9 @@ class ScraperPool:
         custom_next_page_selector: str | None = None,
         requires_js: bool = False,
     ) -> ListingScrapeResult:
-        layers = self._layer_order(requires_js=requires_js)
-        for layer_name in layers:
-            html, _err = await self._fetch_layer_with_retries(layer_name, url)
+        backend_ids = self._layer_order(requires_js=requires_js)
+        for backend_id in backend_ids:
+            html, _err = await self._fetch_layer_with_retries(backend_id, url)
             if not html:
                 continue
             soup = BeautifulSoup(html, "html.parser")
@@ -616,7 +620,7 @@ class ScraperPool:
                     url=url,
                     product_urls=product_urls,
                     next_page_url=next_page_url,
-                    scraper_layer=layer_name,
+                    fetch_backend=backend_id_persisted(backend_id),
                 )
         return ListingScrapeResult(
             success=False,
@@ -627,17 +631,19 @@ class ScraperPool:
 
     async def _fetch_layer_with_retries(
         self,
-        layer_name: str,
+        backend_id: BackendId,
         url: str,
         *,
+        render_js: bool = True,
         deadline_monotonic: float | None = None,
     ) -> tuple[str | None, str | None]:
-        """Try layer up to FETCH_ATTEMPTS_PER_LAYER times; return (html, last_error_code)."""
+        """Try backend up to FETCH_ATTEMPTS_PER_LAYER times; return (html, last_error_code)."""
         last_code: str | None = None
         for attempt in range(FETCH_ATTEMPTS_PER_LAYER):
-            html, err = await self._fetch_by_layer_once(
-                layer_name,
+            html, err = await self._fetch_by_backend_once(
+                backend_id,
                 url,
+                render_js=render_js,
                 deadline_monotonic=deadline_monotonic,
             )
             if html:
@@ -645,65 +651,59 @@ class ScraperPool:
             last_code = err or "fetch_failed"
             if last_code in _NON_RETRIABLE_LAYER_ERRORS:
                 break
-            if last_code == DECODO_DEADLINE_ERROR:
+            if last_code == PROXY_PROVIDER_DEADLINE_ERROR:
                 break
             if attempt < FETCH_ATTEMPTS_PER_LAYER - 1:
                 await asyncio.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
-        mapped = self._map_layer_error(last_code, layer_name)
-        if last_code == DECODO_DEADLINE_ERROR:
-            return None, DECODO_DEADLINE_ERROR
+        mapped = self._map_layer_error(last_code, backend_id)
+        if last_code == PROXY_PROVIDER_DEADLINE_ERROR:
+            return None, PROXY_PROVIDER_DEADLINE_ERROR
         return None, mapped
 
-    def _map_layer_error(self, code: str | None, layer_name: str) -> str:
+    def _map_layer_error(self, code: str | None, backend_id: BackendId) -> str:
+        backend_name = backend_id.value
         c = (code or "fetch_failed").lower()
         if c.startswith("timeout"):
-            return f"timeout:{layer_name}"
+            return f"timeout:{backend_name}"
         if c in {"blocked", "captcha", "not_found", "rate_limit"}:
-            return f"{c}:{layer_name}"
-        return f"fetch_failed:{layer_name}"
+            return f"{c}:{backend_name}"
+        return f"fetch_failed:{backend_name}"
 
-    async def _fetch_by_layer_once(
+    async def _fetch_by_backend_once(
         self,
-        layer_name: str,
+        backend_id: BackendId,
         url: str,
         *,
+        render_js: bool = True,
         deadline_monotonic: float | None = None,
     ) -> tuple[str | None, str | None]:
-        if layer_name == "decodo":
-            return await self._fetch_html_decodo(url, deadline_monotonic=deadline_monotonic)
-        if layer_name == "decodo_static":
-            return await self._fetch_html_decodo_static(
-                url,
-                deadline_monotonic=deadline_monotonic,
-            )
-        if layer_name == "httpx":
-            return await self._fetch_html_httpx(url)
-        if layer_name == "playwright":
-            return await self._fetch_html_playwright(url)
-        return None, "fetch_failed"
+        backend = get_fetch_backend(backend_id)
+        return await backend.fetch(
+            url,
+            render_js=render_js,
+            deadline_monotonic=deadline_monotonic,
+        )
 
-    def _layer_order(self, requires_js: bool, scrape_tier: int = 1) -> list[str]:
-        """Return the ordered list of fetch-layer names to try for one scrape attempt.
+    def _layer_order(self, requires_js: bool, scrape_tier: int = 1) -> list[BackendId]:
+        """Return the ordered list of fetch backends to try for one scrape attempt.
 
-        Layer order is determined by two inputs:
+        Backend order is determined by two inputs:
         - scrape_tier: strategic policy choice (1/2/3) tied to marketplace category.
-        - requires_js: fine-grained hint inside a tier (affects layer order, not set).
+        - requires_js: fine-grained hint inside a tier (affects backend order, not set).
 
         Tier 1 (current default), policy B:
-            Server-rendered (requires_js=False): httpx -> decodo -> playwright.
-                httpx is FIRST to save Decodo quota — httpx is free/fast and
+            Server-rendered (requires_js=False): direct_http -> proxy_provider -> browser_render.
+                direct HTTP is FIRST to save proxy-provider quota — it is free/fast and
                 sufficient for the server-rendered majority of Tier 1 shops.
-                Decodo is tried only when httpx fails; Playwright last.
-            JS-only (requires_js=True): decodo -> playwright -> httpx.
-                httpx cannot execute JS, so leading with it on a JS-only page
-                wastes a request. Decodo (the primary scraper) goes first when
-                configured, then Playwright. httpx is kept as a last-resort
-                fallback because some "JS" pages still expose partial
-                server-rendered content.
-            When Decodo is not configured, "decodo" is dropped from both
-            sequences.
+                Proxy provider is tried only when direct HTTP fails; browser render last.
+            JS-only (requires_js=True): proxy_provider -> browser_render -> direct_http.
+                direct HTTP cannot execute JS, so leading with it on a JS-only page
+                wastes a request. Proxy provider goes first when configured, then
+                browser render. direct HTTP is kept as a last-resort fallback because
+                some "JS" pages still expose partial server-rendered content.
+            When proxy provider is not configured, it is dropped from both sequences.
 
-        Tier 2 / Tier 3: layers are documented in _SUPPORTED_SCRAPE_TIERS and are
+        Tier 2 / Tier 3: backends are documented in _SUPPORTED_SCRAPE_TIERS and are
                          not yet implemented. They will be added when the platform
                          onboards marketplaces requiring them.
 
@@ -723,169 +723,19 @@ class ScraperPool:
                 f"currently supported tiers: {sorted(_SUPPORTED_SCRAPE_TIERS)}"
             )
 
-        decodo_available = (
-            settings.decodo_enabled
-            and settings.decodo_username
-            and settings.decodo_password
-        )
+        proxy_provider_available = ProxyProviderBackend.is_configured()
         if requires_js:
-            # JS-only page: httpx cannot execute JS, so lead with a JS-capable
-            # transport. Decodo (the primary scraper) first when configured, then
-            # Playwright, with httpx kept only as a last-resort fallback (some
-            # "JS" pages still expose partial server-rendered content).
-            layers: list[str] = []
-            if decodo_available:
-                layers.append("decodo")
-            layers.append("playwright")
-            layers.append("httpx")
-            return layers
-        # Server-rendered (general) case: httpx FIRST to save Decodo quota — httpx
-        # is free/fast and sufficient for the server-rendered majority of Tier 1
-        # shops. Decodo is tried only when httpx fails; Playwright last.
-        layers = ["httpx"]
-        if decodo_available:
-            layers.append("decodo")
-        layers.append("playwright")
-        return layers
-
-    async def _fetch_html_decodo_static(
-        self,
-        url: str,
-        *,
-        deadline_monotonic: float | None = None,
-    ) -> tuple[str | None, str | None]:
-        return await self._fetch_html_decodo(
-            url,
-            render_js=False,
-            deadline_monotonic=deadline_monotonic,
-        )
-
-    async def _fetch_html_decodo(
-        self,
-        url: str,
-        *,
-        render_js: bool = True,
-        deadline_monotonic: float | None = None,
-    ) -> tuple[str | None, str | None]:
-        """Fetch via Decodo API. Skip if disabled or credentials missing."""
-        if not settings.decodo_enabled:
-            return None, "fetch_failed"
-        if not (settings.decodo_username and settings.decodo_password):
-            logger.debug("Decodo credentials not configured, skipping")
-            return None, "fetch_failed"
-        if not await acquire_decodo_token(deadline_monotonic):
-            return None, DECODO_DEADLINE_ERROR
-        auth = base64.b64encode(
-            f"{settings.decodo_username}:{settings.decodo_password}".encode()
-        ).decode()
-        api_url = f"{settings.decodo_api_url.rstrip('/')}/scrape"
-        payload: dict[str, str] = {"url": url}
-        if render_js:
-            payload["headless"] = "html"
-        timeout = httpx.Timeout(DECODO_TIMEOUT_SEC)
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    api_url,
-                    json=payload,
-                    headers={"Authorization": f"Basic {auth}"},
-                )
-            if response.status_code == 404:
-                return None, "not_found"
-            if response.status_code in (403, 401):
-                return None, "blocked"
-            if response.status_code == 429:
-                return None, "rate_limit"
-            if response.status_code >= 400:
-                return None, "fetch_failed"
-            data = response.json()
-            results = data.get("results") or []
-            first = results[0] if results else {}
-            html = first.get("content") or data.get("html") or data.get("content")
-            if isinstance(html, str) and html.strip():
-                return html, None
-            return None, "fetch_failed"
-        except httpx.TimeoutException:
-            logger.warning("Decodo timeout for %s", url[:120])
-            return None, "timeout"
-        except httpx.HTTPStatusError as exc:
-            logger.warning("Decodo HTTP error for %s: %s", url[:120], exc)
-            return None, "fetch_failed"
-        except Exception as exc:
-            logger.warning("Decodo fetch failed for %s: %s", url[:120], exc)
-            return None, "fetch_failed"
-
-    async def _fetch_html_httpx(self, url: str) -> tuple[str | None, str | None]:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
-        }
-        timeout = httpx.Timeout(HTTP_TIMEOUT_SEC)
-        try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                response = await client.get(url, headers=headers)
-            if response.status_code == 404:
-                return None, "not_found"
-            if response.status_code in (403, 401):
-                return None, "blocked"
-            if response.status_code >= 400:
-                return None, "fetch_failed"
-            return response.text, None
-        except httpx.TimeoutException:
-            logger.warning("httpx timeout for %s", url[:120])
-            return None, "timeout"
-        except httpx.HTTPStatusError as exc:
-            logger.warning("httpx HTTP error for %s: %s", url[:120], exc)
-            return None, "fetch_failed"
-        except Exception as exc:
-            logger.warning("httpx fetch failed for %s: %s", url[:120], exc)
-            return None, "fetch_failed"
-
-    async def _fetch_html_playwright(self, url: str) -> tuple[str | None, str | None]:
-        try:
-            async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
-                )
-                context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                    ),
-                    viewport={"width": 1920, "height": 1080},
-                )
-                page = await context.new_page()
-                try:
-                    resp = await page.goto(
-                        url,
-                        wait_until="domcontentloaded",
-                        timeout=PLAYWRIGHT_GOTO_TIMEOUT_MS,
-                    )
-                    if resp is not None and resp.status == 404:
-                        await browser.close()
-                        return None, "not_found"
-                    if resp is not None and resp.status in (401, 403):
-                        await browser.close()
-                        return None, "blocked"
-                except Exception as exc:
-                    await browser.close()
-                    msg = str(exc).lower()
-                    if "timeout" in msg or "timed out" in msg:
-                        return None, "timeout"
-                    return None, "fetch_failed"
-                await page.wait_for_timeout(PLAYWRIGHT_WAIT_MS)
-                html = await page.content()
-                await browser.close()
-                return html, None
-        except Exception as exc:
-            logger.warning("Playwright fetch failed for %s: %s", url[:120], exc)
-            msg = str(exc).lower()
-            if "timeout" in msg or "timed out" in msg:
-                return None, "timeout"
-            return None, "fetch_failed"
+            backends: list[BackendId] = []
+            if proxy_provider_available:
+                backends.append(BackendId.PROXY_PROVIDER)
+            backends.append(BackendId.BROWSER_RENDER)
+            backends.append(BackendId.DIRECT_HTTP)
+            return backends
+        backends = [BackendId.DIRECT_HTTP]
+        if proxy_provider_available:
+            backends.append(BackendId.PROXY_PROVIDER)
+        backends.append(BackendId.BROWSER_RENDER)
+        return backends
 
     def _extract_all_levels(
         self,

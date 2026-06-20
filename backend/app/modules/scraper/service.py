@@ -38,6 +38,7 @@ from app.modules.ingestion.service import (
     _today_date_id,
 )
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
+from app.modules.scraper.fetch_backends import backend_id_persisted
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -407,19 +408,19 @@ class GlobalScrapeService:
                 fetch.html,
                 listing.external_url,
                 custom_selectors=custom_selectors if custom_selectors else None,
-                used_layer=fetch.used_layer,
+                used_backend=fetch.used_backend,
                 duration_ms=fetch.duration_ms,
-            last_error=fetch.last_error,
-            scrape_tier=scrape_tier,
-            requires_js=requires_js,
-        )
+                last_error=fetch.last_error,
+                scrape_tier=scrape_tier,
+                requires_js=requires_js,
+            )
         else:
             result = PoolScrapeResult(
                 success=False,
                 url=listing.external_url,
                 error=fetch.last_error,
                 data=None,
-                scraper_layer=fetch.used_layer,
+                fetch_backend=backend_id_persisted(fetch.used_backend),
                 duration_ms=fetch.duration_ms,
                 is_empty=True,
             )
@@ -537,7 +538,7 @@ class GlobalScrapeService:
             price_found=price_found,
             in_stock_found=in_stock_found,
             duration_ms=result.duration_ms,
-            scraper_type=result.scraper_layer,
+            scraper_type=result.fetch_backend,
             error_message=error_message,
             error_category=error_category,
         )
@@ -558,7 +559,7 @@ class GlobalScrapeService:
             in_stock=last_in_stock,
             success=result.success,
             error=result.error,
-            scraper_layer=result.scraper_layer,
+            fetch_backend=result.fetch_backend,
             duration_ms=result.duration_ms,
             log_status=log_status,
             is_partial=result.is_partial,

@@ -99,7 +99,7 @@ def test_persist_commit_failure(monkeypatch):
                 success=True,
                 url="https://example.com/i",
                 data=ExtractedProduct(title="T", price=5.0, currency="USD"),
-                scraper_layer="httpx",
+                fetch_backend="direct_http",
             ),
         ),
     )

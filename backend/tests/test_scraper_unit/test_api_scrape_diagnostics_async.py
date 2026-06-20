@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.modules.scraper import api as scraper_api
+from app.modules.scraper.fetch_backends import ProxyProviderBackend
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import GlobalScrapeService
 
@@ -30,19 +31,26 @@ async def test_get_scrape_diagnostics_executes_queries(monkeypatch):
     )
 
     async def fake_threadpool(fn, *args):
-        if fn is scraper_api._decodo_tcp_reachable:
+        if fn is scraper_api._proxy_provider_tcp_reachable:
             return True
         return await fn(*args) if callable(fn) else fn
 
     monkeypatch.setattr(scraper_api, "run_in_threadpool", fake_threadpool)
-
-    class _Cfg:
-        decodo_enabled = True
-        decodo_username = "u"
-        decodo_password = "p"
-        decodo_api_url = "https://scraper-api.decodo.com/v2/"
-
-    monkeypatch.setattr(scraper_api, "Settings", lambda: _Cfg())
+    monkeypatch.setattr(
+        ProxyProviderBackend,
+        "is_configured",
+        staticmethod(lambda: True),
+    )
+    monkeypatch.setattr(
+        ProxyProviderBackend,
+        "is_enabled",
+        staticmethod(lambda: True),
+    )
+    monkeypatch.setattr(
+        ProxyProviderBackend,
+        "api_url",
+        staticmethod(lambda: "https://proxy-provider.example/v2/"),
+    )
 
     out = await scraper_api.get_scrape_diagnostics(db=mock_db, _current_user=MagicMock())
     assert out["total_listings"] == 42
@@ -51,13 +59,13 @@ async def test_get_scrape_diagnostics_executes_queries(monkeypatch):
     assert out["last_5_logs"][0]["status"] == "success"
     assert out["last_5_logs"][0]["url"] == "https://shop.example/p"
     assert out["last_5_logs"][0]["price_found"] == 9.99
-    assert out["decodo_status"]["enabled"] is True
-    assert out["decodo_status"]["healthy"] is True
+    assert out["proxy_provider_status"]["enabled"] is True
+    assert out["proxy_provider_status"]["healthy"] is True
     assert out["sample_result"] is None
 
 
 @pytest.mark.asyncio
-async def test_get_scrape_diagnostics_decodo_disabled_no_tcp(monkeypatch):
+async def test_get_scrape_diagnostics_proxy_provider_disabled_no_tcp(monkeypatch):
     mock_db = AsyncMock()
     mock_db.execute = AsyncMock(
         side_effect=[
@@ -69,21 +77,23 @@ async def test_get_scrape_diagnostics_decodo_disabled_no_tcp(monkeypatch):
     )
 
     async def fake_threadpool(fn, *args):
-        raise AssertionError("TCP probe must not run when Decodo is not configured")
+        raise AssertionError("TCP probe must not run when proxy provider is not configured")
 
     monkeypatch.setattr(scraper_api, "run_in_threadpool", fake_threadpool)
-
-    class _Cfg:
-        decodo_enabled = False
-        decodo_username = ""
-        decodo_password = ""
-        decodo_api_url = "https://scraper-api.decodo.com/v2/"
-
-    monkeypatch.setattr(scraper_api, "Settings", lambda: _Cfg())
+    monkeypatch.setattr(
+        ProxyProviderBackend,
+        "is_configured",
+        staticmethod(lambda: False),
+    )
+    monkeypatch.setattr(
+        ProxyProviderBackend,
+        "is_enabled",
+        staticmethod(lambda: False),
+    )
 
     out = await scraper_api.get_scrape_diagnostics(db=mock_db, _current_user=MagicMock())
-    assert out["decodo_status"]["enabled"] is False
-    assert out["decodo_status"]["healthy"] is False
+    assert out["proxy_provider_status"]["enabled"] is False
+    assert out["proxy_provider_status"]["healthy"] is False
 
 
 @pytest.mark.asyncio
@@ -93,7 +103,7 @@ async def test_sample_result_built_from_last_success():
     row.url = "https://real/listing"
     row.price_found = 3.5
     row.duration_ms = 99
-    row.scraper_type = "httpx"
+    row.scraper_type = "direct_http"
 
     res = MagicMock()
     res.scalar_one_or_none = lambda: row
@@ -106,6 +116,7 @@ async def test_sample_result_built_from_last_success():
     assert out["success"] is True
     assert out["url"] == "https://real/listing"
     assert out["data"]["price"] == 3.5
+    assert out["fetch_backend"] == "direct_http"
 
 
 @pytest.mark.asyncio

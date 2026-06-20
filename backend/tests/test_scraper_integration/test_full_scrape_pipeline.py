@@ -36,7 +36,7 @@ def _make_ok_worker(
                 currency_raw=currency_raw,
                 price_raw_text=price_raw_text,
             ),
-            scraper_layer="httpx",
+            fetch_backend="direct_http",
             duration_ms=12,
         )
 

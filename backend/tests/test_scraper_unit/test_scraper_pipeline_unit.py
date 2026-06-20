@@ -85,7 +85,7 @@ def test_scrape_product_success_with_title_only(monkeypatch):
             success=True,
             url="https://example.com/item",
             data=ExtractedProduct(title="Title Only Name", price=9.99, currency="USD"),
-            scraper_layer="httpx",
+            fetch_backend="direct_http",
         )
 
     monkeypatch.setattr("app.modules.scraper.service._run_coro_in_worker", ok_worker)
@@ -148,7 +148,7 @@ def test_persistence_gates(monkeypatch):
             success=True,
             url="https://example.com/item",
             data=ExtractedProduct(title="T", price=10.0, currency=None),
-            scraper_layer="httpx",
+            fetch_backend="direct_http",
             missing_fields=["currency"],
         )
 

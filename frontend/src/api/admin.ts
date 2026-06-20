@@ -59,6 +59,38 @@ export interface ClaudeStatus {
 export const getClaudeStatus = () =>
   apiClient.get<ClaudeStatus>("/admin/claude-status");
 
+/** Pool scrape result shape from /admin/scrape/test-single and diagnostics sample_result. */
+export interface ScrapePoolResult {
+  success: boolean;
+  url: string;
+  error: string | null;
+  fetch_backend: string | null;
+  duration_ms: number | null;
+  is_partial: boolean;
+  is_empty: boolean;
+  extracted_fields: string[];
+  missing_fields: string[];
+  log_status: string | null;
+  data: Record<string, unknown> | null;
+}
+
+/** Response from GET /admin/scrape-diagnostics. */
+export interface ScrapeDiagnostics {
+  total_listings: number;
+  with_price_last_24h: number;
+  last_5_logs: Array<{
+    status: string;
+    url: string;
+    price_found: number | null;
+    duration_ms: number | null;
+  }>;
+  proxy_provider_status: {
+    enabled: boolean;
+    healthy: boolean;
+  };
+  sample_result: ScrapePoolResult | null;
+}
+
 export const clearPool = () =>
   apiClient.post<{ deleted: number; message: string }>("/admin/products/clear-pool");
 
