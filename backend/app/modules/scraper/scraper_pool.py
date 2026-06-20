@@ -31,6 +31,7 @@ from app.modules.scraper.fetch_backends import (
     get_fetch_backend,
 )
 from app.modules.scraper.proxy_provider_limiter import PROXY_PROVIDER_DEADLINE_ERROR
+from app.observability.sentry_init import capture_exception_if_initialized
 
 logger = logging.getLogger(__name__)
 
@@ -287,10 +288,11 @@ class ScraperPool:
             merged = self._extract_all_levels(html, url, custom_selectors)
         except Exception as exc:
             logger.exception("extract_all_levels failed for %s", url[:120])
+            capture_exception_if_initialized(exc)
             return PoolScrapeResult(
                 success=False,
                 url=url,
-                error=f"parse_error:{exc.__class__.__name__}",
+                error=f"parse_error:{exc.__class__.__name__}:{str(exc)[:200]}",
                 data=None,
                 fetch_backend=fetch_backend,
                 duration_ms=duration_ms,

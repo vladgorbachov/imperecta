@@ -63,6 +63,74 @@ _SCRAPE_LOG_STATUSES = (
 # Deactivated listings are excluded from the scrape pool.
 LISTING_DEACTIVATE_AFTER_ERRORS = 15
 
+_NON_FAILURE_LOG_STATUSES = frozenset({"success", "no_change"})
+
+_STATUS_ERROR_CATEGORY = {
+    "parse_error": "parse",
+    "currency_rejected": "data_quality",
+    "missing_critical_data": "data_quality",
+    "price_not_found": "parse",
+    "technical_error": "technical",
+    "timeout": "network",
+    "blocked": "auth",
+    "captcha": "auth",
+    "error": "network",
+    "not_found": "parse",
+}
+
+
+def _is_failure_log_status(log_status: str) -> bool:
+    """True when scrape_logs.status represents a failure or gate rejection."""
+    return log_status not in _NON_FAILURE_LOG_STATUSES
+
+
+def _categorize_from_log_status(log_status: str) -> str | None:
+    """Map scrape_logs.status to error_category when result.error is empty."""
+    return _STATUS_ERROR_CATEGORY.get(log_status)
+
+
+def _resolve_scrape_log_diagnostics(
+    *,
+    result: PoolScrapeResult,
+    log_status: str,
+    gate_skip_reason: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Build error_message and error_category for scrape_logs persist."""
+    error_message = result.error
+    if not error_message:
+        if _is_failure_log_status(log_status):
+            if gate_skip_reason:
+                error_message = f"gate:{gate_skip_reason}"
+            else:
+                error_message = f"status:{log_status}"
+        elif not result.success:
+            error_message = f"status:{log_status}"
+
+    if result.error:
+        error_category = _categorize_error_text(result.error)
+    else:
+        error_category = _categorize_from_log_status(log_status)
+
+    return error_message, error_category
+
+
+def _categorize_error_text(error: str) -> str | None:
+    """Classify error text for scrape_logs.error_category."""
+    if not error:
+        return None
+    lowered = error.lower()
+    if "fetch" in lowered or "network" in lowered:
+        return "network"
+    if "parse" in lowered or "extract" in lowered:
+        return "parse"
+    if "timeout" in lowered:
+        return "network"
+    if "blocked" in lowered or "captcha" in lowered:
+        return "auth"
+    if "rate" in lowered:
+        return "rate_limit"
+    return "parse"
+
 # Back-compat re-exports so legacy scraper unit tests that monkeypatch /
 # import these symbols from this module keep working after ING1 moved them
 # to ``app.modules.ingestion``. Canonical ownership is ingestion's; this
@@ -448,6 +516,7 @@ class GlobalScrapeService:
         last_in_stock = _resolve_in_stock(result, data)
         is_partial = bool(result.is_partial)
         forced_log_status: str | None = None
+        gate_skip_reason: str | None = None
 
         if not result.success or not data:
             if not result.success:
@@ -491,6 +560,7 @@ class GlobalScrapeService:
                 scrape_job_id=self.scrape_job_id,
             )
             forced_log_status = ing_result.log_status
+            gate_skip_reason = ing_result.skip_reason
 
             if ing_result.read_only_failed:
                 return _read_only_retriable_result(
@@ -514,14 +584,15 @@ class GlobalScrapeService:
         else:
             log_status = forced_log_status
         result.log_status = log_status
-        error_message = result.error
-        if (not result.success) and (not error_message):
-            error_message = f"status:{log_status}"
+        error_message, error_category = _resolve_scrape_log_diagnostics(
+            result=result,
+            log_status=log_status,
+            gate_skip_reason=gate_skip_reason,
+        )
         price_found = None
         if result.success and data and data.price is not None:
             price_found = float(data.price)
         in_stock_found = last_in_stock if (result.success and data) else None
-        error_category = self._categorize_error(result.error) if result.error else None
 
         price = getattr(data, "price", None) if data else None
         currency = getattr(data, "currency", None) if data else None
@@ -696,20 +767,7 @@ class GlobalScrapeService:
 
     def _categorize_error(self, error: str) -> str | None:
         """Classify error for scrape_logs.error_category."""
-        if not error:
-            return None
-        lowered = error.lower()
-        if "fetch" in lowered or "network" in lowered:
-            return "network"
-        if "parse" in lowered or "extract" in lowered:
-            return "parse"
-        if "timeout" in lowered:
-            return "network"
-        if "blocked" in lowered or "captcha" in lowered:
-            return "auth"
-        if "rate" in lowered:
-            return "rate_limit"
-        return "parse"
+        return _categorize_error_text(error)
 
     def get_stale_products(self, limit: int = 500) -> list[UUID]:
         """Listings that need refresh (oldest last_checked_at first)."""

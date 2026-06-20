@@ -3,8 +3,10 @@
 import ssl
 
 from celery import Celery
+from celery.signals import worker_process_init
 
 from app.config import Settings
+from app.observability.sentry_init import init_sentry
 
 settings = Settings()
 
@@ -51,3 +53,9 @@ celery_app.conf.include = [
 
 # Load beat schedule from scheduler module
 from app.workers import scheduler  # noqa: F401, E402
+
+
+@worker_process_init.connect
+def _init_worker_sentry(**_kwargs: object) -> None:
+    """Initialize Sentry in each prefork worker child (not the parent only)."""
+    init_sentry(with_celery=True)

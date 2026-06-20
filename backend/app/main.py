@@ -32,10 +32,9 @@ from app.modules.users.api import self_router as users_self_router
 logger = logging.getLogger(__name__)
 settings = Settings()
 
-if settings.sentry_dsn:
-    import sentry_sdk
+from app.observability.sentry_init import init_sentry
 
-    sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
+init_sentry(with_celery=False)
 
 
 async def _run_alembic_upgrade_head() -> None:
