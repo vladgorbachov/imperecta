@@ -395,11 +395,15 @@ def test_scrape_log_persist_is_separate_commit() -> None:
 def test_parser_scrape_product_delegates_to_ingestion_service() -> None:
     from app.modules.scraper import service as parser_svc
 
-    src = inspect.getsource(parser_svc.GlobalScrapeService.scrape_product)
-    assert "IngestionService(self.db).persist_extracted(" in src
+    scrape_src = inspect.getsource(parser_svc.GlobalScrapeService.scrape_product)
+    assert "_persist_scrape_pool_result(" in scrape_src
+    persist_src = inspect.getsource(
+        parser_svc.GlobalScrapeService._persist_scrape_pool_result
+    )
+    assert "IngestionService(self.db).persist_extracted(" in persist_src
     # The parser no longer constructs FactPrice rows or runs the inline gate.
-    assert "FactPrice(" not in src
-    assert "PERSISTENCE_GATE" not in src
+    assert "FactPrice(" not in persist_src
+    assert "PERSISTENCE_GATE" not in persist_src
 
 
 def test_scraper_service_no_longer_constructs_fact_price() -> None:
@@ -449,7 +453,7 @@ def test_parser_keeps_consecutive_error_deactivation_and_scrape_log() -> None:
     path + ScrapeLog write (these are parser concerns, not ingestion)."""
     from app.modules.scraper import service as parser_svc
 
-    src = inspect.getsource(parser_svc.GlobalScrapeService.scrape_product)
+    src = inspect.getsource(parser_svc.GlobalScrapeService._persist_scrape_pool_result)
     assert "LISTING_DEACTIVATE_AFTER_ERRORS" in src
     assert "_persist_scrape_log(" in src
 
