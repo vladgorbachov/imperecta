@@ -59,6 +59,7 @@ async def test_get_scrape_diagnostics_executes_queries(monkeypatch):
     assert out["last_5_logs"][0]["status"] == "success"
     assert out["last_5_logs"][0]["url"] == "https://shop.example/p"
     assert out["last_5_logs"][0]["price_found"] == 9.99
+    assert out["proxy_provider_status"]["provider"] == scraper_api.settings.proxy_provider
     assert out["proxy_provider_status"]["enabled"] is True
     assert out["proxy_provider_status"]["healthy"] is True
     assert out["sample_result"] is None

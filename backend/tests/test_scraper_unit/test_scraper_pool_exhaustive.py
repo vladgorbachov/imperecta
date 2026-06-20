@@ -72,9 +72,9 @@ async def test_scrape_product_oversized_price_not_found(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_proxy_provider_paths(monkeypatch):
     backend = ProxyProviderBackend()
-    monkeypatch.setattr(fb.settings, "decodo_enabled", True)
-    monkeypatch.setattr(fb.settings, "decodo_username", "u")
-    monkeypatch.setattr(fb.settings, "decodo_password", "p")
+    monkeypatch.setattr(fb.settings, "proxy_provider_enabled", True)
+    monkeypatch.setattr(fb.settings, "proxy_provider_username", "u")
+    monkeypatch.setattr(fb.settings, "proxy_provider_password", "p")
     monkeypatch.setattr(
         fb,
         "acquire_proxy_provider_token",
@@ -99,9 +99,9 @@ async def test_fetch_proxy_provider_paths(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_proxy_provider_429_rate_limit(monkeypatch):
     backend = ProxyProviderBackend()
-    monkeypatch.setattr(fb.settings, "decodo_enabled", True)
-    monkeypatch.setattr(fb.settings, "decodo_username", "u")
-    monkeypatch.setattr(fb.settings, "decodo_password", "p")
+    monkeypatch.setattr(fb.settings, "proxy_provider_enabled", True)
+    monkeypatch.setattr(fb.settings, "proxy_provider_username", "u")
+    monkeypatch.setattr(fb.settings, "proxy_provider_password", "p")
     monkeypatch.setattr(
         fb,
         "acquire_proxy_provider_token",

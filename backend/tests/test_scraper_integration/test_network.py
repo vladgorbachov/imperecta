@@ -100,13 +100,13 @@ async def test_extract_product_links():
 @pytest.mark.asyncio
 async def test_scraper_pool_failover():
     """When proxy provider is disabled, pool should fetch through fallback backends."""
-    previous = fb.settings.decodo_enabled
+    previous = fb.settings.proxy_provider_enabled
     try:
-        fb.settings.decodo_enabled = False
+        fb.settings.proxy_provider_enabled = False
         pool = ScraperPool()
         result = await pool.scrape_product(_ECOMMERCE_PRODUCT_URL)
         if not result.success:
             pytest.skip("Fallback layers could not scrape integration page")
         assert result.fetch_backend in {"direct_http", "browser_render"}
     finally:
-        fb.settings.decodo_enabled = previous
+        fb.settings.proxy_provider_enabled = previous

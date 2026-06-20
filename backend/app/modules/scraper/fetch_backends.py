@@ -114,25 +114,25 @@ class DirectHttpBackend:
 
 
 class ProxyProviderBackend:
-    """Remote proxy-provider API fetch (vendor config read from settings until Stage 2)."""
+    """Remote proxy-provider API fetch (credentials from neutral settings)."""
 
     backend_id = BackendId.PROXY_PROVIDER
 
     @staticmethod
     def is_configured() -> bool:
         return bool(
-            settings.decodo_enabled
-            and settings.decodo_username
-            and settings.decodo_password
+            settings.proxy_provider_enabled
+            and settings.proxy_provider_username
+            and settings.proxy_provider_password
         )
 
     @staticmethod
     def is_enabled() -> bool:
-        return bool(settings.decodo_enabled)
+        return bool(settings.proxy_provider_enabled)
 
     @staticmethod
     def api_url() -> str:
-        return settings.decodo_api_url
+        return settings.proxy_provider_api_url or ""
 
     async def fetch(
         self,
@@ -141,17 +141,17 @@ class ProxyProviderBackend:
         render_js: bool = True,
         deadline_monotonic: float | None = None,
     ) -> tuple[str | None, str | None]:
-        if not settings.decodo_enabled:
+        if not settings.proxy_provider_enabled:
             return None, "fetch_failed"
-        if not (settings.decodo_username and settings.decodo_password):
+        if not (settings.proxy_provider_username and settings.proxy_provider_password):
             logger.debug("Proxy provider credentials not configured, skipping")
             return None, "fetch_failed"
         if not await acquire_proxy_provider_token(deadline_monotonic):
             return None, PROXY_PROVIDER_DEADLINE_ERROR
         auth = base64.b64encode(
-            f"{settings.decodo_username}:{settings.decodo_password}".encode()
+            f"{settings.proxy_provider_username}:{settings.proxy_provider_password}".encode()
         ).decode()
-        api_url = f"{settings.decodo_api_url.rstrip('/')}/scrape"
+        api_url = f"{settings.proxy_provider_api_url.rstrip('/')}/scrape"
         payload: dict[str, str] = {"url": url}
         if render_js:
             payload["headless"] = "html"

@@ -8,8 +8,6 @@ from typing import Any
 
 from app.config import Settings
 
-PROXY_PROVIDER_MAX_RPS = 10
-PROXY_PROVIDER_BUCKET_CAPACITY = 10
 PROXY_PROVIDER_REDIS_KEY = "proxy_provider:ratebucket"
 PROXY_PROVIDER_DEADLINE_ERROR = "proxy_provider_deadline"
 
@@ -17,8 +15,18 @@ PROXY_PROVIDER_DEADLINE_ERROR = "proxy_provider_deadline"
 SCRAPE_FETCH_PARALLELISM = 5
 
 # Fail-closed fallback when Redis is unreachable: at most one provider token per
-# second per process (2 workers -> <=2 req/s, conservative vs 10/s contract).
+# second per process (2 workers -> <=2 req/s, conservative vs configured RPS).
 _LOCAL_FALLBACK_MIN_INTERVAL_SEC = 1.0
+
+
+def proxy_provider_max_rps() -> int:
+    """Fleet-wide proxy-provider requests-per-second cap (from settings)."""
+    return Settings().proxy_provider_rps
+
+
+def proxy_provider_bucket_capacity() -> int:
+    """Token-bucket capacity equals RPS (unchanged contract from Stage 1b)."""
+    return Settings().proxy_provider_rps
 
 _ACQUIRE_LUA = """
 local key = KEYS[1]
@@ -95,13 +103,15 @@ async def _acquire_local_fallback(deadline_monotonic: float | None) -> bool:
 def _redis_acquire_sync() -> bool:
     client = _get_redis()
     now_ms = int(time.time() * 1000)
+    max_rps = proxy_provider_max_rps()
+    bucket_capacity = proxy_provider_bucket_capacity()
     result = client.eval(
         _ACQUIRE_LUA,
         1,
         PROXY_PROVIDER_REDIS_KEY,
         now_ms,
-        PROXY_PROVIDER_MAX_RPS,
-        PROXY_PROVIDER_BUCKET_CAPACITY,
+        max_rps,
+        bucket_capacity,
         1,
     )
     return int(result) == 1
@@ -122,7 +132,7 @@ async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) 
         acquired = await asyncio.to_thread(_redis_acquire_sync)
         if acquired:
             return True
-        wait_sec = 1.0 / PROXY_PROVIDER_MAX_RPS
+        wait_sec = 1.0 / proxy_provider_max_rps()
         if remaining is not None and wait_sec > remaining:
             return False
         await asyncio.sleep(wait_sec)

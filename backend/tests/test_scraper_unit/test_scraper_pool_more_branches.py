@@ -47,9 +47,9 @@ async def test_fetch_html_returns_first_html(monkeypatch):
 @pytest.mark.asyncio
 async def test_layer_order_requires_js_inserts_browser_render(monkeypatch):
     pool = ScraperPool()
-    monkeypatch.setattr(fb.settings, "decodo_enabled", True)
-    monkeypatch.setattr(fb.settings, "decodo_username", "u")
-    monkeypatch.setattr(fb.settings, "decodo_password", "p")
+    monkeypatch.setattr(fb.settings, "proxy_provider_enabled", True)
+    monkeypatch.setattr(fb.settings, "proxy_provider_username", "u")
+    monkeypatch.setattr(fb.settings, "proxy_provider_password", "p")
     backends = pool._layer_order(requires_js=True)
     assert backends[1] == BackendId.BROWSER_RENDER
 
@@ -111,9 +111,9 @@ async def test_fetch_direct_http_timeout(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_proxy_provider_404(monkeypatch):
     backend = ProxyProviderBackend()
-    monkeypatch.setattr(fb.settings, "decodo_enabled", True)
-    monkeypatch.setattr(fb.settings, "decodo_username", "u")
-    monkeypatch.setattr(fb.settings, "decodo_password", "p")
+    monkeypatch.setattr(fb.settings, "proxy_provider_enabled", True)
+    monkeypatch.setattr(fb.settings, "proxy_provider_username", "u")
+    monkeypatch.setattr(fb.settings, "proxy_provider_password", "p")
     monkeypatch.setattr(
         fb,
         "acquire_proxy_provider_token",

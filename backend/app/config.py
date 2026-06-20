@@ -1,6 +1,6 @@
 """Application settings loaded from environment variables."""
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -36,10 +36,31 @@ class Settings(BaseSettings):
     proxy_sticky_duration: int
     proxy_country_routing: bool
 
-    decodo_api_url: str
-    decodo_username: str | None = None
-    decodo_password: str | None = None
-    decodo_enabled: bool
+  # Provider-neutral proxy fetch configuration (Stage 2).
+    proxy_provider: str = "decodo"
+    proxy_provider_rps: int = 10
+    proxy_provider_api_url: str | None = Field(
+        default=None,
+        validation_alias="PROXY_PROVIDER_API_URL",
+    )
+    proxy_provider_username: str | None = Field(
+        default=None,
+        validation_alias="PROXY_PROVIDER_USERNAME",
+    )
+    proxy_provider_password: str | None = Field(
+        default=None,
+        validation_alias="PROXY_PROVIDER_PASSWORD",
+    )
+    proxy_provider_enabled: bool | None = Field(
+        default=None,
+        validation_alias="PROXY_PROVIDER_ENABLED",
+    )
+
+    # Deprecated DECODO_* env aliases — honored when neutral keys are unset.
+    decodo_api_url: str | None = Field(default=None, validation_alias="DECODO_API_URL")
+    decodo_username: str | None = Field(default=None, validation_alias="DECODO_USERNAME")
+    decodo_password: str | None = Field(default=None, validation_alias="DECODO_PASSWORD")
+    decodo_enabled: bool | None = Field(default=None, validation_alias="DECODO_ENABLED")
     sentry_dsn: str | None = None
     allowed_origins: str
     app_env: str
@@ -74,6 +95,39 @@ class Settings(BaseSettings):
                 "or postgresql:// (auto-converted)"
             )
         return value
+
+    @model_validator(mode="after")
+    def resolve_proxy_provider_config(self) -> "Settings":
+        """Merge neutral proxy_provider_* with deprecated DECODO_* (neutral wins)."""
+        api_url = self.proxy_provider_api_url or self.decodo_api_url
+        if not api_url:
+            raise ValueError(
+                "PROXY_PROVIDER_API_URL or DECODO_API_URL (deprecated) is required"
+            )
+        username = (
+            self.proxy_provider_username
+            if self.proxy_provider_username is not None
+            else self.decodo_username
+        )
+        password = (
+            self.proxy_provider_password
+            if self.proxy_provider_password is not None
+            else self.decodo_password
+        )
+        if self.proxy_provider_enabled is not None:
+            enabled = self.proxy_provider_enabled
+        elif self.decodo_enabled is not None:
+            enabled = self.decodo_enabled
+        else:
+            raise ValueError(
+                "PROXY_PROVIDER_ENABLED or DECODO_ENABLED (deprecated) is required"
+            )
+
+        object.__setattr__(self, "proxy_provider_api_url", api_url)
+        object.__setattr__(self, "proxy_provider_username", username)
+        object.__setattr__(self, "proxy_provider_password", password)
+        object.__setattr__(self, "proxy_provider_enabled", enabled)
+        return self
 
     @model_validator(mode="after")
     def validate_telegram_webhook_secret(self) -> "Settings":

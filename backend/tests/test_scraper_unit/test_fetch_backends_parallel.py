@@ -18,10 +18,10 @@ from app.modules.scraper import service as scraper_service
 from app.modules.scraper import tasks as scraper_tasks
 from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.proxy_provider_limiter import (
-    PROXY_PROVIDER_BUCKET_CAPACITY,
-    PROXY_PROVIDER_MAX_RPS,
     PROXY_PROVIDER_REDIS_KEY,
     acquire_proxy_provider_token,
+    proxy_provider_bucket_capacity,
+    proxy_provider_max_rps,
     reset_limiter_state_for_tests,
 )
 from app.modules.scraper.extractors import ExtractedProduct
@@ -40,20 +40,23 @@ def _reset_limiter():
 async def test_proxy_provider_limiter_caps_rps(monkeypatch):
     """Atomic acquire path must not grant more than capacity in a tight burst."""
     grants = 0
+    cap = proxy_provider_max_rps()
+    lock = threading.Lock()
 
     def fake_eval(*_args, **_kwargs):
         nonlocal grants
-        if grants >= PROXY_PROVIDER_MAX_RPS:
-            return 0
-        grants += 1
-        return 1
+        with lock:
+            if grants >= cap:
+                return 0
+            grants += 1
+            return 1
 
     fake_client = MagicMock()
     fake_client.eval.side_effect = fake_eval
     monkeypatch.setattr(limiter, "_get_redis", lambda: fake_client)
 
     results = await asyncio.gather(*[acquire_proxy_provider_token() for _ in range(20)])
-    assert sum(1 for r in results if r) <= PROXY_PROVIDER_MAX_RPS
+    assert sum(1 for r in results if r) <= cap
 
 
 @pytest.mark.asyncio
@@ -207,10 +210,10 @@ async def test_proxy_provider_gated_direct_http_not_gated(monkeypatch):
     monkeypatch.setattr(
         "app.modules.scraper.fetch_backends.settings",
         MagicMock(
-            decodo_enabled=True,
-            decodo_username="user",
-            decodo_password="pass",
-            decodo_api_url="http://proxy-provider",
+            proxy_provider_enabled=True,
+            proxy_provider_username="user",
+            proxy_provider_password="pass",
+            proxy_provider_api_url="http://proxy-provider",
         ),
     )
     from app.modules.scraper.fetch_backends import DirectHttpBackend, ProxyProviderBackend
@@ -369,7 +372,7 @@ async def test_limiter_lua_bucket_no_overshoot_burst(monkeypatch):
 
     results = await asyncio.gather(*[acquire_proxy_provider_token() for _ in range(20)])
     granted = sum(1 for ok in results if ok)
-    assert granted <= PROXY_PROVIDER_BUCKET_CAPACITY
+    assert granted <= proxy_provider_bucket_capacity()
 
 
 @pytest.mark.asyncio
@@ -397,7 +400,9 @@ async def test_limiter_lua_bucket_no_overshoot_refill_window(monkeypatch):
         if await acquire_proxy_provider_token():
             granted += 1
 
-    max_allowed = PROXY_PROVIDER_BUCKET_CAPACITY + int(window_sec * PROXY_PROVIDER_MAX_RPS) + 1
+    max_allowed = proxy_provider_bucket_capacity() + int(
+        window_sec * proxy_provider_max_rps()
+    ) + 1
     assert granted <= max_allowed
 
 

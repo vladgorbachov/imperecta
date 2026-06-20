@@ -45,6 +45,17 @@ os.environ.setdefault(
 os.environ.setdefault(
     "PROXY_COUNTRY_ROUTING", os.environ.get("TEST_PROXY_COUNTRY_ROUTING", "")
 )
+os.environ.setdefault("PROXY_PROVIDER", os.environ.get("TEST_PROXY_PROVIDER", "decodo"))
+os.environ.setdefault(
+    "PROXY_PROVIDER_RPS", os.environ.get("TEST_PROXY_PROVIDER_RPS", "10")
+)
+_test_proxy_api_url = os.environ.get("TEST_PROXY_PROVIDER_API_URL")
+if _test_proxy_api_url:
+    os.environ.setdefault("PROXY_PROVIDER_API_URL", _test_proxy_api_url)
+_test_proxy_enabled = os.environ.get("TEST_PROXY_PROVIDER_ENABLED")
+if _test_proxy_enabled is not None and _test_proxy_enabled != "":
+    os.environ.setdefault("PROXY_PROVIDER_ENABLED", _test_proxy_enabled)
+# Deprecated DECODO_* aliases — honored when neutral keys are unset.
 os.environ.setdefault("DECODO_API_URL", os.environ.get("TEST_DECODO_API_URL", ""))
 os.environ.setdefault("DECODO_ENABLED", os.environ.get("TEST_DECODO_ENABLED", ""))
 os.environ.setdefault("ALLOWED_ORIGINS", os.environ.get("TEST_ALLOWED_ORIGINS", ""))

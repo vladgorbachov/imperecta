@@ -76,6 +76,8 @@ jobs:
           APP_URL: ${{ secrets.TEST_APP_URL }}
           PROXY_STICKY_DURATION: ${{ secrets.TEST_PROXY_STICKY_DURATION }}
           PROXY_COUNTRY_ROUTING: ${{ secrets.TEST_PROXY_COUNTRY_ROUTING }}
+          PROXY_PROVIDER: decodo
+          PROXY_PROVIDER_RPS: "10"
           DECODO_API_URL: ${{ secrets.TEST_DECODO_API_URL }}
           DECODO_ENABLED: ${{ secrets.TEST_DECODO_ENABLED }}
           ALLOWED_ORIGINS: ${{ secrets.TEST_ALLOWED_ORIGINS }}

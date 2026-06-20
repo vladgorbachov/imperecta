@@ -12,6 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
+from app.config import Settings
 from app.database import sync_engine, sync_session_factory
 from app.modules.scraper.fetch_backends import ProxyProviderBackend
 from app.models.app_tables import ScrapeLog
@@ -27,6 +28,7 @@ from app.modules.scraper.tasks import (
 )
 
 logger = logging.getLogger(__name__)
+settings = Settings()
 
 router = APIRouter(
     prefix="/admin",
@@ -205,6 +207,7 @@ async def get_scrape_diagnostics(
         )
 
     proxy_provider_status = {
+        "provider": settings.proxy_provider,
         "enabled": ProxyProviderBackend.is_enabled(),
         "healthy": healthy,
     }

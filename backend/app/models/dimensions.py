@@ -149,7 +149,7 @@ class DimMarketplace(Base):
     products_in_pool: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default=text("0"))
     requires_js: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
     # Tiered scrape strategy selector. Maps to the layer-order policy in ScraperPool.
-    # 1 — server-rendered shops (Decodo + httpx + Playwright fallback).
+    # 1 — server-rendered shops (proxy-provider + direct-http + browser-render fallback).
     # 2 — modern SPA shops (adds network interception + basic stealth, future).
     # 3 — hostile marketplaces (adds full stealth + sticky residential + LLM fallback, future).
     scrape_tier: Mapped[int] = mapped_column(
