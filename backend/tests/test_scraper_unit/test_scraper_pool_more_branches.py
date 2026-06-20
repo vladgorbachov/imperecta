@@ -19,7 +19,7 @@ async def test_scrape_listing_success_with_product_links(monkeypatch):
     </body></html>
     """
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return html, None
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
@@ -31,7 +31,7 @@ async def test_scrape_listing_success_with_product_links(monkeypatch):
 async def test_fetch_html_returns_first_html(monkeypatch):
     pool = ScraperPool()
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return "<html>ok</html>", None
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
@@ -177,7 +177,7 @@ async def test_fetch_layer_retries_backoff(monkeypatch):
     pool = ScraperPool()
     calls = {"n": 0}
 
-    async def slow(layer: str, url: str):
+    async def slow(layer: str, url: str, **kwargs):
         calls["n"] += 1
         return None, "fetch_failed"
 

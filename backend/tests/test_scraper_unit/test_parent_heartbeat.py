@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from app.modules.scraper import tasks as scraper_tasks
+from app.modules.scraper.scraper_pool import ListingFetchResult
 from app.modules.scraper.pipeline import activity_pulse
 from app.modules.scraper.pipeline.worker_log_relay import _last_db_pulse
 
@@ -117,6 +118,8 @@ def test_run_scrape_all_pool_threads_parent_heartbeat(monkeypatch):
 
     listing_id = uuid4()
     listing = MagicMock(external_url="https://example.test/p/1")
+    listing.scraper_config = {}
+    listing.marketplace_id = uuid4()
 
     db = MagicMock()
     batch_result = MagicMock()
@@ -130,11 +133,25 @@ def test_run_scrape_all_pool_threads_parent_heartbeat(monkeypatch):
     monkeypatch.setattr(scraper_tasks, "sync_session_factory", lambda: db)
 
     svc = MagicMock()
-    svc.scrape_product.return_value = MagicMock(success=True, error=None)
+    svc._listing_scrape_context.return_value = (False, 1, {})
+    svc.scrape_listing_from_fetch.return_value = MagicMock(success=True, error=None)
     monkeypatch.setattr(
         scraper_tasks,
         "GlobalScrapeService",
         lambda *_a, **_k: svc,
+    )
+    monkeypatch.setattr(
+        scraper_tasks,
+        "_parallel_fetch_listings",
+        lambda _pool, specs, deadline_monotonic=None: [
+            ListingFetchResult(
+                html="<html/>",
+                used_layer="httpx",
+                last_error="",
+                duration_ms=1,
+            )
+            for _ in specs
+        ],
     )
 
     scraper_tasks._run_scrape_all_pool_impl(

@@ -19,7 +19,7 @@ async def test_scrape_product_success_after_httpx_html(monkeypatch):
     </script></head><body><h1>X</h1></body></html>
     """
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return html, None
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
@@ -31,7 +31,7 @@ async def test_scrape_product_success_after_httpx_html(monkeypatch):
 async def test_scrape_product_parse_error_in_extract(monkeypatch):
     pool = ScraperPool()
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return "<html>not valid for merge</html>", None
 
     def boom(*_a, **_k):
@@ -59,7 +59,7 @@ async def test_scrape_product_oversized_price_not_found(monkeypatch):
     </script>
     """
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return html, None
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
@@ -114,7 +114,7 @@ async def test_fetch_html_decodo_429_rate_limit(monkeypatch):
 async def test_listing_scrape_result_and_fetch_html_none(monkeypatch):
     pool = ScraperPool()
 
-    async def nope(layer: str, url: str):
+    async def nope(layer: str, url: str, **kwargs):
         return None, "timeout:httpx"
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", nope)
@@ -136,7 +136,7 @@ async def test_fetch_layer_with_retries_stops_on_rate_limit(monkeypatch):
     pool = ScraperPool()
     attempts = {"n": 0}
 
-    async def fake_once(_layer: str, _url: str):
+    async def fake_once(_layer: str, _url: str, **kwargs):
         attempts["n"] += 1
         return None, "rate_limit"
 

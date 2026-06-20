@@ -11,7 +11,7 @@ async def test_fetch_layer_retries_until_html(monkeypatch):
     pool = ScraperPool()
     attempts = {"count": 0}
 
-    async def fake_once(layer: str, url: str):
+    async def fake_once(layer: str, url: str, **kwargs):
         attempts["count"] += 1
         if attempts["count"] < 2:
             return None, "timeout"
@@ -29,7 +29,7 @@ async def test_scrape_product_maps_fetch_failure_to_error(monkeypatch):
     """No HTML after all layers → success False with last layer error."""
     pool = ScraperPool()
 
-    async def no_html(layer: str, url: str):
+    async def no_html(layer: str, url: str, **kwargs):
         return None, "timeout"
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", no_html)

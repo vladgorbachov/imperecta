@@ -38,7 +38,7 @@ from app.modules.ingestion.service import (
     _today_date_id,
 )
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
-from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
+from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
@@ -357,21 +357,14 @@ class GlobalScrapeService:
             )
             return False
 
-    def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
-        """Scrape a single listing and persist via IngestionService + scrape_logs."""
-        listing = self.db.get(FactListing, listing_id)
-        if not listing:
-            return PoolScrapeResult(success=False, url="", error="listing_not_found")
-
-        now = datetime.now(timezone.utc)
-
+    def _listing_scrape_context(
+        self,
+        listing: FactListing,
+    ) -> tuple[bool, int, dict[str, str]]:
+        """Return requires_js, scrape_tier, and custom_selectors for one listing."""
         mp = self.db.get(DimMarketplace, listing.marketplace_id)
         requires_js = bool(mp.requires_js) if mp else False
         scrape_tier = int(mp.scrape_tier) if mp and mp.scrape_tier is not None else 1
-
-        # Per-shop custom_selectors (legacy extractor input) — Phase 5 universality
-        # registry item: remove together with the marketplace.custom_*_selector
-        # columns when the extractor pass lands. Do NOT delete here.
         cfg = listing.scraper_config if isinstance(listing.scraper_config, dict) else {}
         custom_selectors = {
             k: v
@@ -383,41 +376,71 @@ class GlobalScrapeService:
             }.items()
             if v
         }
+        return requires_js, scrape_tier, custom_selectors
+
+    def scrape_listing_from_fetch(
+        self,
+        listing_id: UUID,
+        fetch: ListingFetchResult,
+    ) -> PoolScrapeResult | None:
+        """Extract + persist after a parallel fetch. None = deadline-skipped (no counters)."""
+        if fetch.deadline_skipped:
+            return None
+
+        listing = self.db.get(FactListing, listing_id)
+        if not listing:
+            return PoolScrapeResult(success=False, url="", error="listing_not_found")
+
+        now = datetime.now(timezone.utc)
+        requires_js, scrape_tier, custom_selectors = self._listing_scrape_context(listing)
 
         slog.info(
             "pool_scrape_start",
             listing_id=str(listing_id),
             url=(listing.external_url or "")[:200],
         )
-        # Pre-flight: clear this-run error state BEFORE the network attempt so a
-        # fresh scrape never carries a previous run's error. failure_streak (the
-        # deactivation counter) is intentionally NOT reset here — it accumulates
-        # across runs and clears only on success (below).
         listing.consecutive_errors = 0
         listing.last_error = None
-        try:
-            result = _run_coro_in_worker(
-                self.pool.scrape_product(
-                    url=listing.external_url,
-                    custom_selectors=custom_selectors if custom_selectors else None,
-                    requires_js=requires_js,
-                    scrape_tier=scrape_tier,
-                ),
-            )
-        except Exception as exc:
-            slog.exception("pool_scrape_exception", listing_id=str(listing_id))
-            err_text = f"exception:{exc.__class__.__name__}:{exc!s}"
+
+        if fetch.html:
+            result = self.pool.build_scrape_result_from_html(
+                fetch.html,
+                listing.external_url,
+                custom_selectors=custom_selectors if custom_selectors else None,
+                used_layer=fetch.used_layer,
+                duration_ms=fetch.duration_ms,
+            last_error=fetch.last_error,
+            scrape_tier=scrape_tier,
+            requires_js=requires_js,
+        )
+        else:
             result = PoolScrapeResult(
                 success=False,
                 url=listing.external_url,
-                error=err_text[:2000],
+                error=fetch.last_error,
                 data=None,
-                duration_ms=None,
+                scraper_layer=fetch.used_layer,
+                duration_ms=fetch.duration_ms,
+                is_empty=True,
             )
 
+        return self._persist_scrape_pool_result(
+            listing_id,
+            listing,
+            result,
+            now=now,
+        )
+
+    def _persist_scrape_pool_result(
+        self,
+        listing_id: UUID,
+        listing: FactListing,
+        result: PoolScrapeResult,
+        *,
+        now: datetime,
+    ) -> PoolScrapeResult:
+        """Sequential persist path for one PoolScrapeResult (D4 semantics preserved)."""
         data = result.data
-        # consecutive_errors/last_error already cleared pre-flight; a success
-        # additionally breaks the deactivation streak.
         if result.success:
             listing.failure_streak = 0
 
@@ -448,8 +471,6 @@ class GlobalScrapeService:
             if persist_fail is not None:
                 return persist_fail
         else:
-            # Success+data: advance last_checked_at in the same transaction
-            # ingestion commits so a read-only rollback does not strand the row.
             listing.last_checked_at = now
             product_name_ok = bool(
                 getattr(data, "product_name", None)
@@ -501,8 +522,6 @@ class GlobalScrapeService:
         in_stock_found = last_in_stock if (result.success and data) else None
         error_category = self._categorize_error(result.error) if result.error else None
 
-        product_name_used = getattr(data, "product_name", None) if data else None
-        title = getattr(data, "title", None) if data else None
         price = getattr(data, "price", None) if data else None
         currency = getattr(data, "currency", None) if data else None
 
@@ -547,6 +566,49 @@ class GlobalScrapeService:
         )
         slog.info("pool_scrape_done", listing_id=str(listing_id), result_success=result.success)
         return result
+
+    def scrape_product(self, listing_id: UUID) -> PoolScrapeResult:
+        """Scrape a single listing and persist via IngestionService + scrape_logs."""
+        listing = self.db.get(FactListing, listing_id)
+        if not listing:
+            return PoolScrapeResult(success=False, url="", error="listing_not_found")
+
+        now = datetime.now(timezone.utc)
+        requires_js, scrape_tier, custom_selectors = self._listing_scrape_context(listing)
+
+        slog.info(
+            "pool_scrape_start",
+            listing_id=str(listing_id),
+            url=(listing.external_url or "")[:200],
+        )
+        listing.consecutive_errors = 0
+        listing.last_error = None
+        try:
+            result = _run_coro_in_worker(
+                self.pool.scrape_product(
+                    url=listing.external_url,
+                    custom_selectors=custom_selectors if custom_selectors else None,
+                    requires_js=requires_js,
+                    scrape_tier=scrape_tier,
+                ),
+            )
+        except Exception as exc:
+            slog.exception("pool_scrape_exception", listing_id=str(listing_id))
+            err_text = f"exception:{exc.__class__.__name__}:{exc!s}"
+            result = PoolScrapeResult(
+                success=False,
+                url=listing.external_url,
+                error=err_text[:2000],
+                data=None,
+                duration_ms=None,
+            )
+
+        return self._persist_scrape_pool_result(
+            listing_id,
+            listing,
+            result,
+            now=now,
+        )
 
     def _determine_log_status(
         self,

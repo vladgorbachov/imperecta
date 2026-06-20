@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 from app.modules.scraper import tasks as scraper_tasks
-from app.modules.scraper.scraper_pool import PoolScrapeResult
+from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult
 
 
 def test_run_async_shutdown_asyncgen_error_ignored(monkeypatch):
@@ -64,10 +64,16 @@ def test_scrape_pool_product_impl_success(monkeypatch):
     db.close.assert_called()
 
 
+def _wire_listing_row(listing):
+    listing.scraper_config = {}
+    listing.marketplace_id = uuid4()
+
+
 def test_run_scrape_all_pool_impl_rollback_on_scrape(monkeypatch):
     lid = uuid4()
     listing = MagicMock()
     listing.external_url = "https://e.com"
+    _wire_listing_row(listing)
 
     db = MagicMock()
     rows = MagicMock()
@@ -77,12 +83,20 @@ def test_run_scrape_all_pool_impl_rollback_on_scrape(monkeypatch):
 
     monkeypatch.setattr(scraper_tasks, "sync_session_factory", lambda: db)
 
-    def boom(self, x):
+    def boom(_lid, _fetch):
         raise RuntimeError("scrape")
 
+    svc = MagicMock()
+    svc._listing_scrape_context.return_value = (False, 1, {})
+    svc.scrape_listing_from_fetch.side_effect = boom
+    monkeypatch.setattr(scraper_tasks, "GlobalScrapeService", lambda *_a, **_k: svc)
     monkeypatch.setattr(
-        "app.modules.scraper.service.GlobalScrapeService.scrape_product",
-        boom,
+        scraper_tasks,
+        "_parallel_fetch_listings",
+        lambda _pool, specs, deadline_monotonic=None: [
+            ListingFetchResult(html="<html/>", used_layer="httpx", last_error="", duration_ms=1)
+            for _ in specs
+        ],
     )
     monkeypatch.setattr(scraper_tasks, "_persist_technical_error_log", lambda *a, **k: None)
 
@@ -94,6 +108,7 @@ def test_run_scrape_all_impl_scrape_raises_and_rollback_fails(monkeypatch):
     lid = uuid4()
     listing = MagicMock()
     listing.external_url = "https://e.com"
+    _wire_listing_row(listing)
 
     db = MagicMock()
     rows = MagicMock()
@@ -103,9 +118,17 @@ def test_run_scrape_all_impl_scrape_raises_and_rollback_fails(monkeypatch):
     db.rollback.side_effect = RuntimeError("rollback failed")
 
     monkeypatch.setattr(scraper_tasks, "sync_session_factory", lambda: db)
+    svc = MagicMock()
+    svc._listing_scrape_context.return_value = (False, 1, {})
+    svc.scrape_listing_from_fetch.side_effect = RuntimeError("scrape")
+    monkeypatch.setattr(scraper_tasks, "GlobalScrapeService", lambda *_a, **_k: svc)
     monkeypatch.setattr(
-        "app.modules.scraper.service.GlobalScrapeService.scrape_product",
-        lambda self, x: (_ for _ in ()).throw(RuntimeError("scrape")),
+        scraper_tasks,
+        "_parallel_fetch_listings",
+        lambda _pool, specs, deadline_monotonic=None: [
+            ListingFetchResult(html="<html/>", used_layer="httpx", last_error="", duration_ms=1)
+            for _ in specs
+        ],
     )
     monkeypatch.setattr(scraper_tasks, "_persist_technical_error_log", lambda *a, **k: None)
 

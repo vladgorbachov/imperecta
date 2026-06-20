@@ -17,7 +17,7 @@ async def test_scrape_product_logs_each_layer(monkeypatch, caplog):
     pool = ScraperPool()
     calls: list[str] = []
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         calls.append(layer)
         return None, "timeout"
 
@@ -37,7 +37,7 @@ async def test_pool_result_has_extracted_and_missing_fields(monkeypatch):
     </script></head><body></body></html>
     """
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return html, None
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
@@ -55,7 +55,7 @@ async def test_raw_html_only_when_decodo_disabled(monkeypatch):
     html += '{"@type":"Product","name":"N","offers":{"price":"1","priceCurrency":"USD"}}'
     html += "</script></head></html>"
 
-    async def fake_layer(layer: str, url: str):
+    async def fake_layer(layer: str, url: str, **kwargs):
         return html, None
 
     monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)

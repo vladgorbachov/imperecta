@@ -17,6 +17,10 @@ from playwright.async_api import async_playwright
 
 from app.config import Settings
 from app.modules.classifier import classify_page_role_for_discovery
+from app.modules.scraper.decodo_limiter import (
+    DECODO_DEADLINE_ERROR,
+    acquire_decodo_token,
+)
 from app.modules.scraper.extractors import (
     ExtractedProduct,
     detect_next_page,
@@ -96,6 +100,17 @@ def _would_escalate_shell(
 
 
 @dataclass
+class ListingFetchResult:
+    """Network-only fetch outcome for one listing URL (no extraction)."""
+
+    html: str | None
+    used_layer: str | None
+    last_error: str
+    duration_ms: int
+    deadline_skipped: bool = False
+
+
+@dataclass
 class PoolScrapeResult:
     """Result of scraping a single product URL.
 
@@ -152,20 +167,62 @@ class ScraperPool:
         requires_js: bool = False,
         *,
         scrape_tier: int = 1,
+        deadline_monotonic: float | None = None,
     ) -> PoolScrapeResult:
         """
         Fetch HTML once (Decodo -> httpx -> Playwright), extract once.
         Do NOT re-fetch via Playwright after Decodo returns HTML.
         """
+        fetch = await self.fetch_listing_html(
+            url,
+            requires_js=requires_js,
+            scrape_tier=scrape_tier,
+            deadline_monotonic=deadline_monotonic,
+        )
+        if fetch.deadline_skipped:
+            return PoolScrapeResult(
+                success=False,
+                url=url,
+                error=DECODO_DEADLINE_ERROR,
+                data=None,
+                scraper_layer=None,
+                duration_ms=fetch.duration_ms,
+                is_empty=True,
+            )
+        return self.build_scrape_result_from_html(
+            fetch.html,
+            url,
+            custom_selectors=custom_selectors,
+            used_layer=fetch.used_layer,
+            duration_ms=fetch.duration_ms,
+            last_error=fetch.last_error,
+            scrape_tier=scrape_tier,
+            requires_js=requires_js,
+        )
+
+    async def fetch_listing_html(
+        self,
+        url: str,
+        *,
+        requires_js: bool = False,
+        scrape_tier: int = 1,
+        deadline_monotonic: float | None = None,
+    ) -> ListingFetchResult:
+        """Fetch HTML for one listing URL without extraction."""
         started = time.perf_counter()
         layers = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
 
         html = None
         used_layer = None
         last_error = "fetch_failed"
+        deadline_skipped = False
         for layer_name in layers:
             layer_started = time.perf_counter()
-            html, layer_err = await self._fetch_layer_with_retries(layer_name, url)
+            html, layer_err = await self._fetch_layer_with_retries(
+                layer_name,
+                url,
+                deadline_monotonic=deadline_monotonic,
+            )
             layer_ms = int((time.perf_counter() - layer_started) * 1000)
             logger.info(
                 "scrape_layer layer=%s duration_ms=%s ok=%s error=%s url=%s",
@@ -183,6 +240,9 @@ class ScraperPool:
                 ((layer_err or "")[:300] if layer_err else None),
                 url[:200],
             )
+            if layer_err == DECODO_DEADLINE_ERROR:
+                deadline_skipped = True
+                break
             if html:
                 used_layer = layer_name
                 break
@@ -190,6 +250,27 @@ class ScraperPool:
                 last_error = layer_err
 
         duration_ms = int((time.perf_counter() - started) * 1000)
+        return ListingFetchResult(
+            html=html,
+            used_layer=used_layer,
+            last_error=last_error,
+            duration_ms=duration_ms,
+            deadline_skipped=deadline_skipped and not html,
+        )
+
+    def build_scrape_result_from_html(
+        self,
+        html: str | None,
+        url: str,
+        *,
+        custom_selectors: dict | None,
+        used_layer: str | None,
+        duration_ms: int,
+        last_error: str = "fetch_failed",
+        scrape_tier: int = 1,
+        requires_js: bool = False,
+    ) -> PoolScrapeResult:
+        """Build a PoolScrapeResult from fetched HTML (sync extraction only)."""
         raw_debug: str | None = None
         if html and not settings.decodo_enabled:
             raw_debug = html[:_MAX_DEBUG_RAW_HTML_CHARS]
@@ -220,13 +301,6 @@ class ScraperPool:
                 raw_html=raw_debug,
             )
 
-        # Z-JSDETECT (observe-only): structural shell detector. On a Tier-1
-        # httpx fetch with no extracted currency AND a non-product page-role,
-        # we WOULD escalate to a JS-capable layer — but in observe mode we
-        # only log. No escalation, no re-fetch, no result mutation. The parse
-        # is gated behind cheap pre-checks so the common path pays nothing.
-        # The broad except wraps pure diagnostics: observe-only logging must
-        # NEVER affect a real scrape outcome.
         try:
             if (
                 scrape_tier == 1
@@ -241,10 +315,14 @@ class ScraperPool:
                     merged_currency=merged.currency,
                     role=role,
                 ):
+                    layers = self._layer_order(
+                        requires_js=requires_js,
+                        scrape_tier=scrape_tier,
+                    )
                     remaining = [
                         layer
                         for layer in layers
-                        if layers.index(layer) > layers.index(used_layer)
+                        if used_layer and layers.index(layer) > layers.index(used_layer)
                     ]
                     next_layer = remaining[0] if remaining else None
                     logger.info(
@@ -551,19 +629,29 @@ class ScraperPool:
         self,
         layer_name: str,
         url: str,
+        *,
+        deadline_monotonic: float | None = None,
     ) -> tuple[str | None, str | None]:
         """Try layer up to FETCH_ATTEMPTS_PER_LAYER times; return (html, last_error_code)."""
         last_code: str | None = None
         for attempt in range(FETCH_ATTEMPTS_PER_LAYER):
-            html, err = await self._fetch_by_layer_once(layer_name, url)
+            html, err = await self._fetch_by_layer_once(
+                layer_name,
+                url,
+                deadline_monotonic=deadline_monotonic,
+            )
             if html:
                 return html, None
             last_code = err or "fetch_failed"
             if last_code in _NON_RETRIABLE_LAYER_ERRORS:
                 break
+            if last_code == DECODO_DEADLINE_ERROR:
+                break
             if attempt < FETCH_ATTEMPTS_PER_LAYER - 1:
                 await asyncio.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
         mapped = self._map_layer_error(last_code, layer_name)
+        if last_code == DECODO_DEADLINE_ERROR:
+            return None, DECODO_DEADLINE_ERROR
         return None, mapped
 
     def _map_layer_error(self, code: str | None, layer_name: str) -> str:
@@ -574,11 +662,20 @@ class ScraperPool:
             return f"{c}:{layer_name}"
         return f"fetch_failed:{layer_name}"
 
-    async def _fetch_by_layer_once(self, layer_name: str, url: str) -> tuple[str | None, str | None]:
+    async def _fetch_by_layer_once(
+        self,
+        layer_name: str,
+        url: str,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> tuple[str | None, str | None]:
         if layer_name == "decodo":
-            return await self._fetch_html_decodo(url)
+            return await self._fetch_html_decodo(url, deadline_monotonic=deadline_monotonic)
         if layer_name == "decodo_static":
-            return await self._fetch_html_decodo_static(url)
+            return await self._fetch_html_decodo_static(
+                url,
+                deadline_monotonic=deadline_monotonic,
+            )
         if layer_name == "httpx":
             return await self._fetch_html_httpx(url)
         if layer_name == "playwright":
@@ -651,14 +748,24 @@ class ScraperPool:
         layers.append("playwright")
         return layers
 
-    async def _fetch_html_decodo_static(self, url: str) -> tuple[str | None, str | None]:
-        return await self._fetch_html_decodo(url, render_js=False)
+    async def _fetch_html_decodo_static(
+        self,
+        url: str,
+        *,
+        deadline_monotonic: float | None = None,
+    ) -> tuple[str | None, str | None]:
+        return await self._fetch_html_decodo(
+            url,
+            render_js=False,
+            deadline_monotonic=deadline_monotonic,
+        )
 
     async def _fetch_html_decodo(
         self,
         url: str,
         *,
         render_js: bool = True,
+        deadline_monotonic: float | None = None,
     ) -> tuple[str | None, str | None]:
         """Fetch via Decodo API. Skip if disabled or credentials missing."""
         if not settings.decodo_enabled:
@@ -666,6 +773,8 @@ class ScraperPool:
         if not (settings.decodo_username and settings.decodo_password):
             logger.debug("Decodo credentials not configured, skipping")
             return None, "fetch_failed"
+        if not await acquire_decodo_token(deadline_monotonic):
+            return None, DECODO_DEADLINE_ERROR
         auth = base64.b64encode(
             f"{settings.decodo_username}:{settings.decodo_password}".encode()
         ).decode()

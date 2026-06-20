@@ -34,8 +34,9 @@ from app.modules.scraper.pipeline.activity_pulse import (
     pulse_parent_heartbeat_sync,
 )
 from app.modules.scraper.pipeline.worker_log_relay import pipeline_worker_log_relay
+from app.modules.scraper.decodo_limiter import SCRAPE_FETCH_PARALLELISM
 from app.modules.scraper.scraper_pool import ScraperPool
-from app.modules.scraper.service import GlobalScrapeService
+from app.modules.scraper.service import GlobalScrapeService, _run_coro_in_worker
 from app.workers.celery_app import celery_app
 
 slog = structlog.get_logger(__name__)
@@ -188,6 +189,71 @@ def _persist_technical_error_log(
                 pass
     finally:
         db.close()
+
+
+def _iter_chunks(items: list, size: int):
+    """Yield successive chunks of *items* with at most *size* elements."""
+    chunk_size = max(int(size), 1)
+    for offset in range(0, len(items), chunk_size):
+        yield items[offset : offset + chunk_size]
+
+
+def _parallel_fetch_listings(
+    pool: ScraperPool,
+    batch_specs: list[dict],
+    *,
+    deadline_monotonic: float | None,
+) -> list:
+    """Run listing fetches concurrently in one asyncio event loop."""
+
+    async def _run() -> list:
+        return list(
+            await asyncio.gather(
+                *[
+                    pool.fetch_listing_html(
+                        spec["url"],
+                        requires_js=spec["requires_js"],
+                        scrape_tier=spec["scrape_tier"],
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                    for spec in batch_specs
+                ],
+                return_exceptions=True,
+            )
+        )
+
+    return _run_coro_in_worker(_run())
+
+
+def _handle_listing_scrape_exception(
+    db,
+    lid: UUID,
+    *,
+    scrape_job_id: UUID | None,
+    parent_job_id: UUID | None,
+    index: int,
+) -> None:
+    """Persist technical_error for an unexpected listing-level failure."""
+    tb = traceback.format_exc()
+    slog.exception("scrape_listing_failed", listing_id=str(lid), traceback=tb)
+    slog.error(
+        "exception_before_technical_error_log",
+        listing_id=str(lid),
+        exc_type="Exception",
+        exc_message=tb[:2000],
+    )
+    try:
+        db.rollback()
+    except Exception:
+        slog.exception("rollback_after_listing_failure", listing_id=str(lid))
+    _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
+    if scrape_job_id is not None:
+        _pulse_scrape_activity(
+            scrape_job_id,
+            f"scrape error {str(lid)[:8]}",
+            parent_job_id=parent_job_id,
+            force_db=index % 10 == 0,
+        )
 
 
 @celery_app.task(name="discover_all_marketplaces")
@@ -500,58 +566,99 @@ def _run_scrape_all_pool_impl(
                     force_db=True,
                 )
 
-            for index, lid in enumerate(stale_ids):
+            for sub_ids in _iter_chunks(stale_ids, SCRAPE_FETCH_PARALLELISM):
                 if (
                     deadline_monotonic is not None
                     and time.monotonic() >= deadline_monotonic
                 ):
                     deadline_exhausted = True
                     break
-                try:
+
+                batch_specs: list[dict] = []
+                lid_order: list[UUID] = []
+                for lid in sub_ids:
                     listing_row = db.get(FactListing, lid)
-                    url_hint = (listing_row.external_url if listing_row else "")[:160]
-                    slog.info("scrape_listing_start", listing_id=str(lid), url=url_hint)
-                    r = svc.scrape_product(lid)
-                    slog.info(
-                        "scrape_listing_end",
-                        listing_id=str(lid),
-                        success=r.success,
-                        err=(r.error or "")[:120],
+                    if listing_row is None:
+                        continue
+                    requires_js, scrape_tier, _selectors = svc._listing_scrape_context(
+                        listing_row
                     )
-                    if scrape_job_id is not None:
-                        status_label = "ok" if r.success else "fail"
-                        _pulse_scrape_activity(
-                            scrape_job_id,
-                            f"scrape {status_label} {url_hint}",
-                            parent_job_id=parent_job_id,
-                            force_db=index % 10 == 0,
-                        )
-                    if r.success:
-                        ok += 1
-                    else:
-                        failed += 1
-                except Exception as exc:
-                    tb = traceback.format_exc()
-                    slog.exception("scrape_listing_failed", listing_id=str(lid), traceback=tb)
-                    slog.error(
-                        "exception_before_technical_error_log",
-                        listing_id=str(lid),
-                        exc_type=exc.__class__.__name__,
-                        exc_message=str(exc)[:2000],
+                    batch_specs.append(
+                        {
+                            "url": listing_row.external_url,
+                            "requires_js": requires_js,
+                            "scrape_tier": scrape_tier,
+                        }
                     )
+                    lid_order.append(lid)
+
+                if not lid_order:
+                    continue
+
+                fetch_results = _parallel_fetch_listings(
+                    scraper_pool,
+                    batch_specs,
+                    deadline_monotonic=deadline_monotonic,
+                )
+
+                for index, (lid, fetch_result) in enumerate(
+                    zip(lid_order, fetch_results, strict=True)
+                ):
+                    if (
+                        deadline_monotonic is not None
+                        and time.monotonic() >= deadline_monotonic
+                    ):
+                        deadline_exhausted = True
+                        break
                     try:
-                        db.rollback()
-                    except Exception:
-                        slog.exception("rollback_after_listing_failure", listing_id=str(lid))
-                    _persist_technical_error_log(lid, tb, scrape_job_id=scrape_job_id)
-                    if scrape_job_id is not None:
-                        _pulse_scrape_activity(
-                            scrape_job_id,
-                            f"scrape error {str(lid)[:8]}",
-                            parent_job_id=parent_job_id,
-                            force_db=True,
+                        if isinstance(fetch_result, BaseException):
+                            raise fetch_result
+                        if fetch_result.deadline_skipped:
+                            slog.info(
+                                "scrape_listing_deadline_skip",
+                                listing_id=str(lid),
+                            )
+                            continue
+
+                        listing_row = db.get(FactListing, lid)
+                        url_hint = (listing_row.external_url if listing_row else "")[:160]
+                        slog.info(
+                            "scrape_listing_start",
+                            listing_id=str(lid),
+                            url=url_hint,
                         )
-                    failed += 1
+                        r = svc.scrape_listing_from_fetch(lid, fetch_result)
+                        if r is None:
+                            continue
+                        slog.info(
+                            "scrape_listing_end",
+                            listing_id=str(lid),
+                            success=r.success,
+                            err=(r.error or "")[:120],
+                        )
+                        if scrape_job_id is not None:
+                            status_label = "ok" if r.success else "fail"
+                            _pulse_scrape_activity(
+                                scrape_job_id,
+                                f"scrape {status_label} {url_hint}",
+                                parent_job_id=parent_job_id,
+                                force_db=index % 10 == 0,
+                            )
+                        if r.success:
+                            ok += 1
+                        else:
+                            failed += 1
+                    except Exception:
+                        _handle_listing_scrape_exception(
+                            db,
+                            lid,
+                            scrape_job_id=scrape_job_id,
+                            parent_job_id=parent_job_id,
+                            index=index,
+                        )
+                        failed += 1
+                if deadline_exhausted:
+                    break
             if deadline_exhausted:
                 break
     finally:

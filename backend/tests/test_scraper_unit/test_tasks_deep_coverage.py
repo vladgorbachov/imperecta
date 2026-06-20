@@ -9,7 +9,7 @@ import pytest
 
 from app.modules.scraper import tasks as scraper_tasks
 from app.modules.scraper.discovery import DiscoveryResult
-from app.modules.scraper.scraper_pool import PoolScrapeResult
+from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult
 
 
 def test_discover_all_marketplaces_mocked_engine(monkeypatch):
@@ -168,10 +168,34 @@ def test_discover_single_success_mocked(monkeypatch):
     assert out["products_new"] == 2
 
 
+def _wire_batch_scrape_svc(monkeypatch, *, persist_side_effect):
+    svc = MagicMock()
+    svc._listing_scrape_context.return_value = (False, 1, {})
+    svc.scrape_listing_from_fetch.side_effect = persist_side_effect
+    monkeypatch.setattr(scraper_tasks, "GlobalScrapeService", lambda *_a, **_k: svc)
+    monkeypatch.setattr(
+        scraper_tasks,
+        "_parallel_fetch_listings",
+        lambda _pool, specs, deadline_monotonic=None: [
+            ListingFetchResult(
+                html="<html/>",
+                used_layer="httpx",
+                last_error="",
+                duration_ms=1,
+            )
+            for _ in specs
+        ],
+    )
+    return svc
+
+
 def test_run_scrape_all_pool_impl_counts_failed_without_exception(monkeypatch):
     lid = uuid4()
     listing = MagicMock()
     listing.external_url = "https://example.com/p"
+
+    listing.scraper_config = {}
+    listing.marketplace_id = uuid4()
 
     db = MagicMock()
     row_result = MagicMock()
@@ -180,9 +204,13 @@ def test_run_scrape_all_pool_impl_counts_failed_without_exception(monkeypatch):
     db.get.return_value = listing
 
     monkeypatch.setattr(scraper_tasks, "sync_session_factory", lambda: db)
-    monkeypatch.setattr(
-        "app.modules.scraper.service.GlobalScrapeService.scrape_product",
-        lambda self, x: PoolScrapeResult(success=False, url="https://example.com/p", error="fetch_failed"),
+    _wire_batch_scrape_svc(
+        monkeypatch,
+        persist_side_effect=lambda _lid, _fetch: PoolScrapeResult(
+            success=False,
+            url="https://example.com/p",
+            error="fetch_failed",
+        ),
     )
 
     out = scraper_tasks._run_scrape_all_pool_impl()
@@ -194,6 +222,9 @@ def test_run_scrape_all_pool_impl_happy_path(monkeypatch):
     listing = MagicMock()
     listing.external_url = "https://example.com/p"
 
+    listing.scraper_config = {}
+    listing.marketplace_id = uuid4()
+
     db = MagicMock()
     row_result = MagicMock()
     row_result.all.return_value = [(lid,)]
@@ -201,9 +232,12 @@ def test_run_scrape_all_pool_impl_happy_path(monkeypatch):
     db.get.return_value = listing
 
     monkeypatch.setattr(scraper_tasks, "sync_session_factory", lambda: db)
-    monkeypatch.setattr(
-        "app.modules.scraper.service.GlobalScrapeService.scrape_product",
-        lambda self, x: PoolScrapeResult(success=True, url="https://example.com/p"),
+    _wire_batch_scrape_svc(
+        monkeypatch,
+        persist_side_effect=lambda _lid, _fetch: PoolScrapeResult(
+            success=True,
+            url="https://example.com/p",
+        ),
     )
 
     out = scraper_tasks._run_scrape_all_pool_impl()
@@ -217,21 +251,22 @@ def test_run_scrape_all_pool_impl_listing_failure_persists(monkeypatch):
     listing = MagicMock()
     listing.external_url = "https://example.com/p"
 
+    listing.scraper_config = {}
+    listing.marketplace_id = uuid4()
+
     db = MagicMock()
     row_result = MagicMock()
     row_result.all.return_value = [(lid,)]
     db.execute.return_value = row_result
     db.get.return_value = listing
+    db.rollback = MagicMock()
 
     monkeypatch.setattr(scraper_tasks, "sync_session_factory", lambda: db)
 
-    def boom(self, x):
+    def boom(_lid, _fetch):
         raise ValueError("scrape failed")
 
-    monkeypatch.setattr(
-        "app.modules.scraper.service.GlobalScrapeService.scrape_product",
-        boom,
-    )
+    _wire_batch_scrape_svc(monkeypatch, persist_side_effect=boom)
     persisted: list[tuple] = []
 
     # Mirror the production signature so the except handler's call
