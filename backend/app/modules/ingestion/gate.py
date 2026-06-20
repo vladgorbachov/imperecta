@@ -135,9 +135,9 @@ def evaluate_gate(
     """Run the 5-check persistence gate on an ExtractedProduct payload.
 
     Logic matches the inline block previously in ``GlobalScrapeService.scrape_product``
-    byte-for-byte. ``forced_log_status`` is set to ``parse_error`` ONLY when
-    the gate rejects for a currency-raw or country-mismatch reason (matches
-    the original ``forced_log_status = "parse_error"`` branches).
+    byte-for-byte. ``forced_log_status`` is set to ``currency_rejected`` when
+    the gate rejects for a currency-raw or country-mismatch reason so the class
+    is visible instead of being collapsed into ``parse_error``.
     """
     product_name_ok = bool(
         data is not None
@@ -170,10 +170,10 @@ def evaluate_gate(
             skip_reason = SKIP_PRICE_NOT_POSITIVE
         elif not currency_raw_sane_ok:
             skip_reason = SKIP_CURRENCY_RAW_TOO_LONG
-            forced_log_status = "parse_error"
+            forced_log_status = "currency_rejected"
         elif not currency_country_match_ok:
             skip_reason = SKIP_CURRENCY_COUNTRY_MISMATCH
-            forced_log_status = "parse_error"
+            forced_log_status = "currency_rejected"
 
     return GateOutcome(
         product_name_ok=product_name_ok,

@@ -54,6 +54,7 @@ _SCRAPE_LOG_STATUSES = (
     "not_found",
     "price_not_found",
     "parse_error",
+    "currency_rejected",
     "missing_critical_data",
     "technical_error",
 )
@@ -561,6 +562,8 @@ class GlobalScrapeService:
             error = (result.error or "").lower()
             if error.startswith("exception:"):
                 return "technical_error"
+            if "currency_rejected" in error:
+                return "currency_rejected"
             if "parse_error" in error:
                 return "parse_error"
             if "price_not_found" in error:

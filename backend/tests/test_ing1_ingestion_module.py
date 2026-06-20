@@ -125,7 +125,7 @@ def test_gate_rejects_currency_raw_glued_text_klick_ee_case() -> None:
     assert not outcome.passed
     assert not outcome.currency_raw_sane_ok
     assert outcome.skip_reason == SKIP_CURRENCY_RAW_TOO_LONG
-    assert outcome.forced_log_status == "parse_error"
+    assert outcome.forced_log_status == "currency_rejected"
 
 
 def test_gate_rejects_currency_country_mismatch() -> None:
@@ -137,7 +137,7 @@ def test_gate_rejects_currency_country_mismatch() -> None:
     assert not outcome.passed
     assert not outcome.currency_country_match_ok
     assert outcome.skip_reason == SKIP_CURRENCY_COUNTRY_MISMATCH
-    assert outcome.forced_log_status == "parse_error"
+    assert outcome.forced_log_status == "currency_rejected"
 
 
 def test_gate_rejects_missing_currency() -> None:
@@ -293,8 +293,8 @@ def test_persist_extracted_no_change_path(patched_ingestion) -> None:
     db.commit.assert_called_once()
 
 
-def test_persist_extracted_gate_skip_returns_parse_error(patched_ingestion) -> None:
-    """Currency-raw too long -> persisted=False, log_status='parse_error'."""
+def test_persist_extracted_gate_skip_returns_currency_rejected(patched_ingestion) -> None:
+    """Currency-raw too long -> persisted=False, log_status='currency_rejected'."""
     db = MagicMock()
     db.get.return_value = SimpleNamespace(name="X", name_normalized="x", image_url=None)
     listing = _make_listing()
@@ -314,7 +314,7 @@ def test_persist_extracted_gate_skip_returns_parse_error(patched_ingestion) -> N
     assert fact_price_rows == []
 
     assert result.persisted is False
-    assert result.log_status == "parse_error"
+    assert result.log_status == "currency_rejected"
     assert result.skip_reason == SKIP_CURRENCY_RAW_TOO_LONG
 
 

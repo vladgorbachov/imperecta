@@ -42,6 +42,8 @@ def test_payload_has_product_name_field():
 
 def test_determine_log_status_failed_variants():
     svc = GlobalScrapeService(MagicMock(), MagicMock())
+    r = PoolScrapeResult(success=False, url="u", error="currency_rejected:SEK")
+    assert svc._determine_log_status(r) == "currency_rejected"
     r = PoolScrapeResult(success=False, url="u", error="parse_error:bad")
     assert svc._determine_log_status(r) == "parse_error"
     r = PoolScrapeResult(success=False, url="u", error="price_not_found")

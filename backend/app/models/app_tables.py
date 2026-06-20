@@ -452,8 +452,8 @@ class ScrapeLog(Base):
         CheckConstraint(
             "status IN ("
             "'success','error','timeout','blocked','captcha',"
-            "'not_found','price_not_found','parse_error','missing_critical_data',"
-            "'technical_error'"
+            "'not_found','price_not_found','parse_error','currency_rejected',"
+            "'missing_critical_data','technical_error'"
             ")",
             name="ck_scrape_logs_status",
         ),

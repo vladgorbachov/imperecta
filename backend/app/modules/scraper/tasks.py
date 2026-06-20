@@ -49,6 +49,7 @@ _SCRAPE_LOG_STATUSES = (
     "not_found",
     "price_not_found",
     "parse_error",
+    "currency_rejected",
     "missing_critical_data",
     "technical_error",
 )

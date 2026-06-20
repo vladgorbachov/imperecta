@@ -107,11 +107,55 @@ _MAX_REALISTIC_PRICE = 5_000_000.0
 # Minimum count of structurally-identical elements to classify as a product grid.
 REPEATED_STRUCTURE_MIN_COUNT = 6
 
+_DATE_PATTERNS = (
+    re.compile(r"\d{4}[-/.]\d{2}[-/.]\d{2}"),
+    re.compile(r"\d{2}[-/.]\d{2}[-/.]\d{4}"),
+)
+_BARE_YEAR_RE = re.compile(r"^\d{4}$")
+
+
+def _token_boundary_pattern(token: str) -> re.Pattern[str]:
+    """Word-boundary regex for an alphabetic currency token (not substring match)."""
+    return re.compile(
+        r"(?<![\w])" + re.escape(token) + r"(?![\w])",
+        re.IGNORECASE,
+    )
+
+
+def _number_overlaps_date_region(raw: str, start: int, end: int) -> bool:
+    """True when *start:end* overlaps a YYYY-MM-DD / DD-MM-YYYY style date span."""
+    for pattern in _DATE_PATTERNS:
+        for date_match in pattern.finditer(raw):
+            if start < date_match.end() and end > date_match.start():
+                return True
+    return False
+
+
+def _is_bare_year_without_currency(token: str, context: str) -> bool:
+    """Reject a standalone 4-digit year with no adjacent currency token."""
+    stripped = token.strip()
+    if not _BARE_YEAR_RE.fullmatch(stripped):
+        return False
+    year = int(stripped)
+    if year < 1900 or year > 2099:
+        return False
+    return _detect_currency(context) is None
+
 
 def parse_currency_symbol(text: str) -> str | None:
-    """Detect currency ISO code from symbol characters in *text*."""
+    """Detect currency ISO code from symbol characters in *text*.
+
+    Single-char symbols (€, $, £) match by presence. Multi-char alphabetic
+    symbols (kr, zł, lei) require a token boundary so substrings inside hashes
+    do not match.
+    """
+    lowered = text.lower()
     for symbol, code in _CURRENCY_SYMBOLS.items():
-        if symbol in text.lower():
+        if len(symbol) == 1:
+            if symbol in text:
+                return code
+            continue
+        if _token_boundary_pattern(symbol).search(lowered):
             return code
     return None
 
@@ -119,8 +163,8 @@ def parse_currency_symbol(text: str) -> str | None:
 def parse_currency_code(text: str) -> str | None:
     """Detect currency ISO code from textual code / abbreviation near a price."""
     lowered = text.lower()
-    for token, code in _CURRENCY_TEXT_CODES.items():
-        if token in lowered:
+    for token, code in sorted(_CURRENCY_TEXT_CODES.items(), key=lambda item: -len(item[0])):
+        if _token_boundary_pattern(token).search(lowered):
             return code
     return None
 
@@ -206,7 +250,11 @@ def parse_price_text(text: str) -> float | None:
             continue
 
         start, end = match.span()
+        if _number_overlaps_date_region(lowered, start, end):
+            continue
         context = lowered[max(0, start - 20):min(len(lowered), end + 20)]
+        if _is_bare_year_without_currency(token, context):
+            continue
         score = 0
         if _detect_currency(context):
             score += 8

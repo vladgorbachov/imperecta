@@ -584,6 +584,52 @@ def extract_with_custom_selectors(
     return result
 
 
+_PRICE_META_PROPERTIES = frozenset(
+    {
+        "product:price:amount",
+        "product:price:currency",
+        "og:price:amount",
+        "og:price:currency",
+    }
+)
+
+
+def _is_price_bearing_meta(tag) -> bool:
+    """True only for meta tags that explicitly carry a product price signal."""
+    itemprop = str(tag.get("itemprop", "")).lower()
+    if itemprop and "price" in itemprop:
+        return True
+    prop = str(tag.get("property", "")).lower()
+    if prop in _PRICE_META_PROPERTIES:
+        return True
+    if prop.startswith("product:price:") or prop.startswith("og:price:"):
+        return True
+    name = str(tag.get("name", "")).lower()
+    if name in {"price", "product:price"}:
+        return True
+    if name.endswith(":price"):
+        return True
+    return False
+
+
+def _node_has_price_context(tag, text: str) -> bool:
+    """True when a candidate node or its text has proof the number is a price."""
+    attrs = " ".join(
+        [
+            str(tag.get("class", "")),
+            str(tag.get("id", "")),
+            str(tag.get("itemprop", "")),
+            str(tag.get("property", "")),
+            str(tag.get("name", "")),
+        ]
+    ).lower()
+    if "price" in attrs:
+        return True
+    if _detect_currency(text):
+        return True
+    return False
+
+
 def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
     """Level 4: Auto-detect using universal heuristics."""
     result = ExtractedProduct()
@@ -604,13 +650,16 @@ def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
 
     candidates: list[tuple[int, str]] = []
     for tag in soup.find_all(["span", "div", "p", "strong", "meta"]):
-        text = ""
         if tag.name == "meta":
+            if not _is_price_bearing_meta(tag):
+                continue
             content = tag.get("content")
             text = str(content).strip() if content else ""
         else:
             text = tag.get_text(strip=True)
         if not text:
+            continue
+        if not _node_has_price_context(tag, text):
             continue
         if parse_price_text(text) is None:
             continue
@@ -626,7 +675,7 @@ def extract_auto_detect(soup: BeautifulSoup, url: str = "") -> ExtractedProduct:
             score += 10
         if "current" in attrs or "final" in attrs:
             score += 5
-        if any(sym in text.lower() for sym in _CURRENCY_SYMBOLS):
+        if _detect_currency(text):
             score += 3
         candidates.append((score, text))
 
