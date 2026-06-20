@@ -1,23 +1,5 @@
 /* shadcn component overrides — glassmorphism design system */
 
-/* Button — primary / default */
-.btn-primary,
-button[data-variant="default"],
-[data-slot="button"][data-variant="default"] {
-  background: linear-gradient(135deg, var(--accent-dim), var(--accent)) !important;
-  box-shadow: 0 0 16px var(--accent-glow), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
-  border: none !important;
-  color: var(--primary-foreground) !important;
-  font-weight: 600;
-  transition: color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
-}
-.btn-primary:hover,
-button[data-variant="default"]:hover,
-[data-slot="button"][data-variant="default"]:hover {
-  box-shadow: 0 0 24px var(--accent-glow-strong), 0 4px 16px rgba(0, 0, 0, 0.4) !important;
-  transform: translateY(-1px);
-}
-
 /* Input */
 input,
 select,

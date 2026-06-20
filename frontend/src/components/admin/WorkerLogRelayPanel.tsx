@@ -4,7 +4,8 @@ import { Terminal } from "lucide-react";
 import { useParsingWorkerLogRelay } from "@/hooks/useAdmin";
 import { cn } from "@/lib/utils";
 
-const VISIBLE_LINES = 3;
+/** Minimum visible rows when the buffer is short; viewport fits ~10 lines at leading-5. */
+const VISIBLE_LINES = 10;
 
 interface WorkerLogRelayPanelProps {
   jobId: string | null;
@@ -12,7 +13,7 @@ interface WorkerLogRelayPanelProps {
 }
 
 /**
- * Live tail of celery worker deploy logs (Redis relay), 3 visible lines with scroll.
+ * Live tail of celery worker deploy logs (Redis relay), ~10 visible lines with scroll.
  */
 export function WorkerLogRelayPanel({ jobId, enabled }: WorkerLogRelayPanelProps) {
   const { t } = useTranslation();
@@ -78,24 +79,26 @@ export function WorkerLogRelayPanel({ jobId, enabled }: WorkerLogRelayPanelProps
         aria-live="polite"
         aria-label={t("admin.dataCollection.workerLogRelay")}
       >
-        <div
-          className={cn(
-            "flex flex-col gap-0.5 transition-transform duration-300 ease-out",
-            animating && "-translate-y-0.5",
-          )}
-        >
-          {padded.map((line, index) => (
-            <div
-              key={`${index}-${line.slice(0, 24)}-${bufferRef.current.length}`}
-              className={cn(
-                "truncate whitespace-nowrap",
-                !line && "text-zinc-600 [.light_&]:text-sky-300/60",
-                line && index === padded.length - 1 && animating && "text-emerald-300 [.light_&]:text-sky-50",
-              )}
-            >
-              {line || t("admin.dataCollection.workerLogRelayWaiting")}
-            </div>
-          ))}
+        <div className="max-h-[13.625rem] overflow-y-auto">
+          <div
+            className={cn(
+              "flex flex-col gap-0.5 transition-transform duration-300 ease-out",
+              animating && "-translate-y-0.5",
+            )}
+          >
+            {padded.map((line, index) => (
+              <div
+                key={`${index}-${line.slice(0, 24)}-${bufferRef.current.length}`}
+                className={cn(
+                  "truncate whitespace-nowrap",
+                  !line && "text-zinc-600 [.light_&]:text-sky-300/60",
+                  line && index === padded.length - 1 && animating && "text-emerald-300 [.light_&]:text-sky-50",
+                )}
+              >
+                {line || t("admin.dataCollection.workerLogRelayWaiting")}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

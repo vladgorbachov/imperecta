@@ -75,6 +75,69 @@
   pointer-events: none;
 }
 
+/* Default Button — glass fill + brand-gradient border (GB1) */
+.btn-glass {
+  position: relative;
+  background: var(--btn-glass-bg);
+  color: var(--btn-glass-text);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--btn-glass-glow);
+  isolation: isolate;
+  transition:
+    box-shadow var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+.btn-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--btn-glass-border-grad);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.btn-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
+  opacity: 0.25;
+  pointer-events: none;
+}
+.btn-glass:hover {
+  background: var(--btn-glass-bg-hover);
+  box-shadow: var(--btn-glass-glow-hover);
+  transform: translateY(-1px);
+}
+.btn-glass:active {
+  transform: translateY(0);
+  box-shadow: var(--btn-glass-glow);
+}
+.btn-glass:disabled,
+.btn-glass[aria-disabled="true"] {
+  opacity: 0.5;
+  box-shadow: none;
+  transform: none;
+  cursor: not-allowed;
+}
+.btn-glass:disabled::after,
+.btn-glass[aria-disabled="true"]::after {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-glass:hover,
+  .btn-glass:active {
+    transform: none;
+  }
+}
+
 /* Glow dot — ambient light source */
 .glow-dot {
   position: absolute;

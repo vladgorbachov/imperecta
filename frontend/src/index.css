@@ -153,6 +153,14 @@
   --motion-slow: 300ms; /* entrances, overlays, larger transitions */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* gentle deceleration */
   --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+
+  /* Glass button (default variant) */
+  --btn-glass-bg: color-mix(in srgb, var(--accent) 10%, transparent);
+  --btn-glass-bg-hover: color-mix(in srgb, var(--accent) 16%, transparent);
+  --btn-glass-border-grad: linear-gradient(135deg, #38bdf8, #3b82f6 50%, #6366f1);
+  --btn-glass-glow: 0 0 18px rgba(56, 189, 248, 0.28), 0 2px 10px rgba(0, 0, 0, 0.35);
+  --btn-glass-glow-hover: 0 0 26px rgba(99, 102, 241, 0.4), 0 4px 16px rgba(0, 0, 0, 0.45);
+  --btn-glass-text: #f0f6ff;
 }
 
 .light {
@@ -240,6 +248,12 @@
   --secondary: #f1f5f9;
   --input: var(--glass-border);
   --ring: 199 89% 42%;
+
+  --btn-glass-bg: color-mix(in srgb, var(--accent) 12%, white);
+  --btn-glass-bg-hover: color-mix(in srgb, var(--accent) 20%, white);
+  --btn-glass-glow: 0 1px 4px rgba(15, 23, 42, 0.12);
+  --btn-glass-glow-hover: 0 2px 10px rgba(59, 130, 246, 0.25);
+  --btn-glass-text: #0f172a;
 }
 
 @theme inline {
