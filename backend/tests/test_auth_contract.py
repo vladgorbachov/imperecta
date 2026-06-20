@@ -71,7 +71,7 @@ async def test_login_wrong_password_401(client):
 @pytest.mark.asyncio
 async def test_me_returns_user_profile(client, auth_headers):
     """Me endpoint returns user profile with expected fields."""
-    resp = await client.get("/api/auth/me", headers=auth_headers)
+    resp = await client.get("/api/users/me", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "id" in data
@@ -84,7 +84,7 @@ async def test_me_returns_user_profile(client, auth_headers):
 @pytest.mark.asyncio
 async def test_me_without_auth_401(client):
     """Me without auth returns 401 or 403."""
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/users/me")
     assert resp.status_code in (401, 403)
 
 
@@ -105,9 +105,9 @@ async def test_register_invalid_language_422(client):
 
 @pytest.mark.asyncio
 async def test_put_me_updates_profile(client, auth_headers):
-    """PUT /api/auth/me updates profile and returns user."""
+    """PUT /api/users/me updates profile and returns user."""
     resp = await client.put(
-        "/api/auth/me",
+        "/api/users/me",
         headers=auth_headers,
         json={
             "name": "Updated Name",
@@ -124,10 +124,10 @@ async def test_put_me_updates_profile(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_put_me_with_data_url_avatar(client, auth_headers):
-    """PUT /api/auth/me accepts data URL avatar (base64 image)."""
+    """PUT /api/users/me accepts data URL avatar (base64 image)."""
     data_url = "data:image/png;base64,iVBORw0KGgo="  # minimal valid base64
     resp = await client.put(
-        "/api/auth/me",
+        "/api/users/me",
         headers=auth_headers,
         json={"avatar_url": data_url},
     )

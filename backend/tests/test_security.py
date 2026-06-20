@@ -83,7 +83,7 @@ async def test_change_initial_password_requires_force_flag(client, auth_headers)
 @pytest.mark.asyncio
 async def test_me_returns_user_profile_without_sensitive_fields(client, auth_headers):
     """Me endpoint does not expose password_hash or internal fields."""
-    resp = await client.get("/api/auth/me", headers=auth_headers)
+    resp = await client.get("/api/users/me", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "password_hash" not in data
@@ -116,7 +116,7 @@ async def test_user_a_cannot_overwrite_user_b_preferences(client, auth_headers, 
 async def test_put_me_rejects_extra_fields(client, auth_headers):
     """PUT /me does not accept is_superuser or other privileged fields."""
     resp = await client.put(
-        "/api/auth/me",
+        "/api/users/me",
         headers=auth_headers,
         json={
             "name": "Updated",

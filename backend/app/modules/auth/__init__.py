@@ -8,6 +8,6 @@ Public surface:
     - schemas: UserRegister, UserLogin, TokenResponse, RefreshTokenRequest,
       ChangeInitialPasswordRequest.
 
-The /auth/me and /auth/telegram-link/disconnect routes still live in
-app.modules.core.api_auth pending the users and telegram extraction passes.
+Self-profile (GET+PUT /users/me) lives in app.modules.users.api.self_router
+(/api/users/me). Telegram link/disconnect routes live in app.modules.telegram.
 """

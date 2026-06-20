@@ -7,9 +7,9 @@ Verifies the auth surface extraction:
    surface (api / service / schemas).
 2. The four canonical /auth/* paths (register, login, change-initial-password,
    refresh) are still mounted under /api/auth/* exactly.
-3. The remaining core routes (/me GET+PUT, /auth/telegram-link,
-   /auth/telegram-disconnect) still mount from ``app.modules.core.api_auth``
-   (they migrate in the users/telegram passes).
+3. Self-profile (/me GET+PUT) mounts at ``/api/users/me`` via
+   ``app.modules.users.api.self_router`` (CORE-USERS1). Telegram routes
+   mount from ``app.modules.telegram`` (CORE-TG1).
 4. The old import path ``app.modules.core.auth.service`` is gone; every
    previous importer (common.deps, core.admin_service, admin.parsing_admin,
    core.api_auth-callers) points at ``app.modules.auth.service``.
