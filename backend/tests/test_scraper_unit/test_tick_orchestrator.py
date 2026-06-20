@@ -315,7 +315,7 @@ async def test_tick_scrape_phase_dispatches_children(monkeypatch):
     monkeypatch.setattr(
         tick_mod,
         "_build_scrape_dispatch_queue",
-        AsyncMock(return_value=(["a", "b", "c"], 0)),
+        AsyncMock(return_value=(["a", "b", "c"], 0, {"a": 1, "b": 1, "c": 1})),
     )
     created_ids = [uuid4() for _ in range(MAX_PARALLEL_SCRAPE)]
     create_mock = AsyncMock(side_effect=created_ids)
@@ -373,7 +373,7 @@ async def test_tick_scrape_phase_advances_to_complete_when_drained(monkeypatch):
     monkeypatch.setattr(
         tick_mod,
         "_build_scrape_dispatch_queue",
-        AsyncMock(return_value=([], 0)),
+        AsyncMock(return_value=([], 0, {})),
     )
     create_mock = AsyncMock()
     monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
@@ -438,7 +438,7 @@ async def test_tick_scrape_phase_first_tick_builds_queue(monkeypatch):
     monkeypatch.setattr(
         tick_mod,
         "_build_scrape_dispatch_queue",
-        AsyncMock(return_value=(["a", "b"], 0)),
+        AsyncMock(return_value=(["a", "b"], 0, {"a": 1, "b": 1})),
     )
     created_ids = [uuid4() for _ in range(2)]
     create_mock = AsyncMock(side_effect=created_ids)

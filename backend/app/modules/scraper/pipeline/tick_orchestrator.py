@@ -421,20 +421,54 @@ async def _build_scrape_dispatch_queue(
     parent_id: UUID,
     all_codes: list[str],
     cohort_anchor: datetime | None,
-) -> tuple[list[str], int]:
-    """Return (eligible codes for dispatch, count of cohort-drained MPs)."""
+) -> tuple[list[str], int, dict[str, int]]:
+    """Return (eligible codes for dispatch, cohort-drained count, remainder per MP)."""
     active_codes = await _active_scrape_marketplace_codes(db, parent_id)
     eligible: list[str] = []
+    remainders: dict[str, int] = {}
     drained = 0
     for code in all_codes:
         remainder = await _cohort_remainder(db, code, cohort_anchor)
+        remainders[code] = remainder
         if remainder == 0:
             drained += 1
             continue
         if code in active_codes:
             continue
         eligible.append(code)
-    return eligible, drained
+    return eligible, drained, remainders
+
+
+def _parse_last_dispatched_at(raw: str | None) -> datetime:
+    """Parse ISO timestamp; missing/invalid sorts as oldest (never dispatched)."""
+    if not isinstance(raw, str) or not raw.strip():
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _pick_next_scrape_marketplace(
+    eligible: list[str],
+    last_dispatched: dict[str, str],
+    remainders: dict[str, int],
+) -> str:
+    """Pick the eligible MP with oldest last_dispatched_at (never-dispatched first).
+
+    Tie-break: higher cohort_remainder, then marketplace_code ascending.
+    """
+    return min(
+        eligible,
+        key=lambda code: (
+            _parse_last_dispatched_at(last_dispatched.get(code)),
+            -remainders.get(code, 0),
+            code,
+        ),
+    )
 
 
 _NON_TERMINAL_TICK_PHASES = frozenset({"discovery", "scrape"})
@@ -588,6 +622,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 metadata["scrape_marketplace_codes"] = scrape_codes
                 metadata["scrape_queue"] = list(scrape_codes)
                 metadata["scrape_total"] = len(scrape_codes)
+                metadata.setdefault("scrape_last_dispatched_at", {})
                 metadata["scrape_phase_started_at"] = datetime.now(
                     timezone.utc
                 ).isoformat()
@@ -605,13 +640,22 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 dispatched = True
 
             active = await _count_active_scrape_children(db, parent_job_id)
-            queue, drained_count = await _build_scrape_dispatch_queue(
+            queue, drained_count, remainders = await _build_scrape_dispatch_queue(
                 db, parent_job_id, all_codes, cohort_anchor
             )
             from app.modules.scraper.tasks import scrape_one_marketplace
 
+            last_dispatched_raw = metadata.get("scrape_last_dispatched_at")
+            if not isinstance(last_dispatched_raw, dict):
+                last_dispatched_raw = {}
+                metadata["scrape_last_dispatched_at"] = last_dispatched_raw
+            last_dispatched: dict[str, str] = last_dispatched_raw
+
             while active < MAX_PARALLEL_SCRAPE and queue:
-                code = queue.pop(0)
+                code = _pick_next_scrape_marketplace(
+                    queue, last_dispatched, remainders
+                )
+                queue.remove(code)
                 child_id = await _create_pending_scrape_child(
                     db, parent_job_id, code
                 )
@@ -619,6 +663,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                     continue
                 await db.commit()
                 scrape_one_marketplace.apply_async([str(child_id)])
+                last_dispatched[code] = datetime.now(timezone.utc).isoformat()
                 active += 1
                 dispatched = True
 

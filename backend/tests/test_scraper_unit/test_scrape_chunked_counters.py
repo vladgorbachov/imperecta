@@ -254,7 +254,7 @@ async def test_tick_redispatches_mp_with_cohort_remainder(monkeypatch):
     monkeypatch.setattr(
         tick_mod,
         "_build_scrape_dispatch_queue",
-        AsyncMock(return_value=(["klick"], 0)),
+        AsyncMock(return_value=(["klick"], 0, {"klick": 1})),
     )
     create_mock = AsyncMock(return_value=uuid4())
     monkeypatch.setattr(tick_mod, "_create_pending_scrape_child", create_mock)
@@ -305,7 +305,7 @@ async def test_tick_completes_when_all_cohorts_drained(monkeypatch):
     monkeypatch.setattr(
         tick_mod,
         "_build_scrape_dispatch_queue",
-        AsyncMock(return_value=([], 2)),
+        AsyncMock(return_value=([], 2, {})),
     )
     monkeypatch.setattr(
         tick_mod, "_create_pending_scrape_child", AsyncMock()
