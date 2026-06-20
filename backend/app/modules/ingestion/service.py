@@ -30,12 +30,8 @@ from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.dimensions import DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.ingestion.dto import IngestionResult
-from app.modules.ingestion.gate import (
-    MAX_CURRENCY_RAW_LEN,
-    CurrencyResolver,
-    GateOutcome,
-    evaluate_gate,
-)
+from app.modules.data_firewall.firewall import FirewallOutcome, evaluate_ecommerce
+from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN, CurrencyResolver
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
@@ -258,10 +254,11 @@ class IngestionService:
 
         self._enrich_dim_product(data, listing)
 
-        outcome = evaluate_gate(
+        outcome = evaluate_ecommerce(
             data,
             marketplace_id=listing.marketplace_id,
             currency_resolver=self._currency_resolver,
+            page_role=getattr(data, "page_role", None),
         )
         currency_raw_text = getattr(data, "currency_raw", None) or ""
         curr_raw = getattr(data, "currency", None)
@@ -469,7 +466,7 @@ class IngestionService:
 
     @staticmethod
     def _log_gate_rejection(
-        outcome: GateOutcome,
+        outcome: FirewallOutcome,
         listing: FactListing,
         currency_raw_text: str,
         curr_raw: str | None,

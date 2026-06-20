@@ -137,6 +137,7 @@ class PoolScrapeResult:
     missing_fields: list[str] = field(default_factory=list)
     log_status: str | None = None
     raw_html: str | None = None
+    page_role: str | None = None
 
 
 @dataclass
@@ -403,6 +404,7 @@ class ScraperPool:
             extracted_fields=extracted_fields,
             missing_fields=missing_fields,
             raw_html=raw_debug,
+            page_role=merged.page_role,
         )
 
     async def fetch_html(

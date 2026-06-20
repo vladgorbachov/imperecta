@@ -154,6 +154,8 @@ class ExtractedProduct:
     description: str | None = None
     price_raw_text: str | None = None
     currency_raw: str | None = None
+    page_role: str | None = None
+    product_name: str | None = None
 
     @property
     def completeness(self) -> float:
@@ -761,7 +763,8 @@ def merge_and_finalize(
             page_url[:200],
             page_role,
         )
-        return ExtractedProduct()
+        skipped = ExtractedProduct(page_role=page_role)
+        return skipped
 
     merged = merge_results(*results)
     if merged.currency is None:
@@ -777,6 +780,7 @@ def merge_and_finalize(
                 merged.currency = detected
                 merged.currency_raw = text_probe[:100]
     _ensure_title(merged, soup, page_url)
+    merged.page_role = page_role
     logger.debug(
         "EXTRACTED title=%s price=%s currency=%s",
         merged.title,
