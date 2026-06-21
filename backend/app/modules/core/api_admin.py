@@ -2,7 +2,7 @@
 
 from time import perf_counter
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, text
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
@@ -59,15 +59,26 @@ async def admin_claude_status(_current_user: CurrentSuperuser) -> dict:
 @router.post("/products/clear-pool")
 async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
     """Clear product pool data; keeps dim_marketplace and dimension seeds."""
-    from app.modules.core.pool_maintenance import clear_product_pool_preserve_marketplaces
+    from app.modules.core.pool_maintenance import (
+        PoolResetBlockedError,
+        clear_product_pool_preserve_marketplaces,
+    )
 
     started = perf_counter()
-    counts = await clear_product_pool_preserve_marketplaces(db)
+    try:
+        counts = await clear_product_pool_preserve_marketplaces(db)
+    except PoolResetBlockedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     elapsed_ms = int((perf_counter() - started) * 1000)
     return {
         "status": "pool_cleared",
         "deleted_listings": counts["deleted_listings"],
         "deleted_products": counts["deleted_products"],
         "deleted_prices": counts["deleted_prices"],
+        "deleted_scrape_logs": counts["deleted_scrape_logs"],
+        "deleted_reject_data": counts["deleted_reject_data"],
         "time_ms": elapsed_ms,
     }

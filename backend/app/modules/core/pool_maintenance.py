@@ -1,22 +1,63 @@
-"""Product pool maintenance helpers (batched deletes for large tables)."""
+"""Product pool maintenance — complete blank-slate reset (admin-only)."""
 
 from __future__ import annotations
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-BATCH_SIZE = 10_000
+from app.workers.maintenance_tasks import _has_active_scrape_job, _refresh_mv
+
+slog = structlog.get_logger(__name__)
+
+_MATERIALIZED_VIEWS: tuple[str, ...] = (
+    "mv_daily_price_summary",
+    "mv_marketplace_health",
+)
+
+_ANALYZE_TABLES: tuple[str, ...] = (
+    "fact_listing",
+    "dim_product",
+    "fact_price",
+    "fact_review",
+    "fact_stock",
+    "fact_promo",
+    "fact_search_trend",
+    "scrape_logs",
+    "reject_data",
+)
+
+
+class PoolResetBlockedError(RuntimeError):
+    """Raised when pool reset is requested while scrape/discovery jobs are active."""
+
+
+async def _table_count(db: AsyncSession, table: str) -> int:
+    """Return row count for a public table (empty / missing table → 0)."""
+    result = await db.execute(text(f"SELECT COUNT(*) FROM {table}"))
+    return int(result.scalar() or 0)
 
 
 async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str, int]:
     """
-    Remove listings/products/prices/logs while keeping dim_marketplace rows.
+    Wipe e-commerce pool data and discovery cursors; preserve marketplaces and seeds.
 
-    Uses batched DELETE to avoid statement timeouts on large pools.
+    Uses TRUNCATE CASCADE for instant reclaim. Market-data facts (forex/crypto/commodity)
+    are untouched. Requires an idle scrape pool (no running pipeline/scrape/discovery jobs).
     """
-    listings_before = int((await db.execute(text("SELECT COUNT(*) FROM fact_listing"))).scalar() or 0)
-    products_before = int((await db.execute(text("SELECT COUNT(*) FROM dim_product"))).scalar() or 0)
-    prices_before = int((await db.execute(text("SELECT COUNT(*) FROM fact_price"))).scalar() or 0)
+    if _has_active_scrape_job():
+        raise PoolResetBlockedError(
+            "Cannot reset pool while pipeline, scrape, or discovery jobs are running",
+        )
+
+    counts_before = {
+        "deleted_listings": await _table_count(db, "fact_listing"),
+        "deleted_products": await _table_count(db, "dim_product"),
+        "deleted_prices": await _table_count(db, "fact_price"),
+        "deleted_scrape_logs": await _table_count(db, "scrape_logs"),
+        "deleted_reject_data": await _table_count(db, "reject_data"),
+    }
+    slog.info("reset_pool_started", **counts_before)
 
     await db.execute(
         text(
@@ -25,7 +66,7 @@ async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str
             SET listing_id = NULL
             WHERE listing_id IS NOT NULL
             """
-        )
+        ),
     )
     await db.execute(
         text(
@@ -38,52 +79,54 @@ async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str
                OR product_id IS NOT NULL
                OR marketplace_id IS NOT NULL
             """
-        )
+        ),
     )
     await db.execute(text("DELETE FROM user_products"))
 
-    while True:
-        result = await db.execute(
-            text(
-                """
-                DELETE FROM fact_listing
-                WHERE id IN (SELECT id FROM fact_listing LIMIT :limit)
-                """
-            ),
-            {"limit": BATCH_SIZE},
-        )
-        if result.rowcount == 0:
-            break
-
-    while True:
-        result = await db.execute(
-            text(
-                """
-                DELETE FROM dim_product
-                WHERE id IN (SELECT id FROM dim_product LIMIT :limit)
-                """
-            ),
-            {"limit": BATCH_SIZE},
-        )
-        if result.rowcount == 0:
-            break
+    await db.execute(text("TRUNCATE TABLE reject_data RESTART IDENTITY CASCADE"))
+    slog.info("reset_reject_data_cleared", rows_before=counts_before["deleted_reject_data"])
 
     await db.execute(text("TRUNCATE TABLE fact_price RESTART IDENTITY CASCADE"))
-    await db.execute(text("TRUNCATE TABLE fact_review, fact_stock, fact_promo, fact_search_trend RESTART IDENTITY CASCADE"))
+    await db.execute(
+        text(
+            "TRUNCATE TABLE fact_review, fact_stock, fact_promo, fact_search_trend "
+            "RESTART IDENTITY CASCADE",
+        ),
+    )
     await db.execute(text("TRUNCATE TABLE scrape_logs RESTART IDENTITY CASCADE"))
+    await db.execute(text("TRUNCATE TABLE fact_listing RESTART IDENTITY CASCADE"))
+    await db.execute(text("TRUNCATE TABLE dim_product RESTART IDENTITY CASCADE"))
+    slog.info("reset_truncated", **counts_before)
+
     await db.execute(
         text(
             """
             UPDATE dim_marketplace
             SET products_in_pool = 0,
-                last_discovery_products_found = 0
+                last_discovery_products_found = 0,
+                discovery_error_count = 0,
+                sitemap_resume_offset = 0,
+                category_resume_index = 0,
+                recon_frontier_state = NULL,
+                discovered_category_urls = '[]'::jsonb,
+                last_sitemap_harvest_at = NULL,
+                last_category_recon_at = NULL,
+                last_discovery_at = NULL,
+                last_discovery_status = NULL
             """
-        )
+        ),
     )
+    slog.info("reset_cursors_cleared")
+
     await db.commit()
 
-    return {
-        "deleted_listings": listings_before,
-        "deleted_products": products_before,
-        "deleted_prices": prices_before,
-    }
+    for view_name in _MATERIALIZED_VIEWS:
+        _refresh_mv(view_name)
+    slog.info("reset_mv_refreshed", views=list(_MATERIALIZED_VIEWS))
+
+    for table_name in _ANALYZE_TABLES:
+        await db.execute(text(f"ANALYZE {table_name}"))
+    await db.commit()
+
+    slog.info("reset_completed", **counts_before)
+    return counts_before
