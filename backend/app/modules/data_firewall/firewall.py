@@ -162,19 +162,6 @@ def _validate_against_contract(
     return True, [], None
 
 
-def _check_fake_defaults(
-    record: _RecordLike,
-    *,
-    extracted_in_stock: bool | None,
-    persist_fields: dict[str, Any],
-) -> tuple[bool, list[str]]:
-    """Reject only when the extract explicitly flags unknown stock but a bool was set."""
-    if getattr(record, "in_stock_marked_unknown", False):
-        if persist_fields.get("in_stock") is not None or extracted_in_stock is not None:
-            return False, ["fake_default:in_stock"]
-    return True, []
-
-
 def _sign_fields(table: str, fields: dict[str, Any]) -> SignedRecord | None:
     signature = sign(fields)
     if signature is None:
@@ -202,7 +189,6 @@ def evaluate_ecommerce(
     page_role: str | None = None,
     persist_fields: dict[str, Any] | None = None,
     table: str = "fact_price",
-    extracted_in_stock: bool | None = None,
     db: Any | None = None,
     reject_source: str = "ecommerce_scrape",
     listing_id: UUID | None = None,
@@ -251,34 +237,23 @@ def evaluate_ecommerce(
     signed_record: SignedRecord | None = None
 
     if passed and persist_fields is not None:
-        fake_ok, fake_failed = _check_fake_defaults(
-            record,
-            extracted_in_stock=extracted_in_stock,
-            persist_fields=persist_fields,
+        contract = FACT_TABLE_CONTRACTS.get(table, {})
+        contract_ok, contract_failed, contract_reason = _validate_against_contract(
+            persist_fields,
+            contract,
         )
-        if not fake_ok:
+        if not contract_ok:
             passed = False
-            reject_reason = REJECT_FAKE_DEFAULT
-            failed_rules = fake_failed
+            reject_reason = contract_reason
+            failed_rules = contract_failed
             forced_log_status = "currency_rejected"
         else:
-            contract = FACT_TABLE_CONTRACTS.get(table, {})
-            contract_ok, contract_failed, contract_reason = _validate_against_contract(
-                persist_fields,
-                contract,
-            )
-            if not contract_ok:
+            signed_record = _sign_fields(table, persist_fields)
+            if signed_record is None:
                 passed = False
-                reject_reason = contract_reason
-                failed_rules = contract_failed
-                forced_log_status = "currency_rejected"
-            else:
-                signed_record = _sign_fields(table, persist_fields)
-                if signed_record is None:
-                    passed = False
-                    reject_reason = REJECT_SIGNING_UNAVAILABLE
-                    failed_rules = ["signing_secret_missing"]
-                    forced_log_status = "persist_failed"
+                reject_reason = REJECT_SIGNING_UNAVAILABLE
+                failed_rules = ["signing_secret_missing"]
+                forced_log_status = "persist_failed"
 
     if not passed and db is not None:
         payload = persist_fields if persist_fields is not None else _extract_snapshot(record)

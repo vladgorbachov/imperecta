@@ -58,6 +58,7 @@ FORBIDDEN_POOL_ITEM_FIELDS: tuple[str, ...] = (
     "price_change_pct_7d",
     "price_change_pct_30d",
     "volatility_30d",
+    "in_stock",
 )
 
 REQUIRED_POOL_ITEM_FIELDS: tuple[str, ...] = (
@@ -75,7 +76,6 @@ REQUIRED_POOL_ITEM_FIELDS: tuple[str, ...] = (
     "currency",
     "price_eur",
     "price_change_pct",
-    "in_stock",
     "last_checked_at",
     "status",
     "is_active",
@@ -127,7 +127,6 @@ def _sample_row() -> dict:
         "currency": "EUR",
         "price_eur": 9.99,
         "price_change_pct": 1.25,
-        "in_stock": True,
         "last_checked_at": None,
         "is_active": True,
     }

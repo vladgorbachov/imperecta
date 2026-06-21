@@ -25,7 +25,6 @@ from app.models.facts import (  # noqa: F401
     FactPromo,
     FactReview,
     FactSearchTrend,
-    FactStock,
     FactTariff,
 )
 from app.models.app_tables import (  # noqa: F401
@@ -55,7 +54,6 @@ __all__ = [
     "FactListing",
     "FactPrice",
     "FactReview",
-    "FactStock",
     "FactSearchTrend",
     "FactCurrencyRate",
     "FactTariff",

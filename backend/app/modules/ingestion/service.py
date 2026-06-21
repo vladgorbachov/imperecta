@@ -135,9 +135,8 @@ class IngestionService:
         listing: FactListing,
         new_price: float | None,
         new_currency: str | None,
-        new_in_stock: bool | None,
     ) -> bool:
-        """Return True when extracted values are identical to the last known state."""
+        """Return True when extracted price/currency are identical to the last known state."""
         if listing.last_price is None or listing.last_currency_code is None:
             return False
         if new_price is None or new_currency is None:
@@ -147,31 +146,23 @@ class IngestionService:
         currency_same = (
             new_currency.strip().upper() == listing.last_currency_code.strip().upper()
         )
-        if new_in_stock is None and listing.last_in_stock is None:
-            stock_same = True
-        elif new_in_stock is None or listing.last_in_stock is None:
-            stock_same = False
-        else:
-            stock_same = bool(new_in_stock) == bool(listing.last_in_stock)
-        return price_same and currency_same and stock_same
+        return price_same and currency_same
 
     def persist_extracted(
         self,
         *,
         data: Any,
         listing: FactListing,
-        extracted_in_stock: bool | None,
         scrape_job_id: UUID | None = None,
     ) -> IngestionResult:
         """Run firewall -> (optional) signed persist -> commit."""
         slog.info(
             "EXTRACTED_DATA",
-            line="EXTRACTED DATA → product_name/title/price/currency/in_stock",
+            line="EXTRACTED DATA → product_name/title/price/currency",
             product_name=getattr(data, "product_name", None),
             title=getattr(data, "title", None),
             price=getattr(data, "price", None),
             currency=getattr(data, "currency", None),
-            in_stock=extracted_in_stock,
         )
 
         self._enrich_dim_product(data, listing)
@@ -195,7 +186,6 @@ class IngestionService:
                 currency_code=str(curr_raw),
                 original_price=original_price_value,
                 discount_pct=getattr(data, "discount_pct", None),
-                in_stock=extracted_in_stock,
                 price_change_pct=getattr(data, "price_change_pct", None),
                 scraped_at=now,
                 scrape_job_id=scrape_job_id,
@@ -207,7 +197,6 @@ class IngestionService:
             currency_resolver=self._currency_resolver,
             page_role=getattr(data, "page_role", None),
             persist_fields=persist_fields,
-            extracted_in_stock=extracted_in_stock,
             db=self.db,
             listing_id=listing.id,
         )
@@ -236,12 +225,10 @@ class IngestionService:
                 listing,
                 data.price,
                 data.currency,
-                extracted_in_stock,
             ):
                 listing.last_checked_at = datetime.now(tz=timezone.utc)
                 listing.last_price = data.price
                 listing.last_currency_code = data.currency if data.currency else None
-                listing.last_in_stock = extracted_in_stock
                 forced_log_status = "no_change"
                 logger.info(
                     "PRICE_UNCHANGED listing_id=%s price=%s %s",
@@ -263,7 +250,6 @@ class IngestionService:
                 if wrote and persist_fields:
                     listing.last_price = data.price
                     listing.last_currency_code = persist_fields["currency_code"]
-                    listing.last_in_stock = extracted_in_stock
                     listing.last_price_changed_at = persist_fields["scraped_at"]
                     forced_log_status = "success"
                     persisted = True
@@ -282,13 +268,11 @@ class IngestionService:
             if getattr(data, "price", None) is not None
             else None
         )
-        in_stock_found = extracted_in_stock
         result = IngestionResult(
             persisted=persisted,
             log_status=forced_log_status,
             skip_reason=outcome.skip_reason,
             price_found=price_found,
-            in_stock_found=in_stock_found,
             persist_failed=False,
         )
 
@@ -303,7 +287,6 @@ class IngestionService:
             title=getattr(data, "title", None),
             price=getattr(data, "price", None),
             currency=getattr(data, "currency", None),
-            in_stock=extracted_in_stock,
             status=forced_log_status,
         )
 
@@ -325,7 +308,6 @@ class IngestionService:
                     log_status=forced_log_status,
                     skip_reason=outcome.skip_reason,
                     price_found=price_found,
-                    in_stock_found=in_stock_found,
                     read_only_failed=True,
                 )
             return IngestionResult(
@@ -333,7 +315,6 @@ class IngestionService:
                 log_status=forced_log_status,
                 skip_reason=outcome.skip_reason,
                 price_found=price_found,
-                in_stock_found=in_stock_found,
                 persist_failed=True,
             )
 

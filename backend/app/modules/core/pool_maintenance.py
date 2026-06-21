@@ -23,7 +23,6 @@ _ANALYZE_TABLES: tuple[str, ...] = (
     "dim_product",
     "fact_price",
     "fact_review",
-    "fact_stock",
     "fact_promo",
     "fact_search_trend",
     "scrape_logs",
@@ -118,7 +117,7 @@ async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str
     await db.execute(text("TRUNCATE TABLE fact_price RESTART IDENTITY CASCADE"))
     await db.execute(
         text(
-            "TRUNCATE TABLE fact_review, fact_stock, fact_promo, fact_search_trend "
+            "TRUNCATE TABLE fact_review, fact_promo, fact_search_trend "
             "RESTART IDENTITY CASCADE",
         ),
     )

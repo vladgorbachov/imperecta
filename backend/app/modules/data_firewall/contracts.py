@@ -17,7 +17,6 @@ from app.models.facts import (
     FactPromo,
     FactReview,
     FactSearchTrend,
-    FactStock,
     FactTariff,
 )
 
@@ -106,7 +105,6 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "fact_listing": build_table_contract(FactListing),
     "fact_price": build_table_contract(FactPrice),
     "fact_review": build_table_contract(FactReview),
-    "fact_stock": build_table_contract(FactStock),
     "fact_promo": build_table_contract(FactPromo),
     "fact_search_trend": build_table_contract(FactSearchTrend),
     "fact_currency_rate": build_table_contract(FactCurrencyRate),

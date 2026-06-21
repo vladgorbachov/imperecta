@@ -213,27 +213,6 @@ def _repair_scrape_logs_status_constraint(db: Session) -> bool:
         return False
 
 
-def _resolve_in_stock(result: object | None, data: object | None) -> bool | None:
-    """Return in_stock as bool when extractor explicitly provided a value, else None."""
-    for source in (result, data):
-        if source is None:
-            continue
-        val = getattr(source, "in_stock", None)
-        if val is not None:
-            return bool(val)
-    return None
-
-
-def _optional_in_stock(extracted: object | None) -> bool | None:
-    """Availability is optional on extractor payloads; never invent True/False."""
-    if extracted is None:
-        return None
-    raw = getattr(extracted, "in_stock", None)
-    if raw is None or isinstance(raw, bool):
-        return raw
-    return None
-
-
 def _is_read_only_error(exc: BaseException) -> bool:
     """Detect Postgres read-only transaction errors (SQLSTATE 25006)."""
     return is_read_only_sql_error(exc)
@@ -297,10 +276,9 @@ class GlobalScrapeService:
         listing: FactListing,
         new_price: float | None,
         new_currency: str | None,
-        new_in_stock: bool | None,
     ) -> bool:
         return IngestionService._should_skip_price_record(
-            listing, new_price, new_currency, new_in_stock
+            listing, new_price, new_currency
         )
 
     def _persist_listing_housekeeping_or_fail(
@@ -339,7 +317,6 @@ class GlobalScrapeService:
         listing: FactListing,
         log_status: str,
         price_found: float | None,
-        in_stock_found: bool | None,
         duration_ms: int | None,
         scraper_type: str | None,
         error_message: str | None,
@@ -353,7 +330,6 @@ class GlobalScrapeService:
             status=log_status,
             url=listing.external_url,
             price_found=price_found,
-            in_stock_found=in_stock_found,
             duration_ms=duration_ms,
             scraper_type=scraper_type,
             error_message=error_message,
@@ -366,7 +342,6 @@ class GlobalScrapeService:
         listing: FactListing,
         log_status: str,
         price_found: float | None,
-        in_stock_found: bool | None,
         duration_ms: int | None,
         scraper_type: str | None,
         error_message: str | None,
@@ -379,7 +354,6 @@ class GlobalScrapeService:
                 listing=listing,
                 log_status=status,
                 price_found=price_found,
-                in_stock_found=in_stock_found,
                 duration_ms=duration_ms,
                 scraper_type=scraper_type,
                 error_message=error_message,
@@ -509,7 +483,6 @@ class GlobalScrapeService:
         if result.success:
             listing.failure_streak = 0
 
-        last_in_stock = _resolve_in_stock(result, data)
         is_partial = bool(result.is_partial)
         forced_log_status: str | None = None
         gate_skip_reason: str | None = None
@@ -552,7 +525,6 @@ class GlobalScrapeService:
             ing_result = IngestionService(self.db).persist_extracted(
                 data=data,
                 listing=listing,
-                extracted_in_stock=last_in_stock,
                 scrape_job_id=self.scrape_job_id,
             )
             forced_log_status = ing_result.log_status
@@ -588,7 +560,6 @@ class GlobalScrapeService:
         price_found = None
         if result.success and data and data.price is not None:
             price_found = float(data.price)
-        in_stock_found = last_in_stock if (result.success and data) else None
 
         price = getattr(data, "price", None) if data else None
         currency = getattr(data, "currency", None) if data else None
@@ -603,7 +574,6 @@ class GlobalScrapeService:
             listing=listing,
             log_status=log_status,
             price_found=price_found,
-            in_stock_found=in_stock_found,
             duration_ms=result.duration_ms,
             scraper_type=result.fetch_backend,
             error_message=error_message,
@@ -623,7 +593,6 @@ class GlobalScrapeService:
             status=log_status,
             price=price,
             currency=currency,
-            in_stock=last_in_stock,
             success=result.success,
             error=result.error,
             fetch_backend=result.fetch_backend,

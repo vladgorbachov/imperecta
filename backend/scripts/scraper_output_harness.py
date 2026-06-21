@@ -40,7 +40,6 @@ from app.modules.scraper.extractors import (
     extract_from_microdata,
 )
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
-from app.modules.scraper.service import _resolve_in_stock
 
 _DEFAULT_URLS_FILE = Path(__file__).resolve().parent / "harness_urls.txt"
 _DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "output"
@@ -180,7 +179,6 @@ def _persist_fields_skip_reason(data: ExtractedProduct | None) -> str | None:
 
 def _build_would_be_persist_fields(
     data: ExtractedProduct | None,
-    extracted_in_stock: bool | None,
 ) -> tuple[dict[str, dict[str, Any]] | None, str | None]:
     """Mirror ingestion.build_fact_price_fields without firewall or DB."""
     skip = _persist_fields_skip_reason(data)
@@ -201,7 +199,6 @@ def _build_would_be_persist_fields(
         currency_code=str(data.currency),
         original_price=original_price_value,
         discount_pct=getattr(data, "discount_pct", None),
-        in_stock=extracted_in_stock,
         price_change_pct=getattr(data, "price_change_pct", None),
         scraped_at=now,
         scrape_job_id=None,
@@ -218,7 +215,6 @@ def _serialize_pool_result(
     html: str | None,
     would_be_persist_fields: dict[str, dict[str, Any]] | None,
     persist_fields_skip_reason: str | None,
-    extracted_in_stock: bool | None,
     extraction_notes: dict[str, Any],
 ) -> dict[str, Any]:
     """Full per-URL capture for JSON artifact."""
@@ -245,7 +241,6 @@ def _serialize_pool_result(
         "missing_fields": result.missing_fields,
         "log_status": result.log_status,
         "page_role": result.page_role,
-        "extracted_in_stock": _typed_value(extracted_in_stock),
         "extracted_product": _serialize_dataclass(data) if data is not None else None,
         "would_be_persist_fields": would_be_persist_fields,
         "persist_fields_skip_reason": persist_fields_skip_reason,
@@ -309,8 +304,7 @@ async def _scrape_one(pool: ScraperPool, url: str) -> dict[str, Any]:
         scrape_tier=fetch_ctx.scrape_tier,
         requires_js=fetch_ctx.requires_js,
     )
-    extracted_in_stock = _resolve_in_stock(result, result.data)
-    would_be, skip_reason = _build_would_be_persist_fields(result.data, extracted_in_stock)
+    would_be, skip_reason = _build_would_be_persist_fields(result.data)
     notes = _extraction_layer_notes(fetch.html, url)
     return _serialize_pool_result(
         result,
@@ -319,7 +313,6 @@ async def _scrape_one(pool: ScraperPool, url: str) -> dict[str, Any]:
         html=fetch.html,
         would_be_persist_fields=would_be,
         persist_fields_skip_reason=skip_reason,
-        extracted_in_stock=extracted_in_stock,
         extraction_notes=notes,
     )
 

@@ -50,7 +50,6 @@ class PoolProductItem(BaseModel):
     local_currency_resolution: LocalCurrencyResolution | None = None
     local_currency_unavailable: bool = False
     price_change_pct: float | None = None
-    in_stock: bool | None = None
     last_checked_at: datetime | None = None
     status: str | None = None
     is_active: bool | None = None

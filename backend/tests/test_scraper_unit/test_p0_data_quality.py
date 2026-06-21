@@ -12,7 +12,6 @@ from app.modules.scraper.extractors import (
 from app.modules.scraper.service import (
     MAX_CURRENCY_RAW_LEN,
     GlobalScrapeService,
-    _resolve_in_stock,
 )
 
 
@@ -64,23 +63,17 @@ def test_merge_and_finalize_skips_listing_pages():
     assert merged.title is None
 
 
-def test_resolve_in_stock_returns_none_when_unknown():
-    """FIX-4: unknown availability must not coerce to False."""
-    assert _resolve_in_stock(None, ExtractedProduct(price=1.0)) is None
-
-
 def test_max_currency_raw_len_constant():
     """FIX-3: glued header text exceeds sane currency_raw threshold."""
     glued = "x" * (MAX_CURRENCY_RAW_LEN + 1)
     assert len(glued) >= MAX_CURRENCY_RAW_LEN
 
 
-def test_should_skip_price_record_both_unknown_stock():
-    """FIX-4: both unknown in_stock values are treated as unchanged."""
+def test_should_skip_price_record_when_price_and_currency_unchanged():
+    """Unchanged price/currency skips a new fact_price row."""
     from unittest.mock import MagicMock
 
     listing = MagicMock()
     listing.last_price = 10.0
     listing.last_currency_code = "USD"
-    listing.last_in_stock = None
-    assert GlobalScrapeService._should_skip_price_record(listing, 10.0, "USD", None) is True
+    assert GlobalScrapeService._should_skip_price_record(listing, 10.0, "USD") is True

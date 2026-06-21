@@ -355,7 +355,7 @@ class ScraperPool:
 
         extracted_fields: list[str] = []
         missing_fields: list[str] = []
-        for field_name in ["title", "price", "currency", "in_stock", "image_url", "description"]:
+        for field_name in ["title", "price", "currency", "image_url", "description"]:
             value = getattr(merged, field_name, None) if merged else None
             if value is not None and value != "":
                 extracted_fields.append(field_name)

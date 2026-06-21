@@ -14,7 +14,6 @@ from app.modules.scraper.extractors import (
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
-    _optional_in_stock,
     _should_replace_placeholder_name,
 )
 
@@ -103,12 +102,6 @@ def test_completeness_score():
     partial = ExtractedProduct(title="x", price=10.0, image_url=None)
     assert full.completeness == 1.0
     assert round(partial.completeness, 2) == 0.67
-
-
-def test_optional_in_stock_missing_on_extracted_product():
-    """ExtractedProduct has no in_stock; persistence must not assume the attribute."""
-    assert _optional_in_stock(ExtractedProduct(title="x", price=1.0)) is None
-    assert _optional_in_stock(None) is None
 
 
 def test_should_replace_placeholder_numeric_slug():

@@ -86,7 +86,6 @@ def _make_listing(**overrides):
         external_url="https://example.com/product",
         last_price=None,
         last_currency_code=None,
-        last_in_stock=None,
         last_price_changed_at=None,
         last_checked_at=None,
     )
@@ -186,7 +185,6 @@ def test_ingestion_result_is_frozen_dto() -> None:
         "log_status",
         "skip_reason",
         "price_found",
-        "in_stock_found",
         "persist_failed",
         "read_only_failed",
     }
@@ -194,7 +192,6 @@ def test_ingestion_result_is_frozen_dto() -> None:
         persisted=True,
         log_status="success",
         price_found=1.0,
-        in_stock_found=True,
     )
     with pytest.raises(Exception):
         result.persisted = False  # frozen
@@ -230,7 +227,6 @@ def test_persist_extracted_writes_fact_price_on_pass(patched_ingestion) -> None:
     result = svc.persist_extracted(
         data=_make_data(),
         listing=listing,
-        extracted_in_stock=True,
     )
 
     added = [c.args[0] for c in db.add.call_args_list]
@@ -239,11 +235,10 @@ def test_persist_extracted_writes_fact_price_on_pass(patched_ingestion) -> None:
     row = fact_price_rows[0]
     assert float(row.price) == 99.99
     assert row.currency_code == "EUR"
-    assert row.in_stock is True
+    assert not hasattr(row, "in_stock")
 
     assert listing.last_price == 99.99
     assert listing.last_currency_code == "EUR"
-    assert listing.last_in_stock is True
     assert listing.last_price_changed_at is not None
 
     db.flush.assert_called()
@@ -253,7 +248,6 @@ def test_persist_extracted_writes_fact_price_on_pass(patched_ingestion) -> None:
     assert result.log_status == "success"
     assert result.skip_reason is None
     assert result.price_found == 99.99
-    assert result.in_stock_found is True
     assert result.persist_failed is False
 
 
@@ -268,7 +262,6 @@ def test_persist_extracted_no_change_path(patched_ingestion) -> None:
     listing = _make_listing(
         last_price=99.99,
         last_currency_code="EUR",
-        last_in_stock=True,
     )
 
     svc = IngestionService(db)
@@ -277,7 +270,6 @@ def test_persist_extracted_no_change_path(patched_ingestion) -> None:
     result = svc.persist_extracted(
         data=_make_data(),
         listing=listing,
-        extracted_in_stock=True,
     )
 
     added = [c.args[0] for c in db.add.call_args_list]
@@ -303,7 +295,6 @@ def test_persist_extracted_gate_skip_returns_currency_rejected(patched_ingestion
     result = svc.persist_extracted(
         data=_make_data(currency_raw=glued),
         listing=listing,
-        extracted_in_stock=None,
     )
 
     added = [c.args[0] for c in db.add.call_args_list]
@@ -334,7 +325,6 @@ def test_persist_extracted_dim_enrichment_only_image_when_absent(
     svc.persist_extracted(
         data=_make_data(image_url="https://example.com/new-image.jpg"),
         listing=listing,
-        extracted_in_stock=None,
     )
 
     assert product.image_url == existing_image
@@ -364,7 +354,6 @@ def test_persist_extracted_commit_failure_returns_persist_failed(
     result = svc.persist_extracted(
         data=_make_data(),
         listing=listing,
-        extracted_in_stock=True,
     )
 
     assert result.persist_failed is True
@@ -459,7 +448,7 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
     patched_ingestion, monkeypatch
 ) -> None:
     """End-to-end shape: GlobalScrapeService.scrape_product passes data +
-    listing + extracted_in_stock into IngestionService.persist_extracted."""
+    listing into IngestionService.persist_extracted."""
     from app.modules.scraper import service as parser_svc
 
     captured: dict = {}
@@ -469,17 +458,15 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
             captured["db"] = db
 
         def persist_extracted(
-            self, *, data, listing, extracted_in_stock, scrape_job_id=None
+            self, *, data, listing, scrape_job_id=None
         ):
             captured["data"] = data
             captured["listing"] = listing
-            captured["extracted_in_stock"] = extracted_in_stock
             captured["scrape_job_id"] = scrape_job_id
             return IngestionResult(
                 persisted=True,
                 log_status="success",
                 price_found=getattr(data, "price", None),
-                in_stock_found=extracted_in_stock,
             )
 
     monkeypatch.setattr(parser_svc, "IngestionService", _CapturedIngestion)
@@ -501,7 +488,7 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
         ),
     ]
     pool = MagicMock()
-    pool_data = _make_data(in_stock=True)
+    pool_data = _make_data()
     pool_result = SimpleNamespace(
         success=True,
         url=listing.external_url,
@@ -512,7 +499,6 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
         is_partial=False,
         is_empty=False,
         missing_fields=[],
-        in_stock=True,
         log_status=None,
     )
     with patch(
@@ -528,5 +514,4 @@ def test_parser_delegates_via_ingestion_service_with_listing_and_data(
 
     assert captured["data"] is pool_data
     assert captured["listing"] is listing
-    assert captured["extracted_in_stock"] is True
     assert captured["scrape_job_id"] is None

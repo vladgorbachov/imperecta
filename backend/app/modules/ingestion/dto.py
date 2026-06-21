@@ -19,7 +19,6 @@ class IngestionResult:
             One of ``missing_name_or_currency`` | ``currency_raw_too_long``
             | ``currency_country_mismatch`` | None.
         price_found: the parsed price the parser logs into scrape_logs.
-        in_stock_found: the resolved in-stock flag the parser logs.
         persist_failed: True when ingestion's own commit raised (rare).
             Parser uses this to short-circuit ScrapeLog and return
             persist_failed to its caller (today's behaviour).
@@ -29,6 +28,5 @@ class IngestionResult:
     log_status: str | None
     skip_reason: str | None = None
     price_found: float | None = None
-    in_stock_found: bool | None = None
     persist_failed: bool = False
     read_only_failed: bool = False

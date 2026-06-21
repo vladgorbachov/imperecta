@@ -69,7 +69,6 @@ class FactListing(Base):
     last_price_eur: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     last_original_price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     last_currency_code: Mapped[str | None] = mapped_column(String(3), nullable=True)
-    last_in_stock: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     last_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
     last_review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -99,7 +98,6 @@ class FactListing(Base):
 
     prices: Mapped[list[FactPrice]] = relationship("FactPrice", back_populates="listing")
     reviews: Mapped[list[FactReview]] = relationship("FactReview", back_populates="listing")
-    stocks: Mapped[list[FactStock]] = relationship("FactStock", back_populates="listing")
     promos: Mapped[list["FactPromo"]] = relationship("FactPromo", back_populates="listing")
 
     __table_args__ = (
@@ -148,7 +146,6 @@ class FactPrice(Base):
     price_eur: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     discount_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     price_change_pct: Mapped[float | None] = mapped_column(Numeric(8, 4), nullable=True)
-    in_stock: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     delivery_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     delivery_cost: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     seller_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
@@ -217,51 +214,6 @@ class FactReview(Base):
         Index("idx_fact_review_listing", "listing_id"),
         Index("idx_fact_review_date", "date_id"),
         Index("idx_fact_review_listing_date", "listing_id", "date_id"),
-    )
-
-
-class FactStock(Base):
-    """Stock availability facts."""
-
-    __tablename__ = "fact_stock"
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
-    listing_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("fact_listing.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    date_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("dim_date.date_id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    in_stock: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    stock_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    stock_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    delivery_days_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    delivery_days_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    delivery_cost: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
-    delivery_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    scraped_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-
-    listing: Mapped[FactListing] = relationship("FactListing", back_populates="stocks")
-
-    __table_args__ = (
-        Index("idx_fact_stock_listing", "listing_id"),
-        Index("idx_fact_stock_date", "date_id"),
-        Index(
-            "idx_fact_stock_oos",
-            "listing_id",
-            "in_stock",
-            postgresql_where=text("in_stock = false"),
-        ),
     )
 
 

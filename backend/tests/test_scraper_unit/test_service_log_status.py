@@ -12,20 +12,8 @@ from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
     _needs_scrape_logs_status_column_repair,
-    _optional_in_stock,
     _payload_has_product_name_field,
 )
-
-
-def test_optional_in_stock_variants():
-    assert _optional_in_stock(None) is None
-
-    @dataclass
-    class P:
-        in_stock: bool | str | None
-
-    assert _optional_in_stock(P(in_stock=True)) is True
-    assert _optional_in_stock(P(in_stock="x")) is None
 
 
 def test_payload_has_product_name_field():

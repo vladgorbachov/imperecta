@@ -41,7 +41,6 @@ class _FakeData:
     currency: str | None = "EUR"
     currency_raw: str | None = "19.0 EUR"
     page_role: str | None = "product"
-    in_stock: bool | None = True
 
 
 @pytest.fixture(autouse=True)
@@ -96,7 +95,6 @@ def test_persist_writes_verbatim_no_mutation() -> None:
         currency_code="EUR",
         original_price=None,
         discount_pct=None,
-        in_stock=True,
         price_change_pct=None,
         scraped_at=now,
         scrape_job_id=None,
@@ -129,7 +127,6 @@ def test_data_firewall_rejects_long_currency_no_truncate() -> None:
         currency_code="EURO",
         original_price=None,
         discount_pct=None,
-        in_stock=True,
         price_change_pct=None,
         scraped_at=now,
         scrape_job_id=None,
@@ -141,7 +138,6 @@ def test_data_firewall_rejects_long_currency_no_truncate() -> None:
         currency_resolver=_FakeResolver(),
         page_role="product",
         persist_fields=fields,
-        extracted_in_stock=True,
         db=db,
         listing_id=listing_id,
     )
@@ -177,7 +173,6 @@ def test_data_firewall_category_unknown_passes() -> None:
         currency_code="EUR",
         original_price=None,
         discount_pct=None,
-        in_stock=True,
         price_change_pct=None,
         scraped_at=now,
         scrape_job_id=None,
@@ -188,10 +183,40 @@ def test_data_firewall_category_unknown_passes() -> None:
         currency_resolver=_FakeResolver(),
         page_role="unknown",
         persist_fields=fields,
-        extracted_in_stock=True,
     )
     assert outcome.passed
     assert outcome.signed_record is not None
+
+
+def test_data_firewall_ignores_unknown_in_stock_key_in_persist_fields() -> None:
+    """Extra keys not in the fact_price contract are ignored (not rejected)."""
+    mp_id = uuid4()
+    listing_id = uuid4()
+    data = _FakeData()
+    now = datetime.now(tz=timezone.utc)
+    fields = build_fact_price_fields(
+        listing_id=listing_id,
+        date_id=20990101,
+        price=10.0,
+        currency_code="EUR",
+        original_price=None,
+        discount_pct=None,
+        price_change_pct=None,
+        scraped_at=now,
+        scrape_job_id=None,
+    )
+    fields["in_stock"] = True
+    outcome = evaluate_ecommerce(
+        data,
+        marketplace_id=mp_id,
+        currency_resolver=_FakeResolver(),
+        persist_fields=fields,
+    )
+    assert outcome.passed
+    assert outcome.signed_record is not None
+    from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS
+
+    assert "in_stock" not in FACT_TABLE_CONTRACTS["fact_price"]
 
 
 def test_data_firewall_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,7 +233,6 @@ def test_data_firewall_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatc
         currency_code="EUR",
         original_price=None,
         discount_pct=None,
-        in_stock=True,
         price_change_pct=None,
         scraped_at=now,
         scrape_job_id=None,
@@ -218,7 +242,6 @@ def test_data_firewall_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatc
         marketplace_id=mp_id,
         currency_resolver=_FakeResolver(),
         persist_fields=fields,
-        extracted_in_stock=True,
     )
     assert not outcome.passed
     assert outcome.signed_record is None

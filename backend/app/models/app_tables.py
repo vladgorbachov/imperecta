@@ -110,7 +110,6 @@ class Alert(Base):
         CheckConstraint(
             "alert_type IN ("
             "'price_drop','price_increase','price_threshold',"
-            "'out_of_stock','back_in_stock',"
             "'new_competitor','competitor_promo',"
             "'review_drop','review_spike',"
             "'trend_spike','trend_drop',"
@@ -432,7 +431,6 @@ class ScrapeLog(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     price_found: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
-    in_stock_found: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     proxy_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
