@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,8 +12,47 @@ import pytest
 from sqlalchemy import create_engine, text
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-
+MIGRATION_027 = (
+    BACKEND_ROOT / "alembic/versions/027_remove_in_stock_and_fact_stock.py"
+)
 _ALEMBIC_UPGRADE_HEAD = [sys.executable, "-m", "alembic", "upgrade", "head"]
+
+_EXECUTE_STRING_RE = re.compile(
+    r'op\.execute\(\s*(?:r?"""(.*?)"""|r?\'\'\'(.*?)\'\'\'|"([^"]*)"|\'([^\']*)\')',
+    re.DOTALL,
+)
+
+
+def _migration_execute_strings(path: Path) -> list[str]:
+    """Return string literals passed directly to op.execute() in a migration file."""
+    source = path.read_text(encoding="utf-8")
+    strings: list[str] = []
+    for match in _EXECUTE_STRING_RE.finditer(source):
+        value = next(group for group in match.groups() if group is not None)
+        strings.append(value)
+    return strings
+
+
+def _count_sql_statements(sql: str) -> int:
+    """Count top-level SQL statements separated by semicolons."""
+    return len([part for part in sql.split(";") if part.strip()])
+
+
+def test_migration_027_has_no_multi_statement_op_execute_literals() -> None:
+    """asyncpg rejects multiple commands in one prepared statement."""
+    offenders: list[str] = []
+    for sql in _migration_execute_strings(MIGRATION_027):
+        if _count_sql_statements(sql) > 1:
+            offenders.append(sql.strip()[:120])
+    assert offenders == [], f"multi-statement op.execute literals: {offenders}"
+
+
+def test_migration_027_index_statements_are_split() -> None:
+    """Index DDL is executed one statement per op.execute (asyncpg-safe)."""
+    source = MIGRATION_027.read_text(encoding="utf-8")
+    assert "_MV_DAILY_PRICE_INDEX_STATEMENTS" in source
+    assert "op.execute(_MV_DAILY_PRICE_INDEXES)" not in source
+    assert "for index_statement in _MV_DAILY_PRICE_INDEX_STATEMENTS" in source
 
 
 def _sync_database_url() -> str:

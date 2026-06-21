@@ -38,13 +38,15 @@ GROUP BY fp.date_id, fl.product_id, fl.marketplace_id, dp.category_id, dp.brand_
 WITH NO DATA;
 """
 
-_MV_DAILY_PRICE_INDEXES = """
-CREATE UNIQUE INDEX idx_mv_daily_price ON mv_daily_price_summary
-    (date_id, product_id, marketplace_id);
-CREATE INDEX idx_mv_daily_price_date ON mv_daily_price_summary (date_id);
-CREATE INDEX idx_mv_daily_price_product ON mv_daily_price_summary (product_id);
-CREATE INDEX idx_mv_daily_price_category ON mv_daily_price_summary (category_id);
-"""
+_MV_DAILY_PRICE_INDEX_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE UNIQUE INDEX idx_mv_daily_price ON mv_daily_price_summary
+        (date_id, product_id, marketplace_id)
+    """,
+    "CREATE INDEX idx_mv_daily_price_date ON mv_daily_price_summary (date_id)",
+    "CREATE INDEX idx_mv_daily_price_product ON mv_daily_price_summary (product_id)",
+    "CREATE INDEX idx_mv_daily_price_category ON mv_daily_price_summary (category_id)",
+)
 
 
 def upgrade() -> None:
@@ -81,7 +83,8 @@ def upgrade() -> None:
     )
     op.execute("DROP TABLE IF EXISTS fact_stock CASCADE")
     op.execute(_MV_DAILY_PRICE_SUMMARY)
-    op.execute(_MV_DAILY_PRICE_INDEXES)
+    for index_statement in _MV_DAILY_PRICE_INDEX_STATEMENTS:
+        op.execute(index_statement)
     for statement in harden_materialized_view_statements("mv_daily_price_summary"):
         op.execute(statement)
 
