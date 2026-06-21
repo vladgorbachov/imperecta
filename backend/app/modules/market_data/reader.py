@@ -21,6 +21,8 @@ from app.models.facts import (
     FactCurrencyRate,
     FactFuelPrice,
 )
+from app.config import Settings
+from app.modules.market_data.forex_pairs import derive_forex_pairs
 
 
 class MarketDataService:
@@ -28,6 +30,25 @@ class MarketDataService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _forex_allowed_codes() -> frozenset[str]:
+        return Settings().forex_allowed_currency_set
+
+    @staticmethod
+    def _currency_rows_from_facts(rows: list[FactCurrencyRate]) -> list[dict[str, Any]]:
+        allowed = MarketDataService._forex_allowed_codes()
+        return [
+            {
+                "currency_code": r.currency_code,
+                "rate_to_eur": float(r.rate_to_eur),
+                "rate_to_usd": float(r.rate_to_usd),
+                "source": r.source,
+                "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
+            }
+            for r in rows
+            if r.currency_code in allowed
+        ]
 
     @staticmethod
     def _dedupe_currency_rows(rows: list[FactCurrencyRate]) -> list[FactCurrencyRate]:
@@ -79,16 +100,7 @@ class MarketDataService:
             .order_by(FactCurrencyRate.currency_code, FactCurrencyRate.source),
         )
         rows = self._dedupe_currency_rows(list(result.scalars().all()))
-        return [
-            {
-                "currency_code": r.currency_code,
-                "rate_to_eur": float(r.rate_to_eur),
-                "rate_to_usd": float(r.rate_to_usd),
-                "source": r.source,
-                "fetched_at": r.fetched_at.isoformat() if r.fetched_at else None,
-            }
-            for r in rows
-        ]
+        return self._currency_rows_from_facts(rows)
 
     async def get_crypto(self) -> list[dict[str, Any]]:
         """Latest crypto prices from fact_crypto_price."""
@@ -170,22 +182,15 @@ class MarketDataService:
         commodity_set = {value.strip().upper() for value in (commodity_favorites or []) if value}
 
         items: list[dict[str, Any]] = []
-        for fx in await self.get_forex():
-            cc = fx["currency_code"]
-            if cc == "EUR":
-                continue
-            symbol = f"EUR/{cc}"
+        forex_rows = await self.get_forex()
+        for pair in derive_forex_pairs(forex_rows):
+            symbol = pair["symbol"]
             if forex_set and symbol.upper() not in forex_set:
                 continue
-            rte = fx["rate_to_eur"]
-            if rte and rte > 0:
-                display = 1.0 / rte
-            else:
-                display = rte
             items.append({
                 "symbol": symbol,
-                "name": cc,
-                "price": display,
+                "name": symbol,
+                "price": pair["rate"],
                 "change_pct": None,
                 "type": "forex",
             })
@@ -225,16 +230,15 @@ class MarketDataService:
         return items
 
     async def get_available_forex_instruments(self) -> list[dict[str, Any]]:
-        """Return forex symbols available in DB for instrument selection UI."""
+        """Return forex pair symbols available in DB for instrument selection UI."""
         rows = await self.get_forex()
+        pairs = derive_forex_pairs(rows)
         options: list[dict[str, Any]] = []
-        for idx, row in enumerate(rows):
-            code = row.get("currency_code")
-            if not code or code == "EUR":
-                continue
+        for idx, pair in enumerate(pairs):
+            symbol = pair["symbol"]
             options.append({
-                "symbol": f"EUR/{code}",
-                "name": str(code),
+                "symbol": symbol,
+                "name": symbol,
                 "rank": idx + 1,
                 "category": "forex",
                 "market_cap_usd": None,
@@ -344,20 +348,25 @@ class MarketDataService:
             "fetched_at": r.fetched_at,
         }
 
-    async def build_forex_api_response_async(self) -> tuple[list[dict[str, Any]], datetime | None]:
-        """Build MarketsForexResponse-compatible item dicts from DB facts."""
+    async def build_forex_api_response_async(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], datetime | None]:
+        """Build MarketsForexResponse-compatible item and pair dicts from DB facts."""
         latest_date = await self.db.scalar(select(func.max(FactCurrencyRate.date_id)))
         if not latest_date:
-            return [], None
+            return [], [], None
         result = await self.db.execute(
             select(FactCurrencyRate)
             .where(FactCurrencyRate.date_id == latest_date)
             .order_by(FactCurrencyRate.currency_code, FactCurrencyRate.source),
         )
         rows = self._dedupe_currency_rows(list(result.scalars().all()))
+        currency_rows = self._currency_rows_from_facts(rows)
         last_at: datetime | None = None
         items: list[dict[str, Any]] = []
         for r in rows:
+            if r.currency_code not in self._forex_allowed_codes():
+                continue
             if r.currency_code == "EUR":
                 continue
             rte = float(r.rate_to_eur)
@@ -375,7 +384,15 @@ class MarketDataService:
                 "change_24h": None,
                 "refreshed_at": r.fetched_at or datetime.now(timezone.utc),
             })
-        return items, last_at
+        pair_items: list[dict[str, Any]] = []
+        for pair in derive_forex_pairs(currency_rows):
+            pair_items.append({
+                "symbol": pair["symbol"],
+                "base": pair["base"],
+                "quote": pair["quote"],
+                "rate": Decimal(str(round(pair["rate"], 6))),
+            })
+        return items, pair_items, last_at
 
     async def build_crypto_api_response_async(self) -> tuple[list[dict[str, Any]], datetime | None, bool]:
         """Build MarketsCryptoResponse-compatible items."""

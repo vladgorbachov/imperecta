@@ -77,9 +77,9 @@ async def get_refresh_metadata(current_user: CurrentUser, db: DbSession) -> Mark
 async def get_forex(current_user: CurrentUser, db: DbSession) -> MarketsForexResponse:
     _ = current_user
     mds = MarketDataService(db)
-    db_items, last_at = await mds.build_forex_api_response_async()
-    if db_items:
-        return MarketsForexResponse(items=db_items, last_refreshed_at=last_at)
+    db_items, pair_items, last_at = await mds.build_forex_api_response_async()
+    if db_items or pair_items:
+        return MarketsForexResponse(items=db_items, pairs=pair_items, last_refreshed_at=last_at)
     raw = await fetch_forex_rates("EUR")
     if not raw:
         raise HTTPException(503, "Forex data temporarily unavailable")
@@ -95,7 +95,7 @@ async def get_forex(current_user: CurrentUser, db: DbSession) -> MarketsForexRes
         }
         for pair in raw
     ]
-    return MarketsForexResponse(items=items, last_refreshed_at=now)
+    return MarketsForexResponse(items=items, pairs=[], last_refreshed_at=now)
 
 
 @router.get("/crypto", response_model=MarketsCryptoResponse)

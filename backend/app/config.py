@@ -78,6 +78,10 @@ class Settings(BaseSettings):
         default=64,
         validation_alias="MV_REFRESH_WORK_MEM_MB",
     )
+    forex_allowed_currencies: str = Field(
+        default="USD,EUR,GBP,JPY,CHF,MDL,RON,PLN,TRY",
+        validation_alias="FOREX_ALLOWED_CURRENCIES",
+    )
     allowed_origins: str
     app_env: str
     port: int
@@ -182,6 +186,15 @@ class Settings(BaseSettings):
     def origins_list(self) -> list[str]:
         """Return allowed origins as list of strings."""
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def forex_allowed_currency_set(self) -> frozenset[str]:
+        """Fixed forex ingest/read allowlist (which currencies, not their rates)."""
+        return frozenset(
+            part.strip().upper()
+            for part in self.forex_allowed_currencies.split(",")
+            if part.strip()
+        )
 
     class Config:
         env_file = ".env"

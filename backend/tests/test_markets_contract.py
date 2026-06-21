@@ -34,8 +34,10 @@ async def test_markets_forex_returns_stored_data(client, auth_headers):
     assert resp.status_code == 200
     data = resp.json()
     assert "items" in data
+    assert "pairs" in data
     assert "last_refreshed_at" in data
     assert isinstance(data["items"], list)
+    assert isinstance(data["pairs"], list)
 
 
 @pytest.mark.asyncio

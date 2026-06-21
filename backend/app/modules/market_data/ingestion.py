@@ -6,9 +6,11 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import calendar
+import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.models.app_tables import ApiLog
 from app.models.dimensions import DimDate
 from app.models.facts import FactCommodityPrice, FactCryptoPrice, FactCurrencyRate
@@ -16,6 +18,7 @@ from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.persist.writer import PersistContext, write_async
 
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 
 async def _ensure_dim_date(db: AsyncSession, d: date) -> int:
@@ -247,9 +250,17 @@ class IngestionService:
                     if r > 0:
                         pairs[cur] = r
                 usd_per_eur = pairs.get("USD")
+                allowed = Settings().forex_allowed_currency_set
+                for allowed_code in allowed:
+                    if allowed_code == "EUR":
+                        continue
+                    if allowed_code not in pairs:
+                        slog.debug("forex_currency_absent", cur=allowed_code)
                 items: list[ForexIngestItem] = []
                 for cur, rate in pairs.items():
                     if cur == "EUR":
+                        continue
+                    if cur not in allowed:
                         continue
                     rate_to_eur = 1.0 / rate
                     if usd_per_eur:

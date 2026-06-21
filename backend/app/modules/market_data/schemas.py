@@ -78,8 +78,16 @@ class MarketsForexItem(BaseModel):
     refreshed_at: datetime
 
 
+class MarketsForexPairItem(BaseModel):
+    symbol: str
+    base: str
+    quote: str
+    rate: Decimal
+
+
 class MarketsForexResponse(BaseModel):
     items: list[MarketsForexItem]
+    pairs: list[MarketsForexPairItem] = Field(default_factory=list)
     last_refreshed_at: datetime | None
 
 
