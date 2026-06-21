@@ -20,8 +20,10 @@ _FOREX_NINE = (
 def upgrade() -> None:
     op.execute(
         """
-        INSERT INTO dim_currency (currency_code, name, symbol, decimal_places)
-        VALUES ('JPY', 'Japanese Yen', '¥', 0)
+        INSERT INTO dim_currency (
+            currency_code, name, symbol, decimal_places, is_active
+        )
+        VALUES ('JPY', 'Japanese Yen', '¥', 0, true)
         ON CONFLICT (currency_code) DO NOTHING
         """
     )

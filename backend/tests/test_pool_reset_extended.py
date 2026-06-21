@@ -77,8 +77,11 @@ async def test_reset_truncates_pool() -> None:
     assert "DELETE FROM dim_product" not in sql
     assert "UPDATE dim_marketplace" in sql
     assert "ANALYZE fact_listing" in sql
-    assert result["deleted_listings"] == 100
-    assert result["deleted_reject_data"] == 5
+    assert result["pool_cleared"] is True
+    assert result["fact_listing_deleted"] == 100
+    assert result["reject_data_deleted"] == 5
+    assert result["mv_refreshed"] is True
+    assert result["post_maintenance_error"] is None
     assert mock_refresh.call_count == 2
 
 
@@ -144,13 +147,10 @@ async def test_reset_idempotent() -> None:
             first = await clear_product_pool_preserve_marketplaces(db)
             second = await clear_product_pool_preserve_marketplaces(db)
 
-    assert first == second == {
-        "deleted_listings": 0,
-        "deleted_products": 0,
-        "deleted_prices": 0,
-        "deleted_scrape_logs": 0,
-        "deleted_reject_data": 0,
-    }
+    assert first == second
+    assert first["pool_cleared"] is True
+    assert first["fact_listing_deleted"] == 0
+    assert first["mv_refreshed"] is True
     assert db.commit.await_count == 4
 
 @pytest.mark.asyncio

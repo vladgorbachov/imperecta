@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.observability.sentry_init import capture_exception_if_initialized
 from app.workers.maintenance_tasks import _has_active_scrape_job, _refresh_mv
 
 slog = structlog.get_logger(__name__)
@@ -38,7 +41,32 @@ async def _table_count(db: AsyncSession, table: str) -> int:
     return int(result.scalar() or 0)
 
 
-async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str, int]:
+async def _run_post_wipe_maintenance(db: AsyncSession) -> tuple[bool, str | None]:
+    """Best-effort MV refresh + ANALYZE; must never fail the pool reset contract."""
+    try:
+        for view_name in _MATERIALIZED_VIEWS:
+            _refresh_mv(view_name)
+        for table_name in _ANALYZE_TABLES:
+            await db.execute(text(f"ANALYZE {table_name}"))
+        await db.commit()
+        slog.info("reset_mv_refreshed", views=list(_MATERIALIZED_VIEWS))
+        return True, None
+    except Exception as exc:
+        post_error = str(exc)[:2000]
+        slog.warning(
+            "reset_post_maintenance_failed",
+            error=post_error,
+            exc_info=True,
+        )
+        capture_exception_if_initialized(exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return False, post_error
+
+
+async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str, Any]:
     """
     Wipe e-commerce pool data and discovery cursors; preserve marketplaces and seeds.
 
@@ -57,6 +85,7 @@ async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str
         "deleted_scrape_logs": await _table_count(db, "scrape_logs"),
         "deleted_reject_data": await _table_count(db, "reject_data"),
     }
+    marketplaces_preserved = await _table_count(db, "dim_marketplace")
     slog.info("reset_pool_started", **counts_before)
 
     await db.execute(
@@ -120,13 +149,18 @@ async def clear_product_pool_preserve_marketplaces(db: AsyncSession) -> dict[str
 
     await db.commit()
 
-    for view_name in _MATERIALIZED_VIEWS:
-        _refresh_mv(view_name)
-    slog.info("reset_mv_refreshed", views=list(_MATERIALIZED_VIEWS))
-
-    for table_name in _ANALYZE_TABLES:
-        await db.execute(text(f"ANALYZE {table_name}"))
-    await db.commit()
+    mv_refreshed, post_maintenance_error = await _run_post_wipe_maintenance(db)
 
     slog.info("reset_completed", **counts_before)
-    return counts_before
+    return {
+        "pool_cleared": True,
+        "fact_listing_deleted": counts_before["deleted_listings"],
+        "dim_product_deleted": counts_before["deleted_products"],
+        "fact_price_deleted": counts_before["deleted_prices"],
+        "scrape_logs_deleted": counts_before["deleted_scrape_logs"],
+        "reject_data_deleted": counts_before["deleted_reject_data"],
+        "marketplaces_preserved": marketplaces_preserved,
+        "cursors_reset": True,
+        "mv_refreshed": mv_refreshed,
+        "post_maintenance_error": post_maintenance_error,
+    }

@@ -77,7 +77,8 @@ async def test_forex_ingest_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_jpy_seeded() -> None:
     """Migration 026 inserts JPY into dim_currency."""
     text = MIGRATION_026.read_text(encoding="utf-8")
-    assert "'JPY', 'Japanese Yen', '¥', 0" in text
+    assert "'JPY', 'Japanese Yen', '¥', 0, true" in text
+    assert "is_active" in text
     assert "ON CONFLICT (currency_code) DO NOTHING" in text
     assert DEFAULT_FOREX_ALLOWED_CURRENCIES == frozenset(
         {"USD", "EUR", "GBP", "JPY", "CHF", "MDL", "RON", "PLN", "TRY"},

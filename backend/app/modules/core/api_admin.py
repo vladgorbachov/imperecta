@@ -66,7 +66,7 @@ async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
 
     started = perf_counter()
     try:
-        counts = await clear_product_pool_preserve_marketplaces(db)
+        result = await clear_product_pool_preserve_marketplaces(db)
     except PoolResetBlockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -74,11 +74,6 @@ async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
         ) from exc
     elapsed_ms = int((perf_counter() - started) * 1000)
     return {
-        "status": "pool_cleared",
-        "deleted_listings": counts["deleted_listings"],
-        "deleted_products": counts["deleted_products"],
-        "deleted_prices": counts["deleted_prices"],
-        "deleted_scrape_logs": counts["deleted_scrape_logs"],
-        "deleted_reject_data": counts["deleted_reject_data"],
+        **result,
         "time_ms": elapsed_ms,
     }
