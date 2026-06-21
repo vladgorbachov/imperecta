@@ -22,7 +22,7 @@ from app.models.facts import (
     FactFuelPrice,
 )
 from app.config import Settings
-from app.modules.market_data.forex_pairs import derive_forex_pairs
+from app.modules.market_data.forex_pairs import derive_forex_pairs, expand_forex_favorites_with_inverses
 
 
 class MarketDataService:
@@ -176,57 +176,52 @@ class MarketDataService:
         crypto_favorites: Iterable[str] | None = None,
         commodity_favorites: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Build ticker from latest forex + crypto + commodities (+ fuel from DB when available)."""
-        forex_set = {value.strip().upper() for value in (forex_favorites or []) if value}
+        """Build ticker from latest forex + crypto + commodities."""
+        forex_set = expand_forex_favorites_with_inverses(
+            {value.strip().upper() for value in (forex_favorites or []) if value}
+        )
         crypto_set = {value.strip().upper() for value in (crypto_favorites or []) if value}
         commodity_set = {value.strip().upper() for value in (commodity_favorites or []) if value}
 
         items: list[dict[str, Any]] = []
-        forex_rows = await self.get_forex()
-        for pair in derive_forex_pairs(forex_rows):
-            symbol = pair["symbol"]
-            if forex_set and symbol.upper() not in forex_set:
-                continue
-            items.append({
-                "symbol": symbol,
-                "name": symbol,
-                "price": pair["rate"],
-                "change_pct": None,
-                "type": "forex",
-            })
-        for c in (await self.get_crypto())[:5]:
-            symbol = str(c["symbol"]).upper()
-            if crypto_set and symbol not in crypto_set:
-                continue
-            items.append({
-                "symbol": symbol,
-                "name": c.get("name", c["symbol"]),
-                "price": c["price_usd"],
-                "change_pct": c.get("change_24h_pct"),
-                "type": "crypto",
-            })
-        for cm in await self.get_commodities():
-            symbol = str(cm["symbol"]).upper()
-            if commodity_set and symbol not in commodity_set:
-                continue
-            items.append({
-                "symbol": symbol,
-                "name": cm["name"],
-                "price": cm["price_usd"],
-                "change_pct": cm.get("change_24h_pct"),
-                "type": "commodity",
-                "unit": cm.get("unit", ""),
-            })
-        fuel_rows = await self.get_fuel(country_code.upper())
-        for row in fuel_rows:
-            items.append({
-                "symbol": f"{row['fuel_type']}@{country_code.upper()}",
-                "name": row["fuel_type"],
-                "price": row["price_local"],
-                "change_pct": row.get("change_week_pct"),
-                "type": "fuel",
-                "currency_code": row["currency_code"],
-            })
+        if forex_set:
+            forex_rows = await self.get_forex()
+            for pair in derive_forex_pairs(forex_rows):
+                symbol = pair["symbol"]
+                if symbol.upper() not in forex_set:
+                    continue
+                items.append({
+                    "symbol": symbol,
+                    "name": symbol,
+                    "price": pair["rate"],
+                    "change_pct": None,
+                    "type": "forex",
+                })
+        if crypto_set:
+            for c in await self.get_crypto():
+                symbol = str(c["symbol"]).upper()
+                if symbol not in crypto_set:
+                    continue
+                items.append({
+                    "symbol": symbol,
+                    "name": c.get("name", c["symbol"]),
+                    "price": c["price_usd"],
+                    "change_pct": c.get("change_24h_pct"),
+                    "type": "crypto",
+                })
+        if commodity_set:
+            for cm in await self.get_commodities():
+                symbol = str(cm["symbol"]).upper()
+                if symbol not in commodity_set:
+                    continue
+                items.append({
+                    "symbol": symbol,
+                    "name": cm["name"],
+                    "price": cm["price_usd"],
+                    "change_pct": cm.get("change_24h_pct"),
+                    "type": "commodity",
+                    "unit": cm.get("unit", ""),
+                })
         return items
 
     async def get_available_forex_instruments(self) -> list[dict[str, Any]]:

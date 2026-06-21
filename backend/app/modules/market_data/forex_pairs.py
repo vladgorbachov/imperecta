@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 import structlog
 
@@ -91,4 +91,22 @@ def derive_forex_pairs(
         if include_inverses:
             add_pair(quote, base)
 
+    return out
+
+
+def expand_forex_favorites_with_inverses(symbols: Iterable[str]) -> set[str]:
+    """Given favorite forex symbols like {'EUR/USD'}, return them plus inverses.
+
+    Pure string transform; does not validate against available rates.
+    """
+    out: set[str] = set()
+    for raw in symbols:
+        if not raw:
+            continue
+        sym = raw.strip().upper()
+        out.add(sym)
+        if "/" in sym:
+            base, quote = sym.split("/", 1)
+            if base and quote:
+                out.add(f"{quote}/{base}")
     return out

@@ -12,6 +12,7 @@ from app.modules.market_data.forex_pairs import (
     FOREX_PRIMARY_PAIRS,
     PAIR_DIRECTION,
     derive_forex_pairs,
+    expand_forex_favorites_with_inverses,
 )
 from app.modules.market_data.ingestion import IngestionService
 
@@ -129,6 +130,19 @@ def test_absent_currency_pair_omitted() -> None:
     assert "USD/JPY" not in symbols
     assert "JPY/USD" not in symbols
     assert "MDL/EUR" not in symbols
+
+
+def test_expand_forex_favorites_with_inverses_adds_reciprocal() -> None:
+    """EUR/USD selection expands to include USD/EUR for ticker filtering."""
+    assert expand_forex_favorites_with_inverses(["EUR/USD"]) == {"EUR/USD", "USD/EUR"}
+
+
+def test_expand_forex_favorites_with_inverses_empty() -> None:
+    assert expand_forex_favorites_with_inverses([]) == set()
+
+
+def test_expand_forex_favorites_with_inverses_malformed_no_slash() -> None:
+    assert expand_forex_favorites_with_inverses(["BTC"]) == {"BTC"}
 
 
 def test_no_hardcoded_rates() -> None:
