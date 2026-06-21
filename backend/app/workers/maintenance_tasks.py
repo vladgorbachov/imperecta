@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 from app.config import Settings
 from app.database import sync_engine, sync_session_factory
 from app.models.app_tables import ScrapeJob
+from app.modules.core.supabase_security import harden_table_statements
 from app.observability.sentry_init import capture_exception_if_initialized
 from app.workers.celery_app import celery_app
 
@@ -129,7 +130,10 @@ def ensure_fact_price_partitions() -> None:
         try:
             with sync_engine.connect() as conn:
                 conn.execute(text(ddl))
+                qualified = f"public.{partition_name}"
+                for statement in harden_table_statements(qualified):
+                    conn.execute(text(statement))
                 conn.commit()
-            logger.info("Ensured partition %s", partition_name)
+            logger.info("Ensured partition %s (RLS + client revoke)", partition_name)
         except Exception:
             logger.exception("Failed to create partition %s", partition_name)

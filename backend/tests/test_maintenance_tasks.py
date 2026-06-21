@@ -70,3 +70,21 @@ def test_refresh_failure_isolated() -> None:
 def test_refresh_mv_rejects_unknown_name() -> None:
     with pytest.raises(ValueError, match="unsupported materialized view"):
         mt._refresh_mv("mv_unknown")
+
+
+def test_ensure_partition_applies_security_hardening() -> None:
+    conn = MagicMock()
+    with patch.object(mt, "sync_engine") as mock_engine:
+        mock_engine.connect.return_value.__enter__.return_value = conn
+        with patch.object(mt, "datetime") as mock_dt:
+            mock_dt.now.return_value = __import__("datetime").datetime(
+                2026, 6, 1, tzinfo=__import__("datetime").timezone.utc,
+            )
+            mt.ensure_fact_price_partitions()
+
+    executed = [call.args[0].text for call in conn.execute.call_args_list]
+    assert any("CREATE TABLE IF NOT EXISTS fact_price_202607" in sql for sql in executed)
+    assert any("ENABLE ROW LEVEL SECURITY" in sql for sql in executed)
+    assert any("rls_deny_client_roles" in sql for sql in executed)
+    assert any("REVOKE ALL ON public.fact_price_202607 FROM anon, authenticated" in sql for sql in executed)
+    conn.commit.assert_called()
