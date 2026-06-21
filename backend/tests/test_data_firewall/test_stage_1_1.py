@@ -82,25 +82,19 @@ def test_firewall_matches_legacy_gate_country_mismatch_reason() -> None:
     assert fw.forced_log_status == "currency_rejected"
 
 
-def test_page_role_threaded_shadow_does_not_change_pass() -> None:
+def test_page_role_listing_blocked_in_stage_1_2() -> None:
     mp_id = uuid4()
     data = _FakeData(page_role="listing")
     resolver = _FakeResolver(frozenset({"EUR"}))
-    fw_product = evaluate_ecommerce(
-        data,
-        marketplace_id=mp_id,
-        currency_resolver=resolver,
-        page_role="product",
-    )
     fw_listing = evaluate_ecommerce(
         data,
         marketplace_id=mp_id,
         currency_resolver=resolver,
         page_role="listing",
     )
-    assert fw_product.passed == fw_listing.passed
+    assert not fw_listing.passed
     assert fw_listing.page_role_verdict == "non_product"
-    assert fw_listing.notes.get("would_block_non_product") is True
+    assert fw_listing.reject_reason == "not_a_product_page"
 
 
 def test_page_role_on_extracted_product_from_classifier() -> None:
@@ -129,15 +123,9 @@ def test_contract_structure_loaded() -> None:
     assert search_source.get("check_values") is not None
 
 
-def test_market_rail_stub_not_wired() -> None:
-    outcome = evaluate_market(
-        {"date_id": 20260101, "symbol": "BTC", "price_usd": 1.0, "source": "binance"},
-        table="fact_crypto_price",
-    )
-    assert outcome.passed is False
-    assert "missing:" in outcome.failed_rules[0] or "type:" in outcome.failed_rules[0]
-
+def test_market_rail_wired_in_stage_1_2() -> None:
     from app.modules.market_data import ingestion as market_ingestion
 
     source = open(market_ingestion.__file__, encoding="utf-8").read()
-    assert "evaluate_market" not in source
+    assert "evaluate_market" in source
+    assert "write_async" in source

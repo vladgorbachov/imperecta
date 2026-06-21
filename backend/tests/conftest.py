@@ -61,6 +61,10 @@ os.environ.setdefault("DECODO_ENABLED", os.environ.get("TEST_DECODO_ENABLED", ""
 os.environ.setdefault("ALLOWED_ORIGINS", os.environ.get("TEST_ALLOWED_ORIGINS", ""))
 os.environ.setdefault("APP_ENV", os.environ.get("TEST_APP_ENV", "test"))
 os.environ.setdefault("PORT", os.environ.get("TEST_PORT", "8000"))
+os.environ.setdefault(
+    "FIREWALL_SIGNING_SECRET",
+    os.environ.get("TEST_FIREWALL_SIGNING_SECRET", "test-firewall-signing-secret"),
+)
 
 from app.database import async_session_maker, get_db
 from app.main import app

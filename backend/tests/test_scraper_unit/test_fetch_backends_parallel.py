@@ -482,7 +482,6 @@ def test_parallel_persist_success_advances_last_checked(monkeypatch):
         ),
     )
     monkeypatch.setattr(scraper_service, "_today_date_id", lambda _db: 20990101)
-    monkeypatch.setattr(scraper_service, "_previous_price_snapshot", lambda *_a, **_k: None)
 
     svc = GlobalScrapeService(session, pool)
     fetch = ListingFetchResult(

@@ -1,8 +1,8 @@
 """IngestionService — write-and-enrich half of the pool scrape pipeline.
 
 Receives ``ExtractedProduct`` from the parser (scraper) and runs the
-PERSISTENCE_GATE; on pass writes a FactPrice row (with price-change percent
-and discount), enriches DimProduct (name + image), and updates the
+data_firewall; on pass signs fields and delegates verbatim write to
+persist_module. Enriches DimProduct (name + image), and updates the
 FactListing's denormalised price fields. Commits its own transaction
 (decision A). Returns an immutable ``IngestionResult`` the parser uses to
 shape its separate ScrapeLog write.
@@ -22,22 +22,20 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.dimensions import DimProduct
-from app.models.facts import FactListing, FactPrice
-from app.modules.ingestion.dto import IngestionResult
+from app.models.facts import FactListing
 from app.modules.data_firewall.firewall import FirewallOutcome, evaluate_ecommerce
+from app.modules.ingestion.dto import IngestionResult
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN, CurrencyResolver
+from app.modules.persist.writer import PersistContext, build_fact_price_fields, write_sync
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
-
-# Upper bound for the FactPrice.price_change_pct Numeric(8,4) column.
-_MAX_ABS_PRICE_CHANGE_PCT = 9_999.9999
 
 
 # --- ingestion-owned helpers (moved verbatim from scraper.service) -----------
@@ -92,57 +90,6 @@ def _today_date_id(db: Session) -> int:
     return date_id
 
 
-def _previous_price_snapshot(
-    db: Session,
-    listing_id: UUID,
-    before_date_id: int,
-) -> float | None:
-    """Latest prior fact_price.price for change_pct."""
-    row = db.execute(
-        select(FactPrice.price)
-        .where(FactPrice.listing_id == listing_id, FactPrice.date_id < before_date_id)
-        .order_by(FactPrice.date_id.desc())
-        .limit(1),
-    )
-    val = row.scalar_one_or_none()
-    return float(val) if val is not None else None
-
-
-def _compute_price_change_pct(prev_price: float | None, current_price: float) -> float | None:
-    """Compute bounded price change percent for Numeric(8,4) column."""
-    if prev_price is None or prev_price <= 0:
-        return None
-    pct = round((float(current_price) - prev_price) / prev_price * 100.0, 4)
-    if abs(pct) > _MAX_ABS_PRICE_CHANGE_PCT:
-        return None
-    return pct
-
-
-def _calculate_discount_pct(
-    current_price: float | None,
-    original_price: float | None,
-) -> float | None:
-    """Compute discount percentage from original to current price.
-
-    Returns the discount as a percentage (e.g., 25.50 for 25.5% off), rounded
-    to 2 decimal places. Returns None when:
-      - either price is missing or non-positive
-      - original_price <= current_price (no discount — possibly a price increase,
-        which is not a "discount" semantically)
-
-    No fallback values, no mock data: a None result means "discount cannot be
-    determined" and must be persisted as NULL, never as 0.
-    """
-    if current_price is None or original_price is None:
-        return None
-    if current_price <= 0 or original_price <= 0:
-        return None
-    if original_price <= current_price:
-        return None
-    discount = (original_price - current_price) / original_price * 100
-    return round(discount, 2)
-
-
 def _normalize_product_name(raw: str) -> str:
     s = (raw or "").lower().strip()
     s = re.sub(r"\s+", " ", s)
@@ -173,7 +120,7 @@ def _payload_has_product_name_field(payload: object) -> bool:
 
 
 class IngestionService:
-    """PERSISTENCE_GATE + FactPrice write + DimProduct enrichment.
+    """data_firewall + persist_module + DimProduct enrichment.
 
     Single public method: ``persist_extracted``. Owns its own commit
     (decision A). Does NOT write to scrape_logs; that stays with the parser.
@@ -190,18 +137,7 @@ class IngestionService:
         new_currency: str | None,
         new_in_stock: bool | None,
     ) -> bool:
-        """Return True when extracted values are identical to the last known state.
-
-        When True:
-        - No new fact_price row is written.
-        - last_checked_at on the listing is still updated.
-        - scrape_log is written with status 'no_change'.
-
-        Returns False (always write) when:
-        - listing.last_price is None -> no prior record exists.
-        - new_price or new_currency is None -> quality gate handles this separately.
-        - Any value differs from last known state.
-        """
+        """Return True when extracted values are identical to the last known state."""
         if listing.last_price is None or listing.last_currency_code is None:
             return False
         if new_price is None or new_currency is None:
@@ -227,21 +163,7 @@ class IngestionService:
         extracted_in_stock: bool | None,
         scrape_job_id: UUID | None = None,
     ) -> IngestionResult:
-        """Run gate -> (optional) FactPrice write + enrichment -> commit.
-
-        Parameters:
-            data: ExtractedProduct-like (duck-typed). Must be non-None.
-            listing: the FactListing row attached to ``self.db``. Pending
-                listing changes from the caller (e.g. ``last_checked_at``)
-                are flushed by ingestion's own commit.
-            extracted_in_stock: resolved by the parser via the
-                (result.in_stock, data.in_stock) chain — passed in so
-                ingestion stays decoupled from PoolScrapeResult.
-
-        Returns ``IngestionResult`` describing the persist decision; on
-        commit failure returns ``persist_failed=True`` so the parser can
-        skip ScrapeLog and propagate the failure (today's behaviour).
-        """
+        """Run firewall -> (optional) signed persist -> commit."""
         slog.info(
             "EXTRACTED_DATA",
             line="EXTRACTED DATA → product_name/title/price/currency/in_stock",
@@ -254,14 +176,42 @@ class IngestionService:
 
         self._enrich_dim_product(data, listing)
 
+        currency_raw_text = getattr(data, "currency_raw", None) or ""
+        curr_raw = getattr(data, "currency", None)
+
+        persist_fields: dict[str, Any] | None = None
+        if getattr(data, "price", None) is not None and curr_raw:
+            now = datetime.now(tz=timezone.utc)
+            date_id = _today_date_id(self.db)
+            original_price_value = (
+                float(data.original_price)
+                if getattr(data, "original_price", None) is not None
+                else None
+            )
+            persist_fields = build_fact_price_fields(
+                listing_id=listing.id,
+                date_id=date_id,
+                price=float(data.price),
+                currency_code=str(curr_raw),
+                original_price=original_price_value,
+                discount_pct=getattr(data, "discount_pct", None),
+                in_stock=extracted_in_stock,
+                price_change_pct=getattr(data, "price_change_pct", None),
+                scraped_at=now,
+                scrape_job_id=scrape_job_id,
+            )
+
         outcome = evaluate_ecommerce(
             data,
             marketplace_id=listing.marketplace_id,
             currency_resolver=self._currency_resolver,
             page_role=getattr(data, "page_role", None),
+            persist_fields=persist_fields,
+            extracted_in_stock=extracted_in_stock,
+            db=self.db,
+            listing_id=listing.id,
         )
-        currency_raw_text = getattr(data, "currency_raw", None) or ""
-        curr_raw = getattr(data, "currency", None)
+
         slog.info(
             "PERSISTENCE_GATE",
             line="PERSISTENCE GATE → product_name_ok / price_ok / currency_ok / sane / country",
@@ -290,7 +240,7 @@ class IngestionService:
             ):
                 listing.last_checked_at = datetime.now(tz=timezone.utc)
                 listing.last_price = data.price
-                listing.last_currency_code = data.currency[:3] if data.currency else None
+                listing.last_currency_code = data.currency if data.currency else None
                 listing.last_in_stock = extracted_in_stock
                 forced_log_status = "no_change"
                 logger.info(
@@ -300,14 +250,32 @@ class IngestionService:
                     data.currency,
                 )
             else:
-                self._write_fact_price(
-                    data=data,
-                    listing=listing,
-                    extracted_in_stock=extracted_in_stock,
-                    scrape_job_id=scrape_job_id,
+                wrote = write_sync(
+                    self.db,
+                    outcome.signed_record,
+                    ctx=PersistContext(
+                        source="ecommerce_scrape",
+                        marketplace_id=listing.marketplace_id,
+                        listing_id=listing.id,
+                        date_id=persist_fields["date_id"] if persist_fields else None,
+                    ),
                 )
-                forced_log_status = "success"
-                persisted = True
+                if wrote and persist_fields:
+                    listing.last_price = data.price
+                    listing.last_currency_code = persist_fields["currency_code"]
+                    listing.last_in_stock = extracted_in_stock
+                    listing.last_price_changed_at = persist_fields["scraped_at"]
+                    forced_log_status = "success"
+                    persisted = True
+                    logger.info(
+                        "fact_price write listing_id=%s date_id=%s currency=%s",
+                        listing.id,
+                        persist_fields["date_id"],
+                        persist_fields["currency_code"],
+                    )
+                else:
+                    forced_log_status = "persist_failed"
+                    persisted = False
 
         price_found = (
             float(data.price)
@@ -372,12 +340,7 @@ class IngestionService:
         return result
 
     def _enrich_dim_product(self, data: Any, listing: FactListing) -> None:
-        """Update DimProduct.name / image_url per the placeholder-replacement rules.
-
-        Verbatim port of the inline enrichment block (scraper.service ~559-581).
-        Image is only set when absent; name is replaced when current is a
-        placeholder (empty, "product", url-as-name, all-digits compact).
-        """
+        """Update DimProduct.name / image_url per the placeholder-replacement rules."""
         product = self.db.get(DimProduct, listing.product_id)
         if not product:
             return
@@ -403,66 +366,6 @@ class IngestionService:
         image_url = getattr(data, "image_url", None)
         if image_url and not product.image_url:
             product.image_url = image_url
-
-    def _write_fact_price(
-        self,
-        *,
-        data: Any,
-        listing: FactListing,
-        extracted_in_stock: bool | None,
-        scrape_job_id: UUID | None = None,
-    ) -> None:
-        """Write FactPrice + update FactListing denorm fields (success branch)."""
-        date_id = _today_date_id(self.db)
-        self.db.execute(
-            delete(FactPrice).where(
-                FactPrice.listing_id == listing.id,
-                FactPrice.date_id == date_id,
-            ),
-        )
-        prev = _previous_price_snapshot(self.db, listing.id, date_id)
-        price_change_pct = _compute_price_change_pct(prev, float(data.price))
-        if prev is not None and prev > 0 and price_change_pct is None:
-            logger.warning(
-                "price_change_pct_out_of_range listing_id=%s prev=%s current=%s",
-                listing.id,
-                prev,
-                float(data.price),
-            )
-
-        current_price_value = float(data.price)
-        original_price_value = (
-            float(data.original_price)
-            if getattr(data, "original_price", None)
-            else None
-        )
-        discount_pct_value = _calculate_discount_pct(
-            current_price_value, original_price_value
-        )
-        now = datetime.now(tz=timezone.utc)
-        price_record = FactPrice(
-            listing_id=listing.id,
-            date_id=date_id,
-            price=current_price_value,
-            currency_code=data.currency[:3],
-            original_price=original_price_value,
-            discount_pct=discount_pct_value,
-            in_stock=extracted_in_stock,
-            scraped_at=now,
-            price_change_pct=price_change_pct,
-            scrape_job_id=scrape_job_id,
-        )
-        self.db.add(price_record)
-        listing.last_price = data.price
-        listing.last_currency_code = data.currency[:3] if data.currency else None
-        listing.last_in_stock = extracted_in_stock
-        listing.last_price_changed_at = now
-        logger.info(
-            "fact_price write listing_id=%s date_id=%s currency=%s",
-            listing.id,
-            date_id,
-            data.currency[:3] if data.currency else None,
-        )
 
     @staticmethod
     def _log_gate_rejection(
@@ -496,9 +399,6 @@ __all__ = [
     "IngestionService",
     "MAX_CURRENCY_RAW_LEN",
     "_today_date_id",
-    "_previous_price_snapshot",
-    "_compute_price_change_pct",
-    "_calculate_discount_pct",
     "_normalize_product_name",
     "_should_replace_placeholder_name",
     "_payload_has_product_name_field",

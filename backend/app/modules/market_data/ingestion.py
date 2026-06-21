@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_tables import ApiLog
 from app.models.dimensions import DimDate
 from app.models.facts import FactCommodityPrice, FactCryptoPrice, FactCurrencyRate
+from app.modules.data_firewall.firewall import evaluate_market
+from app.modules.persist.writer import PersistContext, write_async
 
 logger = logging.getLogger(__name__)
 
@@ -112,25 +114,31 @@ class IngestionService:
         today_id = await _ensure_dim_date(self.db, today)
         now = datetime.now(timezone.utc)
         n = 0
+        sync_db = self.db.sync_session
         for item in items:
-            await self.db.execute(
-                delete(FactCurrencyRate).where(
-                    FactCurrencyRate.date_id == today_id,
-                    FactCurrencyRate.currency_code == item.currency_code[:3],
-                    FactCurrencyRate.source == item.source,
-                ),
+            fields = {
+                "date_id": today_id,
+                "currency_code": item.currency_code,
+                "rate_to_eur": item.rate_to_eur,
+                "rate_to_usd": item.rate_to_usd,
+                "source": item.source,
+                "fetched_at": now.isoformat(),
+            }
+            outcome = evaluate_market(
+                fields,
+                table="fact_currency_rate",
+                db=sync_db,
+                reject_source="market_forex",
             )
-            self.db.add(
-                FactCurrencyRate(
-                    date_id=today_id,
-                    currency_code=item.currency_code[:3],
-                    rate_to_eur=item.rate_to_eur,
-                    rate_to_usd=item.rate_to_usd,
-                    source=item.source,
-                    fetched_at=now,
-                ),
+            if not outcome.passed or outcome.signed_record is None:
+                continue
+            wrote = await write_async(
+                self.db,
+                outcome.signed_record,
+                ctx=PersistContext(source="market_forex", date_id=today_id),
             )
-            n += 1
+            if wrote:
+                n += 1
         await _log_ingestion(self.db, endpoint="forex", status="success")
         await self.db.commit()
         return n
@@ -143,30 +151,35 @@ class IngestionService:
         today_id = await _ensure_dim_date(self.db, today)
         now = datetime.now(timezone.utc)
         n = 0
+        sync_db = self.db.sync_session
         for item in items:
-            sym = item.symbol[:20]
-            await self.db.execute(
-                delete(FactCryptoPrice).where(
-                    FactCryptoPrice.date_id == today_id,
-                    FactCryptoPrice.symbol == sym,
-                    FactCryptoPrice.source == item.source,
-                ),
+            fields = {
+                "date_id": today_id,
+                "symbol": item.symbol,
+                "name": item.name,
+                "price_usd": item.price_usd,
+                "market_cap_usd": item.market_cap_usd,
+                "volume_24h_usd": item.volume_24h_usd,
+                "change_24h_pct": item.change_24h_pct,
+                "source": item.source,
+                "rank": item.rank,
+                "fetched_at": now.isoformat(),
+            }
+            outcome = evaluate_market(
+                fields,
+                table="fact_crypto_price",
+                db=sync_db,
+                reject_source="market_crypto",
             )
-            self.db.add(
-                FactCryptoPrice(
-                    date_id=today_id,
-                    symbol=sym,
-                    name=(item.name or sym)[:100],
-                    price_usd=item.price_usd,
-                    market_cap_usd=item.market_cap_usd,
-                    volume_24h_usd=item.volume_24h_usd,
-                    change_24h_pct=item.change_24h_pct,
-                    source=item.source,
-                    rank=item.rank,
-                    fetched_at=now,
-                ),
+            if not outcome.passed or outcome.signed_record is None:
+                continue
+            wrote = await write_async(
+                self.db,
+                outcome.signed_record,
+                ctx=PersistContext(source="market_crypto", date_id=today_id),
             )
-            n += 1
+            if wrote:
+                n += 1
         await self.db.commit()
         await _log_ingestion(self.db, endpoint="crypto", status="success")
         await self.db.commit()
@@ -180,29 +193,35 @@ class IngestionService:
         today_id = await _ensure_dim_date(self.db, today)
         now = datetime.now(timezone.utc)
         n = 0
+        sync_db = self.db.sync_session
         for item in items:
-            await self.db.execute(
-                delete(FactCommodityPrice).where(
-                    FactCommodityPrice.date_id == today_id,
-                    FactCommodityPrice.symbol == item.symbol[:20],
-                    FactCommodityPrice.source == item.source,
-                ),
+            fields = {
+                "date_id": today_id,
+                "symbol": item.symbol,
+                "name": item.name,
+                "commodity_type": item.commodity_type,
+                "price_usd": item.price_usd,
+                "price_eur": item.price_eur,
+                "change_24h_pct": item.change_24h_pct,
+                "unit": item.unit,
+                "source": item.source,
+                "fetched_at": now.isoformat(),
+            }
+            outcome = evaluate_market(
+                fields,
+                table="fact_commodity_price",
+                db=sync_db,
+                reject_source="market_commodities",
             )
-            self.db.add(
-                FactCommodityPrice(
-                    date_id=today_id,
-                    symbol=item.symbol[:20],
-                    name=item.name[:100],
-                    commodity_type=item.commodity_type,
-                    price_usd=item.price_usd,
-                    price_eur=item.price_eur,
-                    change_24h_pct=item.change_24h_pct,
-                    unit=item.unit[:20],
-                    source=item.source,
-                    fetched_at=now,
-                ),
+            if not outcome.passed or outcome.signed_record is None:
+                continue
+            wrote = await write_async(
+                self.db,
+                outcome.signed_record,
+                ctx=PersistContext(source="market_commodities", date_id=today_id),
             )
-            n += 1
+            if wrote:
+                n += 1
         await _log_ingestion(self.db, endpoint="commodities", status="success")
         await self.db.commit()
         return n
@@ -242,7 +261,7 @@ class IngestionService:
                             currency_code=cur,
                             rate_to_eur=rate_to_eur,
                             rate_to_usd=rate_to_usd,
-                            source="forex_unified",
+                            source="custom",
                         ),
                     )
                 out["forex"] = await self.persist_forex(items)
@@ -262,7 +281,7 @@ class IngestionService:
                         market_cap_usd=float(c["market_cap"]) if c.get("market_cap") else None,
                         volume_24h_usd=None,
                         change_24h_pct=float(c["change_24h"]) if c.get("change_24h") is not None else None,
-                        source="crypto_unified",
+                        source="custom",
                         rank=index + 1,
                     )
                     for index, c in enumerate(raw_c)
@@ -278,9 +297,9 @@ class IngestionService:
                 comm_raw, _, _ = await fetch_commodities()
                 comm_items: list[CommodityIngestItem] = []
                 for c in comm_raw or []:
-                    sym = str(c.get("symbol", "UNK"))[:20]
-                    name = str(c.get("name", sym))[:100]
-                    unit = str(c.get("unit", "unit"))[:20]
+                    sym = str(c.get("symbol", "UNK"))
+                    name = str(c.get("name", sym))
+                    unit = str(c.get("unit", "unit"))
                     price = float(c.get("price", 0))
                     ch = c.get("change_24h")
                     comm_items.append(
@@ -315,9 +334,9 @@ class IngestionService:
             comm_raw, _, _ = await fetch_commodities()
             comm_items: list[CommodityIngestItem] = []
             for c in comm_raw or []:
-                sym = str(c.get("symbol", "UNK"))[:20]
-                name = str(c.get("name", sym) or sym)[:100]
-                unit = str(c.get("unit", "unit"))[:20]
+                sym = str(c.get("symbol", "UNK"))
+                name = str(c.get("name", sym) or sym)
+                unit = str(c.get("unit", "unit"))
                 price = float(c.get("price", 0))
                 ch = c.get("change_24h")
                 src = "goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"

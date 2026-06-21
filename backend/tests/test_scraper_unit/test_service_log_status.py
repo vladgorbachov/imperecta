@@ -11,11 +11,9 @@ from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
-    _compute_price_change_pct,
     _needs_scrape_logs_status_column_repair,
     _optional_in_stock,
     _payload_has_product_name_field,
-    _previous_price_snapshot,
 )
 
 
@@ -37,7 +35,7 @@ def test_payload_has_product_name_field():
         title: str | None = None
 
     assert _payload_has_product_name_field(WithName()) is True
-    assert _payload_has_product_name_field(ExtractedProduct()) is False
+    assert _payload_has_product_name_field(ExtractedProduct()) is True
 
 
 def test_determine_log_status_failed_variants():
@@ -69,7 +67,7 @@ def test_determine_log_status_success_paths():
     empty = PoolScrapeResult(success=True, url="u", data=ExtractedProduct(), is_empty=True)
     assert svc._determine_log_status(empty) == "missing_critical_data"
 
-    data = ExtractedProduct(title="T", price=1.0, currency="USD")
+    data = ExtractedProduct(title="T", product_name="T", price=1.0, currency="USD")
     r = PoolScrapeResult(
         success=True,
         url="u",
@@ -109,25 +107,6 @@ def test_categorize_error_branches():
     assert svc._categorize_error("blocked captcha") == "auth"
     assert svc._categorize_error("rate limited") == "rate_limit"
     assert svc._categorize_error("weird") == "parse"
-
-
-def test_previous_price_snapshot():
-    from uuid import uuid4
-
-    lid = uuid4()
-    session = MagicMock()
-    row = MagicMock()
-    row.scalar_one_or_none.return_value = 9.5
-    session.execute.return_value = row
-    assert _previous_price_snapshot(session, lid, 20260101) == 9.5
-
-
-def test_compute_price_change_pct_bounds():
-    assert _compute_price_change_pct(None, 10.0) is None
-    assert _compute_price_change_pct(0.0, 10.0) is None
-    assert _compute_price_change_pct(100.0, 120.0) == 20.0
-    # Numeric(8,4) cap protection: values above 9999.9999 become NULL.
-    assert _compute_price_change_pct(1.0, 1000.0) is None
 
 
 def test_detect_status_column_drift_error():

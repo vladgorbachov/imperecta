@@ -29,11 +29,8 @@ from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.ingestion.service import (
     IngestionService,
-    _calculate_discount_pct,
-    _compute_price_change_pct,
     _normalize_product_name,
     _payload_has_product_name_field,
-    _previous_price_snapshot,
     _should_replace_placeholder_name,
     _today_date_id,
 )
@@ -56,6 +53,7 @@ _SCRAPE_LOG_STATUSES = (
     "price_not_found",
     "parse_error",
     "currency_rejected",
+    "not_a_product",
     "missing_critical_data",
     "technical_error",
 )
@@ -68,6 +66,7 @@ _NON_FAILURE_LOG_STATUSES = frozenset({"success", "no_change"})
 _STATUS_ERROR_CATEGORY = {
     "parse_error": "parse",
     "currency_rejected": "data_quality",
+    "not_a_product": "data_quality",
     "missing_critical_data": "data_quality",
     "price_not_found": "parse",
     "technical_error": "technical",
@@ -140,9 +139,6 @@ __all__ = [
     "LISTING_DEACTIVATE_AFTER_ERRORS",
     "MAX_CURRENCY_RAW_LEN",
     "_today_date_id",
-    "_previous_price_snapshot",
-    "_compute_price_change_pct",
-    "_calculate_discount_pct",
     "_normalize_product_name",
     "_should_replace_placeholder_name",
     "_payload_has_product_name_field",

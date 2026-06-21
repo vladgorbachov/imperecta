@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -79,9 +80,9 @@ def _make_data(**overrides):
 
 def _make_listing(**overrides):
     base = dict(
-        id=999,
-        marketplace_id=1,
-        product_id=42,
+        id=uuid4(),
+        marketplace_id=uuid4(),
+        product_id=uuid4(),
         external_url="https://example.com/product",
         last_price=None,
         last_currency_code=None,
@@ -210,10 +211,6 @@ def patched_ingestion(monkeypatch):
     monkeypatch.setattr(
         "app.modules.ingestion.service._today_date_id",
         lambda _db: 20990101,
-    )
-    monkeypatch.setattr(
-        "app.modules.ingestion.service._previous_price_snapshot",
-        lambda _db, _lid, _did: None,
     )
     yield
 

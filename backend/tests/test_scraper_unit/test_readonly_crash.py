@@ -172,10 +172,6 @@ def test_scrape_listing_success_advances_last_checked(monkeypatch):
 
     monkeypatch.setattr("app.modules.scraper.service._run_coro_in_worker", ok_worker)
     monkeypatch.setattr("app.modules.scraper.service._today_date_id", lambda _db: 20990101)
-    monkeypatch.setattr(
-        "app.modules.scraper.service._previous_price_snapshot",
-        lambda *_a, **_k: None,
-    )
 
     svc = GlobalScrapeService(session, MagicMock(spec=ScraperPool))
     out = svc.scrape_product(listing_id)
