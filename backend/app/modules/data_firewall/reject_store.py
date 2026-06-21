@@ -23,7 +23,7 @@ _recent_reject_timestamps: list[float] = []
 
 
 def _spike_threshold() -> int:
-    return Settings().firewall_reject_spike_threshold
+    return Settings().data_firewall_reject_spike_threshold
 
 
 def _prune_old_rejects(now: float, window_seconds: float = 60.0) -> None:
@@ -47,7 +47,7 @@ def record_reject_spike_signal(
 ) -> None:
     """Emit structured warn; escalate to Sentry on burst threshold."""
     slog.warning(
-        "firewall_reject",
+        "data_firewall_reject",
         source=source,
         reject_reason=reject_reason,
         rejected_by=rejected_by,
@@ -64,7 +64,7 @@ def record_reject_spike_signal(
 
             if sentry_sdk.is_initialized():
                 sentry_sdk.capture_message(
-                    "firewall_reject_spike",
+                    "data_firewall_reject_spike",
                     level="warning",
                     extras={
                         "count": count,

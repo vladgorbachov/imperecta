@@ -60,7 +60,7 @@ def canonical_serialize(record_fields: dict[str, Any]) -> bytes:
 
 def signing_secret() -> str | None:
     """Return the configured signing secret; None means fail-closed."""
-    secret = _get_settings().firewall_signing_secret
+    secret = _get_settings().data_firewall_signing_secret
     if secret is None or not str(secret).strip():
         return None
     return str(secret)

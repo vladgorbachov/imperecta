@@ -62,13 +62,13 @@ class Settings(BaseSettings):
     decodo_password: str | None = Field(default=None, validation_alias="DECODO_PASSWORD")
     decodo_enabled: bool | None = Field(default=None, validation_alias="DECODO_ENABLED")
     sentry_dsn: str | None = None
-    firewall_signing_secret: str | None = Field(
+    data_firewall_signing_secret: str | None = Field(
         default=None,
-        validation_alias="FIREWALL_SIGNING_SECRET",
+        validation_alias="DATA_FIREWALL_SIGNING_SECRET",
     )
-    firewall_reject_spike_threshold: int = Field(
+    data_firewall_reject_spike_threshold: int = Field(
         default=50,
-        validation_alias="FIREWALL_REJECT_SPIKE_THRESHOLD",
+        validation_alias="DATA_FIREWALL_REJECT_SPIKE_THRESHOLD",
     )
     allowed_origins: str
     app_env: str

@@ -45,8 +45,8 @@ class _FakeData:
 
 
 @pytest.fixture(autouse=True)
-def _firewall_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FIREWALL_SIGNING_SECRET", "unit-test-firewall-secret")
+def _data_firewall_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATA_FIREWALL_SIGNING_SECRET", "unit-test-data-firewall-secret")
     reset_signing_settings_cache()
     reset_reject_spike_state()
     yield
@@ -54,7 +54,7 @@ def _firewall_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_reject_spike_state()
 
 
-def test_signature_unforgeable() -> None:
+def test_data_firewall_signature_unforgeable() -> None:
     fields = {"price": 12.34, "currency_code": "EUR"}
     signature = sign(fields)
     assert signature is not None
@@ -65,10 +65,10 @@ def test_signature_unforgeable() -> None:
     assert verify(fields, "deadbeef" * 8) is False
 
 
-def test_signature_content_binding_bytes() -> None:
-  a = canonical_serialize({"b": 1, "a": 2})
-  b = canonical_serialize({"a": 2, "b": 1})
-  assert a == b
+def test_data_firewall_signature_content_binding_bytes() -> None:
+    a = canonical_serialize({"b": 1, "a": 2})
+    b = canonical_serialize({"a": 2, "b": 1})
+    assert a == b
 
 
 def test_persist_rejects_unsigned() -> None:
@@ -117,7 +117,7 @@ def test_persist_writes_verbatim_no_mutation() -> None:
     assert row.currency_code == "EUR"
 
 
-def test_firewall_rejects_long_currency_no_truncate() -> None:
+def test_data_firewall_rejects_long_currency_no_truncate() -> None:
     mp_id = uuid4()
     listing_id = uuid4()
     data = _FakeData(currency="EURO")
@@ -151,7 +151,7 @@ def test_firewall_rejects_long_currency_no_truncate() -> None:
 
 
 @pytest.mark.parametrize("role", ["listing", "hub"])
-def test_category_page_blocked(role: str) -> None:
+def test_data_firewall_category_page_blocked(role: str) -> None:
     mp_id = uuid4()
     data = _FakeData(page_role=role)
     outcome = evaluate_ecommerce(
@@ -165,7 +165,7 @@ def test_category_page_blocked(role: str) -> None:
     assert outcome.forced_log_status == FORCED_NOT_A_PRODUCT
 
 
-def test_category_unknown_passes() -> None:
+def test_data_firewall_category_unknown_passes() -> None:
     mp_id = uuid4()
     listing_id = uuid4()
     data = _FakeData(page_role="unknown")
@@ -194,8 +194,8 @@ def test_category_unknown_passes() -> None:
     assert outcome.signed_record is not None
 
 
-def test_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FIREWALL_SIGNING_SECRET", raising=False)
+def test_data_firewall_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATA_FIREWALL_SIGNING_SECRET", raising=False)
     reset_signing_settings_cache()
     mp_id = uuid4()
     listing_id = uuid4()
@@ -227,7 +227,7 @@ def test_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     assert wrote is False
 
 
-def test_market_firewall_wired_bad_source() -> None:
+def test_market_data_firewall_wired_bad_source() -> None:
     fields = {
         "date_id": 20990101,
         "currency_code": "USD",
@@ -241,7 +241,7 @@ def test_market_firewall_wired_bad_source() -> None:
     assert outcome.reject_reason == REJECT_CONTRACT_VIOLATION
 
 
-def test_market_firewall_wired_valid_source() -> None:
+def test_market_data_firewall_wired_valid_source() -> None:
     fields = {
         "date_id": 20990101,
         "currency_code": "USD",
@@ -268,12 +268,12 @@ def test_reject_data_resilient() -> None:
             table_target="fact_price",
             reject_reason="contract_violation",
             raw_payload={"currency_code": "EURO"},
-            rejected_by="firewall",
+            rejected_by="data_firewall",
         )
         mock_logger.exception.assert_called_once()
 
 
-def test_market_ingestion_imports_firewall() -> None:
+def test_market_data_ingestion_imports_data_firewall() -> None:
     from app.modules.market_data import ingestion as market_ingestion
 
     source = open(market_ingestion.__file__, encoding="utf-8").read()

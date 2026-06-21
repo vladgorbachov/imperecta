@@ -77,7 +77,7 @@ def _reject_persist(
     signature_present: bool,
 ) -> bool:
     slog.error(
-        "firewall_flag_missing",
+        "data_firewall_flag_missing",
         table=table,
         source=ctx.source,
         reject_reason=reject_reason,
@@ -88,7 +88,7 @@ def _reject_persist(
 
         if sentry_sdk.is_initialized():
             sentry_sdk.capture_message(
-                "firewall_flag_missing",
+                "data_firewall_flag_missing",
                 level="error",
                 extras={
                     "table": table,

@@ -59,7 +59,7 @@ def _assert_same_decision(legacy, fw) -> None:  # noqa: ANN001
         _FakeData(product_name=None, title=None),
     ],
 )
-def test_firewall_matches_legacy_gate(data: _FakeData) -> None:
+def test_data_firewall_matches_legacy_gate(data: _FakeData) -> None:
     mp_id = uuid4()
     resolver = _FakeResolver(frozenset({"EUR"}))
     legacy = evaluate_gate(data, marketplace_id=mp_id, currency_resolver=resolver)
@@ -72,7 +72,7 @@ def test_firewall_matches_legacy_gate(data: _FakeData) -> None:
     _assert_same_decision(legacy, fw)
 
 
-def test_firewall_matches_legacy_gate_country_mismatch_reason() -> None:
+def test_data_firewall_matches_legacy_gate_country_mismatch_reason() -> None:
     mp_id = uuid4()
     data = _FakeData(currency="SEK", currency_raw="19.0 SEK")
     resolver = _FakeResolver(frozenset({"EUR"}))

@@ -227,21 +227,21 @@ def evaluate_ecommerce(
         forced_log_status = FORCED_NOT_A_PRODUCT
         failed_rules = ["page_role_not_product"]
         slog.info(
-            "firewall_page_role_blocked",
+            "data_firewall_page_role_blocked",
             marketplace_id=str(marketplace_id),
             role=role,
             page_role_verdict=page_role_verdict,
         )
     elif role == "unknown":
         slog.info(
-            "firewall_page_role_unknown_pass",
+            "data_firewall_page_role_unknown",
             marketplace_id=str(marketplace_id),
             role=role,
             page_role_verdict=page_role_verdict,
         )
     elif role is not None:
         slog.info(
-            "firewall_page_role_observed",
+            "data_firewall_page_role_observed",
             marketplace_id=str(marketplace_id),
             role=role,
             would_block=False,
@@ -286,10 +286,10 @@ def evaluate_ecommerce(
             db,
             source=reject_source,
             table_target=table,
-            reject_reason=reject_reason or "firewall_reject",
+            reject_reason=reject_reason or "data_firewall_reject",
             failed_rules=failed_rules,
             raw_payload=payload,
-            rejected_by="firewall",
+            rejected_by="data_firewall",
             marketplace_id=marketplace_id,
             listing_id=listing_id,
             signature_present=False,
@@ -345,10 +345,10 @@ def evaluate_market(
             db,
             source=reject_source,
             table_target=table,
-            reject_reason=reject_reason or "firewall_reject",
+            reject_reason=reject_reason or "data_firewall_reject",
             failed_rules=failed_rules,
             raw_payload=record,
-            rejected_by="firewall",
+            rejected_by="data_firewall",
             signature_present=False,
         )
 
