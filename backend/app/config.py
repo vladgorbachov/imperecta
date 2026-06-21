@@ -70,6 +70,14 @@ class Settings(BaseSettings):
         default=50,
         validation_alias="DATA_FIREWALL_REJECT_SPIKE_THRESHOLD",
     )
+    mv_refresh_temp_file_limit_mb: int = Field(
+        default=256,
+        validation_alias="MV_REFRESH_TEMP_FILE_LIMIT_MB",
+    )
+    mv_refresh_work_mem_mb: int = Field(
+        default=64,
+        validation_alias="MV_REFRESH_WORK_MEM_MB",
+    )
     allowed_origins: str
     app_env: str
     port: int

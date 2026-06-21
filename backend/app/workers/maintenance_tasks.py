@@ -3,38 +3,99 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
+import structlog
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from sqlalchemy import text
+from sqlalchemy import select, text
 
-from app.database import sync_engine
+from app.config import Settings
+from app.database import sync_engine, sync_session_factory
+from app.models.app_tables import ScrapeJob
+from app.observability.sentry_init import capture_exception_if_initialized
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
+
+_ALLOWED_MATERIALIZED_VIEWS: frozenset[str] = frozenset(
+    {"mv_daily_price_summary", "mv_marketplace_health"},
+)
+_ACTIVE_SCRAPE_JOB_TYPES: tuple[str, ...] = (
+    "full_pipeline_test",
+    "scrape",
+    "discovery",
+)
 
 
-def _refresh_mv_concurrently(statement: str) -> None:
-    """Run REFRESH MATERIALIZED VIEW CONCURRENTLY outside an explicit transaction."""
+def _has_active_scrape_job() -> bool:
+    """True when a pipeline/scrape/discovery job is actively running.
+
+    Uses the same scrape_jobs table signal as ParsingAdminService.get_active_pipeline_job,
+    extended to running scrape/discovery children during a pipeline.
+    """
+    with sync_session_factory() as session:
+        exists = session.execute(
+            select(ScrapeJob.id)
+            .where(
+                ScrapeJob.status == "running",
+                ScrapeJob.job_type.in_(_ACTIVE_SCRAPE_JOB_TYPES),
+            )
+            .limit(1),
+        ).scalar_one_or_none()
+        return exists is not None
+
+
+def _refresh_mv(mv_name: str) -> None:
+    """Refresh one materialized view non-concurrently with bounded temp usage.
+
+    Uses a dedicated autocommit connection. Session-level SET applies only to this
+    connection and is reset before close so temp spill is bounded per refresh.
+    """
+    if mv_name not in _ALLOWED_MATERIALIZED_VIEWS:
+        raise ValueError(f"unsupported materialized view: {mv_name}")
+
+    settings = Settings()
+    temp_limit_kb = settings.mv_refresh_temp_file_limit_mb * 1024
+    work_mem_mb = settings.mv_refresh_work_mem_mb
+
     raw = sync_engine.raw_connection()
     try:
         raw.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cur = raw.cursor()
-        cur.execute(statement)
+        cur.execute(f"SET temp_file_limit = {temp_limit_kb}")
+        cur.execute(f"SET work_mem = '{work_mem_mb}MB'")
+        cur.execute(f"REFRESH MATERIALIZED VIEW {mv_name}")
+        cur.execute("RESET temp_file_limit")
+        cur.execute("RESET work_mem")
         cur.close()
     finally:
         raw.close()
 
 
+def _refresh_one_mv(mv_name: str) -> None:
+    """Refresh a single MV with timing, logging, and isolated failure handling."""
+    started = time.perf_counter()
+    try:
+        _refresh_mv(mv_name)
+    except Exception as exc:
+        slog.error("mv_refresh_failed", mv=mv_name, error=str(exc)[:500])
+        capture_exception_if_initialized(exc)
+        return
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    slog.info("mv_refresh_ok", mv=mv_name, duration_ms=duration_ms)
+
+
 @celery_app.task(name="refresh_materialized_views")
 def refresh_materialized_views() -> None:
-    """Refresh materialized views (requires unique indexes from migration 001)."""
-    try:
-        _refresh_mv_concurrently("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_price_summary")
-        _refresh_mv_concurrently("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_marketplace_health")
-        logger.info("Materialized views refreshed")
-    except Exception:
-        logger.exception("MV refresh failed")
+    """Refresh materialized views without CONCURRENTLY temp-copy blowup."""
+    if _has_active_scrape_job():
+        slog.info("mv_refresh_skipped_active_scrape")
+        return
+
+    for mv_name in ("mv_daily_price_summary", "mv_marketplace_health"):
+        _refresh_one_mv(mv_name)
 
 
 def _next_month(year: int, month: int) -> tuple[int, int]:
