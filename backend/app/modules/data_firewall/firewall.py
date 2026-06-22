@@ -209,11 +209,11 @@ def evaluate_ecommerce(
 
     if passed and role in ("listing", "hub"):
         passed = False
-        reject_reason = REJECT_NOT_A_PRODUCT_PAGE
+        reject_reason = FORCED_NOT_A_PRODUCT
         forced_log_status = FORCED_NOT_A_PRODUCT
         failed_rules = ["page_role_not_product"]
         slog.info(
-            "data_firewall_page_role_blocked",
+            "data_firewall_rejected_nonproduct",
             marketplace_id=str(marketplace_id),
             role=role,
             page_role_verdict=page_role_verdict,

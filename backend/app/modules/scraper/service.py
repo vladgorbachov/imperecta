@@ -20,7 +20,7 @@ from typing import Awaitable, TypeVar
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.database import invalidate_sync_session, is_read_only_sql_error
@@ -470,6 +470,48 @@ class GlobalScrapeService:
             now=now,
         )
 
+    def _confirmed_nonproduct_page_role(self, result: PoolScrapeResult) -> str | None:
+        """Return listing/hub when scrape confirmed a non-PDP page."""
+        role = result.page_role
+        if role in ("listing", "hub"):
+            return role
+        data = result.data
+        if data is not None:
+            data_role = getattr(data, "page_role", None)
+            if data_role in ("listing", "hub"):
+                return data_role
+        return None
+
+    def _prune_confirmed_nonproduct(
+        self,
+        listing: FactListing,
+        *,
+        page_role: str,
+    ) -> None:
+        """DELETE listing and its 1:1 dim_product when scrape confirms non-product."""
+        product_id = listing.product_id
+        listing_url = listing.external_url
+        self.db.delete(listing)
+        self.db.flush()
+        other_listings = (
+            self.db.execute(
+                select(func.count())
+                .select_from(FactListing)
+                .where(FactListing.product_id == product_id),
+            ).scalar()
+            or 0
+        )
+        if other_listings == 0:
+            product = self.db.get(DimProduct, product_id)
+            if product is not None:
+                self.db.delete(product)
+        self.db.flush()
+        logger.info(
+            "scrape_pruned_nonproduct url=%s page_role=%s",
+            (listing_url or "")[:200],
+            page_role,
+        )
+
     def _persist_scrape_pool_result(
         self,
         listing_id: UUID,
@@ -479,6 +521,27 @@ class GlobalScrapeService:
         now: datetime,
     ) -> PoolScrapeResult:
         """Sequential persist path for one PoolScrapeResult (D4 semantics preserved)."""
+        nonproduct_role = self._confirmed_nonproduct_page_role(result)
+        if nonproduct_role is not None:
+            self._persist_scrape_log(
+                listing=listing,
+                log_status="not_a_product",
+                price_found=None,
+                duration_ms=result.duration_ms,
+                scraper_type=result.fetch_backend,
+                error_message=f"page_role:{nonproduct_role}",
+                error_category="parse",
+            )
+            self._prune_confirmed_nonproduct(listing, page_role=nonproduct_role)
+            result.log_status = "not_a_product"
+            slog.info(
+                "pool_scrape_done",
+                listing_id=str(listing_id),
+                result_success=False,
+                pruned=True,
+            )
+            return result
+
         data = result.data
         if result.success:
             listing.failure_streak = 0

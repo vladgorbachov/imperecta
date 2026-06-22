@@ -23,6 +23,19 @@ HTTP_TIMEOUT_SEC = 25.0
 PROXY_PROVIDER_TIMEOUT_SEC = 60.0
 PLAYWRIGHT_GOTO_TIMEOUT_MS = 35_000
 PLAYWRIGHT_WAIT_MS = 2_500
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+_DEFAULT_ACCEPT_LANGUAGE = "en, en-US;q=0.9"
+
+
+def _request_headers(accept_language: str | None = None) -> dict[str, str]:
+    headers = {"User-Agent": _DEFAULT_USER_AGENT}
+    headers["Accept-Language"] = accept_language or _DEFAULT_ACCEPT_LANGUAGE
+    return headers
 
 
 class BackendId(str, Enum):
@@ -68,6 +81,7 @@ class FetchBackend(Protocol):
         *,
         render_js: bool = True,
         deadline_monotonic: float | None = None,
+        accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         """Return (html, error_code). error_code is None on success."""
 
@@ -83,14 +97,10 @@ class DirectHttpBackend:
         *,
         render_js: bool = True,
         deadline_monotonic: float | None = None,
+        accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
-        }
+        headers = _request_headers(accept_language)
         timeout = httpx.Timeout(HTTP_TIMEOUT_SEC)
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -140,6 +150,7 @@ class ProxyProviderBackend:
         *,
         render_js: bool = True,
         deadline_monotonic: float | None = None,
+        accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         if not settings.proxy_provider_enabled:
             return None, "fetch_failed"
@@ -155,6 +166,8 @@ class ProxyProviderBackend:
         payload: dict[str, str] = {"url": url}
         if render_js:
             payload["headless"] = "html"
+        if accept_language:
+            payload["Accept-Language"] = accept_language
         timeout = httpx.Timeout(PROXY_PROVIDER_TIMEOUT_SEC)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -200,6 +213,7 @@ class BrowserRenderBackend:
         *,
         render_js: bool = True,
         deadline_monotonic: float | None = None,
+        accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
         try:
@@ -209,9 +223,10 @@ class BrowserRenderBackend:
                     args=["--no-sandbox", "--disable-dev-shm-usage"],
                 )
                 context = await browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                    user_agent=_DEFAULT_USER_AGENT,
+                    locale=(accept_language.split(",")[0].strip() if accept_language else None),
+                    extra_http_headers=(
+                        {"Accept-Language": accept_language} if accept_language else None
                     ),
                     viewport={"width": 1920, "height": 1080},
                 )

@@ -1132,20 +1132,25 @@ def extract_internal_links_all(soup: BeautifulSoup, base_url: str) -> list[str]:
     return results
 
 
-def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str]]:
+def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str] | list[dict[str, object]]]:
     """Parse a sitemap XML document.
 
-    Returns a dict with two keys:
-    - 'urls': list of <loc> URLs (product URLs in a regular sitemap)
+    Returns a dict with keys:
+    - 'urls': list of raw <loc> URLs (backward compatible)
+    - 'url_entries': list of {"loc": str, "alternates": dict[str, str]}
     - 'sitemaps': list of nested sitemap URLs (in a sitemap index)
 
-    Handles both sitemap index files and regular sitemaps.
-    Language-agnostic: XML standard.
+    Handles sitemap index files, regular sitemaps, and per-URL xhtml:link
+    hreflang alternates (including x-default).
     """
     import xml.etree.ElementTree as ET
 
     _ = base_url
-    result: dict[str, list[str]] = {"urls": [], "sitemaps": []}
+    result: dict[str, list[str] | list[dict[str, object]]] = {
+        "urls": [],
+        "url_entries": [],
+        "sitemaps": [],
+    }
     try:
         root = ET.fromstring(xml_content)
     except ET.ParseError:
@@ -1153,6 +1158,32 @@ def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str]]:
 
     def _strip_ns(tag: str) -> str:
         return tag.split("}")[-1] if "}" in tag else tag
+
+    def _local_name(tag: str) -> str:
+        if "}" in tag:
+            return tag.split("}", 1)[1]
+        return tag
+
+    def _parse_alternates(url_el) -> dict[str, str]:
+        alternates: dict[str, str] = {}
+        for child in url_el:
+            local = _local_name(child.tag)
+            if local != "link":
+                continue
+            rel = (child.attrib.get("rel") or child.attrib.get("{http://www.w3.org/1999/xhtml}rel") or "").strip()
+            hreflang = (
+                child.attrib.get("hreflang")
+                or child.attrib.get("{http://www.w3.org/1999/xhtml}hreflang")
+                or ""
+            ).strip()
+            href = (
+                child.attrib.get("href")
+                or child.attrib.get("{http://www.w3.org/1999/xhtml}href")
+                or ""
+            ).strip()
+            if rel == "alternate" and hreflang and href:
+                alternates[hreflang.lower()] = href
+        return alternates
 
     tag_name = _strip_ns(root.tag)
     if tag_name == "sitemapindex":
@@ -1163,8 +1194,24 @@ def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str]]:
                         result["sitemaps"].append(child.text.strip())
     else:
         for url_el in root:
-            if _strip_ns(url_el.tag) == "url":
-                for child in url_el:
-                    if _strip_ns(child.tag) == "loc" and child.text:
-                        result["urls"].append(child.text.strip())
+            if _strip_ns(url_el.tag) != "url":
+                continue
+            loc: str | None = None
+            alternates: dict[str, str] = {}
+            for child in url_el:
+                child_tag = _strip_ns(child.tag)
+                if child_tag == "loc" and child.text:
+                    loc = child.text.strip()
+                elif child_tag == "link":
+                    rel = (child.attrib.get("rel") or "").strip()
+                    hreflang = (child.attrib.get("hreflang") or "").strip()
+                    href = (child.attrib.get("href") or "").strip()
+                    if rel == "alternate" and hreflang and href:
+                        alternates[hreflang.lower()] = href
+            if loc is None:
+                continue
+            if not alternates:
+                alternates = _parse_alternates(url_el)
+            result["urls"].append(loc)
+            result["url_entries"].append({"loc": loc, "alternates": alternates})
     return result

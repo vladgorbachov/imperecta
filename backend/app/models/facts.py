@@ -61,6 +61,8 @@ class FactListing(Base):
         index=True,
     )
     external_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # Structural page role at discovery gate ('product' for gated pool rows).
+    page_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # SHA256 of normalized URL for deduplication during discovery.
     url_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)

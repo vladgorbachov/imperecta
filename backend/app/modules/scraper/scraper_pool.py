@@ -346,11 +346,12 @@ class ScraperPool:
                 success=False,
                 url=url,
                 error="price_not_found",
-                data=None,
+                data=merged if merged.page_role in ("listing", "hub") else None,
                 fetch_backend=fetch_backend,
                 duration_ms=duration_ms,
                 is_empty=not bool(merged.title),
                 raw_html=raw_debug,
+                page_role=merged.page_role,
             )
 
         extracted_fields: list[str] = []
@@ -419,7 +420,12 @@ class ScraperPool:
         return None
 
     async def _fetch_raw(
-        self, url: str, requires_js: bool = False, *, scrape_tier: int = 1
+        self,
+        url: str,
+        requires_js: bool = False,
+        *,
+        scrape_tier: int = 1,
+        accept_language: str | None = None,
     ) -> str | None:
         """Fetch and return raw HTML/text for a URL without extraction.
 
@@ -428,7 +434,11 @@ class ScraperPool:
         backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
         for backend_id in backend_ids:
             try:
-                html, _err = await self._fetch_layer_with_retries(backend_id, url)
+                html, _err = await self._fetch_layer_with_retries(
+                    backend_id,
+                    url,
+                    accept_language=accept_language,
+                )
                 if html:
                     return html
             except Exception:
@@ -440,6 +450,7 @@ class ScraperPool:
         url: str,
         *,
         log_url_hint: str | None = None,
+        accept_language: str | None = None,
     ) -> str | None:
         """Lightweight fetch for static documents (sitemap, robots, category/listing pages).
 
@@ -458,6 +469,7 @@ class ScraperPool:
                 backend_id,
                 url,
                 render_js=render_js,
+                accept_language=accept_language,
             )
             backend_ms = int((time.perf_counter() - backend_started) * 1000)
             logger.info(
@@ -505,8 +517,13 @@ class ScraperPool:
             return html
         return None
 
-    async def fetch_sitemap_candidates(self, base_url: str) -> list[str]:
-        """Attempt to discover and harvest product URLs from sitemaps."""
+    async def fetch_sitemap_candidates(
+        self,
+        base_url: str,
+        *,
+        marketplace_locale: str | None = None,
+    ) -> list[str]:
+        """Discover sitemap URLs with locale selection and canonical deduplication."""
         from urllib.parse import urljoin
 
         from app.modules.scraper.extractors import (
@@ -514,6 +531,7 @@ class ScraperPool:
             SITEMAP_MAX_URLS,
             parse_sitemap_xml,
         )
+        from app.modules.scraper.locale_selection import select_locale_url
 
         sitemap_urls_to_try: list[str] = []
 
@@ -539,6 +557,9 @@ class ScraperPool:
                 sitemap_urls_to_try.append(candidate)
 
         product_urls: list[str] = []
+        seen_hashes: set[str] = set()
+        from app.models.facts import FactListing
+
         visited_sitemaps: set[str] = set()
         pending_sitemaps: list[str] = list(sitemap_urls_to_try)
 
@@ -562,10 +583,20 @@ class ScraperPool:
             for nested in parsed["sitemaps"]:
                 if nested not in visited_sitemaps:
                     pending_sitemaps.append(nested)
-            for url in parsed["urls"]:
+            for entry in parsed.get("url_entries", []):
                 if len(product_urls) >= SITEMAP_MAX_URLS:
                     break
-                product_urls.append(url)
+                loc = str(entry.get("loc") or "")
+                if not loc:
+                    continue
+                alternates = entry.get("alternates")
+                alt_map = alternates if isinstance(alternates, dict) else {}
+                selected = select_locale_url(loc, alt_map, marketplace_locale)
+                url_hash = FactListing.compute_url_hash(selected)
+                if url_hash in seen_hashes:
+                    continue
+                seen_hashes.add(url_hash)
+                product_urls.append(selected)
             if len(product_urls) >= SITEMAP_MAX_URLS:
                 break
 
@@ -578,6 +609,7 @@ class ScraperPool:
         *,
         static_fetch: bool = False,
         scrape_tier: int = 1,
+        accept_language: str | None = None,
     ) -> tuple[str | None, BeautifulSoup | None]:
         """Fetch a page and return (html, soup) for structural analysis.
 
@@ -585,9 +617,14 @@ class ScraperPool:
         """
         try:
             if static_fetch:
-                html = await self._fetch_static(url)
+                html = await self._fetch_static(url, accept_language=accept_language)
             else:
-                html = await self._fetch_raw(url, requires_js=requires_js, scrape_tier=scrape_tier)
+                html = await self._fetch_raw(
+                    url,
+                    requires_js=requires_js,
+                    scrape_tier=scrape_tier,
+                    accept_language=accept_language,
+                )
             if not html:
                 return None, None
             soup = BeautifulSoup(html, "html.parser")
@@ -640,6 +677,7 @@ class ScraperPool:
         *,
         render_js: bool = True,
         deadline_monotonic: float | None = None,
+        accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         """Try backend up to FETCH_ATTEMPTS_PER_LAYER times; return (html, last_error_code)."""
         last_code: str | None = None
@@ -649,6 +687,7 @@ class ScraperPool:
                 url,
                 render_js=render_js,
                 deadline_monotonic=deadline_monotonic,
+                accept_language=accept_language,
             )
             if html:
                 return html, None
@@ -680,12 +719,14 @@ class ScraperPool:
         *,
         render_js: bool = True,
         deadline_monotonic: float | None = None,
+        accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         backend = get_fetch_backend(backend_id)
         return await backend.fetch(
             url,
             render_js=render_js,
             deadline_monotonic=deadline_monotonic,
+            accept_language=accept_language,
         )
 
     def _layer_order(self, requires_js: bool, scrape_tier: int = 1) -> list[BackendId]:

@@ -18,6 +18,7 @@ from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.classifier import classify_page_role_for_discovery
+from app.modules.scraper.locale_selection import build_accept_language_header, extract_canonical_url
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,7 @@ class DiscoveryCrawler:
                 external_url=url,
                 url_hash=url_hash,
                 is_active=True,
+                page_role="product",
             )
             self.db.add(listing)
             existing_hashes.add(url_hash)
@@ -320,54 +322,45 @@ class DiscoveryCrawler:
         age = (datetime.now(tz=timezone.utc) - marketplace.last_sitemap_harvest_at).days
         return age >= SITEMAP_STALE_DAYS
 
-    async def _classify_url(self, url: str) -> str:
-        """Fetch a URL statically and return its page-role classification.
-
-        Returns one of:
-        - 'product' — page is a single product detail page (PDP).
-        - 'listing' — page lists multiple products (category, search results, etc.).
-        - 'hub'     — navigational page with no products (homepage, about, etc.).
-        - 'unknown' — fetch failed or signals were inconclusive.
-
-        Pure content-based classification: no URL pattern matching, no language-specific
-        keywords. Works for any marketplace in any language.
-        """
+    async def _classify_and_resolve_url(
+        self,
+        url: str,
+        *,
+        marketplace_locale: str | None,
+        accept_language: str | None,
+    ) -> tuple[str, str]:
+        """Fetch, resolve canonical URL, and return (page_role, pool_url)."""
         try:
             _html, soup = await self.pool.scrape_page_for_analysis(
                 url,
                 static_fetch=True,
+                accept_language=accept_language,
             )
         except Exception:
-            return "unknown"
+            return "unknown", url
         if soup is None:
-            return "unknown"
+            return "unknown", url
         try:
-            return classify_page_role_for_discovery(soup, url)
+            canonical = extract_canonical_url(soup, url)
+            pool_url = canonical or url
+            role = classify_page_role_for_discovery(soup, pool_url)
+            return role, pool_url
         except Exception:
-            return "unknown"
+            return "unknown", url
 
     async def _filter_urls_by_role(
         self,
         urls: list[str],
+        *,
+        marketplace_locale: str | None = None,
     ) -> tuple[list[str], dict[str, int | float | str | None]]:
-        """Classify a list of URLs concurrently and return only product PDPs.
+        """Classify every candidate URL structurally; admit only page_role=product.
 
-        Strategy:
-        - For small lists (<= SITEMAP_FULL_CLASSIFY_LIMIT) classify everything.
-        - For larger lists, classify a random sample first:
-          - If >= SITEMAP_TRUST_THRESHOLD of the sample are products → trust
-            the entire input as product URLs (avoids classifying tens of thousands).
-          - If < SITEMAP_REJECT_THRESHOLD are products → reject the entire input
-            (the source is not product-oriented), but keep PDPs found in sample.
-          - Otherwise → fall back to full classification.
+        Large lists may use a sample for early reject_sample (source not product-
+        oriented), but every admitted URL is individually classified. The former
+        trust_sample blind-accept path is removed.
 
-        Concurrency is bounded by SITEMAP_CLASSIFY_CONCURRENCY via asyncio.Semaphore
-        to avoid overloading the target server.
-
-        Returns (accepted_urls, stats_dict) where stats_dict contains:
-            total, sampled, sample_product_ratio, classified, accepted, mode.
-        In 'full' and 'trust_sample' modes, 'sampled' is None to distinguish
-        from 'sampled=0' which would mean an empty sample.
+        Concurrency is bounded by SITEMAP_CLASSIFY_CONCURRENCY.
         """
         stats: dict[str, int | float | str | None] = {
             "total": len(urls),
@@ -381,56 +374,92 @@ class DiscoveryCrawler:
             stats["mode"] = "empty"
             return [], stats
 
+        accept_language = build_accept_language_header(marketplace_locale)
         semaphore = asyncio.Semaphore(SITEMAP_CLASSIFY_CONCURRENCY)
 
-        async def classify_one(target_url: str) -> tuple[str, str]:
+        async def classify_one(target_url: str) -> tuple[str, str, str]:
             async with semaphore:
-                role = await self._classify_url(target_url)
-                return target_url, role
+                role, pool_url = await self._classify_and_resolve_url(
+                    target_url,
+                    marketplace_locale=marketplace_locale,
+                    accept_language=accept_language,
+                )
+                return target_url, role, pool_url
 
-        # Small input: classify everything.
+        def _products_from_results(
+            results: list[tuple[str, str, str]],
+        ) -> list[str]:
+            seen_hashes: set[str] = set()
+            accepted: list[str] = []
+            for _source_url, role, pool_url in results:
+                if role != "product":
+                    continue
+                url_hash = FactListing.compute_url_hash(pool_url)
+                if url_hash in seen_hashes:
+                    continue
+                seen_hashes.add(url_hash)
+                accepted.append(pool_url)
+            return accepted
+
+        def _log_gate(results: list[tuple[str, str, str]], accepted: list[str]) -> None:
+            kept = len(accepted)
+            rejected = sum(1 for _s, role, _p in results if role != "product")
+            logger.info(
+                "discovery_gate_classified total=%d kept_product=%d rejected_nonproduct=%d",
+                len(results),
+                kept,
+                rejected,
+            )
+
         if len(urls) <= SITEMAP_FULL_CLASSIFY_LIMIT:
             stats["mode"] = "full"
             results = await asyncio.gather(*(classify_one(u) for u in urls))
             stats["classified"] = len(results)
-            accepted = [u for u, role in results if role == "product"]
+            accepted = _products_from_results(results)
             stats["accepted"] = len(accepted)
+            _log_gate(results, accepted)
             return accepted, stats
 
-        # Large input: sample first.
         sample_size = min(SITEMAP_SAMPLE_SIZE, len(urls))
         sample = random.sample(urls, sample_size)
         sample_results = await asyncio.gather(*(classify_one(u) for u in sample))
         stats["sampled"] = len(sample_results)
-        product_in_sample = sum(1 for _u, role in sample_results if role == "product")
+        product_in_sample = sum(1 for _u, role, _p in sample_results if role == "product")
         ratio = product_in_sample / len(sample_results) if sample_results else 0.0
         stats["sample_product_ratio"] = round(ratio, 3)
 
-        if ratio >= SITEMAP_TRUST_THRESHOLD:
-            # Sample statistically vouches for the source; accept all input URLs.
-            stats["mode"] = "trust_sample"
-            stats["accepted"] = len(urls)
-            return list(urls), stats
-
         if ratio < SITEMAP_REJECT_THRESHOLD:
-            # Source is not product-oriented; reject everything except the actual
-            # product URLs we already discovered in the sample (those are real PDPs).
             stats["mode"] = "reject_sample"
-            sample_products = [u for u, role in sample_results if role == "product"]
-            stats["accepted"] = len(sample_products)
-            return sample_products, stats
+            accepted = _products_from_results(sample_results)
+            stats["classified"] = len(sample_results)
+            stats["accepted"] = len(accepted)
+            _log_gate(sample_results, accepted)
+            return accepted, stats
 
-        # Borderline ratio (20-80%): fall through to full classification.
-        # Reuse already-classified sample results, classify only the rest.
-        stats["mode"] = "full_fallback"
-        sample_urls_set = {u for u, _r in sample_results}
+        sample_urls_set = {source for source, _role, _pool in sample_results}
         remaining = [u for u in urls if u not in sample_urls_set]
         remaining_results = await asyncio.gather(*(classify_one(u) for u in remaining))
         all_results = list(sample_results) + list(remaining_results)
+        stats["mode"] = "full_large"
         stats["classified"] = len(all_results)
-        accepted = [u for u, role in all_results if role == "product"]
+        accepted = _products_from_results(all_results)
         stats["accepted"] = len(accepted)
+        _log_gate(all_results, accepted)
         return accepted, stats
+
+    async def _gate_urls_for_pool(
+        self,
+        urls: list[str],
+        marketplace: DimMarketplace,
+    ) -> list[str]:
+        """Structural product-ness gate for category-harvest candidate URLs."""
+        if not urls:
+            return []
+        accepted, _stats = await self._filter_urls_by_role(
+            urls,
+            marketplace_locale=marketplace.locale,
+        )
+        return accepted
 
     async def _phase0_sitemap_harvest(self, marketplace: DimMarketplace) -> list[str]:
         """Phase 0: collect product URLs from XML sitemaps with content-aware filtering.
@@ -450,9 +479,15 @@ class DiscoveryCrawler:
             marketplace.id,
             marketplace.base_url,
         )
-        raw_urls = await self.pool.fetch_sitemap_candidates(marketplace.base_url)
+        raw_urls = await self.pool.fetch_sitemap_candidates(
+            marketplace.base_url,
+            marketplace_locale=marketplace.locale,
+        )
 
-        filtered_urls, classify_stats = await self._filter_urls_by_role(raw_urls)
+        filtered_urls, classify_stats = await self._filter_urls_by_role(
+            raw_urls,
+            marketplace_locale=marketplace.locale,
+        )
         rejected_count = len(raw_urls) - len(filtered_urls)
         useful = len(filtered_urls) >= SITEMAP_MIN_USEFUL_URLS
 
@@ -804,13 +839,20 @@ class DiscoveryCrawler:
                 if not product_urls:
                     product_urls = extract_product_links(soup, marketplace.base_url)
                 if product_urls:
-                    saved_this_call, _, save_exhausted = (
-                        await self._save_product_urls(
-                            marketplace.id,
-                            product_urls,
-                            deadline_monotonic=deadline_monotonic,
-                        )
+                    gated_urls = await self._gate_urls_for_pool(
+                        product_urls,
+                        marketplace,
                     )
+                    saved_this_call = 0
+                    save_exhausted = False
+                    if gated_urls:
+                        saved_this_call, _, save_exhausted = (
+                            await self._save_product_urls(
+                                marketplace.id,
+                                gated_urls,
+                                deadline_monotonic=deadline_monotonic,
+                            )
+                        )
                     saved_for_this_category += saved_this_call
                     total_saved += saved_this_call
                     if save_exhausted:

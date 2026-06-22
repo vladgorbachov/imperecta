@@ -96,30 +96,37 @@ async def test_filter_urls_by_role_full_mode():
 
     crawler = disc.DiscoveryCrawler(MagicMock(), MagicMock())
     roles = {
-        "https://shop.example/p/1": "product",
-        "https://shop.example/p/2": "listing",
-        "https://shop.example/p/3": "product",
+        "https://shop.example/p/1": ("product", "https://shop.example/p/1"),
+        "https://shop.example/p/2": ("listing", "https://shop.example/p/2"),
+        "https://shop.example/p/3": ("product", "https://shop.example/p/3"),
     }
-    crawler._classify_url = AsyncMock(side_effect=lambda url: roles[url])
 
-    accepted, stats = await crawler._filter_urls_by_role(list(roles))
+    async def classify_side_effect(url: str, **kwargs):
+        return roles[url]
+
+    crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+    accepted, stats = await crawler._filter_urls_by_role(list(roles), marketplace_locale=None)
     assert stats["mode"] == "full"
     assert len(accepted) == 2
     assert stats["accepted"] == 2
 
 
 @pytest.mark.asyncio
-async def test_filter_urls_by_role_trust_sample(monkeypatch):
+async def test_filter_urls_by_role_large_list_classifies_all(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
     crawler = disc.DiscoveryCrawler(MagicMock(), MagicMock())
     urls = [f"https://shop.example/p/{index}" for index in range(150)]
-    crawler._classify_url = AsyncMock(return_value="product")
+    crawler._classify_and_resolve_url = AsyncMock(
+        return_value=("product", "https://shop.example/p/x"),
+    )
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
 
-    accepted, stats = await crawler._filter_urls_by_role(urls)
-    assert stats["mode"] == "trust_sample"
-    assert len(accepted) == 150
+    accepted, stats = await crawler._filter_urls_by_role(urls, marketplace_locale=None)
+    assert stats["mode"] == "full_large"
+    assert crawler._classify_and_resolve_url.await_count == 150
+    assert len(accepted) == 1
 
 
 @pytest.mark.asyncio
@@ -130,15 +137,16 @@ async def test_filter_urls_by_role_reject_sample(monkeypatch):
     urls = [f"https://shop.example/page/{index}" for index in range(150)]
     call_count = 0
 
-    async def classify_side_effect(_url: str) -> str:
+    async def classify_side_effect(url: str, **kwargs):
         nonlocal call_count
         call_count += 1
-        return "product" if call_count == 3 else "hub"
+        role = "product" if call_count == 3 else "hub"
+        return role, url
 
-    crawler._classify_url = AsyncMock(side_effect=classify_side_effect)
+    crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
 
-    accepted, stats = await crawler._filter_urls_by_role(urls)
+    accepted, stats = await crawler._filter_urls_by_role(urls, marketplace_locale=None)
     assert stats["mode"] == "reject_sample"
     assert len(accepted) == 1
 

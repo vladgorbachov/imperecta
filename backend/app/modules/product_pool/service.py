@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import asc, case, desc, func, nullslast, or_, select
+from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.currency import (
@@ -25,6 +25,14 @@ _SORT_LOSERS = "losers"
 _SORT_VOLATILE = "volatile"
 BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
 SPARKLINE_POINTS_LIMIT = 14
+
+
+def _pool_product_visibility_filter():
+    """Listings that are gated products or legacy rows with a scraped price."""
+    return or_(
+        FactListing.page_role == "product",
+        and_(FactListing.page_role.is_(None), FactListing.last_price.isnot(None)),
+    )
 
 
 def _latest_price_change_subquery():
@@ -77,6 +85,7 @@ class ProductPoolService:
             .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
             .outerjoin(latest_pc, latest_pc.c.listing_id == FactListing.id)
             .where(FactListing.is_active.is_(True))
+            .where(_pool_product_visibility_filter())
         )
 
     def _apply_filters(
@@ -160,6 +169,7 @@ class ProductPoolService:
             .join(DimProduct, FactListing.product_id == DimProduct.id)
             .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
             .where(FactListing.is_active.is_(True))
+            .where(_pool_product_visibility_filter())
         )
         count_base = self._apply_filters(
             count_base,

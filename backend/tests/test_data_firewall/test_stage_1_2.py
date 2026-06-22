@@ -157,7 +157,7 @@ def test_data_firewall_category_page_blocked(role: str) -> None:
         page_role=role,
     )
     assert not outcome.passed
-    assert outcome.reject_reason == REJECT_NOT_A_PRODUCT_PAGE
+    assert outcome.reject_reason == FORCED_NOT_A_PRODUCT
     assert outcome.forced_log_status == FORCED_NOT_A_PRODUCT
 
 

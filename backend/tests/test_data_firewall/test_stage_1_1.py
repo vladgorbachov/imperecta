@@ -94,7 +94,7 @@ def test_page_role_listing_blocked_in_stage_1_2() -> None:
     )
     assert not fw_listing.passed
     assert fw_listing.page_role_verdict == "non_product"
-    assert fw_listing.reject_reason == "not_a_product_page"
+    assert fw_listing.reject_reason == "not_a_product"
 
 
 def test_page_role_on_extracted_product_from_classifier() -> None:
