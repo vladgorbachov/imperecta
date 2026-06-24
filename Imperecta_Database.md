@@ -1,6 +1,6 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-06-15 (alembic head `022`; app `8ec2ff4`)  
+**Актуально на:** 2026-06-23 (alembic head `028`; app `4f961a9`)  
 **Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию схемы; принципы не дублирует.
@@ -16,7 +16,7 @@
 | Backend access | Direct URL, table owner — **RLS bypass** |
 | Supabase REST | RLS enabled (migration 012) |
 | Alembic version | Schema `alembic_meta.alembic_version` |
-| Head revision | `022_scrape_jobs_job_type_allow_scrape` |
+| Head revision | `028_add_fact_listing_page_role` |
 
 При старте API: `alembic upgrade head` (subprocess).
 
@@ -47,7 +47,13 @@
 | 019 | `scrape_jobs_status_allow_partial` | CHECK + `'partial'` for inner discovery jobs |
 | 020 | `scrape_jobs_parent_job_id` | Self-FK `parent_job_id` + index `(parent_job_id, status)` — tick child jobs |
 | 021 | `fact_listing_failure_streak` | `failure_streak INTEGER NOT NULL DEFAULT 0` — persistent deactivation counter; backfill `UPDATE fact_listing SET failure_streak = consecutive_errors` |
-| 022 | `scrape_jobs_job_type_allow_scrape` | `ck_scrape_jobs_job_type` расширен на `'scrape'` — per-MP scrape children (`scrape_one_marketplace`, O4a/O4b); downgrade сначала помечает существующие `job_type='scrape'` строки `cancelled` перед сужением CHECK (**head**) |
+| 022 | `scrape_jobs_job_type_allow_scrape` | `ck_scrape_jobs_job_type` расширен на `'scrape'` — per-MP scrape children (`scrape_one_marketplace`, O4a/O4b) |
+| 023 | `scrape_logs_currency_rejected` | CHECK `scrape_logs.status` + `currency_rejected` |
+| 024 | `reject_data_and_not_a_product` | Таблица `reject_data`; статус `not_a_product` |
+| 025 | `supabase_security_hardening` | RLS deny + REVOKE anon/authenticated (`core/supabase_security.py`) |
+| 026 | `forex_nine_currency_allowlist` | Seed JPY (`is_active=true`); DELETE forex rows вне 9 валют |
+| 027 | `remove_in_stock_and_fact_stock` | Drop stock columns/table; rebuild `mv_daily_price_summary`; tighten `alerts.alert_type` CHECK |
+| 028 | `add_fact_listing_page_role` | `fact_listing.page_role varchar(16)` — structural gate diagnostics (**head**) |
 
 **Правила:** не редактировать старые revisions; один statement per `op.execute()` для asyncpg; `IF NOT EXISTS` для repair.
 
@@ -61,9 +67,10 @@
 |--------|------|--------|---------|
 | Core | `models/core.py` | 3 | `users`, `user_subscriptions`, `user_products` |
 | Dimensions (`dim_*`) | `models/dimensions.py` | 8 | `dim_date`, `dim_currency`, `dim_country`, `dim_marketplace`, `dim_category`, `dim_brand`, `dim_product`, `dim_seller` |
-| Facts e-commerce | `models/facts.py` | 5 | `fact_listing`, `fact_price`, `fact_review`, `fact_stock`, `fact_promo` |
+| Facts e-commerce | `models/facts.py` | 4 | `fact_listing`, `fact_price`, `fact_review`, `fact_promo` |
 | Facts market data | `models/facts.py` | 6 | `fact_search_trend`, `fact_currency_rate`, `fact_tariff`, `fact_crypto_price`, `fact_commodity_price`, `fact_fuel_price` |
 | Application / operational | `models/app_tables.py` | 9 | `alerts`, `alert_events`, `digests`, `ai_chat_sessions`, `ai_chat_messages`, `scrape_jobs`, `scrape_logs`, `api_logs`, `data_exports` |
+| Diagnostic | `models/reject_data.py` | 1 | `reject_data` |
 
 Полные определения колонок и FK — см. **Часть II** (`§§ 3–7`).
 
@@ -104,18 +111,17 @@
 
 Existing rows get `DEFAULT 1` — behavior unchanged until tier is raised and layers implemented.
 
-**Seeds в миграциях:** dates 2024–2030, ~30 currencies, ~44 countries — `ON CONFLICT DO NOTHING`.
+**Seeds в миграциях:** dates 2024–2030, currencies (incl. JPY seed in `026`), ~44 countries — `ON CONFLICT DO NOTHING`. Runtime forex ingest restricted to **9 currencies** (`USD,EUR,GBP,JPY,CHF,MDL,RON,PLN,TRY`).
 
 ### 3.3 Facts (`models/facts.py`)
 
-E-commerce facts (5):
+E-commerce facts (4):
 
 | Table | ORM | Notes |
 |-------|-----|-------|
-| `fact_listing` | FactListing | URL identity, denormalized `last_*`, scrape health (`consecutive_errors` this-run, `failure_streak` persistent — `021`) |
-| `fact_price` | FactPrice | **Partitioned** by `date_id` (RANGE). `scrape_job_id` UUID FK → `scrape_jobs` (`SET NULL`); populated на pipeline-пути, NULL на ad-hoc API |
-| `fact_review` | FactReview | Review aggregates per listing × date (rating histogram, sentiment) |
-| `fact_stock` | FactStock | Stock availability snapshots per listing × date |
+| `fact_listing` | FactListing | URL identity, denormalized `last_*` (price/currency only — stock removed `027`), scrape health |
+| `fact_price` | FactPrice | **Partitioned** by `date_id` (RANGE). No `in_stock` column (`027`) |
+| `fact_review` | FactReview | Review aggregates per listing × date |
 | `fact_promo` | FactPromo | Promotional campaigns / discount events |
 
 Market-data facts (6):
@@ -135,7 +141,7 @@ Market-data facts (6):
 |--------|------|
 | `external_url` | Canonical URL |
 | `url_hash` | SHA256, **UNIQUE** dedup |
-| `last_price`, `last_currency_code`, `last_in_stock` | Current snapshot |
+| `last_price`, `last_currency_code` | Current snapshot |
 | `consecutive_errors`, `last_error` | Scrape health (this-run; **reset pre-flight** at start of every `scrape_product`) |
 | `failure_streak` | Persistent failure counter across runs (migration `021`); incremented on fail, reset only on success — drives deactivation |
 | `is_active` | Lifecycle; false after `failure_streak >= LISTING_DEACTIVATE_AFTER_ERRORS` (app logic, default 15) |
@@ -208,9 +214,9 @@ Refresh: Celery `refresh_materialized_views` (concurrent where supported).
 
 ## 5. Integrity rules (application layer)
 
-### 5.1 `fact_price` write gate
+### 5.1 `fact_price` write gate (`data_firewall`)
 
-Все условия одновременно:
+Все условия одновременно (`data_firewall/rules.py` → `evaluate_ecommerce_rules`):
 
 1. `product_name` OR non-empty `title`
 2. `price > 0`
@@ -222,7 +228,7 @@ Refresh: Celery `refresh_materialized_views` (concurrent where supported).
 
 ### 5.2 `no_change`
 
-Если price/currency/stock совпадают с `listing.last_*` (tolerance 0.001 on price):
+Если price/currency совпадают с `listing.last_*` (tolerance 0.001 on price):
 
 - No new `fact_price` row
 - Update `last_checked_at`
@@ -236,7 +242,6 @@ Refresh: Celery `refresh_materialized_views` (concurrent where supported).
 
 - No USD fallback
 - No `price = 0` substitute
-- `last_in_stock` chain ends at `False`, not NULL
 
 ### 5.5 `dim_date`
 
@@ -248,13 +253,13 @@ Deadlock-safe: SELECT → INSERT ON CONFLICT DO NOTHING → SELECT.
 
 ---
 
-## 6. RLS (012)
+## 6. RLS (012 + 025)
 
 **Цель:** restrict PostgREST if keys leak.
 
-- `ENABLE ROW LEVEL SECURITY` on public business tables.
+- `ENABLE ROW LEVEL SECURITY` on public business tables (012).
+- Migration **025** codifies deny policies on `users`, `reject_data`, `fact_price` partitions; REVOKE `anon`/`authenticated`; MV hardening via `core/supabase_security.py`.
 - Backend service role bypasses as owner.
-- Policies defined in `012_enable_rls_public_tables.py`.
 
 ---
 
@@ -375,7 +380,8 @@ Normalizer in `Settings.validate_database_url`.
 | Column | Write path | Read path |
 |--------|------------|-----------|
 | `url_hash` | `compute_url_hash(url)` on insert | UNIQUE dedup |
-| `last_price`, `last_currency_code`, `last_in_stock` | Updated on successful scrape / no_change check | Pool UI, dashboard |
+| `page_role` | `"product"` on gated discovery insert (`4f961a9`); NULL on legacy rows | Pool filter: product OR (NULL + has price) |
+| `last_price`, `last_currency_code` | Updated on successful scrape / no_change check | Pool UI, dashboard |
 | `last_checked_at` | Every scrape attempt | Stale selector: NULL or >6h |
 | `consecutive_errors`, `last_error` | **Reset pre-flight** every scrape; set on this-run failure; cleared on success | Admin health (current attempt) |
 | `failure_streak` | Incremented on fail; reset only on success; **NOT** reset pre-flight (021) | Deactivation circuit breaker |
@@ -413,7 +419,7 @@ Columns: `currency_code`, `rate_to_eur`, `rate_to_usd`, `date_id`.
 
 ### 13.9 Market fact tables
 
-`fact_crypto_price`, `fact_commodity_price`, `fact_fuel_price`, `fact_tariff`, `fact_promo`, `fact_review`, `fact_stock` — written by `market_data` ingest and scrape adjunct paths; read by dashboard/markets API.
+`fact_crypto_price`, `fact_commodity_price`, `fact_fuel_price`, `fact_tariff`, `fact_promo`, `fact_review` — written by `market_data` ingest and scrape adjunct paths; read by dashboard/markets API.
 
 ---
 
@@ -509,7 +515,7 @@ child jobs → parent_job_id links discovery children to pipeline parent (020)
 
 # Часть II. Полная схема базы данных
 
-**Head migration:** `022_scrape_jobs_job_type_allow_scrape` · **Источник:** `backend/app/models/` + migrations `001`–`022`
+**Head migration:** `028_add_fact_listing_page_role` · **Источник:** `backend/app/models/` + migrations `001`–`028`
 
 Полный справочник всех таблиц, колонок, FK и CHECK. Ранее — отдельный `Imperecta_Database_Schema.md`.
 
@@ -542,11 +548,9 @@ erDiagram
 
     fact_listing ||--o{ fact_price : ""
     fact_listing ||--o{ fact_review : ""
-    fact_listing ||--o{ fact_stock : ""
     fact_listing ||--o{ fact_promo : ""
     dim_date ||--o{ fact_price : ""
     dim_date ||--o{ fact_review : ""
-    dim_date ||--o{ fact_stock : ""
     dim_date ||--o{ fact_search_trend : ""
     dim_date ||--o{ fact_currency_rate : ""
     dim_date ||--o{ fact_crypto_price : ""
@@ -619,8 +623,6 @@ erDiagram
 | `max_price_eur` | NUMERIC |
 | `avg_price_eur` | NUMERIC(12,2) |
 | `median_price_eur` | NUMERIC |
-| `in_stock_count` | BIGINT |
-| `out_of_stock_count` | BIGINT |
 | `promoted_count` | BIGINT |
 | `avg_discount_pct` | NUMERIC |
 
@@ -924,6 +926,7 @@ erDiagram
 | `marketplace_id` | UUID | NO | — | **FK** → `dim_marketplace` CASCADE |
 | `seller_id` | UUID | YES | — | **FK** → `dim_seller` SET NULL |
 | `external_url` | TEXT | NO | — | |
+| `page_role` | VARCHAR(16) | YES | — | Structural role at gate (`product` for admitted pool rows; migration `028`) |
 | `url_hash` | VARCHAR(64) | YES | — | UNIQUE — SHA256 dedup |
 | `external_id` | VARCHAR(200) | YES | — | |
 | `external_name` | VARCHAR(500) | YES | — | |
@@ -931,7 +934,6 @@ erDiagram
 | `last_price_eur` | NUMERIC(12,2) | YES | — | |
 | `last_original_price` | NUMERIC(12,2) | YES | — | |
 | `last_currency_code` | VARCHAR(3) | YES | — | |
-| `last_in_stock` | BOOLEAN | YES | — | |
 | `last_rating` | NUMERIC(3,2) | YES | — | |
 | `last_review_count` | INTEGER | YES | — | |
 | `last_checked_at` | TIMESTAMPTZ | YES | — | |
@@ -964,7 +966,6 @@ erDiagram
 | `price_eur` | NUMERIC(12,2) | YES | — | |
 | `discount_pct` | NUMERIC(5,2) | YES | — | |
 | `price_change_pct` | NUMERIC(8,4) | YES | — | cap ±9999.9999% |
-| `in_stock` | BOOLEAN | YES | — | |
 | `delivery_days` | INTEGER | YES | — | |
 | `delivery_cost` | NUMERIC(8,2) | YES | — | |
 | `seller_name` | VARCHAR(300) | YES | — | |
@@ -995,23 +996,9 @@ erDiagram
 
 ---
 
-### 5.4 `fact_stock`
+### 5.4 `reject_data` (migration `024`)
 
-| Колонка | Тип | NULL | Default |
-|---------|-----|------|---------|
-| `id` | BIGINT | NO | IDENTITY **PK** |
-| `listing_id` | UUID | NO | **FK** → `fact_listing` CASCADE |
-| `date_id` | INTEGER | NO | **FK** → `dim_date` RESTRICT |
-| `in_stock` | BOOLEAN | NO | — |
-| `stock_quantity` | INTEGER | YES | — |
-| `stock_status` | VARCHAR(30) | YES | — |
-| `delivery_days_min` | INTEGER | YES | — |
-| `delivery_days_max` | INTEGER | YES | — |
-| `delivery_cost` | NUMERIC(8,2) | YES | — |
-| `delivery_type` | VARCHAR(30) | YES | — |
-| `scraped_at` | TIMESTAMPTZ | NO | `now()` |
-
-**Partial index:** `idx_fact_stock_oos` WHERE `in_stock = false`
+Diagnostic table for data_firewall / persist rejects. See `models/reject_data.py`.
 
 ---
 
@@ -1174,7 +1161,7 @@ erDiagram
 | `marketplace_id` | UUID | YES | — | **FK** → `dim_marketplace` SET NULL |
 | `category_id` | UUID | YES | — | **FK** → `dim_category` SET NULL |
 | `country_code` | VARCHAR(2) | YES | — | **FK** → `dim_country` SET NULL |
-| `alert_type` | VARCHAR(30) | NO | — | CHECK: price_drop, out_of_stock, … |
+| `alert_type` | VARCHAR(30) | NO | — | CHECK: price_drop, price_increase, price_threshold, new_competitor, … (stock types removed `027`) |
 | `threshold_pct` | NUMERIC(5,2) | YES | — | |
 | `threshold_value` | NUMERIC(12,2) | YES | — | |
 | `channel` | VARCHAR(20) | NO | `email` | CHECK: email, telegram, … |
@@ -1307,7 +1294,6 @@ erDiagram
 | `status` | VARCHAR(50) | NO | см. CHECK ниже |
 | `url` | TEXT | NO | |
 | `price_found` | NUMERIC(12,2) | YES | |
-| `in_stock_found` | BOOLEAN | YES | |
 | `duration_ms` | INTEGER | YES | |
 | `response_code` | INTEGER | YES | |
 | `proxy_used` | VARCHAR(100) | YES | |
@@ -1317,8 +1303,8 @@ erDiagram
 | `retry_count` | INTEGER | NO | `0` |
 | `created_at` | TIMESTAMPTZ | NO | `now()` |
 
-**`status` CHECK (migration `011`, production):**  
-`success`, `no_change`, `error`, `timeout`, `blocked`, `captcha`, `not_found`, `price_not_found`, `parse_error`, `missing_critical_data`, `technical_error`, `fetch_failed`, `parse_failed`, `quota_exceeded`, `persist_failed`
+**`status` CHECK (migrations `011`–`024`, production):**  
+`success`, `no_change`, `error`, `timeout`, `blocked`, `captcha`, `not_found`, `price_not_found`, `parse_error`, `missing_critical_data`, `technical_error`, `fetch_failed`, `parse_failed`, `quota_exceeded`, `persist_failed`, `currency_rejected` (`023`), `not_a_product` (`024`)
 
 > ORM-модель перечисляет подмножество; при расхождении ориентируйтесь на миграцию `011`.
 
@@ -1385,7 +1371,7 @@ erDiagram
 | `fact_price` | `date_id` | `dim_date` | RESTRICT |
 | `fact_price` | `scrape_job_id` | `scrape_jobs` | SET NULL |
 | `fact_review` | `listing_id` | `fact_listing` | CASCADE |
-| `fact_stock` | `listing_id` | `fact_listing` | CASCADE |
+| `reject_data` | `marketplace_id` | `dim_marketplace` | SET NULL |
 | `fact_promo` | `listing_id` | `fact_listing` | SET NULL |
 | `fact_promo` | `marketplace_id` | `dim_marketplace` | CASCADE |
 | `fact_search_trend` | `country_code` | `dim_country` | RESTRICT |
@@ -1420,5 +1406,5 @@ Migration `012`: `ENABLE ROW LEVEL SECURITY` на public business tables для 
 | Область | Путь |
 |---------|------|
 | ORM | `backend/app/models/*.py` |
-| Migrations | `backend/alembic/versions/001`–`022` |
+| Migrations | `backend/alembic/versions/001`–`028` |
 | Обзор | `Imperecta_Database.md` |

@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-15 (head `8ec2ff4`)  
+**Актуально на:** 2026-06-23 (head `4f961a9`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию backend; принципы не дублирует.
@@ -197,7 +197,7 @@ Monolith-путь (`run_full_pipeline_test`, `FullPipelineOrchestrator`, `_run_s
 ### 4.4 Остальные модули
 
 - **marketplaces** — CRUD, `requires_js`, discovery config JSONB.
-- **product_pool** — search, stats, MV health; `display_currency` query → `CurrencyConverter`.
+- **product_pool** — search, stats, MV health; pool listings filter: `page_role='product'` OR (`page_role IS NULL` AND `last_price IS NOT NULL`); `display_currency` query → `CurrencyConverter`.
 - **user_products** — products + import; competitors API не в main.
 - **market_data** — providers + `ingest_market_data`.
 - **dashboard / analytics** — read aggregations.
@@ -350,7 +350,13 @@ GlobalScrapeService.scrape_product(listing_id)
 **Migration `019`:** `partial` in `scrape_jobs.status`.  
 **Migration `020`:** `parent_job_id` self-FK on `scrape_jobs`.  
 **Migration `021`:** `fact_listing.failure_streak`.  
-**Migration `022`:** `job_type='scrape'` in CHECK (head).
+**Migration `022`:** `job_type='scrape'` in CHECK.  
+**Migration `023`:** `currency_rejected` in `scrape_logs.status`.  
+**Migration `024`:** table `reject_data`; `not_a_product` status.  
+**Migration `025`:** Supabase security hardening (`supabase_security.py`).  
+**Migration `026`:** Forex nine-currency allowlist + JPY seed.  
+**Migration `027`:** Remove stock tracking; rebuild `mv_daily_price_summary`.  
+**Migration `028`:** `fact_listing.page_role varchar(16)` — gate diagnostics (**head**).
 
 **Celery `ensure_fact_price_partitions`:** создаёт партиции на **следующие 3 календарных месяца** (`CREATE TABLE IF NOT EXISTS`). Beat: daily 00:00 (`scheduler.py`).
 
@@ -463,8 +469,9 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Load | `FactListing` + `DimMarketplace` + product |
 | Fetch | `ScraperPool.scrape_product(url, requires_js, scrape_tier)` |
 | Extract | `merge_and_finalize` → PDP gate |
-| Gate | name, price>0, currency, currency_raw len, whitelist |
-| Persist | delete same-day price if changed → insert `fact_price` (+ `discount_pct`, + `scrape_job_id` when called from pipeline); else `no_change` |
+| L2 prune | hub/listing → `not_a_product` + DELETE listing (+ orphan product) |
+| Ingest | `IngestionService.persist_extracted` → `data_firewall.evaluate_ecommerce` → signed `persist.write_sync` |
+| Persist | On pass: insert `fact_price` (+ `discount_pct`, + `scrape_job_id` from pipeline); unchanged price/currency → `no_change` |
 | Failure | this-run `consecutive_errors`/`last_error` уже сброшены pre-flight; `failure_streak++`; at 15 → `is_active=false` |
 | Logs | `_determine_log_status` → `scrape_logs` row |
 | Drift repair | Auto ALTER scrape_logs on constraint mismatch |
@@ -514,7 +521,7 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Модуль | Логика |
 |--------|--------|
 | **marketplaces** | CRUD `dim_marketplace`; exposes requires_js, scraper_config |
-| **product_pool** | Search/listings MV; applies display currency |
+| **product_pool** | Search/listings MV; filter `page_role=product` (legacy rows: `page_role IS NULL` + price); display currency |
 | **user_products** | User catalog CRUD + CSV import |
 | **market_data** | Provider fetch → fact_* tables; ingest tasks |
 | **dashboard/analytics** | Read-only aggregations for UI |
@@ -531,12 +538,13 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Settings | `backend/app/config.py` |
 | Parsing API | `backend/app/modules/admin/api_parsing.py` |
 | Parsing service | `backend/app/modules/admin/parsing_admin.py` |
-| Persist | `backend/app/modules/scraper/service.py` |
+| Persist / firewall | `ingestion/service.py`, `data_firewall/`, `persist/writer.py` |
+| Orchestration | `backend/app/modules/scraper/service.py` |
 | Tiered layers | `backend/app/modules/scraper/scraper_pool.py` (`_layer_order`) |
 | Pipeline | `backend/app/modules/scraper/pipeline/` |
 | Celery | `backend/app/workers/celery_app.py` |
 | Partitions task | `backend/app/workers/maintenance_tasks.py` |
-| Migrations 015–022 | `backend/alembic/versions/015_*.py` … `022_*.py` |
+| Migrations 015–028 | `backend/alembic/versions/015_*.py` … `028_*.py` |
 | Reaper | `backend/app/workers/reaper_tasks.py` |
 | Pipeline status | `parsing_admin.get_pipeline_status`, `api_parsing` GET `/pipeline-status` |
 | Display currency | `backend/app/common/currency.py`, `marketplace_locale.py` |
@@ -576,7 +584,8 @@ backend/app/modules/scraper/
 ├── service.py              # GlobalScrapeService + quality gates
 ├── scraper_pool.py
 ├── extractors.py
-├── proxy_manager.py
+├── fetch_backends.py
+├── locale_selection.py     # hreflang chain + Accept-Language (4f961a9)
 ├── api.py                  # NOT in main.py
 └── pipeline/
     ├── tick_orchestrator.py      # run_tick state machine
@@ -785,10 +794,12 @@ Category crawl получил тот же cooperative budget, что и sitemap 
 ```text
 fetch_sitemap_candidates(base_url)     # ScraperPool: robots, XML, nested index
         ↓
-_filter_urls_by_role(raw_urls)        # classify_page_role_for_discovery per URL (or sample)
+_filter_urls_by_role(raw_urls)        # per-URL classify_page_role_for_discovery (+ locale)
         ↓
-only role == 'product' → save path
+only role == 'product' → save path (page_role stamped on insert)
 ```
+
+**Gate semantics (`4f961a9`):** каждый admitted URL классифицируется индивидуально; blind `trust_sample` (≥80% sample → accept all) **удалён**. Большие sitemap могут использовать sample только для раннего `reject_sample` (<20% product в sample → отброс всего batch). Canonical URL через `extract_canonical_url`; fetch с `build_accept_language_header(marketplace.locale)`.
 
 **Константы:**
 
@@ -796,14 +807,11 @@ only role == 'product' → save path
 |----------|-------|------|
 | `SITEMAP_STALE_DAYS` | 3 | Cooldown между harvest |
 | `SITEMAP_MIN_USEFUL_URLS` | 10 | Порог «успешного» sitemap |
-| `SITEMAP_FULL_CLASSIFY_LIMIT` | 100 | Полная классификация всех URL |
-| `SITEMAP_SAMPLE_SIZE` | 50 | Размер sample для больших sitemap |
-| `SITEMAP_TRUST_THRESHOLD` | 0.80 | ≥80% sample = product → trust all URLs |
-| `SITEMAP_REJECT_THRESHOLD` | 0.20 | <20% sample = product → reject bulk |
+| `SITEMAP_FULL_CLASSIFY_LIMIT` | 100 | Порог «малый sitemap» для полной классификации |
+| `SITEMAP_SAMPLE_SIZE` | 50 | Размер sample для early reject на больших sitemap |
+| `SITEMAP_REJECT_THRESHOLD` | 0.20 | <20% sample = product → reject bulk (early exit) |
 | `SITEMAP_CLASSIFY_CONCURRENCY` | 8 | Semaphore на HTTP classify |
 | `SITEMAP_BAD_HARVEST_RETRY_HOURS` | 1 | Повтор при плохом harvest вместо 3d cooldown |
-
-**Bad harvest:** `last_sitemap_harvest_at` сдвигается так, чтобы retry через ~1h; `sitemap_url` не обновляется.
 
 **Fetch sitemap XML** (`scraper_pool.fetch_sitemap_candidates`):
 
@@ -811,6 +819,28 @@ only role == 'product' → save path
 - Fallback paths: `/sitemap.xml`, `/sitemap_index.xml`, …  
 - Static fetch + `_looks_like_sitemap_xml`; Playwright render fallback  
 - Caps: `SITEMAP_MAX_SUBFILES`, `SITEMAP_MAX_URLS` (extractors)
+
+**Bad harvest:** `last_sitemap_harvest_at` сдвигается так, чтобы retry через ~1h; `sitemap_url` не обновляется.
+
+### 6.2b Locale selection (`locale_selection.py`, `4f961a9`)
+
+| Function | Role |
+|----------|------|
+| `select_locale_url(raw_url, alternates, marketplace_locale)` | hreflang chain: **en** / **en-*** → marketplace locale → `x-default` → first alternate → `raw_url` |
+| `build_accept_language_header(marketplace_locale)` | `Accept-Language` для classify fetch |
+| `extract_canonical_url(soup, page_url)` | `<link rel="canonical">` → pool URL dedup |
+
+Используется в `discovery._classify_and_resolve_url` и `scraper_pool` locale-aware fetch.
+
+### 6.2c Scrape L2 prune (`service.py`, `4f961a9`)
+
+Когда scrape подтверждает `page_role` ∈ `{hub, listing}` (из `PoolScrapeResult` или `ExtractedProduct`):
+
+1. `scrape_logs.status = not_a_product`
+2. `DELETE fact_listing`
+3. Если у `dim_product` нет других listings → `DELETE dim_product`
+
+`price_not_found` без hub/listing role **не** prune (transient).
 
 ### 6.3 Schema-aware classifier (`classify_page_role_for_discovery`)
 
@@ -986,7 +1016,7 @@ listing.last_error = None
 
 1. Pre-flight reset уже выполнен; `failure_streak = 0` дополнительно (success ломает streak)  
 2. Enrich `dim_product.name` from title if placeholder (внутри `IngestionService`)  
-3. Evaluate **persistence gate** (`evaluate_gate` в `ingestion/gate.py`)  
+3. Evaluate **data_firewall** (`evaluate_ecommerce` in `data_firewall/firewall.py`; rules in `data_firewall/rules.py`, re-exported from `ingestion/gate.py`)  
 4. If gate pass + values changed → delete same-day `fact_price`, insert new row (+ `discount_pct` через `_calculate_discount_pct`, + `scrape_job_id` при пайплайн-вызове, `1acd749`), update `last_price_changed_at`  
 5. If gate pass + unchanged → `no_change`, update `last_checked_at` only  
 6. Write `scrape_logs` (`scrape_job_id` уже стэмпится сюда из `GlobalScrapeService.scrape_job_id`)
@@ -1030,8 +1060,8 @@ Structured logs: `EXTRACTED_DATA`, `PERSISTENCE_GATE`, `PRICE_UNCHANGED`, `fact_
 
 ### `no_change` logic
 
-`_should_skip_price_record`: compares price (±0.001), currency (case-insensitive), stock to `listing.last_*`.  
-If skip: no `fact_price` insert; status `no_change`.
+`_should_skip_price_record`: compares price (±0.001), currency (case-insensitive) to `listing.last_*`.  
+If skip: no `fact_price` insert; status `no_change`. (Stock tracking removed in migration `027`.)
 
 ### Log status mapping (`_determine_log_status`)
 
@@ -1445,7 +1475,7 @@ flowchart TD
 
 ### 18.14 `GlobalScrapeService.scrape_product` (краткая логика)
 
-См. §10; ключевые шаги: load listing+MP → `ScraperPool.scrape_product(scrape_tier, requires_js)` → `merge_and_finalize` (PDP gate) → persistence gate → `fact_price` / `no_change` / deactivate @15 errors → `scrape_logs`.
+См. §10; ключевые шаги: load listing+MP → `ScraperPool.scrape_product` → `merge_and_finalize` (PDP gate) → L2 prune if hub/listing → `IngestionService` → `data_firewall` + signed `persist` → `fact_price` / `no_change` / deactivate @15 errors → `scrape_logs`.
 
 ---
 
@@ -1476,7 +1506,8 @@ flowchart TD
 | JWT decode (Tier-0) | `backend/app/common/security.py` |
 | Auth service (Tier-1) | `backend/app/modules/auth/service.py` |
 | Tasks | `backend/app/modules/scraper/tasks.py` |
-| Service / gates | `backend/app/modules/scraper/service.py` |
+| Ingestion / firewall / persist | `ingestion/service.py`, `data_firewall/firewall.py`, `persist/writer.py` |
+| Scrape orchestration | `backend/app/modules/scraper/service.py` |
 | Pool | `backend/app/modules/scraper/scraper_pool.py` |
 | Classifier (Tier-1) | `backend/app/modules/classifier/service.py` |
 | Extractors + re-export | `backend/app/modules/scraper/extractors.py` |

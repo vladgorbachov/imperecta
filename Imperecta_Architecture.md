@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-15 (ветка `main`, head `8ec2ff4`)  
+**Актуально на:** 2026-06-23 (ветка `main`, head `4f961a9`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -25,8 +25,8 @@
 
 **Принципы:**
 
-- **Данные:** критические поля не подменяются фейковыми значениями; `fact_price` — через **persistence gate** (имя, цена, валюта, whitelist, sanity `currency_raw`).
-- **Универсальность:** парсинг и discovery **без привязки к конкретным магазинам**. Классификация PDP — **`classify_page_role_for_discovery`** (`modules/classifier/`: og:type с override для `website`, JSON-LD, microdata, structural fallback) в discovery **и** в `merge_and_finalize` при scrape. `classify_page_role` — только Layer 3 fallback. Без URL-regex по языку/домену.
+- **Данные:** критические поля не подменяются фейковыми значениями; `fact_price` — через **data_firewall** (имя, цена, валюта, whitelist, sanity `currency_raw`) + HMAC-signed **persist**; stock/availability не отслеживается (migration `027`).
+- **Универсальность:** парсинг и discovery **без привязки к конкретным магазинам**. Классификация PDP — **`classify_page_role_for_discovery`** (`modules/classifier/`: og:type с override для `website`, JSON-LD, microdata, structural fallback) в discovery **и** в `merge_and_finalize` при scrape. `classify_page_role` — только Layer 3 fallback. Без URL-regex по языку/домену. **Discovery gate (`4f961a9`):** каждый кандидат классифицируется индивидуально; в пул попадают только `page_role=product` (blind `trust_sample` удалён); canonical URL + `locale_selection` для hreflang. **Scrape L2 prune:** hub/listing → `not_a_product` + DELETE listing и 1:1 `dim_product`.
 
 ---
 
@@ -69,7 +69,7 @@ imperecta/
 │   ├── app/models/
 │   ├── app/modules/          # доменная логика
 │   ├── app/workers/
-│   └── alembic/versions/     # 001 … 022 (head: scrape_jobs job_type allow scrape)
+│   └── alembic/versions/     # 001 … 028 (head: add fact_listing page_role)
 ├── Imperecta_Architecture.md   # продукт, топология, карта файлов (Часть II)
 ├── Imperecta_Backend.md        # API, Celery, parsing (Часть II)
 ├── Imperecta_Frontend.md
@@ -94,14 +94,16 @@ Legacy `app/api/`, `app/services/` удалены.
 | `marketplaces` | `dim_marketplace` CRUD, pool quotas |
 | `scraper` | Discovery, scrape, `pipeline/` orchestrator (см. `Imperecta_Backend.md` §4.3) |
 | `classifier` | Tier-1: PageRole классификация (`classify_page_role_for_discovery` использует слои JSON-LD/og/microdata/structural) — выделено как самостоятельный модуль (ARCHITECTURE_PRINCIPLES §10) |
-| `ingestion` | Tier-1: persistence gate + write decision (`gate.py`, `service.py`, `dto.py`) — единственный владелец `fact_listing` / `fact_price` writes |
+| `data_firewall` | Tier-1: контракты колонок, ecommerce/market rules, HMAC signing, `reject_data` на отказ (`firewall.py`, `rules.py`, `contracts.py`, `signing.py`, `reject_store.py`) |
+| `ingestion` | Tier-1: orchestration scrape→persist (`service.py`, `dto.py`) — вызывает `data_firewall` + `persist`; re-export gate в `gate.py` |
+| `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`: `write_sync` / `write_async`, `build_fact_price_fields`) |
 | `product_pool` | Публичный пул товаров; `/pool/*`, `/markets/overview` |
 | `market_data` | Forex/crypto/commodities/fuel ingestion + `/markets/*` API |
 | `ai_analyst` | Claude chat sessions; entitlement-gated |
 
-**Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, `entitlements.api`, `ai_analyst.api` — всего 11 объединённых роутеров под единым `prefix="/api"` (`main.py:147-161`).
+**Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, `entitlements.api`, `ai_analyst.api` — всего **12** роутеров под единым `prefix="/api"` (`main.py:146-160`).
 
-**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `scraper.api` (admin-internal/diagnostics), `classifier`, `ingestion` (внутренние Tier-1 контракты, вызываются из `scraper`).
+**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `scraper.api` (admin-internal/diagnostics), `classifier`, `ingestion`, `data_firewall`, `persist` (внутренние Tier-1 контракты, вызываются из scraper/ingestion/market_data).
 
 **Удалены / в перестройке:** `analytics/`, `dashboard/`, `digests/`, `alerts/` модули — отсутствуют либо как пустые namespace; их API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
 
@@ -159,7 +161,7 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 
 Если sitemap дал ≥10 product URLs — **sitemap path** (resumable offset, `016`); иначе category crawl с Phase 2 budget (`017`/`018` resume).  
 При нехватке 15 min budget — `partial_budget` / inner job `partial` (`019`); следующий run продолжает.  
-Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest retry через 1h.
+Sitemap: per-URL structural classify (sample только для early `reject_sample` при <20% product); **trust_sample blind-accept удалён** (`4f961a9`); concurrency 8; bad harvest retry через 1h. Locale: `locale_selection.select_locale_url` (en → marketplace locale → x-default) + `Accept-Language` на classify fetch.
 
 Подробно: `Imperecta_Backend.md`.
 
@@ -194,7 +196,7 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 - currency non-empty  
 - `len(currency_raw) < 50`  
 - валюта в whitelist маркетплейса (страна + EUR/USD + `scraper_config.allowed_currencies`)  
-- `no_change` если цена/валюта/stock не изменились  
+- `no_change` если цена/валюта не изменились (stock tracking удалён, migration `027`)  
 - после **15** подряд ошибок → `fact_listing.is_active = false`
 
 Подробно: `Imperecta_Backend.md`.
@@ -212,7 +214,7 @@ Sitemap: sample/trust/reject thresholds (80% / 20%), concurrency 8, bad harvest 
 ## 9. База данных (кратко)
 
 - Star schema + app tables.
-- **Head migration:** `022_scrape_jobs_job_type_allow_scrape` (CHECK расширен на `'scrape'` для per-MP scrape children); `021_fact_listing_failure_streak` (persistent deactivation counter); resumable discovery — `016`–`018`; `partial` job status — `019`; child parent_job_id — `020`.
+- **Head migration:** `028_add_fact_listing_page_role` (`fact_listing.page_role varchar(16)` — gate diagnostics); `027_remove_in_stock_and_fact_stock` (drop stock columns/table; rebuild `mv_daily_price_summary`); `026_forex_nine_currency_allowlist`; `025_supabase_security_hardening`; `024_reject_data_and_not_a_product`; `023_scrape_logs_currency_rejected`; ранее — `022` scrape children, `021` failure_streak, resumable discovery `016`–`018`, `partial` `019`, `parent_job_id` `020`.
 - `fact_price` partitioned by `date_id` (`fact_price_YYYYMM` + **`fact_price_default`** safety partition).
 - Без партиции на текущий месяц INSERT в `fact_price` падает (`no partition found for row`).
 - `url_hash` unique на `fact_listing`.
@@ -276,6 +278,14 @@ sequenceDiagram
 
 | Коммит / область | Суть |
 |------------------|------|
+| `4f961a9` Structural pool gate + locale | Discovery: per-URL classify, `page_role` on insert; `trust_sample` removed; `locale_selection.py`; scrape L2 prune non-PDP; migration `028` `fact_listing.page_role`; pool UI filter `page_role=product` |
+| `f8c8439` Migration 027 asyncpg split | Один SQL statement per `op.execute()` в 027 (asyncpg deadlock safety) |
+| `ad6aa57` Remove stock tracking | Drop `in_stock`/`last_in_stock`/`fact_stock`/`scrape_logs.in_stock_found`; modules `data_firewall`/`persist`/`ingestion` без stock path |
+| `cdb8af8` Extended pool reset | `clear-pool`: TRUNCATE pool + `reject_data`, cursor wipe, MV refresh + ANALYZE |
+| `0e14ac5` Supabase security 025 | `supabase_security.py` + migration: RLS deny, revoke client roles |
+| `de8063b` data_firewall 1.2 | HMAC sign/verify boundary; `reject_data` writes on fail |
+| `f0a7118` data_firewall module | Extract gate from scraper → `data_firewall` + `persist` |
+| `b60602a` Forex nine currencies | Runtime allowlist + migration `026` purge |
 | `5d3eb26` Phase 1 batch publish | `_publish_category_batch` — публикация до 60 category URLs за batch; Phase 2 harvest в том же tick; frontier с пустым `listing_urls` для resume BFS |
 | `08c23f2` Classifier og:website fix | `og:type=website` — слабый CMS-сигнал; JSON-LD/microdata Product/Listing переопределяют hub |
 | `ef11075` Worker log relay revival | `pipeline_worker_log_relay(parent_id)` в `discover_one_marketplace` / `scrape_one_marketplace`; `discovery_activity_callback` wired |
@@ -363,10 +373,10 @@ sequenceDiagram
 | Элемент | Где живёт | Суть |
 |---------|-----------|------|
 | **Lifespan** | `main.py` | Alembic → superuser → create_all → Telegram webhook |
-| **Auth JWT** | `core/api_auth.py`, `core/service` | Register/login/refresh; Bearer middleware |
-| **Display currency** | `common/currency.py`, `marketplace_locale.py` | `fact_currency_rate` → live forex; local = TLD resolution |
+| **Auth JWT** | `modules/auth/api.py`, `modules/auth/service.py` | Register/login/refresh; Bearer via `common/deps.py` |
+| **Display currency** | `common/currency.py`, `marketplace_locale.py` | `fact_currency_rate` (9-currency allowlist, `026`) → live forex; local = TLD resolution |
 | **Tiered fetch** | `scraper_pool.py` `_layer_order` | Tier 1 only, policy B: SSR httpx-first / JS-only decodo-first |
-| **Persistence gate** | `scraper/service.py` | P0 guards before `fact_price` |
+| **data_firewall + persist** | `data_firewall/`, `ingestion/service.py`, `persist/writer.py` | Gate + HMAC sign + verbatim `fact_price` write |
 | **Celery broker** | `workers/celery_app.py` | Redis, no result backend |
 | **Partitions** | `workers/maintenance_tasks.py` | Rolling `fact_price_YYYYMM` +3 months |
 
@@ -435,7 +445,7 @@ sequenceDiagram
 
 # Часть II. Полная структура файлов репозитория
 
-**Актуально на:** 2026-06-15 (head `8ec2ff4`) · **Tracked файлов:** 460 (`git ls-files`)
+**Актуально на:** 2026-06-23 (head `4f961a9`) · **Tracked файлов:** 509 (`git ls-files`)
 
 Список всех tracked файлов приложения (исключая кэши, секреты, build-артефакты). Источник истины — `git ls-files`.
 
@@ -504,7 +514,13 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/alembic/versions/019_scrape_jobs_status_allow_partial.py` | `'partial'` в CHECK `ck_scrape_jobs_status` для inner discovery jobs. |
 | `backend/alembic/versions/020_scrape_jobs_parent_job_id.py` | `parent_job_id` self-FK + index `(parent_job_id, status)` — tick child discovery jobs. |
 | `backend/alembic/versions/021_fact_listing_failure_streak.py` | `fact_listing.failure_streak INTEGER NOT NULL DEFAULT 0`; backfill `= consecutive_errors`; persistent circuit-breaker для деактивации после 15 подряд ошибок. |
-| `backend/alembic/versions/022_scrape_jobs_job_type_allow_scrape.py` | `ck_scrape_jobs_job_type` расширен на `'scrape'` — per-MP scrape-children задачи `scrape_one_marketplace` (**head**). |
+| `backend/alembic/versions/022_scrape_jobs_job_type_allow_scrape.py` | `ck_scrape_jobs_job_type` расширен на `'scrape'` — per-MP scrape-children задачи `scrape_one_marketplace`. |
+| `backend/alembic/versions/023_scrape_logs_currency_rejected.py` | CHECK `scrape_logs.status` + значение `currency_rejected`. |
+| `backend/alembic/versions/024_reject_data_and_not_a_product.py` | Таблица `reject_data`; статус `not_a_product` в `scrape_logs`. |
+| `backend/alembic/versions/025_supabase_security_hardening.py` | RLS deny policies + REVOKE anon/authenticated (`core/supabase_security.py`). |
+| `backend/alembic/versions/026_forex_nine_currency_allowlist.py` | Seed JPY; purge `fact_currency_rate` вне allowlist 9 валют. |
+| `backend/alembic/versions/027_remove_in_stock_and_fact_stock.py` | Drop stock columns/table; rebuild MV; tighten `alerts.alert_type` CHECK. |
+| `backend/alembic/versions/028_add_fact_listing_page_role.py` | `fact_listing.page_role varchar(16)` — structural gate diagnostics (**head**). |
 
 ### 2.3 Корневые пакеты приложения (`backend/app/`)
 
@@ -597,7 +613,8 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/modules/core/__init__.py` | Пакет. |
 | `backend/app/modules/core/admin_service.py` | Сервис админ-операций (bootstrap superuser). |
 | `backend/app/modules/core/api_admin.py` | REST endpoints `/api/admin/*` (stats, claude-status, clear-pool). |
-| `backend/app/modules/core/pool_maintenance.py` | Обслуживание product pool. |
+| `backend/app/modules/core/pool_maintenance.py` | Extended blank-slate pool reset (`clear_product_pool_preserve_marketplaces`): TRUNCATE pool tables + `reject_data`, FK prep on alerts, wipe `user_products`, reset discovery cursors on `dim_marketplace`, post-wipe MV refresh + ANALYZE; HTTP 409 if scrape jobs active. |
+| `backend/app/modules/core/supabase_security.py` | RLS deny + REVOKE helpers (migrations 025/027, new `fact_price` partitions). |
 
 > Вынесено в отдельные Tier-1 модули: `auth/` (бывш. `core/auth/`, `core/api_auth.py`), `users/` (бывш. `core/users/`), `telegram/` (бывш. `core/api_telegram.py`), `entitlements/` API (бывш. `core/plans/`).
 
@@ -643,14 +660,30 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/modules/classifier/constants.py` | Layer constants (og:type, JSON-LD types, microdata). |
 | `backend/app/modules/classifier/service.py` | `classify_page_role_for_discovery` (Layer 1–3), `classify_page_role` fallback. |
 
-#### 2.7.5f Ingestion (`ingestion/`) — Tier-1 (ARCHITECTURE_PRINCIPLES §10, sole owner of write decision)
+#### 2.7.5f Ingestion (`ingestion/`) — Tier-1 (orchestration scrape → firewall → persist)
 
 | Файл | Назначение |
 |---|---|
 | `backend/app/modules/ingestion/__init__.py` | Пакет. |
-| `backend/app/modules/ingestion/dto.py` | `IngestionResult` DTO + sibling. |
-| `backend/app/modules/ingestion/gate.py` | `PERSISTENCE_GATE`: name + price>0 + currency + whitelist + currency_raw len. |
-| `backend/app/modules/ingestion/service.py` | Apply policy, write `fact_listing` / `fact_price`. |
+| `backend/app/modules/ingestion/dto.py` | `IngestionResult` DTO. |
+| `backend/app/modules/ingestion/gate.py` | Re-export `evaluate_gate` / skip reasons из `data_firewall.rules`. |
+| `backend/app/modules/ingestion/service.py` | `IngestionService.persist_extracted`: enrich `dim_product`, call `evaluate_ecommerce`, `write_sync` on signed pass. |
+
+#### 2.7.5g Data firewall (`data_firewall/`) — Tier-1
+
+| Файл | Назначение |
+|---|---|
+| `backend/app/modules/data_firewall/contracts.py` | `FACT_TABLE_CONTRACTS` из ORM (DB shape = contract). |
+| `backend/app/modules/data_firewall/rules.py` | Ecommerce gate rules (`evaluate_ecommerce_rules`). |
+| `backend/app/modules/data_firewall/firewall.py` | `evaluate_ecommerce`, `evaluate_market`; sign on pass. |
+| `backend/app/modules/data_firewall/signing.py` | HMAC-SHA256 canonical serialize + verify. |
+| `backend/app/modules/data_firewall/reject_store.py` | `write_reject_data` (fail-closed diagnostic table). |
+
+#### 2.7.5h Persist (`persist/`) — Tier-1
+
+| Файл | Назначение |
+|---|---|
+| `backend/app/modules/persist/writer.py` | `write_sync` / `write_async`: verify signature → verbatim ORM insert; `build_fact_price_fields`. |
 
 #### 2.7.6 Dashboard (`dashboard/`) — удалён
 
@@ -724,7 +757,7 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/modules/scraper/pipeline/worker_log_relay.py` | Redis relay `pipeline:worker_deploy_log` (500-строчный буфер) + `PipelineWorkerLogHandler`; CM `pipeline_worker_log_relay(parent_id)` в child tasks (`ef11075`). |
 | `backend/app/modules/scraper/pipeline/child_aggregation.py` | `aggregate_discovery_children(parent_job_id)` + scrape children — seed для `complete_pipeline_job` на complete-фазе тика. |
 | `backend/app/modules/scraper/pipeline/tick_orchestrator.py` | `run_tick` — единственная state-machine pipeline-а (после O4c); per-parent session advisory-lock (O5b/`a82fa48`/`ff781a9`); reap stale children + reconcile pending. |
-| `backend/app/modules/scraper/proxy_manager.py` | Управление прокси (Decodo, ротация). |
+| `backend/app/modules/scraper/fetch_backends.py` | Fetch backends (httpx, Decodo, Playwright). |
 | `backend/app/modules/scraper/scraper_pool.py` | `ScraperPool` — пул Playwright/HTTP-клиентов; layer order policy B (`1de44f1`); observe-only JS-shell детектор (`731d789`). |
 | `backend/app/modules/scraper/service.py` | `GlobalScrapeService` — индивидуальный scrape листинга; `_run_scrape_all_pool` (per-MP scoped, вызывается из `scrape_one_marketplace`). |
 | `backend/app/modules/scraper/tasks.py` | Celery: `orchestrator_tick`, `discover_one_marketplace`, `scrape_one_marketplace`, `discover_single_marketplace`, `discover_all_marketplaces`, `scrape_all_pool_products`, `scrape_pool_product`, `check_pool_completeness`. |
@@ -747,7 +780,7 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/workers/reaper_tasks.py` | `reap_orphan_jobs` — внешний reaper зависших `status='running'` job'ов; `REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS=600`. |
 | `backend/app/workers/scheduler.py` | Celery Beat: `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape — **manual** via API. |
 
-### 2.9 Тесты backend (`backend/tests/`) — 81 файл
+### 2.9 Тесты backend (`backend/tests/`) — 101 файл
 
 #### 2.9.1 Корневые тесты и фикстуры
 
@@ -783,7 +816,12 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/tests/test_core_users1_module_assembly.py` | CoreUsers1: `users/` собран. |
 | `backend/tests/test_d1_dashboard_dissolution.py` | D1: `dashboard/` модуль удалён. |
 | `backend/tests/test_da1_alerts_digests_dissolution.py` | DA1: `alerts/`+`digests/` распущены. |
-| `backend/tests/test_ing1_ingestion_module.py` | ING1: `ingestion/` Tier-1 sole writer. |
+| `backend/tests/test_ing1_ingestion_module.py` | ING1: `ingestion/` Tier-1 orchestration. |
+| `backend/tests/test_data_firewall/` | data_firewall contracts, HMAC, page_role blocks. |
+| `backend/tests/test_migration_027.py` | Migration 027: stock columns/table dropped. |
+| `backend/tests/test_collector_gate_and_locale.py` | Gate/locale/prune: migration 028 asyncpg scan, `select_locale_url`, discovery gate, L2 prune safety. |
+| `backend/tests/test_pool_reset_extended.py` | Extended admin clear-pool maintenance. |
+| `backend/tests/test_supabase_security.py` | supabase_security hardening statements. |
 | `backend/tests/test_market_data_fetch_consolidation.py` | Market Data: консолидация fetch. |
 | `backend/tests/test_market_data_module_baseline.py` | Market Data: baseline contract. |
 | `backend/tests/test_market_data_structure.py` | Market Data: структура facade/fetching/reader. |
@@ -1291,19 +1329,19 @@ Skill-документы для специализированных AI-аген
 | Discovery | `scraper/discovery.py` (`DiscoveryCrawler`), `scraper/tasks.py:discover_one_marketplace` |
 | Scrape (pipeline) | `scraper/service.py:_run_scrape_all_pool` (per-MP), `scraper/tasks.py:scrape_one_marketplace` |
 | Pipeline dispatch | `scraper/pipeline/tick_orchestrator.py:run_tick` (advisory-locked, single dispatch после O4c), `admin/api_parsing.py:_enqueue_pipeline_run` |
-| Persistence gate | `modules/ingestion/gate.py` + `service.py` (sole owner of `fact_listing` / `fact_price` writes) |
+| Persistence gate + sign + write | `modules/data_firewall/` + `modules/ingestion/service.py` + `modules/persist/writer.py` (sole owner of `fact_listing` / `fact_price` writes) |
 | Classification | `modules/classifier/service.py:classify_page_role_for_discovery` (Layer 1–3) |
 | Orphan job reaper | `backend/app/workers/reaper_tasks.py:reap_orphan_jobs`, Beat в `scheduler.py` |
 | Admin pipeline UI | `frontend/src/components/admin/DataCollectionTab.tsx`, `PipelineStatusPanel.tsx`, `WorkerLogRelayPanel.tsx` |
 | Display currency | `backend/app/common/currency.py`, `frontend/src/stores/displayCurrencyStore.ts` + `lib/displayCurrency.ts` |
 | Market data | `modules/market_data/{facade,fetching,ingestion,reader,ticker}.py` + `workers/market_data_tasks.py` |
-| Миграции | `backend/alembic/versions/001` … `022` (head: `022_scrape_jobs_job_type_allow_scrape`) |
+| Миграции | `backend/alembic/versions/001` … `028` (head: `028_add_fact_listing_page_role`) |
 
 
 
 
 
-### Полное дерево `backend/app/` на head `8ec2ff4` (2026-06-15)
+### Полное дерево `backend/app/` на head `4f961a9` (2026-06-23)
 
 ```
 backend/app/
@@ -1370,7 +1408,18 @@ backend/app/
 │   │   ├── __init__.py
 │   │   ├── admin_service.py                 ensure_superuser bootstrap
 │   │   ├── api_admin.py                     /api/admin/* (stats, claude-status, clear-pool)
-│   │   └── pool_maintenance.py              Product pool инварианты
+│   │   ├── pool_maintenance.py              Extended blank-slate pool reset + MV refresh
+│   │   └── supabase_security.py             RLS deny + revoke helpers (migrations 025/027)
+│   │
+│   ├── data_firewall/                       Tier-1 validation boundary
+│   │   ├── contracts.py                     FACT_TABLE_CONTRACTS from ORM
+│   │   ├── firewall.py                      evaluate_ecommerce / evaluate_market
+│   │   ├── reject_store.py                  write_reject_data
+│   │   ├── rules.py                         evaluate_ecommerce_rules
+│   │   └── signing.py                       HMAC sign/verify
+│   │
+│   ├── persist/                             Tier-1 verbatim writer
+│   │   └── writer.py                        write_sync / write_async, build_fact_price_fields
 │   │
 │   ├── digests/                             ── namespace-only (DA1) ──
 │   │   └── __init__.py
@@ -1380,11 +1429,11 @@ backend/app/
 │   │   ├── init.py                          (sic — мусорный artefact rename'а)
 │   │   └── service.py
 │   │
-│   ├── ingestion/                           Tier-1 (sole writer fact_listing/fact_price)
+│   ├── ingestion/                           Tier-1 orchestration scrape → firewall → persist
 │   │   ├── __init__.py
 │   │   ├── dto.py                           IngestionResult DTO
-│   │   ├── gate.py                          PERSISTENCE_GATE: name + price>0 + currency + whitelist
-│   │   └── service.py                       Apply policy, write fact_listing/fact_price
+│   │   ├── gate.py                          Re-export data_firewall rules (evaluate_gate)
+│   │   └── service.py                       IngestionService.persist_extracted
 │   │
 │   ├── market_data/                         Forex / crypto / commodities / fuel
 │   │   ├── api.py                           /api/markets/*
@@ -1425,7 +1474,8 @@ backend/app/
 │   │   ├── extractors.py                    JSON-LD → Microdata → OG-meta → custom → auto + classify
 │   │   ├── init.py                          (sic — мусорный artefact)
 │   │   ├── models.py                        Доменные типы скрапера
-│   │   ├── proxy_manager.py                 Sticky proxies, country routing
+│   │   ├── fetch_backends.py                httpx / Decodo / Playwright fetch layer
+│   │   ├── locale_selection.py              hreflang URL chain + Accept-Language (`4f961a9`)
 │   │   ├── scraper_pool.py                  Layered fetch (policy B); observe-only JS-shell детектор
 │   │   ├── service.py                       GlobalScrapeService → IngestionService
 │   │   ├── tasks.py                         Celery: orchestrator_tick, discover_one_marketplace,
@@ -1478,8 +1528,11 @@ backend/app/
 - **Celery worker** (`app/workers/celery_app.py` `conf.include`): `app.modules.scraper.tasks`, `app.workers.market_data_tasks`, `app.workers.cleanup_tasks`, `app.workers.maintenance_tasks`, `app.workers.reaper_tasks`. (Старые `modules.alerts.tasks`, `modules.digests.tasks`, `modules.market_data.tasks` — удалены.)
 - **Celery beat** (`app/workers/scheduler.py`): `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily 00:00), `refresh_materialized_views` (hourly), `cleanup_old_data` (daily 03:00). Discovery/scrape по расписанию **не запускаются**.
 - **SQLAlchemy модели:** `app/models/{core,dimensions,facts,app_tables}.py`.
-- **Скрейп-пайплайн (актуальный, head `8ec2ff4`):**
+- **Скрейп-пайплайн (актуальный, head `4f961a9`):**
   - `modules/classifier/service.py` → `classify_page_role_for_discovery` (og:website weak hub override, `08c23f2`).
+  - `locale_selection.py` → hreflang chain + `Accept-Language` on discovery classify fetch.
+  - `discovery.py` → per-URL gate (`trust_sample` removed); `_save_product_urls` stamps `page_role=product`.
+  - `service.py` → L2 prune: confirmed hub/listing DELETE listing + orphan `dim_product`.
   - `extractors.py` → extraction + re-export classifier; `merge_and_finalize` PDP gate.
   - `scraper_pool.py` → policy B: SSR `httpx→decodo→playwright`; JS-only `decodo→playwright→httpx`; static docs `httpx→decodo_static` (`_fetch_static`).
   - `service.py` → `GlobalScrapeService`; `_run_scrape_all_pool` (scoped per-MP via `marketplace_codes`).

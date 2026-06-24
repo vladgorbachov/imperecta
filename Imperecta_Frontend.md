@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-15 (head `8ec2ff4`)  
+**Актуально на:** 2026-06-23 (head `4f961a9`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию UI; принципы не дублирует.
@@ -9,6 +9,10 @@
 
 | Commit | Суть |
 |--------|------|
+| `4f961a9` | Backend: structural pool gate, `locale_selection`, L2 prune, migration `028 page_role` |
+| `f8c8439` | Migration 027 asyncpg split (deploy) |
+| `ad6aa57` | Backend: stock columns removed — **G-phase:** убрать `in_stock` из `products.ts` / `markets.ts`, `in_stock_found` из `admin.ts` |
+| `cdb8af8` | Admin clear-pool extended response (`pool_cleared`, `*_deleted`, `cursors_reset`, …) |
 | `8ec2ff4` | Header flex overflow fix на узких viewport |
 | `5d3eb26` | Backend: Phase 1 batch publish categories (`CATEGORY_PUBLISH_BATCH=60`) |
 | `2325052` | `:root font-size: 100%` — rem = browser default |
@@ -138,6 +142,7 @@ frontend/src/
 - `RunPipelinePayload`: optional `marketplace_codes[]`
 - `ParsingJobStatus`, `ParsingLiveStep`, `ParsingPipelineRun`
 - `getParsingWorkerLogRelay(after, jobId, limit)`
+- `clearProductPool()` → `POST /admin/products/clear-pool` — ответ: `pool_cleared`, `fact_listing_deleted`, `dim_product_deleted`, `fact_price_deleted`, `scrape_logs_deleted`, `reject_data_deleted`, `marketplaces_preserved`, `cursors_reset`, `mv_refreshed`, `post_maintenance_error`, `time_ms` (тип в `admin.ts` пока устарел — `{ deleted, message }`)
 - User CRUD request/response types
 
 ---
