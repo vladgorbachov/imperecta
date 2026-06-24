@@ -49,26 +49,25 @@ def _has_active_scrape_job() -> bool:
 
 
 def _refresh_mv(mv_name: str) -> None:
-    """Refresh one materialized view non-concurrently with bounded temp usage.
+    """Refresh one materialized view non-concurrently.
 
-    Uses a dedicated autocommit connection. Session-level SET applies only to this
-    connection and is reset before close so temp spill is bounded per refresh.
+    Uses a dedicated autocommit connection. Session-level work_mem applies only
+    to this connection and is reset before close. The temp-file GUC is not set:
+    Supabase managed Postgres forbids the owner role from setting it.
+    Non-concurrent refresh avoids the temp-copy blowup that motivated the guard.
     """
     if mv_name not in _ALLOWED_MATERIALIZED_VIEWS:
         raise ValueError(f"unsupported materialized view: {mv_name}")
 
     settings = Settings()
-    temp_limit_kb = settings.mv_refresh_temp_file_limit_mb * 1024
     work_mem_mb = settings.mv_refresh_work_mem_mb
 
     raw = sync_engine.raw_connection()
     try:
         raw.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cur = raw.cursor()
-        cur.execute(f"SET temp_file_limit = {temp_limit_kb}")
         cur.execute(f"SET work_mem = '{work_mem_mb}MB'")
         cur.execute(f"REFRESH MATERIALIZED VIEW {mv_name}")
-        cur.execute("RESET temp_file_limit")
         cur.execute("RESET work_mem")
         cur.close()
     finally:
