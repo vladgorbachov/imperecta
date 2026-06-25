@@ -27,7 +27,7 @@ async def aggregate_discovery_children(
     ``marketplace_id`` (str), ``domain`` (from child's config), ``status``
     (child's own status), ``listings_created`` (= ``job.successful``),
     ``prices_saved`` (0; scrape phase fills it), ``errors_count``
-    (= ``job.failed``), ``duration_ms``.
+    (= ``job.failed`` discovery errors), ``duration_ms``.
     """
     result = await db.execute(
         select(ScrapeJob).where(
@@ -78,7 +78,7 @@ async def aggregate_scrape_children(
             "domain": cfg.get("domain"),
             "listings_created": 0,
             "prices_saved": 0,
-            "errors_count": int(child.failed or 0),
+            "errors_count": 0,
             "duration_ms": int(child.duration_ms or 0),
             "status": child.status,
         }
@@ -93,8 +93,9 @@ def merge_phase_seeds(
 
     Pure function (no I/O), unit-testable. Rules:
     - When BOTH seeds carry the same marketplace: scrape is the terminal phase,
-      so its status wins; ``errors_count`` is the sum across phases; discovery's
-      ``listings_created`` / ``duration_ms`` / ``domain`` are kept.
+      so its status wins; discovery's ``listings_created`` / ``duration_ms`` /
+      ``domain`` are kept. Scrape outcome counts come solely from ScrapeLog in
+      :func:`complete_pipeline_job` — scrape seed ``errors_count`` is not merged.
     - When only one seed carries the marketplace: that row is carried through
       verbatim (scrape never reached a discovery-only MP, or vice versa).
     - ``prices_saved`` stays 0 here; :func:`complete_pipeline_job` fills it
@@ -108,6 +109,6 @@ def merge_phase_seeds(
         base = dict(d) if d else dict(s)  # type: ignore[arg-type]
         if d and s:
             base["status"] = s["status"]
-            base["errors_count"] = int(d["errors_count"]) + int(s["errors_count"])
+            base["errors_count"] = int(d["errors_count"])
         merged[mp_id] = base
     return merged

@@ -33,7 +33,12 @@ class ParsingAdminService:
       "summary": {
         "listings_created": <int>,
         "prices_saved": <int>,
-        "errors_count": <int>
+        "errors_count": <int>,
+        "successful": <int>,
+        "unchanged": <int>,
+        "filtered": <int>,
+        "failed": <int>,
+        "total": <int>
       },
       "per_marketplace": [
         {
@@ -42,6 +47,10 @@ class ParsingAdminService:
           "listings_created": <int>,
           "prices_saved": <int>,
           "errors_count": <int>,
+          "successful": <int>,
+          "unchanged": <int>,
+          "filtered": <int>,
+          "failed": <int>,
           "duration_ms": <int>,
           "status": "completed|failed|running"
         }
@@ -253,6 +262,7 @@ class ParsingAdminService:
             else None
         )
         summary_final = normalized in {"completed", "failed"} and bool(summary)
+        summary_fields = self._summary_response_fields(summary, job)
         return {
             "job_id": str(job.id),
             "started_at": self._to_iso(job.started_at),
@@ -262,9 +272,7 @@ class ParsingAdminService:
             ),
             "current_stage": metadata.get("current_stage"),
             "marketplace_codes": marketplace_codes,
-            "listings_created": int(summary.get("listings_created", job.total_listings or 0)),
-            "prices_saved": int(summary.get("prices_saved", job.successful or 0)),
-            "errors_count": int(summary.get("errors_count", job.failed or 0)),
+            **summary_fields,
             "status": normalized,
             "error_message": (
                 str(metadata.get("error"))[:500] if metadata.get("error") else None
@@ -616,11 +624,7 @@ class ParsingAdminService:
             "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
             "total_steps": total_steps,
             "status_counts": status_counts,
-            "summary": {
-                "listings_created": int(summary.get("listings_created", job.total_listings or 0)),
-                "prices_saved": int(summary.get("prices_saved", job.successful or 0)),
-                "errors_count": int(summary.get("errors_count", job.failed or 0)),
-            },
+            "summary": self._summary_response_fields(summary, job),
             "timings": {
                 "discovery_ms": int(timings.get("discovery_ms", 0)),
                 "scrape_ms": int(timings.get("scrape_ms", 0)),
@@ -755,6 +759,25 @@ class ParsingAdminService:
             "started_at": self._to_iso(job.started_at),
             "metadata": metadata,
             "discovery": self._discovery_progress(metadata),
+        }
+
+    @staticmethod
+    def _summary_response_fields(
+        summary: dict[str, Any],
+        job: ScrapeJob,
+    ) -> dict[str, int]:
+        """Additive outcome fields for admin polling surfaces."""
+        prices_saved = int(summary.get("prices_saved", job.successful or 0))
+        errors_count = int(summary.get("errors_count", job.failed or 0))
+        return {
+            "listings_created": int(summary.get("listings_created", job.total_listings or 0)),
+            "prices_saved": prices_saved,
+            "errors_count": errors_count,
+            "successful": int(summary.get("successful", prices_saved)),
+            "unchanged": int(summary.get("unchanged", 0)),
+            "filtered": int(summary.get("filtered", 0)),
+            "failed": int(summary.get("failed", errors_count)),
+            "total": int(summary.get("total", 0)),
         }
 
     @staticmethod

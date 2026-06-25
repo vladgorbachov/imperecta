@@ -36,27 +36,13 @@ from app.modules.ingestion.service import (
 )
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
 from app.modules.scraper.fetch_backends import backend_id_persisted
+from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 _CORO_RESULT = TypeVar("_CORO_RESULT")
 
-_SCRAPE_LOG_STATUSES = (
-    "success",
-    "no_change",
-    "error",
-    "timeout",
-    "blocked",
-    "captcha",
-    "not_found",
-    "price_not_found",
-    "parse_error",
-    "currency_rejected",
-    "not_a_product",
-    "missing_critical_data",
-    "technical_error",
-)
 # Number of consecutive scrape failures before a listing is deactivated.
 # Deactivated listings are excluded from the scrape pool.
 LISTING_DEACTIVATE_AFTER_ERRORS = 15
@@ -195,7 +181,7 @@ def _repair_scrape_logs_status_column(db: Session) -> bool:
 
 def _repair_scrape_logs_status_constraint(db: Session) -> bool:
     """Repair scrape_logs.status CHECK to allow all supported statuses."""
-    allowed = ",".join(f"'{status}'" for status in _SCRAPE_LOG_STATUSES)
+    allowed = ",".join(f"'{status}'" for status in CANONICAL_SCRAPE_LOG_STATUSES)
     try:
         db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS ck_scrape_logs_status"))
         db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS scrape_logs_status_check"))

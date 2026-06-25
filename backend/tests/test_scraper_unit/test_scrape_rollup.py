@@ -66,7 +66,7 @@ async def test_aggregate_scrape_children_shape_passes_partial_status():
     }
     assert out[mp_b]["status"] == "partial"
     assert out[mp_b]["listings_created"] == 0
-    assert out[mp_b]["errors_count"] == 2
+    assert out[mp_b]["errors_count"] == 0
     assert out[mp_b]["duration_ms"] == 11000
 
 
@@ -139,23 +139,23 @@ def test_merge_phase_seeds_discovery_only_marketplace_kept():
 
 def test_merge_phase_seeds_scrape_only_marketplace_kept():
     mp = uuid4()
-    out = merge_phase_seeds({}, {mp: _scrape_row(mp, status="failed", errs=3)})
+    out = merge_phase_seeds({}, {mp: _scrape_row(mp, status="failed")})
 
     assert set(out.keys()) == {mp}
     assert out[mp]["status"] == "failed"
     assert out[mp]["listings_created"] == 0
-    assert out[mp]["errors_count"] == 3
+    assert out[mp]["errors_count"] == 0
 
 
 def test_merge_phase_seeds_both_present_scrape_status_wins_errors_summed():
     mp = uuid4()
     discovery = {mp: _disc_row(mp, status="completed", listings=20, errs=1, duration_ms=15000)}
-    scrape = {mp: _scrape_row(mp, status="partial", errs=4, duration_ms=9000)}
+    scrape = {mp: _scrape_row(mp, status="partial")}
 
     out = merge_phase_seeds(discovery, scrape)
 
     assert out[mp]["status"] == "partial"  # scrape terminal wins
-    assert out[mp]["errors_count"] == 5    # 1 + 4
+    assert out[mp]["errors_count"] == 1    # discovery only; scrape from ScrapeLog
     assert out[mp]["listings_created"] == 20  # discovery preserved
     assert out[mp]["duration_ms"] == 15000   # discovery preserved
 
@@ -163,14 +163,14 @@ def test_merge_phase_seeds_both_present_scrape_status_wins_errors_summed():
 def test_merge_phase_seeds_disjoint_union():
     mp_a, mp_b = uuid4(), uuid4()
     discovery = {mp_a: _disc_row(mp_a, status="completed")}
-    scrape = {mp_b: _scrape_row(mp_b, status="failed", errs=2)}
+    scrape = {mp_b: _scrape_row(mp_b, status="failed")}
 
     out = merge_phase_seeds(discovery, scrape)
 
     assert set(out.keys()) == {mp_a, mp_b}
     assert out[mp_a]["status"] == "completed"
     assert out[mp_b]["status"] == "failed"
-    assert out[mp_b]["errors_count"] == 2
+    assert out[mp_b]["errors_count"] == 0
 
 
 # ---------- decide_parent_status -------------------------------------------

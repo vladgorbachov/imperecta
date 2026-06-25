@@ -7,13 +7,22 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
+from app.modules.scraper.pipeline.outcome_buckets import (
+    BUCKET_FAILED,
+    BUCKET_FILTERED,
+    BUCKET_SUCCESSFUL,
+    BUCKET_UNCHANGED,
+    aggregate_marketplace_log_rows,
+    empty_outcome_buckets,
+    sum_buckets_across_marketplaces,
+)
 
 
 def _touch_metadata(
@@ -74,9 +83,9 @@ async def complete_pipeline_job(
 
     log_stats_query = select(
         ScrapeLog.marketplace_id,
-        func.sum(case((ScrapeLog.status == "success", 1), else_=0)).label("prices_saved"),
-        func.sum(case((ScrapeLog.status != "success", 1), else_=0)).label("errors_count"),
-    ).group_by(ScrapeLog.marketplace_id)
+        ScrapeLog.status,
+        func.count().label("count"),
+    ).group_by(ScrapeLog.marketplace_id, ScrapeLog.status)
 
     if child_scrape_ids:
         log_stats_query = log_stats_query.where(
@@ -86,26 +95,22 @@ async def complete_pipeline_job(
         log_stats_query = log_stats_query.where(ScrapeLog.scrape_job_id.is_(None))
 
     log_stats = await db.execute(log_stats_query)
-
-    stats_by_marketplace = {
-        row.marketplace_id: {
-            "prices_saved": int(row.prices_saved or 0),
-            "errors_count": int(row.errors_count or 0),
-        }
-        for row in log_stats
-    }
+    stats_by_marketplace = aggregate_marketplace_log_rows(
+        list(log_stats),
+        job_id=job.id,
+    )
 
     merged: list[dict[str, Any]] = []
     for marketplace_id, seed in per_marketplace_seed.items():
         merged_entry = dict(seed)
-        stats = stats_by_marketplace.get(marketplace_id, {})
-        merged_entry["prices_saved"] = int(stats.get("prices_saved", merged_entry["prices_saved"]))
-        merged_entry["errors_count"] = int(
-            merged_entry["errors_count"] + stats.get("errors_count", 0)
-        )
-        # O5a: per-MP status stays the child's SEED verdict (partial-aware).
-        # Log-derived errors update counters only — they no longer escalate the
-        # status. Parent rollup uses these seed verdicts.
+        buckets = stats_by_marketplace.get(marketplace_id, empty_outcome_buckets())
+        discovery_errors = int(merged_entry.get("errors_count", 0))
+        merged_entry[BUCKET_SUCCESSFUL] = int(buckets[BUCKET_SUCCESSFUL])
+        merged_entry[BUCKET_UNCHANGED] = int(buckets[BUCKET_UNCHANGED])
+        merged_entry[BUCKET_FILTERED] = int(buckets[BUCKET_FILTERED])
+        merged_entry[BUCKET_FAILED] = int(buckets[BUCKET_FAILED])
+        merged_entry["prices_saved"] = int(buckets[BUCKET_SUCCESSFUL])
+        merged_entry["errors_count"] = discovery_errors + int(buckets[BUCKET_FAILED])
         merged.append(merged_entry)
 
     missing_marketplace_ids = set(stats_by_marketplace) - set(per_marketplace_seed)
@@ -117,21 +122,27 @@ async def complete_pipeline_job(
         )
         domain_map = {row.id: row.domain for row in domains_result}
         for marketplace_id in missing_marketplace_ids:
-            stats = stats_by_marketplace[marketplace_id]
+            buckets = stats_by_marketplace[marketplace_id]
             merged.append(
                 {
                     "marketplace_id": str(marketplace_id),
                     "domain": domain_map.get(marketplace_id),
                     "listings_created": 0,
-                    "prices_saved": int(stats.get("prices_saved", 0)),
-                    "errors_count": int(stats.get("errors_count", 0)),
+                    "prices_saved": int(buckets[BUCKET_SUCCESSFUL]),
+                    "errors_count": int(buckets[BUCKET_FAILED]),
+                    BUCKET_SUCCESSFUL: int(buckets[BUCKET_SUCCESSFUL]),
+                    BUCKET_UNCHANGED: int(buckets[BUCKET_UNCHANGED]),
+                    BUCKET_FILTERED: int(buckets[BUCKET_FILTERED]),
+                    BUCKET_FAILED: int(buckets[BUCKET_FAILED]),
                     "duration_ms": 0,
-                    "status": "failed" if int(stats.get("errors_count", 0)) > 0 else "completed",
+                    "status": "failed" if int(buckets[BUCKET_FAILED]) > 0 else "completed",
                 }
             )
 
     listings_created = int(sum(item["listings_created"] for item in merged))
-    prices_saved = int(sum(item["prices_saved"] for item in merged))
+    run_buckets = sum_buckets_across_marketplaces(stats_by_marketplace)
+    prices_saved = int(run_buckets[BUCKET_SUCCESSFUL])
+    scrape_failed = int(run_buckets[BUCKET_FAILED])
     errors_count = int(sum(item["errors_count"] for item in merged))
     total_ms = int(discovery_ms + scrape_ms + persist_ms)
 
@@ -154,6 +165,11 @@ async def complete_pipeline_job(
                 "listings_created": listings_created,
                 "prices_saved": prices_saved,
                 "errors_count": errors_count,
+                BUCKET_SUCCESSFUL: int(run_buckets[BUCKET_SUCCESSFUL]),
+                BUCKET_UNCHANGED: int(run_buckets[BUCKET_UNCHANGED]),
+                BUCKET_FILTERED: int(run_buckets[BUCKET_FILTERED]),
+                BUCKET_FAILED: scrape_failed,
+                "total": int(run_buckets["total"]),
             },
             "per_marketplace": merged,
         }
@@ -165,7 +181,7 @@ async def complete_pipeline_job(
     job.duration_ms = total_ms
     job.total_listings = listings_created
     job.successful = prices_saved
-    job.failed = errors_count
+    job.failed = scrape_failed
     job.status = parent_status
     job.config = {"metadata": deepcopy(metadata)}
     flag_modified(job, "config")

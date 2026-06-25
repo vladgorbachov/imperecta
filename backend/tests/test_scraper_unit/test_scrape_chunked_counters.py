@@ -349,13 +349,20 @@ async def test_counter_scope_child_ids():
     child_result = MagicMock()
     child_result.all.return_value = [(child_id,)]
 
-    log_row = MagicMock()
-    log_row.marketplace_id = mp_id
-    log_row.prices_saved = 3
-    log_row.errors_count = 1
+    log_row_success = MagicMock()
+    log_row_success.marketplace_id = mp_id
+    log_row_success.status = "success"
+    log_row_success.count = 3
+
+    log_row_error = MagicMock()
+    log_row_error.marketplace_id = mp_id
+    log_row_error.status = "error"
+    log_row_error.count = 1
 
     log_result = MagicMock()
-    log_result.__iter__ = MagicMock(return_value=iter([log_row]))
+    log_result.__iter__ = MagicMock(
+        return_value=iter([log_row_success, log_row_error]),
+    )
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[child_result, log_result])
@@ -394,8 +401,11 @@ async def test_counter_scope_child_ids():
     )
 
     assert metadata["summary"]["prices_saved"] == 3
+    assert metadata["summary"]["failed"] == 1
+    assert metadata["summary"]["errors_count"] == 1
     assert metadata["summary"]["listings_created"] == 5
     assert job.successful == 3
+    assert job.failed == 1
     assert len(captured_queries) == 2
     log_query_sql = str(captured_queries[1])
     assert "scrape_job_id" in log_query_sql.lower()

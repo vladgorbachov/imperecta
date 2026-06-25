@@ -38,25 +38,9 @@ from app.modules.scraper.proxy_provider_limiter import SCRAPE_FETCH_PARALLELISM
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _run_coro_in_worker
 from app.workers.celery_app import celery_app
+from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
 
 slog = structlog.get_logger(__name__)
-_SCRAPE_LOG_STATUSES = (
-    "success",
-    "no_change",
-    "error",
-    "timeout",
-    "blocked",
-    "captcha",
-    "not_found",
-    "price_not_found",
-    "parse_error",
-    "currency_rejected",
-    "not_a_product",
-    "missing_critical_data",
-    "technical_error",
-)
-
-
 def _run_async(coro):
     """Run async coroutine from sync Celery task safely."""
     try:
@@ -85,7 +69,7 @@ def _needs_scrape_logs_constraint_repair(exc: Exception) -> bool:
 
 def _repair_scrape_logs_status_constraint(db) -> bool:
     """Repair scrape_logs status CHECK to include technical_error."""
-    allowed = ",".join(f"'{status}'" for status in _SCRAPE_LOG_STATUSES)
+    allowed = ",".join(f"'{status}'" for status in CANONICAL_SCRAPE_LOG_STATUSES)
     try:
         db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS ck_scrape_logs_status"))
         db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS scrape_logs_status_check"))
@@ -805,6 +789,7 @@ def scrape_one_marketplace(self, child_job_id: str):
                 job.successful = ok
                 job.failed = failed
                 job.completed_at = datetime.now(timezone.utc)
+                marketplace.last_scrape_at = job.completed_at
                 # Partial-aware terminal status (O5a): hard_error trumps;
                 # budget exit with progress = partial; mixed ok+failed = partial;
                 # all-failed = failed; cohort drained = completed.
