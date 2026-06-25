@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.modules.data_firewall.contracts import extract_locator
 from app.modules.data_firewall.firewall import (
     FORCED_NOT_A_PRODUCT,
     REJECT_CONTRACT_VIOLATION,
@@ -53,15 +54,112 @@ def _data_firewall_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_reject_spike_state()
 
 
-def test_data_firewall_signature_unforgeable() -> None:
-    fields = {"price": 12.34, "currency_code": "EUR"}
-    signature = sign(fields)
+def _signed_fact_price(fields: dict) -> SignedRecord:
+    table = "fact_price"
+    operation = "insert"
+    locator = extract_locator(table, fields)
+    signature = sign(table=table, operation=operation, fields=fields, locator=locator)
     assert signature is not None
-    assert verify(fields, signature) is True
-    tampered = dict(fields)
-    tampered["price"] = 99.99
-    assert verify(tampered, signature) is False
-    assert verify(fields, "deadbeef" * 8) is False
+    return SignedRecord(
+        table=table,
+        operation=operation,
+        locator=locator,
+        fields=fields,
+        signature=signature,
+    )
+
+
+def test_data_firewall_signature_unforgeable() -> None:
+    listing_id = uuid4()
+    now = datetime.now(tz=timezone.utc)
+    fields = build_fact_price_fields(
+        listing_id=listing_id,
+        date_id=20990101,
+        price=12.34,
+        currency_code="EUR",
+        original_price=None,
+        discount_pct=None,
+        price_change_pct=None,
+        scraped_at=now,
+        scrape_job_id=None,
+    )
+    table = "fact_price"
+    operation = "insert"
+    locator = extract_locator(table, fields)
+    signature = sign(table=table, operation=operation, fields=fields, locator=locator)
+    assert signature is not None
+    assert verify(
+        table=table,
+        operation=operation,
+        fields=fields,
+        locator=locator,
+        signature=signature,
+    )
+    tampered_fields = dict(fields)
+    tampered_fields["price"] = 99.99
+    assert not verify(
+        table=table,
+        operation=operation,
+        fields=tampered_fields,
+        locator=locator,
+        signature=signature,
+    )
+    assert not verify(
+        table=table,
+        operation=operation,
+        fields=fields,
+        locator=locator,
+        signature="deadbeef" * 8,
+    )
+
+
+def test_data_firewall_signature_tamper_table_operation_locator() -> None:
+    listing_id = uuid4()
+    now = datetime.now(tz=timezone.utc)
+    fields = build_fact_price_fields(
+        listing_id=listing_id,
+        date_id=20990101,
+        price=12.34,
+        currency_code="EUR",
+        original_price=None,
+        discount_pct=None,
+        price_change_pct=None,
+        scraped_at=now,
+        scrape_job_id=None,
+    )
+    table = "fact_price"
+    operation = "insert"
+    locator = extract_locator(table, fields)
+    signature = sign(table=table, operation=operation, fields=fields, locator=locator)
+    assert signature is not None
+    assert not verify(
+        table="dim_product",
+        operation=operation,
+        fields=fields,
+        locator=locator,
+        signature=signature,
+    )
+    assert not verify(
+        table=table,
+        operation="delete",
+        fields=fields,
+        locator=locator,
+        signature=signature,
+    )
+    tampered_locator = dict(locator)
+    tampered_locator["date_id"] = 20990102
+    assert not verify(
+        table=table,
+        operation=operation,
+        fields=fields,
+        locator=tampered_locator,
+        signature=signature,
+    )
+
+
+def test_extract_locator_raises_when_column_missing() -> None:
+    with pytest.raises(ValueError, match="locator column missing"):
+        extract_locator("fact_price", {"listing_id": uuid4()})
 
 
 def test_data_firewall_signature_content_binding_bytes() -> None:
@@ -72,8 +170,27 @@ def test_data_firewall_signature_content_binding_bytes() -> None:
 
 def test_persist_rejects_unsigned() -> None:
     db = MagicMock()
-    fields = {"price": 1.0, "currency_code": "EUR"}
-    signed = SignedRecord(table="fact_price", fields=fields, signature="invalid")
+    listing_id = uuid4()
+    now = datetime.now(tz=timezone.utc)
+    fields = build_fact_price_fields(
+        listing_id=listing_id,
+        date_id=20990101,
+        price=1.0,
+        currency_code="EUR",
+        original_price=None,
+        discount_pct=None,
+        price_change_pct=None,
+        scraped_at=now,
+        scrape_job_id=None,
+    )
+    locator = extract_locator("fact_price", fields)
+    signed = SignedRecord(
+        table="fact_price",
+        operation="insert",
+        locator=locator,
+        fields=fields,
+        signature="invalid",
+    )
     wrote = write_sync(
         db,
         signed,
@@ -99,9 +216,7 @@ def test_persist_writes_verbatim_no_mutation() -> None:
         scraped_at=now,
         scrape_job_id=None,
     )
-    signature = sign(fields)
-    assert signature is not None
-    signed = SignedRecord(table="fact_price", fields=fields, signature=signature)
+    signed = _signed_fact_price(fields)
     wrote = write_sync(
         db,
         signed,
@@ -186,6 +301,8 @@ def test_data_firewall_category_unknown_passes() -> None:
     )
     assert outcome.passed
     assert outcome.signed_record is not None
+    assert outcome.signed_record.operation == "insert"
+    assert outcome.signed_record.locator == extract_locator("fact_price", fields)
 
 
 def test_data_firewall_ignores_unknown_in_stock_key_in_persist_fields() -> None:
@@ -276,7 +393,14 @@ def test_market_data_firewall_wired_valid_source() -> None:
     outcome = evaluate_market(fields, table="fact_currency_rate")
     assert outcome.passed
     assert outcome.signed_record is not None
-    assert verify(outcome.signed_record.fields, outcome.signed_record.signature)
+    signed = outcome.signed_record
+    assert verify(
+        table=signed.table,
+        operation=signed.operation,
+        fields=signed.fields,
+        locator=signed.locator,
+        signature=signed.signature,
+    )
 
 
 def test_reject_data_resilient() -> None:

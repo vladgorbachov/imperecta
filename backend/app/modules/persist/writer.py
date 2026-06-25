@@ -21,12 +21,49 @@ from app.models.facts import (
     FactListing,
     FactPrice,
 )
+from app.modules.data_firewall.contracts import extract_locator
 from app.modules.data_firewall.reject_store import write_reject_data
 from app.modules.data_firewall.signing import SignedRecord, verify
 from app.observability.sentry_init import capture_exception_if_initialized
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
+
+SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
+    "fact_price": frozenset({"insert"}),
+    "dim_product": frozenset({"insert"}),
+    "fact_listing": frozenset({"insert"}),
+    "fact_currency_rate": frozenset({"insert"}),
+    "fact_crypto_price": frozenset({"insert"}),
+    "fact_commodity_price": frozenset({"insert"}),
+}
+
+
+def _locator_matches_fields(table: str, fields: dict[str, Any], locator: dict[str, Any]) -> bool:
+    """Defence in depth: signed locator must match the fields subset."""
+    try:
+        expected = extract_locator(table, fields)
+    except ValueError:
+        return False
+    return expected == locator
+
+
+def _verify_signed_record(signed: SignedRecord) -> str | None:
+    """Return reject_reason when verification fails; None when the record is valid."""
+    if not verify(
+        table=signed.table,
+        operation=signed.operation,
+        fields=signed.fields,
+        locator=signed.locator,
+        signature=signed.signature,
+    ):
+        return "invalid_signature"
+    if not _locator_matches_fields(signed.table, signed.fields, signed.locator):
+        return "locator_mismatch"
+    supported = SUPPORTED_WRITE_OPERATIONS.get(signed.table)
+    if supported is None or signed.operation not in supported:
+        return "unsupported_operation"
+    return None
 
 
 @dataclass(frozen=True)
@@ -87,6 +124,7 @@ def _reject_persist(
     fields: dict[str, Any],
     reject_reason: str,
     signature_present: bool,
+    operation: str = "insert",
 ) -> bool:
     slog.error(
         "data_firewall_flag_missing",
@@ -121,6 +159,7 @@ def _reject_persist(
         marketplace_id=ctx.marketplace_id,
         listing_id=ctx.listing_id,
         signature_present=signature_present,
+        operation=operation,
     )
     return False
 
@@ -140,16 +179,19 @@ def write_sync(
             fields={},
             reject_reason="missing_signed_record",
             signature_present=False,
+            operation="insert",
         )
 
-    if not verify(signed.fields, signed.signature):
+    reject_reason = _verify_signed_record(signed)
+    if reject_reason is not None:
         return _reject_persist(
             db,
             ctx=ctx,
             table=signed.table,
             fields=signed.fields,
-            reject_reason="invalid_signature",
+            reject_reason=reject_reason,
             signature_present=bool(signed.signature),
+            operation=signed.operation,
         )
 
     orm_fields = _orm_fields_for_table(signed.table, signed.fields)
@@ -231,20 +273,23 @@ async def write_async(
             marketplace_id=ctx.marketplace_id,
             listing_id=ctx.listing_id,
             signature_present=False,
+            operation="insert",
         )
         return False
 
-    if not verify(signed.fields, signed.signature):
+    reject_reason = _verify_signed_record(signed)
+    if reject_reason is not None:
         write_reject_data(
             db.sync_session,
             source=ctx.source,
             table_target=signed.table,
-            reject_reason="invalid_signature",
+            reject_reason=reject_reason,
             raw_payload=signed.fields,
             rejected_by="persist",
             marketplace_id=ctx.marketplace_id,
             listing_id=ctx.listing_id,
             signature_present=bool(signed.signature),
+            operation=signed.operation,
         )
         return False
 

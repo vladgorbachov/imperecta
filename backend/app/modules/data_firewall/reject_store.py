@@ -90,6 +90,7 @@ def write_reject_data(
     marketplace_id: UUID | None = None,
     listing_id: UUID | None = None,
     signature_present: bool = False,
+    operation: str = "insert",
 ) -> None:
     """Insert reject_data row; failures are logged and never crash the pipeline."""
     record_reject_spike_signal(
@@ -102,6 +103,7 @@ def write_reject_data(
             RejectData(
                 source=source,
                 table_target=table_target,
+                operation=operation,
                 marketplace_id=marketplace_id,
                 listing_id=listing_id,
                 reject_reason=reject_reason,

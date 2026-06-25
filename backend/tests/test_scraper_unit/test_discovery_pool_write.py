@@ -111,7 +111,13 @@ def test_write_pool_dtos_sync_commits_successful_pair() -> None:
             failed_rules=[],
             forced_log_status=None,
             page_role_verdict=None,
-            signed_record=SignedRecord(table="x", fields={}, signature="sig"),
+            signed_record=SignedRecord(
+                table="x",
+                operation="insert",
+                locator={},
+                fields={},
+                signature="sig",
+            ),
         ),
     ), patch("app.modules.scraper.discovery.write_sync", return_value=True):
         result = disc._write_pool_dtos_sync([dto])
@@ -182,7 +188,13 @@ def test_write_pool_dtos_sync_rejects_pair_without_committing_orphan() -> None:
         failed_rules=[],
         forced_log_status=None,
         page_role_verdict=None,
-        signed_record=SignedRecord(table="dim_product", fields={}, signature="sig"),
+        signed_record=SignedRecord(
+            table="dim_product",
+            operation="insert",
+            locator={},
+            fields={},
+            signature="sig",
+        ),
     )
     listing_reject = FirewallOutcome(
         passed=False,

@@ -115,3 +115,28 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "fact_commodity_price": build_table_contract(FactCommodityPrice),
     "fact_fuel_price": build_table_contract(FactFuelPrice),
 }
+
+# Per-table natural keys included in the HMAC locator sub-dict (subset of signed fields).
+TABLE_LOCATORS: dict[str, tuple[str, ...]] = {
+    "fact_price": ("listing_id", "date_id"),
+    "fact_listing": ("url_hash",),
+    "dim_product": ("id",),
+    "fact_currency_rate": ("date_id", "currency_code", "source"),
+    "fact_crypto_price": ("date_id", "symbol", "source"),
+    "fact_commodity_price": ("date_id", "symbol", "source"),
+}
+
+
+def extract_locator(table: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Return the locator subset from signed fields; raise when a locator column is absent."""
+    locator_keys = TABLE_LOCATORS.get(table)
+    if locator_keys is None:
+        raise ValueError(f"no locator contract for table: {table}")
+    locator: dict[str, Any] = {}
+    for key in locator_keys:
+        if key not in fields:
+            raise ValueError(
+                f"locator column missing from fields: {key} for table {table}",
+            )
+        locator[key] = fields[key]
+    return locator

@@ -10,7 +10,11 @@ from uuid import UUID
 
 import structlog
 
-from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS, ColumnContract
+from app.modules.data_firewall.contracts import (
+    FACT_TABLE_CONTRACTS,
+    ColumnContract,
+    extract_locator,
+)
 from app.modules.data_firewall.reject_store import write_reject_data
 from app.modules.data_firewall.rules import (
     SKIP_CURRENCY_COUNTRY_MISMATCH,
@@ -162,11 +166,27 @@ def _validate_against_contract(
     return True, [], None
 
 
-def _sign_fields(table: str, fields: dict[str, Any]) -> SignedRecord | None:
-    signature = sign(fields)
+def _sign_fields(
+    table: str,
+    operation: str,
+    fields: dict[str, Any],
+) -> SignedRecord | None:
+    locator = extract_locator(table, fields)
+    signature = sign(
+        table=table,
+        operation=operation,
+        fields=fields,
+        locator=locator,
+    )
     if signature is None:
         return None
-    return SignedRecord(table=table, fields=fields, signature=signature)
+    return SignedRecord(
+        table=table,
+        operation=operation,
+        locator=locator,
+        fields=fields,
+        signature=signature,
+    )
 
 
 def _extract_snapshot(record: _RecordLike) -> dict[str, Any]:
@@ -248,7 +268,7 @@ def evaluate_ecommerce(
             failed_rules = contract_failed
             forced_log_status = "currency_rejected"
         else:
-            signed_record = _sign_fields(table, persist_fields)
+            signed_record = _sign_fields(table, "insert", persist_fields)
             if signed_record is None:
                 passed = False
                 reject_reason = REJECT_SIGNING_UNAVAILABLE
@@ -268,6 +288,7 @@ def evaluate_ecommerce(
             marketplace_id=marketplace_id,
             listing_id=listing_id,
             signature_present=False,
+            operation="insert",
         )
 
     return FirewallOutcome(
@@ -309,7 +330,7 @@ def evaluate_market(
     signed_record: SignedRecord | None = None
 
     if passed:
-        signed_record = _sign_fields(table, record)
+        signed_record = _sign_fields(table, "insert", record)
         if signed_record is None:
             passed = False
             reject_reason = REJECT_SIGNING_UNAVAILABLE
@@ -325,6 +346,7 @@ def evaluate_market(
             raw_payload=record,
             rejected_by="data_firewall",
             signature_present=False,
+            operation="insert",
         )
 
     return FirewallOutcome(

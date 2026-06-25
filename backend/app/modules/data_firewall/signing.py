@@ -49,11 +49,35 @@ def _canonical_value(value: Any) -> Any:
     return str(value)
 
 
-def canonical_serialize(record_fields: dict[str, Any]) -> bytes:
-    """Deterministic serialization over the exact fields that will be persisted."""
-    canonical = {
+def _canonical_field_dict(record_fields: dict[str, Any]) -> dict[str, Any]:
+    return {
         key: _canonical_value(record_fields[key])
         for key in sorted(record_fields.keys())
+    }
+
+
+def canonical_serialize(record_fields: dict[str, Any]) -> bytes:
+    """Deterministic serialization over a field dict (legacy helper for tests)."""
+    return json.dumps(
+        _canonical_field_dict(record_fields),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def canonical_serialize_signed_payload(
+    *,
+    table: str,
+    operation: str,
+    fields: dict[str, Any],
+    locator: dict[str, Any],
+) -> bytes:
+    """Deterministic serialization for table + operation + locator + fields."""
+    canonical = {
+        "__table__": table,
+        "__operation__": operation,
+        "__locator__": _canonical_field_dict(locator),
+        "fields": _canonical_field_dict(fields),
     }
     return json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -66,24 +90,47 @@ def signing_secret() -> str | None:
     return str(secret)
 
 
-def sign(record_fields: dict[str, Any]) -> str | None:
-    """HMAC-SHA256 hex digest over canonical fields; None when secret unset."""
+def sign(
+    *,
+    table: str,
+    operation: str,
+    fields: dict[str, Any],
+    locator: dict[str, Any],
+) -> str | None:
+    """HMAC-SHA256 hex digest over bound table/operation/locator/fields."""
     secret = signing_secret()
     if secret is None:
         return None
     digest = hmac.new(
         secret.encode("utf-8"),
-        canonical_serialize(record_fields),
+        canonical_serialize_signed_payload(
+            table=table,
+            operation=operation,
+            fields=fields,
+            locator=locator,
+        ),
         digestmod="sha256",
     )
     return digest.hexdigest()
 
 
-def verify(record_fields: dict[str, Any], signature: str | None) -> bool:
+def verify(
+    *,
+    table: str,
+    operation: str,
+    fields: dict[str, Any],
+    locator: dict[str, Any],
+    signature: str | None,
+) -> bool:
     """Constant-time compare of recomputed signature; False when secret or signature missing."""
     if not signature:
         return False
-    expected = sign(record_fields)
+    expected = sign(
+        table=table,
+        operation=operation,
+        fields=fields,
+        locator=locator,
+    )
     if expected is None:
         return False
     return hmac.compare_digest(expected, signature)
@@ -91,8 +138,10 @@ def verify(record_fields: dict[str, Any], signature: str | None) -> bool:
 
 @dataclass(frozen=True)
 class SignedRecord:
-    """Firewall-approved payload bound to an HMAC signature."""
+    """Firewall-approved payload cryptographically bound to table, operation, and locator."""
 
     table: str
+    operation: str
+    locator: dict[str, Any]
     fields: dict[str, Any]
     signature: str
