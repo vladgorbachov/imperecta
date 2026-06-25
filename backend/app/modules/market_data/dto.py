@@ -36,3 +36,4 @@ class NormalizedCommodity(BaseModel):
     change_24h: float | None = None
     unit: str | None = None
     refreshed_at: datetime
+    provider_source: str | None = None

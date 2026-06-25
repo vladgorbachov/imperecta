@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import httpx
 
@@ -28,16 +28,31 @@ METAL_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("XPD", "Palladium", "oz"),
 )
 
+# Internal commodity symbol -> Yahoo Finance futures ticker (symbol mapping only).
+METAL_YAHOO_SYMBOLS: dict[str, str] = {
+    "XAU": "GC=F",
+    "XAG": "SI=F",
+    "XPT": "PL=F",
+    "XPD": "PA=F",
+}
+
 ENERGY_ITEMS: tuple[tuple[str, str, str, str], ...] = (
     ("WTI", "Crude Oil (WTI)", "bbl", "CL=F"),
     ("BRENT", "Crude Oil (Brent)", "bbl", "BZ=F"),
 )
 
+_COMMODITY_PRICE_QUANT = Decimal("0.0001")
+
+
+def _quantize_commodity_price(price: Decimal) -> Decimal:
+    """Round to 4 decimal places for fact_commodity_price Numeric(12,4)."""
+    return price.quantize(_COMMODITY_PRICE_QUANT, rounding=ROUND_HALF_UP)
+
 
 class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
     """
     Unified commodities adapter aligned with Chrome extension data flow:
-    - metals: Gold API
+    - metals: Gold API, fallback to Yahoo Finance futures chart (GC=F, SI=F, …)
     - energy: Alpha Vantage, fallback to Yahoo Finance chart endpoint
     """
 
@@ -61,7 +76,9 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         items: list[NormalizedCommodity] = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             for symbol, name, unit in METAL_ITEMS:
-                item = await self._fetch_metal(client, symbol=symbol, name=name, unit=unit, refreshed_at=refreshed_at)
+                item = await self._fetch_metal(
+                    client, symbol=symbol, name=name, unit=unit, refreshed_at=refreshed_at
+                )
                 if item is not None:
                     items.append(item)
 
@@ -89,6 +106,40 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         unit: str,
         refreshed_at: datetime,
     ) -> NormalizedCommodity | None:
+        """Gold API primary; Yahoo metals futures chart fallback (per metal)."""
+        gold_item = await self._fetch_metal_from_gold_api(
+            client, symbol=symbol, name=name, unit=unit, refreshed_at=refreshed_at
+        )
+        if gold_item is not None:
+            return gold_item
+
+        yahoo_symbol = METAL_YAHOO_SYMBOLS.get(symbol)
+        if yahoo_symbol is None:
+            return None
+
+        logger.info(
+            "Gold API unavailable for %s; falling back to Yahoo %s",
+            symbol,
+            yahoo_symbol,
+        )
+        return await self._fetch_from_yahoo_chart(
+            client,
+            symbol=symbol,
+            name=name,
+            unit=unit,
+            yahoo_symbol=yahoo_symbol,
+            refreshed_at=refreshed_at,
+        )
+
+    async def _fetch_metal_from_gold_api(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        symbol: str,
+        name: str,
+        unit: str,
+        refreshed_at: datetime,
+    ) -> NormalizedCommodity | None:
         url = f"{self.base_url.rstrip('/')}/{symbol}"
         headers: dict[str, str] = {}
         if self.gold_api_key:
@@ -99,7 +150,9 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
             response.raise_for_status()
             payload = response.json()
             price_raw = payload.get("price", payload.get("close"))
-            price = Decimal(str(price_raw))
+            if price_raw is None:
+                raise ValueError(f"Gold API payload missing price for {symbol}")
+            price = _quantize_commodity_price(Decimal(str(price_raw)))
             change_raw = payload.get("chp", payload.get("change_24h"))
             change_24h = float(change_raw) if change_raw is not None else None
             return NormalizedCommodity(
@@ -109,6 +162,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 change_24h=change_24h,
                 unit=unit,
                 refreshed_at=refreshed_at,
+                provider_source="goldapi",
             )
 
         try:
@@ -140,7 +194,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         )
         if alpha_item is not None:
             return alpha_item
-        return await self._fetch_energy_from_yahoo(
+        return await self._fetch_from_yahoo_chart(
             client,
             symbol=symbol,
             name=name,
@@ -177,7 +231,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
             rows = payload.get("data")
             if not isinstance(rows, list) or len(rows) < 2:
                 return None
-            latest = Decimal(str(rows[0].get("value")))
+            latest = _quantize_commodity_price(Decimal(str(rows[0].get("value"))))
             previous = Decimal(str(rows[1].get("value")))
             change_24h = None
             if previous != 0:
@@ -189,6 +243,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 change_24h=change_24h,
                 unit=unit,
                 refreshed_at=refreshed_at,
+                provider_source="alpha_vantage",
             )
 
         try:
@@ -200,7 +255,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         except Exception:
             return None
 
-    async def _fetch_energy_from_yahoo(
+    async def _fetch_from_yahoo_chart(
         self,
         client: httpx.AsyncClient,
         *,
@@ -210,6 +265,8 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         yahoo_symbol: str,
         refreshed_at: datetime,
     ) -> NormalizedCommodity | None:
+        """Yahoo Finance v8 chart endpoint (shared by metals and energy fallbacks)."""
+
         async def _request() -> NormalizedCommodity:
             response = await client.get(
                 f"{YAHOO_CHART_BASE_URL.rstrip('/')}/{yahoo_symbol}",
@@ -220,9 +277,15 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
             result = (((payload.get("chart") or {}).get("result") or [None])[0] or {})
             meta = result.get("meta") or {}
             latest_raw = meta.get("regularMarketPrice", meta.get("previousClose"))
+            if latest_raw is None:
+                raise ValueError(f"Yahoo chart missing price for {yahoo_symbol}")
             previous_raw = meta.get("previousClose")
-            latest = Decimal(str(latest_raw))
-            previous = Decimal(str(previous_raw)) if previous_raw is not None else None
+            latest = _quantize_commodity_price(Decimal(str(latest_raw)))
+            previous = (
+                _quantize_commodity_price(Decimal(str(previous_raw)))
+                if previous_raw is not None
+                else None
+            )
             change_24h = None
             if previous is not None and previous != 0:
                 change_24h = float(((latest - previous) / previous) * 100)
@@ -233,6 +296,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 change_24h=change_24h,
                 unit=unit,
                 refreshed_at=refreshed_at,
+                provider_source="yahoo",
             )
 
         try:
@@ -242,5 +306,10 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 label=f"Yahoo:{yahoo_symbol}",
             )
         except Exception as error:
-            logger.warning("Yahoo fallback failed for %s (%s): %s", symbol, yahoo_symbol, error)
+            logger.warning(
+                "Yahoo fallback failed for %s (%s): %s",
+                symbol,
+                yahoo_symbol,
+                error,
+            )
             return None

@@ -108,6 +108,7 @@ async def fetch_commodities() -> tuple[list[dict], str | None, bool]:
             "price": float(dto.price),
             "unit": dto.unit or "",
             "change_24h": dto.change_24h,
+            "source": dto.provider_source,
         }
         for dto in items
     ]

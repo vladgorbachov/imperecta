@@ -333,7 +333,8 @@ class IngestionService:
                             commodity_type="metal" if sym in ("XAU", "XAG", "XPT", "XPD") else "energy",
                             price_usd=price,
                             unit=unit,
-                            source="goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage",
+                            source=c.get("source")
+                            or ("goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"),
                             change_24h_pct=float(ch) if ch is not None else None,
                         ),
                     )
@@ -357,7 +358,9 @@ class IngestionService:
                 unit = str(c.get("unit", "unit"))
                 price = float(c.get("price", 0))
                 ch = c.get("change_24h")
-                src = "goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"
+                src = c.get("source") or (
+                    "goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"
+                )
                 ctype = "metal" if sym in ("XAU", "XAG", "XPT", "XPD") else "energy"
                 comm_items.append(
                     CommodityIngestItem(
