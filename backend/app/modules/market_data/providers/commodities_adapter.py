@@ -8,6 +8,10 @@ import httpx
 
 from app.config import Settings
 from app.modules.market_data.dto import NormalizedCommodity
+from app.modules.market_data.http_config import (
+    DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    with_transient_retries,
+)
 from app.modules.market_data.providers.base import CommoditiesProviderAdapter
 
 logger = logging.getLogger(__name__)
@@ -37,13 +41,19 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
     - energy: Alpha Vantage, fallback to Yahoo Finance chart endpoint
     """
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+        retry_attempts: int = 0,
+    ):
         settings = Settings()
         configured_base = (base_url or settings.market_data_commodities_url or "").strip()
         self.base_url = configured_base or GOLD_API_DEFAULT_BASE_URL
         self.gold_api_key = (settings.goldapi_key or "").strip()
         self.alpha_vantage_key = (settings.alpha_vantage_key or "").strip()
         self.timeout = timeout
+        self._retry_attempts = retry_attempts
 
     async def fetch(self) -> list[NormalizedCommodity]:
         """Fetch commodities from unified source chain."""
@@ -84,7 +94,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         if self.gold_api_key:
             headers["x-access-token"] = self.gold_api_key
 
-        try:
+        async def _request() -> NormalizedCommodity:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             payload = response.json()
@@ -99,6 +109,13 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 change_24h=change_24h,
                 unit=unit,
                 refreshed_at=refreshed_at,
+            )
+
+        try:
+            return await with_transient_retries(
+                _request,
+                retry_attempts=self._retry_attempts,
+                label=f"GoldAPI:{symbol}",
             )
         except Exception as error:
             logger.warning("Gold API fetch failed for %s: %s", symbol, error)
@@ -143,7 +160,8 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
     ) -> NormalizedCommodity | None:
         if not self.alpha_vantage_key:
             return None
-        try:
+
+        async def _request() -> NormalizedCommodity | None:
             response = await client.get(
                 ALPHA_VANTAGE_QUERY_URL,
                 params={
@@ -172,6 +190,13 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 unit=unit,
                 refreshed_at=refreshed_at,
             )
+
+        try:
+            return await with_transient_retries(
+                _request,
+                retry_attempts=self._retry_attempts,
+                label=f"AlphaVantage:{symbol}",
+            )
         except Exception:
             return None
 
@@ -185,7 +210,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         yahoo_symbol: str,
         refreshed_at: datetime,
     ) -> NormalizedCommodity | None:
-        try:
+        async def _request() -> NormalizedCommodity:
             response = await client.get(
                 f"{YAHOO_CHART_BASE_URL.rstrip('/')}/{yahoo_symbol}",
                 params={"interval": "1d", "range": "5d"},
@@ -208,6 +233,13 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 change_24h=change_24h,
                 unit=unit,
                 refreshed_at=refreshed_at,
+            )
+
+        try:
+            return await with_transient_retries(
+                _request,
+                retry_attempts=self._retry_attempts,
+                label=f"Yahoo:{yahoo_symbol}",
             )
         except Exception as error:
             logger.warning("Yahoo fallback failed for %s (%s): %s", symbol, yahoo_symbol, error)

@@ -8,6 +8,10 @@ import httpx
 
 from app.config import Settings
 from app.modules.market_data.dto import NormalizedCrypto
+from app.modules.market_data.http_config import (
+    DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    with_transient_retries,
+)
 from app.modules.market_data.providers.base import CryptoProviderAdapter
 from app.modules.market_data.providers.binance_adapter import BinanceCryptoAdapter
 
@@ -18,7 +22,7 @@ COINGECKO_FALLBACK_URL = "https://api.coingecko.com/api/v3/coins/markets"
 class CryptoCoingeckoAdapter(CryptoProviderAdapter):
     """CoinGecko markets adapter (backup). Normalizes to NormalizedCrypto."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0, per_page: int = 50):
+    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS, per_page: int = 50):
         self.base_url = base_url or COINGECKO_FALLBACK_URL
         self.timeout = timeout
         self.per_page = per_page
@@ -74,15 +78,24 @@ class CryptoCoingeckoAdapter(CryptoProviderAdapter):
 class CryptoCompositeAdapter(CryptoProviderAdapter):
     """Binance primary, CoinGecko fallback. Returns up to 50 crypto assets."""
 
-    def __init__(self, timeout: float = 15.0):
+    def __init__(
+        self,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+        retry_attempts: int = 0,
+    ):
         self.timeout = timeout
+        self._retry_attempts = retry_attempts
         self._binance = BinanceCryptoAdapter(timeout=timeout)
         self._coingecko = CryptoCoingeckoAdapter(timeout=timeout, per_page=50)
 
     async def fetch(self) -> list[NormalizedCrypto]:
         """Fetch crypto: Binance primary, CoinGecko backup."""
         try:
-            items = await self._binance.fetch()
+            items = await with_transient_retries(
+                self._binance.fetch,
+                retry_attempts=self._retry_attempts,
+                label="BinanceCryptoAdapter",
+            )
             if items and len(items) >= 10:
                 logger.info("Crypto from Binance: %d assets", len(items))
                 return items
@@ -90,7 +103,11 @@ class CryptoCompositeAdapter(CryptoProviderAdapter):
             logger.warning("Binance crypto failed: %s, falling back to CoinGecko", error)
 
         try:
-            items = await self._coingecko.fetch()
+            items = await with_transient_retries(
+                self._coingecko.fetch,
+                retry_attempts=self._retry_attempts,
+                label="CryptoCoingeckoAdapter",
+            )
             logger.info("Crypto from CoinGecko (backup): %d assets", len(items))
             return items
         except Exception as error:
@@ -101,21 +118,39 @@ class CryptoCompositeAdapter(CryptoProviderAdapter):
 class CryptoUnifiedAdapter(CryptoProviderAdapter):
     """Unified crypto adapter: configured provider + Binance + CoinGecko chain."""
 
-    def __init__(self, timeout: float = 15.0):
+    def __init__(
+        self,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+        retry_attempts: int = 0,
+    ):
         self.timeout = timeout
+        self._retry_attempts = retry_attempts
         self._configured_url = (Settings().market_data_crypto_url or "").strip()
 
     async def fetch(self) -> list[NormalizedCrypto]:
         adapters: list[CryptoProviderAdapter] = []
         if self._configured_url:
-            adapters.append(CryptoCoingeckoAdapter(base_url=self._configured_url, timeout=self.timeout, per_page=50))
-        adapters.append(CryptoCompositeAdapter(timeout=self.timeout))
+            adapters.append(
+                CryptoCoingeckoAdapter(
+                    base_url=self._configured_url,
+                    timeout=self.timeout,
+                    per_page=50,
+                )
+            )
+        adapters.append(
+            CryptoCompositeAdapter(timeout=self.timeout, retry_attempts=self._retry_attempts)
+        )
 
         for adapter in adapters:
+            name = adapter.__class__.__name__
             try:
-                items = await adapter.fetch()
+                items = await with_transient_retries(
+                    adapter.fetch,
+                    retry_attempts=self._retry_attempts,
+                    label=name,
+                )
                 if items:
                     return items
             except Exception as error:
-                logger.warning("Crypto provider %s failed: %s", adapter.__class__.__name__, error)
+                logger.warning("Crypto provider %s failed: %s", name, error)
         return []

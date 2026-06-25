@@ -11,6 +11,7 @@ from decimal import Decimal
 import httpx
 
 from app.modules.market_data.dto import NormalizedCrypto
+from app.modules.market_data.http_config import DEFAULT_MARKET_DATA_TIMEOUT_SECONDS
 from app.modules.market_data.providers.base import CryptoProviderAdapter
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ TOP_N = 50
 class BinanceCryptoAdapter(CryptoProviderAdapter):
     """Binance markets adapter. Returns top 50 USDT pairs by 24h volume."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
         self.base_url = base_url or BINANCE_API_URL
         self.timeout = timeout
 

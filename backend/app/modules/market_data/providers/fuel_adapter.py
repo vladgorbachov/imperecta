@@ -8,6 +8,7 @@ import httpx
 
 from app.config import Settings
 from app.modules.market_data.dto import NormalizedCommodity
+from app.modules.market_data.http_config import DEFAULT_MARKET_DATA_TIMEOUT_SECONDS
 from app.modules.market_data.providers.base import CommoditiesProviderAdapter
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ class FuelHttpAdapter(CommoditiesProviderAdapter):
     Set MARKET_DATA_FUEL_URL to enable. Returns empty list if not configured.
     """
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
         self.base_url = (base_url or Settings().market_data_fuel_url).strip()
         self.timeout = timeout
 

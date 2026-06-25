@@ -8,6 +8,10 @@ import httpx
 
 from app.config import Settings
 from app.modules.market_data.dto import NormalizedForex
+from app.modules.market_data.http_config import (
+    DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    with_transient_retries,
+)
 from app.modules.market_data.providers.base import ForexProviderAdapter
 
 logger = logging.getLogger(__name__)
@@ -18,7 +22,7 @@ FRANKFURTER_FALLBACK_URL = "https://api.frankfurter.app/latest?from=EUR"
 class ForexOpenErAdapter(ForexProviderAdapter):
     """open.er-api adapter. Normalizes to NormalizedForex."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
         self.base_url = base_url or OPEN_ER_FALLBACK_URL
         self.timeout = timeout
 
@@ -68,7 +72,7 @@ class ForexOpenErAdapter(ForexProviderAdapter):
 class ForexFrankfurterAdapter(ForexProviderAdapter):
     """Frankfurter API adapter. Normalizes to NormalizedForex."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = 15.0):
+    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
         self.base_url = base_url or FRANKFURTER_FALLBACK_URL
         self.timeout = timeout
 
@@ -108,9 +112,14 @@ class ForexFrankfurterAdapter(ForexProviderAdapter):
 class ForexUnifiedAdapter(ForexProviderAdapter):
     """Unified forex adapter: configured source -> open.er fallback -> Frankfurter fallback."""
 
-    def __init__(self, timeout: float = 15.0):
+    def __init__(
+        self,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+        retry_attempts: int = 0,
+    ):
         configured = (Settings().market_data_forex_url or "").strip()
         self.timeout = timeout
+        self._retry_attempts = retry_attempts
         self._configured = configured
 
     async def fetch(self) -> list[NormalizedForex]:
@@ -131,10 +140,15 @@ class ForexUnifiedAdapter(ForexProviderAdapter):
         )
 
         for adapter in adapters:
+            name = adapter.__class__.__name__
             try:
-                data = await adapter.fetch()
+                data = await with_transient_retries(
+                    adapter.fetch,
+                    retry_attempts=self._retry_attempts,
+                    label=name,
+                )
                 if data:
                     return data
             except Exception as error:
-                logger.warning("Forex provider %s failed: %s", adapter.__class__.__name__, error)
+                logger.warning("Forex provider %s failed: %s", name, error)
         return []

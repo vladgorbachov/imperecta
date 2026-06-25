@@ -11,6 +11,8 @@ with existing call-sites; the flag is now always `False`.
 
 import logging
 
+from app.modules.market_data.http_config import load_market_data_http_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,8 +24,12 @@ async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
     """
     from app.modules.market_data.providers.forex_adapter import ForexUnifiedAdapter
 
+    http_config = load_market_data_http_config()
     try:
-        adapter = ForexUnifiedAdapter(timeout=15.0)
+        adapter = ForexUnifiedAdapter(
+            timeout=http_config.timeout_seconds,
+            retry_attempts=http_config.retry_attempts,
+        )
         items = await adapter.fetch()
     except Exception as error:
         logger.error("Forex unified provider error: %s", error)
@@ -54,7 +60,11 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
     """
     from app.modules.market_data.providers.crypto_adapter import CryptoUnifiedAdapter
 
-    adapter = CryptoUnifiedAdapter(timeout=15.0)
+    http_config = load_market_data_http_config()
+    adapter = CryptoUnifiedAdapter(
+        timeout=http_config.timeout_seconds,
+        retry_attempts=http_config.retry_attempts,
+    )
     items = await adapter.fetch()
     result = [
         {
@@ -80,8 +90,12 @@ async def fetch_commodities() -> tuple[list[dict], str | None, bool]:
     """
     from app.modules.market_data.providers.commodities_adapter import CommoditiesUnifiedAdapter
 
+    http_config = load_market_data_http_config()
     try:
-        adapter = CommoditiesUnifiedAdapter(timeout=15.0)
+        adapter = CommoditiesUnifiedAdapter(
+            timeout=http_config.timeout_seconds,
+            retry_attempts=http_config.retry_attempts,
+        )
         items = await adapter.fetch()
     except Exception as error:
         logger.warning("Unified commodities fetch failed: %s", error)

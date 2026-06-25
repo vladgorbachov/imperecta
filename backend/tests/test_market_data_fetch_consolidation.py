@@ -21,9 +21,38 @@ from app.modules.market_data.dto import (
     NormalizedCrypto,
     NormalizedForex,
 )
+from app.modules.market_data.http_config import MarketDataHttpConfig
 from app.modules.market_data.ingestion import IngestionService
 
 SERVICE_PATH = Path(market_service.__file__)
+
+
+@pytest.fixture(autouse=True)
+def _market_data_http_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid Settings() in fetching helpers during unit tests."""
+    settings_stub = SimpleNamespace(
+        market_data_forex_url="",
+        market_data_crypto_url="",
+        market_data_commodities_url=None,
+        goldapi_key="",
+        alpha_vantage_key="",
+        market_data_timeout_seconds=15,
+        market_data_retry_attempts=0,
+    )
+
+    def _settings() -> SimpleNamespace:
+        return settings_stub
+
+    monkeypatch.setattr(
+        "app.modules.market_data.fetching.load_market_data_http_config",
+        lambda: MarketDataHttpConfig(timeout_seconds=15.0, retry_attempts=0),
+    )
+    for target in (
+        "app.modules.market_data.providers.forex_adapter.Settings",
+        "app.modules.market_data.providers.crypto_adapter.Settings",
+        "app.modules.market_data.providers.commodities_adapter.Settings",
+    ):
+        monkeypatch.setattr(target, _settings)
 
 
 def _ts() -> datetime:
