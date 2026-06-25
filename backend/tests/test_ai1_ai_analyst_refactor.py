@@ -189,12 +189,12 @@ def test_module_artifacts_clean() -> None:
 # 9. chat() persistence (A-keep) ----------------------------------------------
 
 def test_chat_persists_session_message_and_apilog() -> None:
-    """A-keep semantics: chat() writes AIChatSession + AIChatMessage + ApiLog."""
+    """A-keep semantics: chat() writes AIChatSession + AIChatMessage + api_logs via LOGS door."""
     src = (AI_ANALYST_DIR / "service.py").read_text(encoding="utf-8")
     chat_section = src.split("async def chat(", 1)[1]
     assert "AIChatSession(" in chat_section, "chat() must persist AIChatSession"
     assert "AIChatMessage(" in chat_section, "chat() must persist AIChatMessage"
-    assert "ApiLog(" in chat_section, "chat() must log Anthropic call via ApiLog"
+    assert "write_logs_async" in chat_section, "chat() must log Anthropic call via LOGS door"
 
 
 def test_build_user_context_call_removed_from_chat() -> None:

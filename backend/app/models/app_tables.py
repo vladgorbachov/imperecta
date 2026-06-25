@@ -449,9 +449,10 @@ class ScrapeLog(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ("
-            "'success','error','timeout','blocked','captcha',"
+            "'success','no_change','error','timeout','blocked','captcha',"
             "'not_found','price_not_found','parse_error','currency_rejected',"
-            "'missing_critical_data','technical_error'"
+            "'not_a_product','missing_critical_data','technical_error',"
+            "'fetch_failed','parse_failed','quota_exceeded','persist_failed'"
             ")",
             name="ck_scrape_logs_status",
         ),

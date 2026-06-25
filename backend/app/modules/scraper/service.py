@@ -24,7 +24,6 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.database import invalidate_sync_session, is_read_only_sql_error
-from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.ingestion.service import (
@@ -35,6 +34,7 @@ from app.modules.ingestion.service import (
     _today_date_id,
 )
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
+from app.modules.persist.logs_write import build_scrape_log_fields, persist_logs_batch
 from app.modules.scraper.fetch_backends import backend_id_persisted
 from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
@@ -255,6 +255,7 @@ class GlobalScrapeService:
         self.db = db
         self.pool = scraper_pool
         self.scrape_job_id = scrape_job_id
+        self._pending_scrape_logs: list[dict] = []
 
     # Back-compat thin delegate; canonical ownership is IngestionService.
     @staticmethod
@@ -297,7 +298,7 @@ class GlobalScrapeService:
             )
         return None
 
-    def _build_scrape_log_entry(
+    def _queue_scrape_log(
         self,
         *,
         listing: FactListing,
@@ -307,20 +308,65 @@ class GlobalScrapeService:
         scraper_type: str | None,
         error_message: str | None,
         error_category: str | None,
-    ) -> ScrapeLog:
-        """Create a fresh ScrapeLog object for safe retry attempts."""
-        return ScrapeLog(
-            scrape_job_id=self.scrape_job_id,
-            listing_id=listing.id,
-            marketplace_id=listing.marketplace_id,
-            status=log_status,
-            url=listing.external_url,
-            price_found=price_found,
-            duration_ms=duration_ms,
-            scraper_type=scraper_type,
-            error_message=error_message,
-            error_category=error_category,
+    ) -> None:
+        """Append one scrape_logs field dict to the pending batch buffer."""
+        self._pending_scrape_logs.append(
+            build_scrape_log_fields(
+                scrape_job_id=self.scrape_job_id,
+                listing_id=listing.id,
+                marketplace_id=listing.marketplace_id,
+                status=log_status,
+                url=listing.external_url,
+                price_found=price_found,
+                duration_ms=duration_ms,
+                scraper_type=scraper_type,
+                error_message=error_message,
+                error_category=error_category,
+            ),
         )
+
+    def flush_scrape_logs(self) -> bool:
+        """Flush pending scrape_logs rows via LOGS door (one batch, separate commit)."""
+        if not self._pending_scrape_logs:
+            return True
+
+        rows = self._pending_scrape_logs
+        self._pending_scrape_logs = []
+
+        def _try_flush(batch_rows: list[dict]) -> bool:
+            result = persist_logs_batch(
+                self.db,
+                table="scrape_logs",
+                rows=batch_rows,
+                reject_source="scraper_pool",
+                commit=True,
+            )
+            return result.ok
+
+        try:
+            return _try_flush(rows)
+        except Exception as exc:
+            self.db.rollback()
+
+            if _needs_scrape_logs_constraint_repair(exc) and _repair_scrape_logs_status_constraint(self.db):
+                try:
+                    return _try_flush(rows)
+                except Exception:
+                    self.db.rollback()
+
+            if _needs_scrape_logs_status_column_repair(exc) and _repair_scrape_logs_status_column(self.db):
+                try:
+                    return _try_flush(rows)
+                except Exception:
+                    self.db.rollback()
+
+            logger.error(
+                "scrape log batch persist failed count=%s err=%s",
+                len(rows),
+                exc,
+                exc_info=True,
+            )
+            return False
 
     def _persist_scrape_log(
         self,
@@ -332,55 +378,21 @@ class GlobalScrapeService:
         scraper_type: str | None,
         error_message: str | None,
         error_category: str | None,
+        flush: bool = False,
     ) -> bool:
-        """Persist scrape_logs row without risking rollback of listing/price transaction."""
-
-        def _try_commit(status: str) -> bool:
-            entry = self._build_scrape_log_entry(
-                listing=listing,
-                log_status=status,
-                price_found=price_found,
-                duration_ms=duration_ms,
-                scraper_type=scraper_type,
-                error_message=error_message,
-                error_category=error_category,
-            )
-            self.db.add(entry)
-            self.db.flush()
-            self.db.commit()
-            return True
-
-        try:
-            return _try_commit(log_status)
-        except Exception as exc:
-            self.db.rollback()
-
-            if _needs_scrape_logs_constraint_repair(exc) and _repair_scrape_logs_status_constraint(self.db):
-                try:
-                    return _try_commit(log_status)
-                except Exception:
-                    self.db.rollback()
-
-            if _needs_scrape_logs_status_column_repair(exc) and _repair_scrape_logs_status_column(self.db):
-                try:
-                    return _try_commit(log_status)
-                except Exception:
-                    self.db.rollback()
-
-            # Legacy emergency fallback: keep business data committed even if status taxonomy drifts.
-            if log_status != "error":
-                try:
-                    return _try_commit("error")
-                except Exception:
-                    self.db.rollback()
-
-            logger.error(
-                "scrape log persist failed listing_id=%s err=%s",
-                listing.id,
-                exc,
-                exc_info=True,
-            )
-            return False
+        """Queue scrape_logs row; optionally flush via LOGS door (separate commit)."""
+        self._queue_scrape_log(
+            listing=listing,
+            log_status=log_status,
+            price_found=price_found,
+            duration_ms=duration_ms,
+            scraper_type=scraper_type,
+            error_message=error_message,
+            error_category=error_category,
+        )
+        if flush:
+            return self.flush_scrape_logs()
+        return True
 
     def _listing_scrape_context(
         self,
@@ -505,6 +517,7 @@ class GlobalScrapeService:
         result: PoolScrapeResult,
         *,
         now: datetime,
+        flush_log: bool = False,
     ) -> PoolScrapeResult:
         """Sequential persist path for one PoolScrapeResult (D4 semantics preserved)."""
         nonproduct_role = self._confirmed_nonproduct_page_role(result)
@@ -517,6 +530,7 @@ class GlobalScrapeService:
                 scraper_type=result.fetch_backend,
                 error_message=f"page_role:{nonproduct_role}",
                 error_category="parse",
+                flush=True,
             )
             self._prune_confirmed_nonproduct(listing, page_role=nonproduct_role)
             result.log_status = "not_a_product"
@@ -627,6 +641,7 @@ class GlobalScrapeService:
             scraper_type=result.fetch_backend,
             error_message=error_message,
             error_category=error_category,
+            flush=flush_log,
         )
         if not log_saved:
             slog.error(
@@ -694,6 +709,7 @@ class GlobalScrapeService:
             listing,
             result,
             now=now,
+            flush_log=True,
         )
 
     def _determine_log_status(

@@ -14,11 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import Settings
 from app.database import sync_session_factory
-from app.models.app_tables import ScrapeJob, ScrapeLog
+from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
+from app.modules.persist.logs_write import build_scrape_log_fields, write_logs_sync
 from app.modules.persist.meta_write import (
     build_dim_marketplace_fields,
     build_scrape_job_fields,
@@ -136,13 +137,12 @@ def _persist_technical_error_log(
 ) -> None:
     """Write scrape_logs row for unhandled task failure (separate sync session)."""
     db = sync_session_factory()
-    entry: ScrapeLog | None = None
     try:
         listing = db.get(FactListing, listing_id)
         if not listing:
             slog.warning("technical_error_skip_no_listing", listing_id=str(listing_id))
             return
-        entry = ScrapeLog(
+        row = build_scrape_log_fields(
             scrape_job_id=scrape_job_id,
             listing_id=listing.id,
             marketplace_id=listing.marketplace_id,
@@ -152,31 +152,21 @@ def _persist_technical_error_log(
             scraper_type="celery",
             error_category="technical",
         )
-        db.add(entry)
-        db.commit()
-        slog.info("technical_error_logged", listing_id=str(listing_id))
-    except Exception as exc:
-        needs_repair = entry is not None and _needs_scrape_logs_constraint_repair(exc)
-        if needs_repair:
-            db.rollback()
-        if needs_repair and _repair_scrape_logs_status_constraint(db):
-            try:
-                db.add(entry)
-                db.commit()
-                slog.info("technical_error_logged", listing_id=str(listing_id))
-                return
-            except Exception:
-                slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
+        result = write_logs_sync(
+            table="scrape_logs",
+            rows=[row],
+            reject_source="scraper_technical_error",
+        )
+        if result.ok:
+            slog.info("technical_error_logged", listing_id=str(listing_id))
         else:
-            slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            slog.error("technical_error_persist_failed", listing_id=str(listing_id))
+    except Exception:
+        slog.exception("technical_error_persist_failed", listing_id=str(listing_id))
+        try:
+            db.rollback()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -655,6 +645,10 @@ def _run_scrape_all_pool_impl(
                             index=index,
                         )
                         failed += 1
+                try:
+                    svc.flush_scrape_logs()
+                except Exception:
+                    slog.exception("scrape_logs_batch_flush_failed")
                 if deadline_exhausted:
                     break
             if deadline_exhausted:

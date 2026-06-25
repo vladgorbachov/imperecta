@@ -10,9 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog
+from app.models.app_tables import AIChatMessage, AIChatSession
 from app.models.core import User
 from app.modules.ai_analyst.claude_client import resolve_claude_model
+from app.modules.persist.logs_write import build_api_log_fields, write_logs_async
 
 settings = Settings()
 
@@ -111,15 +112,20 @@ async def chat(
     if response.usage is not None:
         tokens_used = (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0)
 
-    db.add(
-        ApiLog(
-            service="claude",
-            endpoint="/v1/messages",
-            status="success",
-            status_code=200,
-            duration_ms=duration_ms,
-            tokens_used=tokens_used,
-        )
+    await write_logs_async(
+        table="api_logs",
+        rows=[
+            build_api_log_fields(
+                service="claude",
+                endpoint="/v1/messages",
+                method="POST",
+                status="success",
+                status_code=200,
+                duration_ms=duration_ms,
+                tokens_used=tokens_used,
+            ),
+        ],
+        reject_source="ai_analyst",
     )
     db.add(AIChatMessage(session_id=session.id, role="assistant", content=assistant_content))
     await db.flush()

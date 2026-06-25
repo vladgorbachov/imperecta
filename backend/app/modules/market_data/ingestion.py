@@ -11,9 +11,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models.app_tables import ApiLog
 from app.models.dimensions import DimDate
 from app.modules.data_firewall.firewall import evaluate_market
+from app.modules.persist.logs_write import build_api_log_fields, persist_logs_batch
 from app.modules.persist.writer import PersistContext, write_sync
 
 logger = logging.getLogger(__name__)
@@ -60,14 +60,19 @@ def _log_ingestion(
     status: str,
     error_message: str | None = None,
 ) -> None:
-    db.add(
-        ApiLog(
-            service="market_data",
-            endpoint=endpoint,
-            method="POST",
-            status=status,
-            error_message=error_message,
-        )
+    row = build_api_log_fields(
+        service="market_data",
+        endpoint=endpoint,
+        method="POST",
+        status=status,
+        error_message=error_message,
+    )
+    persist_logs_batch(
+        db,
+        table="api_logs",
+        rows=[row],
+        reject_source="market_data",
+        commit=False,
     )
 
 

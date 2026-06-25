@@ -25,7 +25,7 @@ from app.modules.data_firewall.rules import (
     GateOutcome,
     evaluate_ecommerce_rules,
 )
-from app.modules.data_firewall.signing import SignedRecord, sign
+from app.modules.data_firewall.signing import SignedBatch, SignedRecord, sign, sign_batch
 
 slog = structlog.get_logger(__name__)
 
@@ -66,6 +66,20 @@ class FirewallOutcome:
     def skip_reason(self) -> str | None:
         """Alias for legacy gate callers."""
         return self.reject_reason
+
+
+@dataclass(frozen=True)
+class LogsOutcome:
+    """LOGS door decision for a batch of append-only audit rows."""
+
+    inserted_count: int
+    rejected_count: int
+    signed_batch: SignedBatch | None = None
+
+    @property
+    def passed(self) -> bool:
+        """True when at least one row was signed for insert."""
+        return self.signed_batch is not None and self.inserted_count > 0
 
 
 def _failed_rules_from_gate(outcome: GateOutcome) -> list[str]:
@@ -199,6 +213,94 @@ def _extract_snapshot(record: _RecordLike) -> dict[str, Any]:
         "currency_raw": getattr(record, "currency_raw", None),
         "page_role": getattr(record, "page_role", None),
     }
+
+
+def evaluate_logs(
+    rows: list[dict[str, Any]],
+    *,
+    table: str,
+    db: Any | None = None,
+    reject_source: str = "logs",
+) -> LogsOutcome:
+    """LOGS rail: LIGHT structural validation per row; sign valid rows as one batch."""
+    if not rows:
+        return LogsOutcome(inserted_count=0, rejected_count=0, signed_batch=None)
+
+    contract = FACT_TABLE_CONTRACTS.get(table)
+    if contract is None:
+        if db is not None:
+            for row in rows:
+                write_reject_data_isolated(
+                    source=reject_source,
+                    table_target=table,
+                    reject_reason="unknown_table",
+                    failed_rules=["unknown_table"],
+                    raw_payload=row,
+                    rejected_by="data_firewall",
+                    signature_present=False,
+                    operation="insert",
+                )
+        return LogsOutcome(inserted_count=0, rejected_count=len(rows), signed_batch=None)
+
+    valid_rows: list[dict[str, Any]] = []
+    rejected_count = 0
+
+    for row in rows:
+        passed, failed_rules, reject_reason = _validate_against_contract(row, contract)
+        if passed:
+            valid_rows.append(row)
+            continue
+        rejected_count += 1
+        if db is not None:
+            write_reject_data_isolated(
+                source=reject_source,
+                table_target=table,
+                reject_reason=reject_reason or REJECT_CONTRACT_VIOLATION,
+                failed_rules=failed_rules,
+                raw_payload=row,
+                rejected_by="data_firewall",
+                signature_present=False,
+                operation="insert",
+            )
+
+    if not valid_rows:
+        return LogsOutcome(inserted_count=0, rejected_count=rejected_count, signed_batch=None)
+
+    locator = extract_locator(table, valid_rows[0])
+    signature = sign_batch(
+        table=table,
+        operation="insert",
+        rows=valid_rows,
+        locator=locator,
+    )
+    if signature is None:
+        rejected_count += len(valid_rows)
+        if db is not None:
+            for row in valid_rows:
+                write_reject_data_isolated(
+                    source=reject_source,
+                    table_target=table,
+                    reject_reason=REJECT_SIGNING_UNAVAILABLE,
+                    failed_rules=["signing_secret_missing"],
+                    raw_payload=row,
+                    rejected_by="data_firewall",
+                    signature_present=False,
+                    operation="insert",
+                )
+        return LogsOutcome(inserted_count=0, rejected_count=rejected_count, signed_batch=None)
+
+    signed_batch = SignedBatch(
+        table=table,
+        operation="insert",
+        locator=locator,
+        rows=valid_rows,
+        signature=signature,
+    )
+    return LogsOutcome(
+        inserted_count=len(valid_rows),
+        rejected_count=rejected_count,
+        signed_batch=signed_batch,
+    )
 
 
 def evaluate_ecommerce(
@@ -362,11 +464,13 @@ def evaluate_market(
 __all__ = [
     "FORCED_NOT_A_PRODUCT",
     "FirewallOutcome",
+    "LogsOutcome",
     "REJECT_CONTRACT_VIOLATION",
     "REJECT_FAKE_DEFAULT",
     "REJECT_NOT_A_PRODUCT_PAGE",
     "REJECT_SIGNING_UNAVAILABLE",
     "evaluate_ecommerce",
+    "evaluate_logs",
     "evaluate_market",
     "SKIP_CURRENCY_COUNTRY_MISMATCH",
     "SKIP_CURRENCY_RAW_TOO_LONG",

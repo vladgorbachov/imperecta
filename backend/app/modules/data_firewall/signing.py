@@ -136,6 +136,69 @@ def verify(
     return hmac.compare_digest(expected, signature)
 
 
+def canonical_serialize_signed_batch_payload(
+    *,
+    table: str,
+    operation: str,
+    rows: list[dict[str, Any]],
+    locator: dict[str, Any],
+) -> bytes:
+    """Deterministic serialization for table + operation + locator + row batch."""
+    canonical = {
+        "__table__": table,
+        "__operation__": operation,
+        "__locator__": _canonical_field_dict(locator),
+        "rows": [_canonical_field_dict(row) for row in rows],
+    }
+    return json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def sign_batch(
+    *,
+    table: str,
+    operation: str,
+    rows: list[dict[str, Any]],
+    locator: dict[str, Any] | None = None,
+) -> str | None:
+    """HMAC-SHA256 hex digest over a bound batch of rows."""
+    secret = signing_secret()
+    if secret is None:
+        return None
+    digest = hmac.new(
+        secret.encode("utf-8"),
+        canonical_serialize_signed_batch_payload(
+            table=table,
+            operation=operation,
+            rows=rows,
+            locator=locator or {},
+        ),
+        digestmod="sha256",
+    )
+    return digest.hexdigest()
+
+
+def verify_batch(
+    *,
+    table: str,
+    operation: str,
+    rows: list[dict[str, Any]],
+    locator: dict[str, Any] | None = None,
+    signature: str | None,
+) -> bool:
+    """Constant-time compare of recomputed batch signature."""
+    if not signature:
+        return False
+    expected = sign_batch(
+        table=table,
+        operation=operation,
+        rows=rows,
+        locator=locator or {},
+    )
+    if expected is None:
+        return False
+    return hmac.compare_digest(expected, signature)
+
+
 @dataclass(frozen=True)
 class SignedRecord:
     """Firewall-approved payload cryptographically bound to table, operation, and locator."""
@@ -144,4 +207,15 @@ class SignedRecord:
     operation: str
     locator: dict[str, Any]
     fields: dict[str, Any]
+    signature: str
+
+
+@dataclass(frozen=True)
+class SignedBatch:
+    """Firewall-approved batch payload bound to table, operation, and empty locator."""
+
+    table: str
+    operation: str
+    locator: dict[str, Any]
+    rows: list[dict[str, Any]]
     signature: str

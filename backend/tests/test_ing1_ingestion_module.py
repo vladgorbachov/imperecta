@@ -362,14 +362,11 @@ def test_persist_extracted_commit_failure_returns_persist_failed(
 
 
 def test_scrape_log_persist_is_separate_commit() -> None:
-    """The parser commits the scrape_logs row in its OWN call, independent of
-    ingestion. We confirm by reading the source of _persist_scrape_log: it
-    must call db.commit() inside, not via IngestionService."""
+    """The parser commits scrape_logs via LOGS door flush (separate commit)."""
     from app.modules.scraper import service as parser_svc
 
-    src = inspect.getsource(parser_svc.GlobalScrapeService._persist_scrape_log)
-    assert "self.db.commit()" in src
-    # ScrapeLog persistence must not flow through IngestionService.
+    src = inspect.getsource(parser_svc.GlobalScrapeService.flush_scrape_logs)
+    assert "commit=True" in src
     assert "IngestionService" not in src
 
 

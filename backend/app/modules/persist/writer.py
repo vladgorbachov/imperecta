@@ -13,7 +13,7 @@ from sqlalchemy import and_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.app_tables import ScrapeJob
+from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import (
     FactCommodityPrice,
@@ -24,7 +24,7 @@ from app.models.facts import (
 )
 from app.modules.data_firewall.contracts import TABLE_LOCATORS, extract_locator
 from app.modules.data_firewall.reject_store import write_reject_data
-from app.modules.data_firewall.signing import SignedRecord, verify
+from app.modules.data_firewall.signing import SignedBatch, SignedRecord, verify, verify_batch
 from app.observability.sentry_init import capture_exception_if_initialized
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
     "fact_currency_rate": frozenset({"insert", "delete"}),
     "fact_crypto_price": frozenset({"insert", "delete"}),
     "fact_commodity_price": frozenset({"insert", "delete"}),
+    "scrape_logs": frozenset({"insert"}),
+    "api_logs": frozenset({"insert"}),
 }
 
 _TABLE_MODELS: dict[str, type] = {
@@ -50,6 +52,8 @@ _TABLE_MODELS: dict[str, type] = {
     "fact_currency_rate": FactCurrencyRate,
     "fact_crypto_price": FactCryptoPrice,
     "fact_commodity_price": FactCommodityPrice,
+    "scrape_logs": ScrapeLog,
+    "api_logs": ApiLog,
 }
 
 
@@ -74,6 +78,26 @@ def _verify_signed_record(signed: SignedRecord) -> str | None:
         return "invalid_signature"
     if not _locator_matches_fields(signed.table, signed.fields, signed.locator):
         return "locator_mismatch"
+    supported = SUPPORTED_WRITE_OPERATIONS.get(signed.table)
+    if supported is None or signed.operation not in supported:
+        return "unsupported_operation"
+    return None
+
+
+def _verify_signed_batch(signed: SignedBatch) -> str | None:
+    """Return reject_reason when batch verification fails; None when valid."""
+    if not verify_batch(
+        table=signed.table,
+        operation=signed.operation,
+        rows=signed.rows,
+        locator=signed.locator,
+        signature=signed.signature,
+    ):
+        return "invalid_signature"
+    if signed.locator:
+        for row in signed.rows:
+            if not _locator_matches_fields(signed.table, row, signed.locator):
+                return "locator_mismatch"
     supported = SUPPORTED_WRITE_OPERATIONS.get(signed.table)
     if supported is None or signed.operation not in supported:
         return "unsupported_operation"
@@ -133,6 +157,8 @@ def _orm_fields_for_table(table: str, fields: dict[str, Any]) -> dict[str, Any]:
         out["parent_job_id"] = _parse_uuid(out["parent_job_id"])
     if "triggered_by" in out:
         out["triggered_by"] = _parse_uuid(out["triggered_by"])
+    if "user_id" in out:
+        out["user_id"] = _parse_uuid(out["user_id"])
     if "id" in out:
         out["id"] = _parse_uuid(out["id"])
     if "scraped_at" in out:
@@ -380,6 +406,56 @@ def write_sync(
         return PersistResult(ok=True, rows_affected=1)
 
     raise ValueError(f"unsupported sync persist table: {table}")
+
+
+def write_batch_sync(
+    db: Session,
+    signed: SignedBatch | None,
+    *,
+    ctx: PersistContext,
+) -> PersistResult:
+    """Verify batch signature and insert all rows verbatim (sync Session)."""
+    if signed is None:
+        return _reject_persist(
+            db,
+            ctx=ctx,
+            table="unknown",
+            fields={},
+            reject_reason="missing_signed_batch",
+            signature_present=False,
+            operation="insert",
+        )
+
+    reject_reason = _verify_signed_batch(signed)
+    if reject_reason is not None:
+        return _reject_persist(
+            db,
+            ctx=ctx,
+            table=signed.table,
+            fields={"rows": signed.rows},
+            reject_reason=reject_reason,
+            signature_present=bool(signed.signature),
+            operation=signed.operation,
+        )
+
+    if signed.operation != "insert":
+        return _reject_persist(
+            db,
+            ctx=ctx,
+            table=signed.table,
+            fields={"rows": signed.rows},
+            reject_reason="unsupported_operation",
+            signature_present=bool(signed.signature),
+            operation=signed.operation,
+        )
+
+    model = _model_for_table(signed.table)
+    instances = [
+        model(**_orm_fields_for_table(signed.table, row))
+        for row in signed.rows
+    ]
+    db.add_all(instances)
+    return PersistResult(ok=True, rows_affected=len(instances))
 
 
 async def write_async(
