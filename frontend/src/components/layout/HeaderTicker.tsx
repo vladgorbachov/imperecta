@@ -2,12 +2,10 @@
  * Read-only marquee ticker for the global Header.
  *
  * Reuses GET /api/markets/ticker.
- * Pixel-exact loop: measures one copy width and animates by integer px (not -50%).
+ * Renders nothing when there are no items (no skeleton, no placeholder).
  * Fully transparent: no card chrome, no background, no border, no radius.
  */
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
@@ -16,24 +14,16 @@ import { cn } from "@/lib/utils";
 
 const STALE_2H = 2 * 60 * 60 * 1000;
 
-type TickerItemData = {
-  symbol: string;
-  name: string | null;
-  price: number;
-  change_24h: number | null;
-  currency: string | null;
-};
-
-function tickerItemsSignature(items: TickerItemData[]): string {
-  return items
-    .map(
-      (item) =>
-        `${item.symbol}:${item.price}:${item.change_24h ?? ""}:${item.name ?? ""}:${item.currency ?? ""}`,
-    )
-    .join("|");
-}
-
-export function formatTickerValue(item: TickerItemData, locale: string): string {
+export function formatTickerValue(
+  item: {
+    symbol: string;
+    name: string | null;
+    price: number;
+    change_24h: number | null;
+    currency: string | null;
+  },
+  locale: string,
+): string {
   const sym = item.symbol ?? "";
   const isForex = sym.includes("/");
   const isFuel = /gasoline|diesel|lpg|petrol|fuel/i.test(sym);
@@ -63,7 +53,19 @@ export function formatTickerValue(item: TickerItemData, locale: string): string 
   }
 }
 
-export function TickerItem({ item, locale }: { item: TickerItemData; locale: string }) {
+export function TickerItem({
+  item,
+  locale,
+}: {
+  item: {
+    symbol: string;
+    name: string | null;
+    price: number;
+    change_24h: number | null;
+    currency: string | null;
+  };
+  locale: string;
+}) {
   const ch = item.change_24h ?? 0;
   const isZero = ch === 0;
   const isPositive = ch > 0;
@@ -110,79 +112,21 @@ export function HeaderTicker({ className }: HeaderTickerProps) {
   });
 
   const items = tickerData?.items ?? [];
-  const itemsSignature = useMemo(() => tickerItemsSignature(items), [items]);
-  const doubled = useMemo(() => [...items, ...items], [itemsSignature]);
-
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [copyWidthPx, setCopyWidthPx] = useState(0);
-
-  const measureCopyWidth = useCallback(() => {
-    const track = trackRef.current;
-    const copyCount = items.length;
-    if (!track || copyCount === 0) {
-      setCopyWidthPx(0);
-      return;
-    }
-
-    const children = track.children;
-    if (children.length < copyCount + 1) {
-      setCopyWidthPx(0);
-      return;
-    }
-
-    const first = children[0] as HTMLElement;
-    const secondCopyStart = children[copyCount] as HTMLElement;
-    setCopyWidthPx(Math.round(secondCopyStart.offsetLeft - first.offsetLeft));
-  }, [items.length]);
-
-  useLayoutEffect(() => {
-    measureCopyWidth();
-    const track = trackRef.current;
-    if (!track) return undefined;
-
-    const observer = new ResizeObserver(() => {
-      measureCopyWidth();
-    });
-    observer.observe(track);
-    return () => observer.disconnect();
-  }, [measureCopyWidth, itemsSignature]);
-
-  const hasItems = doubled.length > 0;
-  const trackStyle = useMemo((): CSSProperties & { "--marquee-distance"?: string } => {
-    if (!hasItems || copyWidthPx <= 0) {
-      return { "--marquee-distance": "0px", animationPlayState: "paused" };
-    }
-    return { "--marquee-distance": `${copyWidthPx}px` };
-  }, [copyWidthPx, hasItems]);
+  if (items.length === 0) {
+    return null;
+  }
 
   return (
     <div
-      className={cn(
-        "group min-w-0 overflow-hidden",
-        !hasItems && "h-0 pointer-events-none",
-        className,
-      )}
+      className={cn("group min-w-0 overflow-hidden", className)}
       style={{
-        maskImage: hasItems
-          ? "linear-gradient(to right, transparent 0, #000 6%, #000 94%, transparent 100%)"
-          : undefined,
-        WebkitMaskImage: hasItems
-          ? "linear-gradient(to right, transparent 0, #000 6%, #000 94%, transparent 100%)"
-          : undefined,
+        maskImage: "linear-gradient(to right, transparent 0, #000 6%, #000 94%, transparent 100%)",
+        WebkitMaskImage: "linear-gradient(to right, transparent 0, #000 6%, #000 94%, transparent 100%)",
       }}
-      aria-hidden={!hasItems}
     >
-      <div
-        key="marquee-track"
-        ref={trackRef}
-        className={cn(
-          "flex animate-marquee whitespace-nowrap group-hover:[animation-play-state:paused]",
-          !hasItems && "invisible",
-        )}
-        style={trackStyle}
-      >
-        {doubled.map((item, index) => (
-          <span key={`${item.symbol}-${index}`} className="flex shrink-0 items-center pe-7">
+      <div className="flex animate-marquee whitespace-nowrap group-hover:[animation-play-state:paused]">
+        {[...items, ...items].map((item, i) => (
+          <span key={`${item.symbol}-${i}`} className="flex shrink-0 items-center pe-7">
             <TickerItem item={item} locale={locale} />
           </span>
         ))}
