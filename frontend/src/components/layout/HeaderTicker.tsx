@@ -149,7 +149,8 @@ export function HeaderTicker({ className }: HeaderTickerProps) {
       <div
         key="ticker-track"
         className={cn(
-          "flex w-max animate-ticker group-hover:[animation-play-state:paused]",
+          "flex w-max",
+          hasItems && "animate-ticker group-hover:[animation-play-state:paused]",
           !hasItems && "invisible",
         )}
       >
