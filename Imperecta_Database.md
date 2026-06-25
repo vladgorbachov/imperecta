@@ -1,6 +1,6 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-06-25 (alembic head `030`; app `fc3b07d`)  
+**Актуально на:** 2026-06-17 (alembic head `030`; app `52697c3`)  
 **Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию схемы; принципы не дублирует.
@@ -17,6 +17,8 @@
 | Supabase REST | RLS enabled (migration 012) |
 | Alembic version | Schema `alembic_meta.alembic_version` |
 | Head revision | `030_fact_listing_url_hash_not_null` |
+
+**Read path (planned):** модуль `visualisation_calc` будет читать агрегаты для дашборда через **data_export** read-OUT door в `data_firewall` (Phase 7/8) — прямых SQL из viscalc в scaffold нет; схема БД не меняется.
 
 При старте API: `alembic upgrade head` (subprocess).
 

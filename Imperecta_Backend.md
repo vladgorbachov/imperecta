@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-25 (head `fc3b07d`)  
+**Актуально на:** 2026-06-17 (head `52697c3`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию backend; принципы не дублирует.
@@ -48,9 +48,9 @@
 | `entitlements.api.router` | `/entitlements` |
 | `ai_analyst.api.router` | (внутренний prefix модуля) |
 
-**Удалены / отсутствуют:** `dashboard/`, `analytics/`, `digests/`, `alerts/`, `user_products/api_*` — модули или пустые, или удалены полностью. Frontend pages для `/competitors`, `/alerts`, `/digests` сохранены без backend.
+**Не подключены в main.py:** `scraper/api.py` (admin-internal diagnostics), `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже).
 
-**Не подключены в main.py:** `scraper/api.py` (admin-internal diagnostics), `classifier`, `ingestion` (внутренние Tier-1 контракты, без HTTP-surface).
+**Удалены / заменены:** `dashboard/`, `analytics/` — dissolved; widget calculations → **`visualisation_calc/`**. `digests/`, `alerts/`, `user_products/api_*` — модули или пустые, или удалены. Frontend pages для `/competitors`, `/alerts`, `/digests` сохранены без backend.
 
 ### Health
 
@@ -140,6 +140,25 @@
 }
 ```
 
+### 4.4 `visualisation_calc` (scaffold)
+
+**Путь:** `backend/app/modules/visualisation_calc/`
+
+| Submodule | `service.py` responsibility |
+|-----------|----------------------------|
+| `kpi/` | Total pool, updated-in-24h, last-update aggregates |
+| `movements/` | `fact_price.price_change_pct` movers (>5% list) |
+| `volatility/` | Volatility over `price_change_pct` series |
+| `coverage/` | Country roll-up + per-country per-marketplace breakdown |
+| `trend/` | Average-price trend over time |
+| `categories/` | Hot categories from `dim_category` |
+
+**Корень модуля:** `api.py` (HTTP surface, later), `schemas.py` (widget response shapes).
+
+**Не сейчас:** DB queries, calculation logic, `main.py` router, Celery, migrations, `data_export` read door (Phase 7/8).
+
+**Потребители (planned):** `MarketsOverviewSection` и analytics hooks на `/dashboard` — заменят client-side KPI math.
+
 ### 4.3 `scraper`
 
 См. **Часть II** (ниже).
@@ -201,9 +220,9 @@ Monolith-путь (`run_full_pipeline_test`, `FullPipelineOrchestrator`, `_run_s
 - **user_products** — products + import; competitors API не в main.
 - **market_data** — providers + `ingest_market_data`.
 - **data_firewall** — Tier-1 gate: `evaluate_ecommerce` / `evaluate_market`, HMAC over `table`+`operation`+`locator`+`fields`, durable reject via `write_reject_data_isolated` on gate fail.
-- **persist** — Tier-1 writer: `write_sync` / `write_async` verify HMAC then INSERT/UPDATE/DELETE; returns `PersistResult` (bool-compatible).
+- **persist** — Tier-1 writer: `write_sync` / `write_async` + `meta_write.py` META bridge; `PersistResult`.
 - **ingestion** — orchestration scrape→firewall→persist (`IngestionService.persist_extracted`).
-- **dashboard / analytics** — read aggregations.
+- **visualisation_calc** — Tier-1 (**scaffold**): dashboard widget calculations (KPI, movements, volatility, coverage, trend, categories). Reads via planned `data_export` read-OUT door; `api.py` not wired.
 - **ai_analyst** — sessions, Claude, api_logs.
 - **alerts / digests** — tasks mostly stubs; alerts router не в main.
 
@@ -265,7 +284,7 @@ Beat включает reaper + infra (см. `scheduler.py`); **не** включ
 
 - `GET /api/products` (`user_products/api_products.py`)
 - `GET /api/pool/*` (`product_pool/api.py`, `service._apply_display_currency`)
-- `GET /api/dashboard/...` / markets overview (`dashboard/api.py`, `markets` API)
+- `GET /api/markets/overview` (`product_pool/api.py`); widget KPI math — planned `visualisation_calc` API (заменит client-side calc в `MarketsOverviewSection`)
 
 ---
 

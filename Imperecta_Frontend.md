@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-25 (head `fc3b07d`)  
+**Актуально на:** 2026-06-17 (head `52697c3`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию UI; принципы не дублирует.
@@ -9,7 +9,9 @@
 
 | Commit | Суть |
 |--------|------|
-| `fc3b07d` | Backend: isolated gate rejects (`write_reject_data_isolated`); persist CUD UPDATE/DELETE + `PersistResult` |
+| `52697c3` | Backend: scaffold `visualisation_calc` (dashboard widget math; docstrings only) |
+| `753fee0` | Backend: META door (`scrape_jobs` + `dim_marketplace` via `meta_write`) |
+| `fc3b07d` | Backend: isolated gate rejects; persist CUD UPDATE/DELETE + `PersistResult` |
 | `346bce0` | Backend: HMAC binds `table`+`operation`+`locator`+`fields` |
 | `bd29c22` | Backend/DB: `fact_listing.url_hash` NOT NULL (migration `030`) |
 | `6456625` | Backend: discovery gate writes + Layer 0 registry |
@@ -475,7 +477,8 @@ frontend/src/
 
 | Feature | Логика |
 |---------|--------|
-| Data source | `GET /markets/overview` (dashboard API) |
+| Data source | `GET /markets/overview` (`product_pool` API) — listing rows |
+| Widget KPI / movements / volatility / coverage / trend / categories | **Client-side today** (`MarketsOverviewSection` + hooks); planned backend: **`visualisation_calc`** (`backend/app/modules/visualisation_calc/`, scaffold) после wiring `api.py` + удаления frontend calc |
 | Search/filter | Client-side on product name/code |
 | Sort modes | recent, gainers, losers, volatile, trending |
 | Pagination | `PAGE_LIMIT=200`; expand +20 |
