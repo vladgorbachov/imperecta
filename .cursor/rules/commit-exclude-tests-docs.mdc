@@ -1,0 +1,35 @@
+---
+description: Exclude tests and description docs from git commits/push
+alwaysApply: true
+---
+
+# Commits — exclude tests and description docs
+
+When the user asks for a **commit**, **push**, or **commit all changes**:
+
+## Never stage or commit
+
+**Tests**
+- `backend/tests/**`
+- `e2e/**`
+- `frontend/**/*.test.ts`, `frontend/**/*.test.tsx`
+- `frontend/**/*.spec.ts`, `frontend/**/*.spec.tsx`
+
+**Description documents** (product/docs snapshots, not application code)
+- `Imperecta_Architecture.md`
+- `Imperecta_Backend.md`
+- `Imperecta_Database.md`
+- `Imperecta_Frontend.md`
+
+## Workflow
+
+1. Stage **only** application/source/config/migration code outside the paths above.
+2. Do **not** use `git add -A` or `git commit -a` without unstaging excluded paths first.
+3. If the working tree has **only** excluded changes, do not commit — report that nothing is eligible for remote under this policy.
+4. If the user **explicitly** asks to commit tests or description docs, confirm once, then include only what they named.
+
+## Unchanged
+
+- `ARCHITECTURE_PRINCIPLES.md` — still never stage (see architecture-principles-immutable rule).
+- Never commit `.env` or secrets.
+- Commit messages: English, 5–7 words, no Cursor attribution trailers.

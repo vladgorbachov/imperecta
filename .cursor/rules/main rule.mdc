@@ -8,7 +8,7 @@ alwaysApply: true
 
 # Commit message
 Commit message limited by 5 to 7 words
-Любой агент при получении запроса на коммит и пуш обязан коммитить ВСЕ изменения, независимо от того, он делал их или другой агент. 
+При коммите и пуше — только код приложения (не тесты, не Imperecta_*.md); см. `.cursor/rules/commit-exclude-tests-docs.mdc`. 
 
 # Commit trailers (forbidden)
 
