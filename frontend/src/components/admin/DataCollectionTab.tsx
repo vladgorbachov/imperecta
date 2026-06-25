@@ -554,6 +554,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
             </Button>
             <Button
               size="lg"
+              variant="default"
               onClick={() => void launchSelectedCollection()}
               disabled={runPipeline.isPending || Boolean(activeJobId) || selectedCodes.size === 0}
             >
