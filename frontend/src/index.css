@@ -494,12 +494,14 @@
     transform: translateX(0);
   }
   100% {
-    transform: translateX(-50%);
+    transform: translateX(calc(var(--marquee-distance, 50%) * -1));
   }
 }
 
 .animate-marquee {
   animation: marquee 30s linear infinite;
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 /* Respect the user's reduced-motion preference (a11y; matches Ink "motion off") */
