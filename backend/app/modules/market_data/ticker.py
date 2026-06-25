@@ -5,13 +5,12 @@ and falls back to live provider data via `fetching.fetch_*` only when the DB
 has no rows yet (pre-first-ingest). `_legacy_ticker_rows_from_db` converts the
 reader's tuples into the legacy ticker shape consumed by `api.py /markets/ticker`.
 
-Parity note carried from pre-M3a service.py: the live-fallback branch calls
-`get_fuel_prices(country_code, db=None)`, which always returns `None`, so the
-gasoline/diesel append blocks below are dead. Preserved verbatim in M3a; the
-fix is a separate backlog item once the live path is removed entirely.
+The live-fallback branch mirrors `reader.get_ticker` parity: exactly-saved
+favorites per class, empty class emits nothing, no slice caps, no fuel, and
+forex crosses/inverses via `derive_forex_pairs` over live EUR-base rates.
 """
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +19,7 @@ from app.modules.market_data.fetching import (
     fetch_crypto_prices,
     fetch_forex_rates,
 )
-from app.modules.market_data.fuel import get_fuel_prices
+from app.modules.market_data.forex_pairs import derive_forex_pairs
 from app.modules.market_data.reader import MarketDataService
 
 
@@ -70,6 +69,31 @@ def _legacy_ticker_rows_from_db(rows: list[dict]) -> list[dict]:
     return items
 
 
+def _currency_rows_from_live_forex(live_pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map fetch_forex_rates EUR-base rows to the shape `get_forex()` returns.
+
+    Live ``EUR/X`` rate R is units of X per 1 EUR; ``rate_to_eur`` for X is
+    EUR per 1 X (= 1/R), matching ``FactCurrencyRate.rate_to_eur`` semantics.
+    """
+    rows: list[dict[str, Any]] = []
+    for pair in live_pairs:
+        pair_code = str(pair.get("pair", "")).upper()
+        if not pair_code.startswith("EUR/"):
+            continue
+        quote = pair_code.split("/", 1)[1]
+        rate = float(pair.get("rate", 0))
+        if rate <= 0:
+            continue
+        rows.append({
+            "currency_code": quote,
+            "rate_to_eur": 1.0 / rate,
+            "rate_to_usd": 0.0,
+            "source": "live",
+            "fetched_at": None,
+        })
+    return rows
+
+
 async def get_ticker_data(
     country_code: str = "UA",
     db: AsyncSession | None = None,
@@ -95,74 +119,57 @@ async def get_ticker_data(
 
     items: list[dict] = []
 
-    forex = await fetch_forex_rates("EUR")
-    for pair in forex[:6]:
-        symbol = str(pair["pair"]).upper()
-        if forex_set and symbol not in forex_set:
-            continue
-        items.append({
-            "type": "forex",
-            "label": symbol,
-            "value": pair["rate"],
-            "change": pair.get("change_24h"),
-            "prefix": "",
-            "suffix": "",
-        })
-
-    try:
-        crypto_data, _ = await fetch_crypto_prices()
-        for coin in crypto_data[:5]:
-            symbol = str(coin["symbol"]).upper()
-            if crypto_set and symbol not in crypto_set:
+    if forex_set:
+        forex_live = await fetch_forex_rates("EUR")
+        currency_rows = _currency_rows_from_live_forex(forex_live)
+        for pair in derive_forex_pairs(currency_rows):
+            symbol = pair["symbol"]
+            if symbol.upper() not in forex_set:
                 continue
             items.append({
-                "type": "crypto",
+                "type": "forex",
                 "label": symbol,
-                "value": coin["price"],
-                "change": coin["change_24h"],
-                "prefix": "$",
+                "value": pair["rate"],
+                "change": None,
+                "prefix": "",
                 "suffix": "",
             })
-    except Exception:
-        pass
 
-    try:
-        commodities, _, _ = await fetch_commodities()
-        for item in (commodities or [])[:3]:
-            symbol = str(item.get("symbol", "")).upper()
-            if commodity_set and symbol not in commodity_set:
-                continue
-            name = item.get("name") or item.get("symbol", "")
-            items.append({
-                "type": "commodity",
-                "label": name,
-                "value": item["price"],
-                "change": item.get("change_24h"),
-                "prefix": "$",
-                "suffix": f"/{item.get('unit', '')}",
-            })
-    except Exception:
-        pass
+    if crypto_set:
+        try:
+            crypto_data, _ = await fetch_crypto_prices()
+            for coin in crypto_data:
+                symbol = str(coin["symbol"]).upper()
+                if symbol not in crypto_set:
+                    continue
+                items.append({
+                    "type": "crypto",
+                    "label": symbol,
+                    "value": coin["price"],
+                    "change": coin["change_24h"],
+                    "prefix": "$",
+                    "suffix": "",
+                })
+        except Exception:
+            pass
 
-    # Parity-preserved dead branch: get_fuel_prices(db=None) returns None, so
-    # the gasoline_95 / diesel rows below never append. Do NOT fix in M3a.
-    fuel = await get_fuel_prices(country_code, db=None)
-    if fuel:
-        items.append({
-            "type": "fuel",
-            "label": f"Gasoline 95 ({fuel['country']})",
-            "value": fuel["gasoline_95"],
-            "change": None,
-            "prefix": "",
-            "suffix": f" {fuel['currency']}/{fuel['unit']}",
-        })
-        items.append({
-            "type": "fuel",
-            "label": f"Diesel ({fuel['country']})",
-            "value": fuel["diesel"],
-            "change": None,
-            "prefix": "",
-            "suffix": f" {fuel['currency']}/{fuel['unit']}",
-        })
+    if commodity_set:
+        try:
+            commodities, _, _ = await fetch_commodities()
+            for item in commodities or []:
+                symbol = str(item.get("symbol", "")).upper()
+                if symbol not in commodity_set:
+                    continue
+                name = item.get("name") or item.get("symbol", "")
+                items.append({
+                    "type": "commodity",
+                    "label": name,
+                    "value": item["price"],
+                    "change": item.get("change_24h"),
+                    "prefix": "$",
+                    "suffix": f"/{item.get('unit', '')}",
+                })
+        except Exception:
+            pass
 
     return items

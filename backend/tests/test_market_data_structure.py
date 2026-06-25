@@ -3,13 +3,12 @@ M3a structure tests for the market_data module.
 
 Verifies the post-split layout: service.py is retired, every former public
 symbol lives in exactly one new file (reader / facade / fetching / ticker /
-fuel), the api.py route set is unchanged, ticker assembly retains its
-pre-split behaviour (including the known-dead live-fallback fuel branch),
-and ingestion still reaches fetching.*.
+fuel), the api.py route set is unchanged, ticker live-fallback mirrors the
+DB path (exactly-saved favorites, derive_forex_pairs, no fuel), and ingestion
+still reaches fetching.*.
 
-After D1 the dashboard module no longer exists; the C3 analytics routes and
-their facade stubs were removed together. The dissolution itself is covered
-by test_d1_dashboard_dissolution.py.
+After TICKER-FIX-B the live-fallback branch mirrors reader.get_ticker parity
+(exactly-saved favorites, no slice caps, no fuel, forex via derive_forex_pairs).
 """
 
 import importlib
@@ -20,10 +19,20 @@ import pytest
 
 from app.modules.market_data import (
     api as market_api,
+)
+from app.modules.market_data import (
     facade as facade_mod,
+)
+from app.modules.market_data import (
     fetching as fetching_mod,
+)
+from app.modules.market_data import (
     fuel as fuel_mod,
+)
+from app.modules.market_data import (
     reader as reader_mod,
+)
+from app.modules.market_data import (
     ticker as ticker_mod,
 )
 from app.modules.market_data.facade import MarketsService
@@ -106,17 +115,40 @@ def test_currency_module_imports_from_fetching() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ticker_assembly_parity_no_db(monkeypatch: pytest.MonkeyPatch) -> None:
-    """get_ticker_data falls back to fetching.* and preserves the dead fuel branch."""
+async def test_ticker_fallback_empty_favorites(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live fallback emits nothing when all favorite sets are empty (DB parity)."""
 
     async def empty_ticker(self, *args, **kwargs):
         _ = self, args, kwargs
         return []
 
-    monkeypatch.setattr(
-        "app.modules.market_data.reader.MarketDataService.get_ticker",
-        empty_ticker,
-    )
+    fetch_forex = AsyncMock()
+    fetch_crypto = AsyncMock()
+    fetch_commodity = AsyncMock()
+    monkeypatch.setattr("app.modules.market_data.reader.MarketDataService.get_ticker", empty_ticker)
+    monkeypatch.setattr("app.modules.market_data.ticker.fetch_forex_rates", fetch_forex)
+    monkeypatch.setattr("app.modules.market_data.ticker.fetch_crypto_prices", fetch_crypto)
+    monkeypatch.setattr("app.modules.market_data.ticker.fetch_commodities", fetch_commodity)
+
+    items = await get_ticker_data(country_code="DE", db=SimpleNamespace())
+
+    assert items == []
+    fetch_forex.assert_not_called()
+    fetch_crypto.assert_not_called()
+    fetch_commodity.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ticker_fallback_forex_derive_exact_saved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live fallback derives forex pairs and filters to exactly-saved favorites."""
+
+    async def empty_ticker(self, *args, **kwargs):
+        _ = self, args, kwargs
+        return []
+
+    monkeypatch.setattr("app.modules.market_data.reader.MarketDataService.get_ticker", empty_ticker)
     monkeypatch.setattr(
         "app.modules.market_data.ticker.fetch_forex_rates",
         AsyncMock(
@@ -128,44 +160,81 @@ async def test_ticker_assembly_parity_no_db(monkeypatch: pytest.MonkeyPatch) -> 
     )
     monkeypatch.setattr(
         "app.modules.market_data.ticker.fetch_crypto_prices",
-        AsyncMock(
-            return_value=(
-                [
-                    {"symbol": "BTC", "price": 65000.0, "change_24h": 1.2},
-                    {"symbol": "ETH", "price": 3500.0, "change_24h": None},
-                ],
-                False,
-            )
-        ),
+        AsyncMock(return_value=([], False)),
     )
     monkeypatch.setattr(
         "app.modules.market_data.ticker.fetch_commodities",
-        AsyncMock(
-            return_value=(
-                [
-                    {"symbol": "XAU", "name": "Gold", "price": 2400.0, "unit": "oz", "change_24h": 0.5},
-                ],
-                None,
-                False,
-            )
-        ),
+        AsyncMock(return_value=([], None, False)),
     )
 
-    fake_db = SimpleNamespace()
-    items = await get_ticker_data(country_code="DE", db=fake_db)
-
-    types = [row["type"] for row in items]
-    assert "forex" in types
-    assert "crypto" in types
-    assert "commodity" in types
-    assert "fuel" not in types, (
-        "Dead live-fallback fuel branch must stay empty in M3a (parity-preserved)"
+    items = await get_ticker_data(
+        country_code="DE",
+        db=SimpleNamespace(),
+        forex_favorites=["EUR/USD", "USD/EUR", "GBP/USD"],
     )
-    forex_rows = [row for row in items if row["type"] == "forex"]
-    assert {row["label"] for row in forex_rows} == {"EUR/USD", "EUR/GBP"}
+
+    forex_rows = {row["label"]: row for row in items if row["type"] == "forex"}
+    assert set(forex_rows) == {"EUR/USD", "USD/EUR", "GBP/USD"}
+    assert forex_rows["EUR/USD"]["value"] == pytest.approx(1.08, rel=1e-4)
+    assert forex_rows["USD/EUR"]["value"] == pytest.approx(1.0 / 1.08, rel=1e-4)
+    assert forex_rows["GBP/USD"]["value"] == pytest.approx(1.08 / 0.86, rel=1e-4)
+    assert all(row["change"] is None for row in forex_rows.values())
+
+
+@pytest.mark.asyncio
+async def test_ticker_fallback_crypto_commodity_no_caps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live fallback filters crypto/commodities to saved symbols without slice caps."""
+
+    async def empty_ticker(self, *args, **kwargs):
+        _ = self, args, kwargs
+        return []
+
+    monkeypatch.setattr("app.modules.market_data.reader.MarketDataService.get_ticker", empty_ticker)
+    monkeypatch.setattr(
+        "app.modules.market_data.ticker.fetch_forex_rates",
+        AsyncMock(return_value=[]),
+    )
+    many_coins = [
+        {"symbol": sym, "price": float(idx), "change_24h": None}
+        for idx, sym in enumerate(["BTC", "ETH", "SOL", "ADA", "DOT", "XRP"], start=1)
+    ]
+    monkeypatch.setattr(
+        "app.modules.market_data.ticker.fetch_crypto_prices",
+        AsyncMock(return_value=(many_coins, False)),
+    )
+    commodity_fixtures = [
+        {
+            "symbol": "XAU",
+            "name": "Gold",
+            "price": 2400.0,
+            "unit": "oz",
+            "change_24h": 0.5,
+        },
+        {
+            "symbol": "XAG",
+            "name": "Silver",
+            "price": 28.0,
+            "unit": "oz",
+            "change_24h": None,
+        },
+    ]
+    monkeypatch.setattr(
+        "app.modules.market_data.ticker.fetch_commodities",
+        AsyncMock(return_value=(commodity_fixtures, None, False)),
+    )
+
+    items = await get_ticker_data(
+        country_code="DE",
+        db=SimpleNamespace(),
+        crypto_favorites=["BTC", "SOL"],
+        commodity_favorites=["XAU"],
+    )
+
+    assert "fuel" not in {row["type"] for row in items}
     crypto_rows = [row for row in items if row["type"] == "crypto"]
-    assert {row["label"] for row in crypto_rows} == {"BTC", "ETH"}
+    assert {row["label"] for row in crypto_rows} == {"BTC", "SOL"}
     commodity_rows = [row for row in items if row["type"] == "commodity"]
+    assert len(commodity_rows) == 1
     assert commodity_rows[0]["label"] == "Gold"
     assert commodity_rows[0]["suffix"] == "/oz"
 
