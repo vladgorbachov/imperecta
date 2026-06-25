@@ -47,7 +47,7 @@ async def _ensure_dim_date(db: AsyncSession, d: date) -> int:
     return date_id
 
 
-def _log_ingestion(
+async def _log_ingestion(
     db: AsyncSession,
     *,
     endpoint: str,
