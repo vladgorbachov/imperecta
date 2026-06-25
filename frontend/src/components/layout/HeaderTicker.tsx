@@ -2,12 +2,10 @@
  * Read-only marquee ticker for the global Header.
  *
  * Reuses GET /api/markets/ticker.
- * Integer-pixel loop distance (measured on mount / items change only); 30s fixed duration.
+ * Minimal CSS loop: two identical item lists, translateX(-50%) on a w-max track.
  * Fully transparent: no card chrome, no background, no border, no radius.
  */
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
@@ -23,15 +21,6 @@ type TickerItemData = {
   change_24h: number | null;
   currency: string | null;
 };
-
-function tickerItemsSignature(items: TickerItemData[]): string {
-  return items
-    .map(
-      (item) =>
-        `${item.symbol}:${item.price}:${item.change_24h ?? ""}:${item.name ?? ""}:${item.currency ?? ""}`,
-    )
-    .join("|");
-}
 
 export function formatTickerValue(item: TickerItemData, locale: string): string {
   const sym = item.symbol ?? "";
@@ -93,6 +82,34 @@ export function TickerItem({ item, locale }: { item: TickerItemData; locale: str
   );
 }
 
+function TickerBlock({
+  items,
+  locale,
+  blockKey,
+  ariaHidden = false,
+}: {
+  items: TickerItemData[];
+  locale: string;
+  blockKey: string;
+  ariaHidden?: boolean;
+}) {
+  return (
+    <ul
+      className="m-0 flex shrink-0 list-none items-center p-0"
+      aria-hidden={ariaHidden}
+    >
+      {items.map((item, index) => (
+        <li
+          key={`${blockKey}-${item.symbol}-${index}`}
+          className="flex shrink-0 items-center pe-7"
+        >
+          <TickerItem item={item} locale={locale} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 interface HeaderTickerProps {
   className?: string;
 }
@@ -110,27 +127,7 @@ export function HeaderTicker({ className }: HeaderTickerProps) {
   });
 
   const items = tickerData?.items ?? [];
-  const itemsSignature = useMemo(() => tickerItemsSignature(items), [items]);
-  const doubled = useMemo(() => [...items, ...items], [itemsSignature]);
-
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [copyWidthPx, setCopyWidthPx] = useState(0);
-
-  useLayoutEffect(() => {
-    const track = trackRef.current;
-    if (!track || items.length === 0) {
-      setCopyWidthPx(0);
-      return;
-    }
-    setCopyWidthPx(Math.round(track.scrollWidth / 2));
-  }, [itemsSignature, items.length]);
-
   const hasItems = items.length > 0;
-  const trackStyle = useMemo((): CSSProperties & { "--marquee-distance"?: string } => {
-    return {
-      "--marquee-distance": copyWidthPx > 0 ? `${copyWidthPx}px` : "50%",
-    };
-  }, [copyWidthPx]);
 
   return (
     <div
@@ -150,19 +147,14 @@ export function HeaderTicker({ className }: HeaderTickerProps) {
       aria-hidden={!hasItems}
     >
       <div
-        key="marquee-track"
-        ref={trackRef}
+        key="ticker-track"
         className={cn(
-          "flex animate-marquee whitespace-nowrap group-hover:[animation-play-state:paused]",
+          "flex w-max animate-ticker group-hover:[animation-play-state:paused]",
           !hasItems && "invisible",
         )}
-        style={trackStyle}
       >
-        {doubled.map((item, index) => (
-          <span key={`${item.symbol}-${index}`} className="flex shrink-0 items-center pe-7">
-            <TickerItem item={item} locale={locale} />
-          </span>
-        ))}
+        <TickerBlock items={items} locale={locale} blockKey="a" />
+        <TickerBlock items={items} locale={locale} blockKey="b" ariaHidden />
       </div>
     </div>
   );

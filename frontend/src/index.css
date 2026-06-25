@@ -489,19 +489,18 @@
   animation: shimmer 2s infinite;
 }
 
-@keyframes marquee {
-  0% {
+@keyframes ticker {
+  from {
     transform: translateX(0);
   }
-  100% {
-    transform: translateX(calc(var(--marquee-distance, 50%) * -1));
+  to {
+    transform: translateX(-50%);
   }
 }
 
-.animate-marquee {
-  animation: marquee 30s linear infinite;
+.animate-ticker {
+  animation: ticker 30s linear infinite;
   will-change: transform;
-  transform: translateZ(0);
 }
 
 /* Respect the user's reduced-motion preference (a11y; matches Ink "motion off") */
@@ -515,7 +514,7 @@
     scroll-behavior: auto !important;
   }
 
-  .animate-marquee,
+  .animate-ticker,
   .glow-pulse,
   .animate-shimmer,
   .animate-grid-pulse,
