@@ -19,6 +19,13 @@ from app.modules.persist.writer import PersistContext, write_sync
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
+_FX_RATE_DECIMALS = 8
+
+
+def _quantize_fx_rate(value: float) -> float:
+    """Round FX rate to fit fact_currency_rate Numeric(18, 8) before firewall check."""
+    return round(value, _FX_RATE_DECIMALS)
+
 
 def _ensure_dim_date(db: Session, d: date) -> int:
     """Return dim_date.date_id for calendar day, inserting a row if missing."""
@@ -270,9 +277,9 @@ class IngestionService:
                         continue
                     if cur not in allowed:
                         continue
-                    rate_to_eur = 1.0 / rate
+                    rate_to_eur = _quantize_fx_rate(1.0 / rate)
                     if usd_per_eur:
-                        rate_to_usd = usd_per_eur / rate
+                        rate_to_usd = _quantize_fx_rate(usd_per_eur / rate)
                     else:
                         rate_to_usd = rate_to_eur
                     items.append(
