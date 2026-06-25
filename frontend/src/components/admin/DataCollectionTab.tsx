@@ -554,11 +554,14 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
             </Button>
             <Button
               size="lg"
-              variant="secondary"
               onClick={() => void launchSelectedCollection()}
               disabled={runPipeline.isPending || Boolean(activeJobId) || selectedCodes.size === 0}
             >
-              <Play className="mr-2 size-4" />
+              {runPipeline.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 size-4" />
+              )}
               {t("admin.dataCollection.runSelected", { count: selectedCodes.size })}
             </Button>
             {activeJobId ? (
