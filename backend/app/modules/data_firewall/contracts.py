@@ -7,6 +7,7 @@ from typing import Any, TypedDict
 from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
+from app.models.dimensions import DimProduct
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -102,6 +103,7 @@ def build_table_contract(model: type) -> dict[str, ColumnContract]:
 
 
 FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
+    "dim_product": build_table_contract(DimProduct),
     "fact_listing": build_table_contract(FactListing),
     "fact_price": build_table_contract(FactPrice),
     "fact_review": build_table_contract(FactReview),

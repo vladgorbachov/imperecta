@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Identity, Index, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Identity, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -26,6 +26,11 @@ class RejectData(Base):
     )
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     table_target: Mapped[str] = mapped_column(String(50), nullable=False)
+    operation: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        server_default=text("'insert'"),
+    )
     marketplace_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     listing_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     reject_reason: Mapped[str] = mapped_column(String(100), nullable=False)

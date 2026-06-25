@@ -203,6 +203,288 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 ---
 
+## Слой 0 — Реестр дверей гейта и контактов с БД (единый вход через data_firewall → persist)
+
+**LAYER 0** перестройки «от БД наружу»: единый живой реестр **дверей** гейта и **контактов** backend ↔ PostgreSQL.
+
+Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data` / `_reject_persist`). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
+
+> **Снимок:** recon `backend/app/**` (gate door catalog + DB-contact inventory). Типы колонок — ORM (`facts.py`, `dimensions.py`, `app_tables.py`, `reject_data.py`, `core.py`). `file:line` — evidence из recon; при дрейфе кода перепривязать grep/read.
+
+---
+
+### 0a. Реестр дверей гейта (Gate Door Registry)
+
+#### 0a.1 Producer-side doors (входы в гейт)
+
+Публичная стена пакета `data_firewall/__init__.py:6–11`: `FirewallOutcome`, `SignedRecord`, `evaluate_ecommerce`, `evaluate_market`. ENTRY-двери — только два `evaluate_*`; остальное — типы или внутренние/legacy рельсы.
+
+| door (function) | file:line | purpose | FROM (who may call) | TO (produces) | lock steps (ordered) | lock strength | known lock-gap |
+|-----------------|-----------|---------|---------------------|---------------|----------------------|---------------|----------------|
+| `evaluate_ecommerce` | `data_firewall/firewall.py:184–195` | E-commerce extract → signed row (default `fact_price`) | Scrape/ingestion: `marketplace_id` + `CurrencyResolver` + optional `persist_fields` (`ingestion/service.py:194–201`) | On pass + `persist_fields`: `SignedRecord`; on fail + `db`: `reject_data` | 1) `evaluate_ecommerce_rules` — 5 checks (`rules.py:108–159`, DB read whitelist `rules.py:65–75`) 2) `page_role in (listing,hub)` → reject (`firewall.py:210–220`) 3) `page_role=unknown` → log only (`221–227`) 4) If `passed and persist_fields`: `_validate_against_contract` (`239–244`) 5) `_sign_fields` / `sign(fields)` (`251`, `165–169`) 6) sign fail → `signing_unavailable` (`252–256`) 7) If `not passed and db`: `write_reject_data` (`258–271`) | **PARTIAL** | `unknown` page_role not blocked; contract only on keys present (`firewall.py:116–119`); HMAC не связывает `table`; `passed=True` без `signed_record` если `persist_fields is None` (`237–238`) |
+| `evaluate_market` | `data_firewall/firewall.py:289–295` | Market/discovery dict → signed dim/fact row | Caller supplies `table` + field dict (`discovery.py:171+`, `market_data/ingestion.py:147+`) | On pass: `SignedRecord`; on fail + `db`: `reject_data` | 1) `unknown_table` if no contract (`297–306`) 2) `_validate_against_contract` (`308`) 3) `_sign_fields` (`311–316`) 4) If `not passed and db`: `write_reject_data` (`318–328`) | **PARTIAL** | No e-commerce rules; sparse contract; 11 contracted tables (`contracts.py:105–117`) vs 6 `write_sync` branches; HMAC не связывает `table` |
+| `evaluate_ecommerce_rules` | `data_firewall/rules.py:108–113` | Rules-only rail (5 checks); **not** package export | Internal from `evaluate_ecommerce` (`firewall.py:197–201`); legacy alias `evaluate_gate` | `GateOutcome` only — no `SignedRecord` | 1) `product_name_ok` 2) `currency_ok` 3) `price_ok` 4) `currency_raw_sane_ok` 5) `currency_country_match_ok` (`115–128`) | **WEAK** | No contract, no signing, no persist ticket |
+| `evaluate_gate` | `ingestion/gate.py:16` | Legacy alias → `evaluate_ecommerce_rules`; **outside** package wall | Legacy callers of `ingestion.gate` | `GateOutcome` only | Same 5 rules | **WEAK** | Bypasses full wall (no contract/sign/persist guard) |
+
+#### 0a.2 DB-side doors (гейт → БД, через persist)
+
+**Persist read doors: 0** — grep `select(`, `.scalar`, `.get(` в `persist/writer.py`: **NOT FOUND**.
+
+| door | file:line | table | op | re-verifies HMAC? | session | notes |
+|------|-----------|-------|-----|-------------------|---------|-------|
+| `write_sync` (null `signed`) | `persist/writer.py:135–143` | `unknown` (reject) | reject insert | N/A | caller `Session` | `_reject_persist` → `missing_signed_record` |
+| `write_sync` (bad signature) | `persist/writer.py:145–153` | `signed.table` | reject insert | **Yes** — `verify(signed.fields, signed.signature)` | caller `Session` | `_reject_persist` → `invalid_signature` |
+| `write_sync` → `fact_price` | `persist/writer.py:158–168` | `fact_price` | DELETE by `(listing_id, date_id)` + INSERT | Yes (`145`) | caller `Session` | `_orm_fields_for_table` coercion (`155`, `58–79`) |
+| `write_sync` → `dim_product` | `persist/writer.py:170–172` | `dim_product` | INSERT only | Yes | caller `Session` | No replace/delete |
+| `write_sync` → `fact_listing` | `persist/writer.py:174–176` | `fact_listing` | INSERT only | Yes | caller `Session` | No replace/delete |
+| `write_sync` → `fact_currency_rate` | `persist/writer.py:180–189` | `fact_currency_rate` | DELETE by `(date_id, currency_code, source)` + INSERT | Yes | caller `Session` | daily replace |
+| `write_sync` → `fact_crypto_price` | `persist/writer.py:191–200` | `fact_crypto_price` | DELETE by `(date_id, symbol, source)` + INSERT | Yes | caller `Session` | daily replace |
+| `write_sync` → `fact_commodity_price` | `persist/writer.py:202–211` | `fact_commodity_price` | DELETE by `(date_id, symbol, source)` + INSERT | Yes | caller `Session` | daily replace |
+| `write_sync` (unsupported) | `persist/writer.py:213` | — | `raise ValueError` | Yes (if reached) | — | `fact_review`, `fact_promo`, `fact_search_trend`, `fact_tariff`, `fact_fuel_price` — contract exists, no branch |
+| `write_async` (null `signed`) | `persist/writer.py:223–235` | `unknown` | reject insert | N/A | `AsyncSession.sync_session` | direct `write_reject_data`, not `_reject_persist` |
+| `write_async` (bad signature) | `persist/writer.py:237–249` | `signed.table` | reject insert | **Yes** `verify(...)` | `db.sync_session` | |
+| `write_async` → `fact_currency_rate` | `persist/writer.py:255–264` | `fact_currency_rate` | DELETE+INSERT | Yes | `AsyncSession` | |
+| `write_async` → `fact_crypto_price` | `persist/writer.py:266–275` | `fact_crypto_price` | DELETE+INSERT | Yes | `AsyncSession` | |
+| `write_async` → `fact_commodity_price` | `persist/writer.py:277–286` | `fact_commodity_price` | DELETE+INSERT | Yes | `AsyncSession` | |
+| `write_async` (unsupported) | `persist/writer.py:288` | — | `raise ValueError` | — | — | No `fact_price`, `dim_product`, `fact_listing`; **runtime callers в `backend/app/**` — NOT FOUND** |
+| `write_reject_data` | `data_firewall/reject_store.py:81–114` | `reject_data` | insert + flush | No HMAC | caller `Session` | Producer + persist reject path; **не** через `write_sync` |
+| `_reject_persist` | `persist/writer.py:82–125` | `reject_data` | insert via `write_reject_data` | No (already failed verify) | caller `Session` | Sentry escalate (`91–112`); **AUDIT GAP:** reject inside nested savepoint may roll back (`discovery.py:165–209`) |
+
+#### 0a.3 Lock mechanism (замки / ключи)
+
+HMAC-SHA256 (`signing.py:69–79`) вычисляется над **только** `canonical_serialize(record_fields)` — sorted keys, канонические значения (`52–58`, `31–48`). **`table` и operation (insert / delete+replace) в подпись НЕ входят.** `verify(record_fields, signature)` (`82–89`) сверяет только поля; `write_sync` / `write_async` затем доверяют `signed.table` **side-band** (`writer.py:145–156`). Это **master-lock-strength finding**: теоретически возможна подмена `table` при валидной подписи полей — **замок №1 для усиления в LAYER 1**.
+
+При незаданном `data_firewall_signing_secret` — fail-closed: `sign` → `None`, `verify` → `False` (`signing.py:61–66, 72–73, 86–88`).
+
+`SignedRecord` (`signing.py:92–98`): `table: str`, `fields: dict[str, Any]`, `signature: str` — «ключ», передаваемый от producer-side к DB-side дверям.
+
+#### 0a.4 Lock gaps (пробоины — backlog LAYER 1)
+
+1. **HMAC не связывает `table` / operation** — forgeable table pairing — `signing.py:69–79`, `writer.py:155–156` — **LAYER 1 (signing)**.
+2. **11 contracted tables vs 6 `write_sync` branches** — 5 таблиц проходят `evaluate_market` signing, но `raise` at persist — `contracts.py:105–117`, `writer.py:213` — **LAYER 1**.
+3. **Contract validator:** нет ветки JSONB/ARRAY/text для содержимого; не проверяет отсутствующие NOT NULL — слеп к `dim_product.attributes` / `image_urls` при расширении payload — `firewall.py:110–162`, `dimensions.py:343–349` — hardened under gate-extraction (slice-T); **LAYER 1**.
+4. **`page_role="unknown"` не блокируется** в `evaluate_ecommerce` — только log — `firewall.py:221–227` — **LAYER 1**.
+5. **`reject_data` внутри nested savepoint продюсера** может откатиться с парой (discovery) — reject должен переживать savepoint — `discovery.py:165–209`, `reject_store.py:114` — **LAYER 1**.
+6. **Legacy `evaluate_gate`** (rules-only) обходит полную стену — `ingestion/gate.py:16` — candidate removal — **LAYER 1 / cleanup**.
+
+#### 0a.5 Planned doors (not built — confirmed absent)
+
+| planned door | status | evidence | target layer/phase |
+|--------------|--------|----------|-------------------|
+| `update_validator` (UPDATE door) | planned, not built | grep `update_validator` in `backend/app`: **NOT FOUND** | **LAYER 1** / discovery-reactivation |
+| `data_export` (read-OUT door) | planned, not built | no symbol in `data_firewall/**` or `persist/**`; model `DataExport` only (`app_tables.py:509–512`) | **Phase 7/8** |
+| `user_data` CRUD (scoped owner door) | planned, not built | grep in gate/persist perimeter: **NOT FOUND** | **Phase 7/8** |
+| `operation` field on `reject_data` | planned, not built | grep `operation` in `models/reject_data.py`: **NOT FOUND** (`reject_data.py:21–35`) | **LAYER 1** |
+| Standalone DELETE door (beyond daily replace) | planned, not built | only DELETE inside replace branches (`writer.py:161–209`); no DELETE-only entry — **NOT FOUND** | **LAYER 1+** |
+
+---
+
+### 0b. Реестр контактов с БД (DB-Contacts Registry)
+
+Инвариант: аналитические **записи** в fact/dim — через гейт; **persist** — тупой исполнитель; всё в **0b.2** — шов **LAYER 2**.
+
+#### 0b.1 Gate writes (через двери — эталон)
+
+| module | file:line | table | column(s) + ORM type | gate door | persist primitive | session |
+|--------|-----------|-------|----------------------|-----------|-------------------|---------|
+| discovery | `scraper/discovery.py:171–176` | `dim_product` | `id` UUID; `name` String(500); `name_normalized` String(500); `is_active` Boolean | `evaluate_market` | — | sync |
+| discovery | `scraper/discovery.py:185–188` | `dim_product` | те же (signed fields) | — | `write_sync` | sync |
+| discovery | `scraper/discovery.py:198–203` | `fact_listing` | `product_id` UUID; `marketplace_id` UUID; `external_url` Text; `url_hash` String(64); `is_active` Boolean; `page_role` String(16) | `evaluate_market` | — | sync |
+| discovery | `scraper/discovery.py:212–215` | `fact_listing` | те же | — | `write_sync` | sync |
+| ingestion | `ingestion/service.py:194–202` | `fact_price` | `listing_id` UUID; `date_id` Integer; `price` Numeric(12,2); `currency_code` String(3); `original_price` Numeric(12,2); `discount_pct` Numeric(5,2); `price_change_pct` Numeric(8,4); `scraped_at` DateTime(tz); `scrape_job_id` UUID | `evaluate_ecommerce` | — | sync |
+| ingestion | `ingestion/service.py:240–248` | `fact_price` | те же | — | `write_sync` | sync |
+| market_data | `market_data/ingestion.py:147–159` | `fact_currency_rate` | `date_id` Integer; `currency_code` String(3); `rate_to_eur` Numeric(18,8); `rate_to_usd` Numeric(18,8); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
+| market_data | `market_data/ingestion.py:187–199` | `fact_crypto_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `price_usd` Numeric(18,8); `market_cap_usd` Numeric(20,2); `volume_24h_usd` Numeric(20,2); `change_24h_pct` Numeric(8,4); `source` String(30); `rank` SmallInteger; `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
+| market_data | `market_data/ingestion.py:228–240` | `fact_commodity_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `commodity_type` String(20); `price_usd` Numeric(12,4); `price_eur` Numeric(12,4); `change_24h_pct` Numeric(8,4); `unit` String(20); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
+| persist | `persist/writer.py:158–210` | `fact_price`, `dim_product`, `fact_listing`, `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | verbatim signed payload → ORM ctor | (verify HMAC upstream) | `write_sync` | sync |
+
+`write_async` (`persist/writer.py:216–288`) — определён, **runtime callers в `backend/app/**` — NOT FOUND** (только export).
+
+#### 0b.2 Bypass writes (мимо дверей — backlog LAYER 2)
+
+#### discovery — `dim_marketplace` cursors / `scrape_jobs` metadata
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| discovery | `scraper/discovery.py:635` | `dim_marketplace` | `last_sitemap_harvest_at` DateTime(tz); `sitemap_url` String(2048) | update + flush | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:684–694` | `dim_marketplace` | `discovered_category_urls` JSONB; `category_resume_index` Integer; `last_category_recon_at` DateTime(tz); `recon_frontier_state` JSONB | update | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:760,775,820,854` | `dim_marketplace` | те же (flush checkpoint) | flush | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:1060` | `scrape_jobs` | `status` String(20); `started_at` DateTime(tz) | update + commit | AsyncSession | scrape_jobs-metadata |
+| discovery | `scraper/discovery.py:1071–1072` | `scrape_jobs` | INSERT explicit SET: `job_type` String(30); `marketplace_id` UUID; `parent_job_id` UUID; `status` String(20); `started_at` DateTime(tz); `config` JSONB. NOT NULL DB defaults (not in ctor): `total_listings` Integer; `successful` Integer; `failed` Integer; `skipped` Integer; server `id` UUID; `created_at` DateTime(tz) | insert | AsyncSession | scrape_jobs-metadata |
+| discovery | `scraper/discovery.py:1089–1090` | `dim_marketplace` | `base_url` Text | update | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:1137–1138` | `dim_marketplace` | `last_sitemap_harvest_at` DateTime(tz) | update + flush | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:1163–1166` | `dim_marketplace` | `sitemap_resume_offset` Integer | update | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:1233` | `dim_marketplace` | `category_resume_index` Integer | update | AsyncSession | dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:1270–1298` | `scrape_jobs`, `dim_marketplace` | job: `status`, `completed_at`, `duration_ms`, `total_listings`, `successful`, `failed`, `config` JSONB; mp: `last_discovery_at`, `last_discovery_status`, `last_discovery_products_found`, `products_in_pool` | update + commit | AsyncSession | scrape_jobs-metadata + dim_marketplace-cursors |
+| discovery | `scraper/discovery.py:1304–1321` | `scrape_jobs`, `dim_marketplace` | error path: `status=failed`, `last_discovery_status` | update + commit/rollback | AsyncSession | scrape_jobs-metadata |
+
+#### scrape-service — denorm / prune / logs
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| ingestion | `ingestion/service.py:56–83` | `dim_date` | `date_id` Integer; `full_date` Date; year/quarter/month/… Boolean/Integer/String | upsert (ON CONFLICT DO NOTHING) | sync | dim_date-upsert |
+| ingestion | `ingestion/service.py:340–349` | `dim_product` | `name` String(500); `name_normalized` String(500); `image_url` Text | update in-place | sync | scrape-fact_listing-denorm |
+| ingestion | `ingestion/service.py:229–231,251–253` | `fact_listing` | `last_checked_at` DateTime(tz); `last_price` Numeric(12,2); `last_currency_code` String(3); `last_price_changed_at` DateTime(tz) | update in-place | sync | scrape-fact_listing-denorm |
+| ingestion | `ingestion/service.py:294–295` | txn | bundles gate + bypass denorm/enrich | commit | sync | scrape-fact_listing-denorm |
+| scraper/service | `scraper/service.py:427–428` | `fact_listing` | `consecutive_errors` Integer; `last_error` Text | update | sync | scrape-fact_listing-denorm |
+| scraper/service | `scraper/service.py:541–545,552–553` | `fact_listing` | `consecutive_errors`, `failure_streak` Integer; `last_error` Text; `is_active` Boolean | update | sync | scrape-fact_listing-denorm |
+| scraper/service | `scraper/service.py:562` | `fact_listing` | `last_checked_at` DateTime(tz) | update | sync | scrape-fact_listing-denorm |
+| scraper/service | `scraper/service.py:480–494` | `fact_listing`, `dim_product` | row DELETE | delete | sync | scrape-fact_listing-denorm |
+| scraper/service | `scraper/service.py:348–350` | `scrape_logs` | `scrape_job_id`, `listing_id`, `marketplace_id`, `status` String(50), `url` Text, `price_found` Numeric(12,2), `duration_ms` Integer, `scraper_type`, `error_message`, `error_category` | insert | sync | scrape_logs-api_logs |
+| scraper/service | `scraper/service.py:279–280` | `fact_listing` | failure-path fields above | flush + commit | sync | scrape-fact_listing-denorm |
+| scraper/service | `scraper/service.py:174–175,186–195` | `scrape_logs` | DDL: widen `status`, rebuild CHECK | DDL | sync | maintenance-DDL |
+| scraper/tasks | `scraper/tasks.py:150–151` | `scrape_logs` | INSERT SET: `scrape_job_id` UUID; `listing_id` UUID; `marketplace_id` UUID; `status` String(50); `url` Text; `error_message` Text; `scraper_type` String(30); `error_category` String(30). NOT NULL default: `retry_count` Integer; server `id` BigInteger; `created_at` DateTime(tz) | insert | sync | scrape_logs-api_logs |
+| scraper/tasks | `scraper/tasks.py:74–83` | `scrape_logs` | DDL CHECK repair | DDL | sync | maintenance-DDL |
+| scraper/tasks | `scraper/tasks.py:356–358` | `scrape_jobs` | `status`, `completed_at` | update + commit | AsyncSession | scrape_jobs-metadata |
+| scraper/tasks | `scraper/tasks.py:710–712,718–720,792–806` | `scrape_jobs`, `dim_marketplace` | `scrape_jobs` UPDATE: `status` String(20); `completed_at` DateTime(tz) (`710–712`); `started_at` DateTime(tz) (`718–720`); `successful` Integer; `failed` Integer; `completed_at` DateTime(tz); `status` String(20) terminal (`789–805`). `dim_marketplace` UPDATE: `last_scrape_at` DateTime(tz) (`792`) | update + commit | AsyncSession | scrape_jobs-metadata |
+| scraper/pipeline/activity_pulse | `scraper/pipeline/activity_pulse.py:59–61,89–91` | `scrape_jobs` | `config.metadata` JSONB (`last_activity_at`, `current_stage`, `worker_log_tail`) | update + commit | sync | scrape_jobs-metadata |
+| scraper/pipeline/activity_pulse | `scraper/pipeline/activity_pulse.py:119` | `scrape_jobs` | metadata via `store.touch` | update + commit | AsyncSession | scrape_jobs-metadata |
+
+#### tick-orchestrator / pipeline metadata
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:154–155` | `scrape_jobs` | INSERT SET: `job_type` String(30)='discovery'; `status` String(20)='pending'; `parent_job_id` UUID; `marketplace_id` UUID; `config` JSONB. NOT NULL defaults: `total_listings`/`successful`/`failed`/`skipped` Integer; server `id` UUID; `created_at` DateTime(tz) | insert + flush | AsyncSession | scrape_jobs-metadata |
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:168–188` | `scrape_jobs` | UPDATE stale discovery children `status=failed` | update + commit | AsyncSession | scrape_jobs-metadata |
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:278–279` | `scrape_jobs` | INSERT SET: `job_type` String(30)='scrape'; `status` String(20)='pending'; `parent_job_id` UUID; `marketplace_id` UUID; `config` JSONB. NOT NULL defaults: `total_listings`/`successful`/`failed`/`skipped` Integer; server `id` UUID; `created_at` DateTime(tz) | insert + flush | AsyncSession | scrape_jobs-metadata |
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:295–315` | `scrape_jobs` | UPDATE stale scrape children | update + commit | AsyncSession | scrape_jobs-metadata |
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:580,664` | txn | commit before `apply_async` | commit | AsyncSession | scrape_jobs-metadata |
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:593,602,678,687` | `scrape_jobs` | parent metadata heartbeat (`store.touch`) | update + commit | AsyncSession | scrape_jobs-metadata |
+| metadata_store | `scraper/pipeline/metadata_store.py:48–52` | `scrape_jobs` | `status`, `config.metadata` JSONB | update + commit | AsyncSession | scrape_jobs-metadata |
+| job_completion | `scraper/pipeline/job_completion.py:180–188` | `scrape_jobs` | `completed_at`, `duration_ms`, `total_listings`, `successful`, `failed`, `status`, `config` JSONB | update + commit | AsyncSession | scrape_jobs-metadata |
+
+#### market_data
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| market_data | `market_data/ingestion.py:33–52` | `dim_date` | full row (см. `DimDate`) | insert + flush | sync | dim_date-upsert |
+| market_data | `market_data/ingestion.py:63–71` | `api_logs` | `service` String(50); `endpoint` String(500); `method` String(10); `status` String(20); `error_message` Text | insert | sync | scrape_logs-api_logs |
+| market_data | `market_data/ingestion.py:76–83` | `api_logs` | error audit after rollback | insert + commit | sync | scrape_logs-api_logs |
+| market_data | `market_data/ingestion.py:163,202–204,244` | txn | post-gated fact batch | commit | sync | market_data |
+| market_data | `market_data/reader.py:167–168` | `users` | `preferences` JSONB | update + commit | AsyncSession | users-auth |
+
+#### admin / pool reset
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| admin | `admin/parsing_admin.py:209–216` | `scrape_jobs` | INSERT SET: `job_type` String(30)='full_pipeline_test'; `status` String(20)='running'; `started_at` DateTime(tz); `config` JSONB (`metadata` nested). NOT NULL defaults: `total_listings`/`successful`/`failed`/`skipped` Integer; server `id` UUID; `created_at` DateTime(tz); `marketplace_id` NULL | insert + commit | AsyncSession | scrape_jobs-metadata |
+| admin | `admin/parsing_admin.py:356–361` | `scrape_jobs` | cancel: `status=failed`, `config.metadata` | update + commit | AsyncSession | scrape_jobs-metadata |
+| admin | `admin/parsing_admin.py:986–994` | `scrape_jobs` | stale pipeline auto-fail | update + commit | AsyncSession | scrape_jobs-metadata |
+| admin | `admin/parsing_admin.py:999–1009` | `scrape_jobs` | DDL `ck_scrape_jobs_job_type` | DDL | AsyncSession | maintenance-DDL |
+| pool_maintenance | `core/pool_maintenance.py:90–111` | `alert_events`, `alerts`, `user_products` | nullable FK wipe; DELETE user_products | update/delete | AsyncSession | admin-pool-reset |
+| pool_maintenance | `core/pool_maintenance.py:114–126` | `reject_data`, `fact_price`, `fact_review`, `fact_promo`, `fact_search_trend`, `scrape_logs`, `fact_listing`, `dim_product` | TRUNCATE — whole-table, no columns: `reject_data` (`114`); `fact_price` (`117`); `fact_review`, `fact_promo`, `fact_search_trend` (`118–122`); `scrape_logs` (`124`); `fact_listing` (`125`); `dim_product` (`126`) | truncate | AsyncSession | admin-pool-reset |
+| pool_maintenance | `core/pool_maintenance.py:129–146` | `dim_marketplace` | cursor columns reset (`products_in_pool`, `sitemap_resume_offset`, `discovered_category_urls`, …) | update | AsyncSession | admin-pool-reset |
+| pool_maintenance | `core/pool_maintenance.py:149` | txn | pool reset commit | commit | AsyncSession | admin-pool-reset |
+| core | `core/admin_service.py:55–56` | `users` | bootstrap superuser INSERT | insert + commit | AsyncSession | users-auth |
+
+#### users / auth / telegram / ai
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| auth | `auth/api.py:69–70` | `users` | INSERT SET: `email` String(255); `password_hash` String(255); `name` String(100); `company_name` String(200); `plan` String(20); `trial_ends_at` DateTime(tz); `language` String(5). NOT NULL ORM/server defaults (unset): `timezone` String(50); `ai_tone` String(20); `default_currency` String(3); `is_superuser` Boolean; `force_password_change` Boolean; `is_active` Boolean; `login_count` Integer; `preferences` JSONB; `id` UUID; `created_at`/`updated_at` DateTime(tz) | insert + flush | AsyncSession | users-auth |
+| auth | `auth/api.py:79–80` | `users` | `last_login_at` DateTime(tz) | update + flush | AsyncSession | users-auth |
+| auth | `auth/api.py:96–99` | `users` | `email`, `password_hash`, `force_password_change` | update + flush | AsyncSession | users-auth |
+| users | `users/service.py:215–216` | `users` | admin create INSERT | insert + commit | AsyncSession | users-auth |
+| users | `users/service.py:304,334,362,378` | `users` | admin field updates | update + commit | AsyncSession | users-auth |
+| users | `users/service.py:399–400` | `users` | DELETE | delete + commit | AsyncSession | users-auth |
+| telegram | `telegram/api.py:134–136` | `users` | `telegram_chat_id` BigInteger; `telegram_link_code` String(20) | update + flush | AsyncSession | users-auth |
+| telegram | `telegram/api.py:156–157,171–173` | `users` | link code / unlink | update + flush | AsyncSession | users-auth |
+| ai_analyst | `ai_analyst/service.py:79–80` | `ai_chat_sessions` | INSERT SET: `user_id` UUID; `context_type` String(30); `context_id` UUID; `title` String(300). NOT NULL defaults: `message_count` Integer; `total_tokens` Integer; `is_archived` Boolean; server `id` UUID; `created_at`/`updated_at` DateTime(tz) | insert + flush | AsyncSession | users-auth |
+| ai_analyst | `ai_analyst/service.py:82–83,124–125` | `ai_chat_messages` | `session_id`, `role` String(10), `content` Text | insert + flush | AsyncSession | users-auth |
+| ai_analyst | `ai_analyst/service.py:114–125` | `api_logs` | Claude call audit | insert + flush | AsyncSession | scrape_logs-api_logs |
+
+#### marketplaces admin
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| marketplaces | `marketplaces/service.py:42–47` | `dim_marketplace` | `products_in_pool` Integer | update + commit | AsyncSession | dim_marketplace-cursors |
+| marketplaces | `marketplaces/service.py:194–195` | `dim_marketplace` | INSERT SET: `marketplace_code` String(50); `name` String(200); `source_type` String(30); `country_code` String(2); `operates_in` ARRAY(String(2)); `domain` String(255); `base_url` Text; `api_available` Boolean; `currency_code` String(3); `scraper_type` String(30); `is_active` Boolean. NOT NULL defaults (unset): `product_quota`/`products_in_pool` Integer; `requires_js` Boolean; `scrape_tier` Integer; `rate_limit_delay` Numeric(4,1); `discovery_error_count` Integer; `discovered_category_urls` JSONB; `sitemap_resume_offset`/`category_resume_index` Integer; server `id` UUID; `created_at`/`updated_at` DateTime(tz) | insert + commit | AsyncSession | dim_marketplace-cursors |
+| marketplaces | `marketplaces/service.py:203–204` | `dim_marketplace` | DELETE row | delete + commit | AsyncSession | dim_marketplace-cursors |
+| marketplaces | `marketplaces/service.py:232–243` | `dim_marketplace` | whitelist admin update cols (`requires_js`, `is_active`, `product_quota`, `name`, `domain`, `base_url`, `rate_limit_delay`, `locale`) | update + commit | AsyncSession | dim_marketplace-cursors |
+| marketplaces | `marketplaces/service.py:261–266` | `dim_marketplace` | `product_quota` Integer (bulk) | update + commit | AsyncSession | dim_marketplace-cursors |
+
+#### reject-path / workers / maintenance
+
+| module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
+|--------|-----------|-------|----------------------|-----|---------|--------------|
+| data_firewall | `data_firewall/reject_store.py:101–114` | `reject_data` | `source` String(50); `table_target` String(50); `marketplace_id`/`listing_id` UUID; `reject_reason` String(100); `failed_rules` JSONB; `raw_payload` JSONB; `signature_present` Boolean; `rejected_by` String(20) | insert + flush | sync/async | reject-path |
+| persist | `persist/writer.py:102–112` | `reject_data` | те же (invalid signature) | insert via `_reject_persist` | sync | reject-path |
+| cleanup | `workers/cleanup_tasks.py:24–35` | `scrape_logs`, `api_logs`, `ai_chat_messages`, `alert_events` | retention DELETE by `created_at` | delete + commit | sync | scrape_logs-api_logs |
+| reaper | `workers/reaper_tasks.py:312–326` | `scrape_jobs` | orphan UPDATE `status=failed` | update + commit | AsyncSession | scrape_jobs-metadata |
+| maintenance | `workers/maintenance_tasks.py:70` | MV | `REFRESH MATERIALIZED VIEW` | DDL | raw conn | maintenance-DDL |
+| maintenance | `workers/maintenance_tasks.py:130–135` | `fact_price` | `CREATE TABLE … PARTITION OF` | DDL | raw conn | maintenance-DDL |
+| pool_maintenance | `core/pool_maintenance.py:49–50` | `fact_listing`, `dim_product`, `fact_price`, `fact_review`, `fact_promo`, `fact_search_trend`, `scrape_logs`, `reject_data` | ANALYZE — no columns (`_ANALYZE_TABLES`, `pool_maintenance.py:21–30`) | DDL | AsyncSession | maintenance-DDL |
+
+#### 0b.3 Read contacts (in)
+
+##### 0b.3-C1 Operational reads (orchestration / auth / dedup / config)
+
+| module | file:line | table | purpose |
+|--------|-----------|-------|---------|
+| discovery | `scraper/discovery.py:367–368` | `fact_listing` | dedup `url_hash` перед pool write |
+| discovery | `scraper/discovery.py:1092–1094,1290–1295` | `fact_listing` | quota / `products_in_pool` counter |
+| scraper/tasks | `scraper/tasks.py:504–522,565` | `fact_listing`, `dim_marketplace` | scrape cohort selection |
+| scraper/service | `scraper/service.py:390,415,658,798,814` | `dim_marketplace`, `fact_listing`, `dim_product` | scrape context / backlog queries |
+| scraper/tasks | `scraper/tasks.py:342,354,413,696,708,730` | `scrape_jobs`, `dim_marketplace` | child task ownership |
+| tick_orchestrator | `scraper/pipeline/tick_orchestrator.py:112–407,506` | `scrape_jobs`, `dim_marketplace` | tick dispatch / reap / advisory lock |
+| child_aggregation | `scraper/pipeline/child_aggregation.py:32–66` | `scrape_jobs` | pipeline child rollup |
+| job_completion | `scraper/pipeline/job_completion.py:76–118` | `scrape_jobs`, `scrape_logs`, `dim_marketplace` | completion stats |
+| metadata_store | `scraper/pipeline/metadata_store.py:35` | `scrape_jobs` | load parent job |
+| cancellation | `scraper/pipeline/cancellation.py:19` | `scrape_jobs` | cancel lookup |
+| activity_pulse | `scraper/pipeline/activity_pulse.py:52,84,115` | `scrape_jobs` | heartbeat load |
+| data_firewall/rules | `data_firewall/rules.py:65,73–75` | `dim_marketplace`, `dim_country` | currency whitelist |
+| ingestion | `ingestion/service.py:56–58,85–87,325` | `dim_date`, `dim_product` | date_id + enrich read |
+| market_data/ingestion | `market_data/ingestion.py:33` | `dim_date` | exists check |
+| auth | `auth/api.py:57,76,93,118` | `users` | auth flows |
+| common/deps | `common/deps.py:70` | `users` | current user |
+| users | `users/service.py` (multiple) | `users`, `user_products` | `140–160` list: `users` — id UUID, email String(255), name String(100), company_name String(200), plan String(20), is_active/is_superuser Boolean, language String(5), timezone String(50), login_count Integer, last_login_at/created_at DateTime(tz); `user_products` — COUNT join. `198` — select User.id. `223–243` detail — same user columns + COUNT. `277,322,352,373,390` — db.get(User) full row. `285,327,357,395` — scalar User.id / is_superuser counts |
+| telegram | `telegram/api.py:113,131` | `users` | bot link / status |
+| marketplaces | `marketplaces/service.py:97,113–171,214,223,252` | `dim_marketplace`, `dim_country`, `dim_currency`, `fact_listing` | CRUD helpers |
+| marketplaces/api | `marketplaces/api.py:63–67` | `dim_country` | region lookup |
+| entitlements | `entitlements/service.py:27–34` | `user_products` | usage counter |
+| core/admin_service | `core/admin_service.py:25` | `users` | superuser bootstrap check |
+| reaper | `workers/reaper_tasks.py:140,189,252` | `scrape_jobs` | orphan scan |
+| maintenance | `workers/maintenance_tasks.py:40–47` | `scrape_jobs` | active job guard |
+| parsing_admin | `admin/parsing_admin.py` (selects) | `scrape_jobs`, `scrape_logs`, `dim_marketplace` | `88–147` overview: `dim_marketplace` (id, marketplace_code, name, domain, base_url, products_in_pool, is_active, last_scrape_status); `scrape_logs` aggregates (total_runs, success_runs, last_run, last_successful_scrape); `scrape_jobs` latest job_status. `244–248` — select ScrapeJob (full entity). `519–555` — ScrapeJob by id; `scrape_logs` (id, created_at, status, listing_id, marketplace_id, url, price_found, duration_ms, scraper_type, error_category, error_message) + dim_marketplace.domain. `658–672` — running/latest pipeline ScrapeJob. `734–737` — pipeline status ScrapeJob. `899` — max(ScrapeLog.created_at). `933–936` — stale pipeline ScrapeJob scan |
+| ai_analyst | `ai_analyst/service.py:63–68,88–94` | `ai_chat_sessions`, `ai_chat_messages` | chat history |
+
+##### 0b.3-C2 Analytical / export reads (future `data_export`)
+
+| module | file:line | table | note |
+|--------|-----------|-------|------|
+| product_pool | `product_pool/service.py:166–260,299–365` | `fact_listing`, `dim_product`, `dim_marketplace`, `fact_price`, `dim_date` | публичный product pool + sparklines → **data_export** |
+| market_data/reader | `market_data/reader.py:94–395` | `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price`, `fact_fuel_price` | dashboard/ticker → **data_export** |
+| common/currency | `common/currency.py:74–78` | `fact_currency_rate` | FX conversion → **data_export** |
+| scraper/api | `scraper/api.py:77–83,172–188` | `scrape_logs`, `fact_listing` | admin diagnostics → **data_export** |
+| core/api_admin | `core/api_admin.py:24–29` | `users`, `dim_marketplace`, `dim_product`, `fact_listing` | admin aggregate counts → **data_export** |
+| market_data/facade | `market_data/facade.py:37` | `users` | preferences read path (operational UI; preferences JSONB) |
+
+#### 0b.4 Connection surface
+
+| factory | defined | used by | commit owner |
+|---------|---------|---------|--------------|
+| `sync_session_factory` | `database.py:22–27` | `discovery._write_pool_dtos_sync:160`; `tasks._run_scrape_all_pool:494`; `tasks._persist_technical_error_log:133`; `activity_pulse:50,82`; `market_data_tasks:49,67`; `cleanup_tasks:22`; `maintenance_tasks:39`; `scraper/api.py:234` | каждый caller (`commit`/`rollback`/`close` локально) |
+| `async_session_maker` | `database.py:90–96` | `get_db`; `main._ensure_superuser:85`; Celery `_make_session_factory` per task | `get_db` auto-commit (`database.py:105`); Celery owners — явный `commit` |
+| `_make_session_factory` | `scraper/tasks.py:90–99`; `workers/reaper_tasks.py:59–74` | `discover_one_marketplace`, `scrape_one_marketplace`, `orchestrator_tick`, reaper | тело задачи |
+| `get_db` | `database.py:100–108` | FastAPI `DbSession` dependency | dependency: commit on success / rollback on error |
+| `sync_engine` / raw connection | `database.py:16–20`; `maintenance_tasks.py:65–74` | MV refresh, partitions, DB diagnostics | autocommit или `conn.commit()` |
+
+**Dual-session scrape pattern:** async owner (`discover_one_marketplace` / `scrape_one_marketplace` на AsyncSession) off-load'ит pool writes в `await asyncio.to_thread(_run_scrape_all_pool, …)` (`tasks.py:762–768`), внутри которого открывается **отдельный** `sync_session_factory()` (`tasks.py:494`). Gate writes discovery pool — тот же паттерн (`discovery.py:406–409` → `_write_pool_dtos_sync:160`).
+
+#### 0b.5 Legend
+
+| Метка | Значение |
+|-------|----------|
+| **A** | Compliant: запись через `evaluate_ecommerce` / `evaluate_market` → `write_sync` |
+| **B** | MUST migrate: bypass — шов LAYER 2; закрыть → убрать прямой контакт |
+| **C1** | Operational read: оркестрация, auth, dedup; гейт read пока не требуется |
+| **C2** | Analytical/export read: будущий контур `data_export` |
+| **persist** | Тупой исполнитель: только verify HMAC + verbatim INSERT/REPLACE; без бизнес-логики |
+
+**Порядок LAYER 2 (seam-clusters):** `dim_marketplace-cursors` → `scrape_jobs-metadata` → `scrape-fact_listing-denorm` → `scrape_logs-api_logs` → `dim_date-upsert` → `reject-path` (audit durability) → `users-auth` → `admin-pool-reset` → `market_data` (api_logs) → `maintenance-DDL`.
+
+---
+
 ## 8. Workers
 
 - **Beat:** `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape cron **выключен** — только manual API.  

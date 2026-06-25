@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 from pathlib import Path
@@ -26,6 +27,22 @@ from app.modules.scraper.service import GlobalScrapeService
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_028 = BACKEND_ROOT / "alembic/versions/028_add_fact_listing_page_role.py"
+
+
+def _patch_pool_write(monkeypatch) -> dict:
+    """Capture pool DTO batches handed to asyncio.to_thread (gate write bridge)."""
+    state: dict = {"batches": [], "calls": 0}
+
+    async def fake_to_thread(func, dtos):
+        state["calls"] += 1
+        state["batches"].append(list(dtos))
+        assert func is disc._write_pool_dtos_sync
+        return disc.PoolWriteResult(inserted=len(dtos), rejected=0)
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    return state
+
+
 _EXECUTE_STRING_RE = re.compile(
     r'op\.execute\(\s*(?:r?"""(.*?)"""|r?\'\'\'(.*?)\'\'\'|"([^"]*)"|\'([^\']*)\')',
     re.DOTALL,
@@ -175,7 +192,7 @@ async def test_discovery_no_trust_sample_blind_accept(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_product_urls_sets_page_role() -> None:
+async def test_save_product_urls_sets_page_role(monkeypatch) -> None:
     mp_id = uuid4()
     db = AsyncMock()
     existing = MagicMock()
@@ -183,15 +200,14 @@ async def test_save_product_urls_sets_page_role() -> None:
     db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
     db.commit = AsyncMock()
+    pool_state = _patch_pool_write(monkeypatch)
 
     crawler = disc.DiscoveryCrawler(db, MagicMock())
     await crawler._save_product_urls(mp_id, ["https://shop.example/p/abc-12345"])
 
-    listing_adds = [
-        call.args[0] for call in db.add.call_args_list if isinstance(call.args[0], FactListing)
-    ]
-    assert len(listing_adds) == 1
-    assert listing_adds[0].page_role == "product"
+    assert pool_state["calls"] == 1
+    assert len(pool_state["batches"][0]) == 1
+    assert pool_state["batches"][0][0].fact_listing["page_role"] == "product"
 
 
 def test_scrape_prunes_nonproduct() -> None:

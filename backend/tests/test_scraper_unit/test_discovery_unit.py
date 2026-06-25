@@ -12,6 +12,22 @@ import app.modules.scraper.discovery as disc
 from app.models.dimensions import DimMarketplace
 
 
+def _patch_pool_write(monkeypatch, *, slow_seconds: float | None = None) -> dict:
+    """Capture pool DTO batches handed to asyncio.to_thread (gate write bridge)."""
+    state: dict = {"batches": [], "calls": 0}
+
+    async def fake_to_thread(func, dtos):
+        state["calls"] += 1
+        if slow_seconds:
+            await asyncio.sleep(slow_seconds)
+        state["batches"].append(list(dtos))
+        assert func is disc._write_pool_dtos_sync
+        return disc.PoolWriteResult(inserted=len(dtos), rejected=0)
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    return state
+
+
 def test_title_from_url_and_normalize():
     assert "my product name" in disc._title_from_url("https://shop.example/path/my-product-name")
     assert disc._normalize_name("  Hello   World  ") == "hello world"
@@ -32,10 +48,8 @@ def test_discovery_result_dataclass():
 
 
 @pytest.mark.asyncio
-async def test_save_product_urls_creates_new_rows():
-    """_save_product_urls persists new URLs when url_hash is not present."""
-    from unittest.mock import AsyncMock, MagicMock
-
+async def test_save_product_urls_creates_new_rows(monkeypatch):
+    """_save_product_urls hands new URLs to the gated pool write bridge."""
     mp_id = uuid4()
     db = AsyncMock()
     existing = MagicMock()
@@ -43,6 +57,7 @@ async def test_save_product_urls_creates_new_rows():
     db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
     db.commit = AsyncMock()
+    pool_state = _patch_pool_write(monkeypatch)
 
     crawler = disc.DiscoveryCrawler(db, MagicMock())
     new_count, next_offset, exhausted = await crawler._save_product_urls(
@@ -55,13 +70,14 @@ async def test_save_product_urls_creates_new_rows():
     assert new_count == 2
     assert next_offset == 2
     assert exhausted is False
-    assert db.add.call_count >= 2
+    assert pool_state["calls"] == 1
+    assert len(pool_state["batches"][0]) == 2
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_save_product_urls_skips_duplicate_hash():
-    from unittest.mock import AsyncMock, MagicMock
-
+async def test_save_product_urls_skips_duplicate_hash(monkeypatch):
     mp_id = uuid4()
     url = "https://shop.example/p/exists"
     url_hash = disc.FactListing.compute_url_hash(url)
@@ -71,12 +87,14 @@ async def test_save_product_urls_skips_duplicate_hash():
     db.execute = AsyncMock(return_value=existing)
     db.add = MagicMock()
     db.commit = AsyncMock()
+    pool_state = _patch_pool_write(monkeypatch)
 
     crawler = disc.DiscoveryCrawler(db, MagicMock())
     new_count, next_offset, exhausted = await crawler._save_product_urls(mp_id, [url])
     assert new_count == 0
     assert next_offset == 1
     assert exhausted is False
+    assert pool_state["calls"] == 0
     db.add.assert_not_called()
 
 
@@ -187,14 +205,10 @@ class TestResumableSitemap:
     """Cooperative deadline + resumable sitemap offset behavior."""
 
     @pytest.mark.asyncio
-    async def test_save_product_urls_respects_deadline(self):
+    async def test_save_product_urls_respects_deadline(self, monkeypatch):
         mp_id = uuid4()
         db = _make_mock_db_for_save()
-
-        async def slow_commit():
-            await asyncio.sleep(0.3)
-
-        db.commit = AsyncMock(side_effect=slow_commit)
+        pool_state = _patch_pool_write(monkeypatch, slow_seconds=0.3)
         urls = [f"https://shop.example/p/item-{i}" for i in range(1500)]
 
         crawler = disc.DiscoveryCrawler(db, MagicMock())
@@ -204,20 +218,20 @@ class TestResumableSitemap:
         )
 
         # Deadline is checked once per batch (SAVE_PRODUCT_URLS_BATCH_SIZE
-        # URLs == 500), AFTER each commit. With a 0.5s budget and 0.3s/commit,
-        # two batches commit (t=0.3 < 0.5 → continue; t=0.6 >= 0.5 → stop), so
-        # the resume offset lands at 2 batches. Pinning the per-batch cadence
-        # here would catch a regression that moved the deadline check to
-        # per-URL — production timing is correct as-is.
+        # URLs == 500), AFTER each gated batch write. With a 0.5s budget and
+        # 0.3s/batch, two batches commit (t=0.3 < 0.5 → continue; t=0.6 >= 0.5
+        # → stop), so the resume offset lands at 2 batches.
         assert exhausted is True
         assert next_offset == 2 * disc.SAVE_PRODUCT_URLS_BATCH_SIZE
         assert new_count == 2 * disc.SAVE_PRODUCT_URLS_BATCH_SIZE
-        assert db.commit.await_count >= 2
+        assert pool_state["calls"] >= 2
+        db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_save_product_urls_resumes_from_offset(self):
+    async def test_save_product_urls_resumes_from_offset(self, monkeypatch):
         mp_id = uuid4()
         db = _make_mock_db_for_save()
+        pool_state = _patch_pool_write(monkeypatch)
         urls = [f"https://shop.example/p/item-{i}" for i in range(1000)]
 
         crawler = disc.DiscoveryCrawler(db, MagicMock())
@@ -228,11 +242,7 @@ class TestResumableSitemap:
         assert new_count == 500
         assert next_offset == 1000
         assert exhausted is False
-        product_adds = [
-            call for call in db.add.call_args_list
-            if isinstance(call.args[0], disc.DimProduct)
-        ]
-        assert len(product_adds) == 500
+        assert sum(len(batch) for batch in pool_state["batches"]) == 500
 
     @pytest.mark.asyncio
     async def test_discover_persists_sitemap_resume_offset_on_partial(self):

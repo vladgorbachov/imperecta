@@ -13,10 +13,12 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.models.dimensions import DimProduct
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
     FactCurrencyRate,
+    FactListing,
     FactPrice,
 )
 from app.modules.data_firewall.reject_store import write_reject_data
@@ -60,10 +62,20 @@ def _orm_fields_for_table(table: str, fields: dict[str, Any]) -> dict[str, Any]:
         out["listing_id"] = _parse_uuid(out["listing_id"])
     if "scrape_job_id" in out:
         out["scrape_job_id"] = _parse_uuid(out["scrape_job_id"])
+    if "product_id" in out:
+        out["product_id"] = _parse_uuid(out["product_id"])
+    if "marketplace_id" in out:
+        out["marketplace_id"] = _parse_uuid(out["marketplace_id"])
+    if "id" in out:
+        out["id"] = _parse_uuid(out["id"])
     if "scraped_at" in out:
         out["scraped_at"] = _parse_datetime(out["scraped_at"])
     if "fetched_at" in out:
         out["fetched_at"] = _parse_datetime(out["fetched_at"])
+    if "created_at" in out:
+        out["created_at"] = _parse_datetime(out["created_at"])
+    if "updated_at" in out:
+        out["updated_at"] = _parse_datetime(out["updated_at"])
     return out
 
 
@@ -153,6 +165,14 @@ def write_sync(
             ),
         )
         db.add(FactPrice(**orm_fields))
+        return True
+
+    if table == "dim_product":
+        db.add(DimProduct(**orm_fields))
+        return True
+
+    if table == "fact_listing":
+        db.add(FactListing(**orm_fields))
         return True
 
     date_id = orm_fields["date_id"]
@@ -291,4 +311,40 @@ def build_fact_price_fields(
         "price_change_pct": price_change_pct,
         "scraped_at": scraped_at,
         "scrape_job_id": scrape_job_id,
+    }
+
+
+def build_dim_product_fields(
+    *,
+    product_id: UUID,
+    name: str,
+    name_normalized: str,
+    is_active: bool = True,
+) -> dict[str, Any]:
+    """Assemble the exact dim_product columns that the firewall signs."""
+    return {
+        "id": product_id,
+        "name": name,
+        "name_normalized": name_normalized,
+        "is_active": is_active,
+    }
+
+
+def build_fact_listing_fields(
+    *,
+    product_id: UUID,
+    marketplace_id: UUID,
+    external_url: str,
+    url_hash: str,
+    is_active: bool = True,
+    page_role: str = "product",
+) -> dict[str, Any]:
+    """Assemble the exact fact_listing columns that the firewall signs."""
+    return {
+        "product_id": product_id,
+        "marketplace_id": marketplace_id,
+        "external_url": external_url,
+        "url_hash": url_hash,
+        "is_active": is_active,
+        "page_role": page_role,
     }
