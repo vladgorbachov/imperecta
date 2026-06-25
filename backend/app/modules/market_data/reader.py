@@ -22,7 +22,7 @@ from app.models.facts import (
     FactFuelPrice,
 )
 from app.config import Settings
-from app.modules.market_data.forex_pairs import derive_forex_pairs, expand_forex_favorites_with_inverses
+from app.modules.market_data.forex_pairs import derive_forex_pairs
 
 
 class MarketDataService:
@@ -177,9 +177,7 @@ class MarketDataService:
         commodity_favorites: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build ticker from latest forex + crypto + commodities."""
-        forex_set = expand_forex_favorites_with_inverses(
-            {value.strip().upper() for value in (forex_favorites or []) if value}
-        )
+        forex_set = {value.strip().upper() for value in (forex_favorites or []) if value}
         crypto_set = {value.strip().upper() for value in (crypto_favorites or []) if value}
         commodity_set = {value.strip().upper() for value in (commodity_favorites or []) if value}
 

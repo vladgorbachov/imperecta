@@ -1,4 +1,4 @@
-"""DB-path ticker assembly tests for MarketDataService.get_ticker (TICKER-FIX-A)."""
+"""DB-path ticker assembly tests for MarketDataService.get_ticker."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -61,18 +61,61 @@ def market_data_service(monkeypatch: pytest.MonkeyPatch) -> MarketDataService:
 
 
 @pytest.mark.asyncio
-async def test_get_ticker_auto_inverse_from_single_favorite(
+async def test_get_ticker_single_favorite_no_auto_inverse(
     market_data_service: MarketDataService,
 ) -> None:
-    """Stored EUR/USD yields both EUR/USD and USD/EUR rows from derive_forex_pairs."""
+    """Saved EUR/TRY only — TRY/EUR must not appear unless explicitly saved."""
     items = await market_data_service.get_ticker(
         "DE",
-        forex_favorites=["EUR/USD"],
+        forex_favorites=["EUR/TRY"],
         crypto_favorites=[],
         commodity_favorites=[],
     )
     forex_symbols = {row["symbol"] for row in items if row["type"] == "forex"}
-    assert forex_symbols == {"EUR/USD", "USD/EUR"}
+    assert forex_symbols == {"EUR/TRY"}
+    assert "TRY/EUR" not in forex_symbols
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_both_directions_only_when_both_saved(
+    market_data_service: MarketDataService,
+) -> None:
+    """EUR/MDL and MDL/EUR both saved — both appear; no extra pairs."""
+    items = await market_data_service.get_ticker(
+        "DE",
+        forex_favorites=["EUR/MDL", "MDL/EUR"],
+        crypto_favorites=[],
+        commodity_favorites=[],
+    )
+    forex_symbols = {row["symbol"] for row in items if row["type"] == "forex"}
+    assert forex_symbols == {"EUR/MDL", "MDL/EUR"}
+
+
+@pytest.mark.asyncio
+async def test_get_ticker_saved_subset_matches_exactly(
+    market_data_service: MarketDataService,
+) -> None:
+    """Seven prod-like favorites yield seven forex rows — no auto-added inverses."""
+    saved = [
+        "EUR/MDL",
+        "EUR/RON",
+        "EUR/TRY",
+        "EUR/USD",
+        "MDL/EUR",
+        "USD/EUR",
+        "USD/MDL",
+    ]
+    items = await market_data_service.get_ticker(
+        "DE",
+        forex_favorites=saved,
+        crypto_favorites=[],
+        commodity_favorites=[],
+    )
+    forex_symbols = {row["symbol"] for row in items if row["type"] == "forex"}
+    assert forex_symbols == set(saved)
+    assert "TRY/EUR" not in forex_symbols
+    assert "RON/EUR" not in forex_symbols
+    assert "MDL/USD" not in forex_symbols
 
 
 @pytest.mark.asyncio
