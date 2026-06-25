@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import delete
+from sqlalchemy import and_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,7 @@ from app.models.facts import (
     FactListing,
     FactPrice,
 )
-from app.modules.data_firewall.contracts import extract_locator
+from app.modules.data_firewall.contracts import TABLE_LOCATORS, extract_locator
 from app.modules.data_firewall.reject_store import write_reject_data
 from app.modules.data_firewall.signing import SignedRecord, verify
 from app.observability.sentry_init import capture_exception_if_initialized
@@ -30,12 +30,21 @@ logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
-    "fact_price": frozenset({"insert"}),
-    "dim_product": frozenset({"insert"}),
-    "fact_listing": frozenset({"insert"}),
-    "fact_currency_rate": frozenset({"insert"}),
-    "fact_crypto_price": frozenset({"insert"}),
-    "fact_commodity_price": frozenset({"insert"}),
+    "dim_product": frozenset({"insert", "update", "delete"}),
+    "fact_listing": frozenset({"insert", "update", "delete"}),
+    "fact_price": frozenset({"insert", "delete"}),
+    "fact_currency_rate": frozenset({"insert", "delete"}),
+    "fact_crypto_price": frozenset({"insert", "delete"}),
+    "fact_commodity_price": frozenset({"insert", "delete"}),
+}
+
+_TABLE_MODELS: dict[str, type] = {
+    "dim_product": DimProduct,
+    "fact_listing": FactListing,
+    "fact_price": FactPrice,
+    "fact_currency_rate": FactCurrencyRate,
+    "fact_crypto_price": FactCryptoPrice,
+    "fact_commodity_price": FactCommodityPrice,
 }
 
 
@@ -64,6 +73,18 @@ def _verify_signed_record(signed: SignedRecord) -> str | None:
     if supported is None or signed.operation not in supported:
         return "unsupported_operation"
     return None
+
+
+@dataclass(frozen=True)
+class PersistResult:
+    """Outcome of a persist write; bool-compatible for insert callers."""
+
+    ok: bool
+    rows_affected: int | None = None
+    no_target: bool = False
+
+    def __bool__(self) -> bool:
+        return self.ok
 
 
 @dataclass(frozen=True)
@@ -125,7 +146,7 @@ def _reject_persist(
     reject_reason: str,
     signature_present: bool,
     operation: str = "insert",
-) -> bool:
+) -> PersistResult:
     slog.error(
         "data_firewall_flag_missing",
         table=table,
@@ -161,7 +182,90 @@ def _reject_persist(
         signature_present=signature_present,
         operation=operation,
     )
-    return False
+    return PersistResult(ok=False)
+
+
+def _model_for_table(table: str) -> type:
+    model = _TABLE_MODELS.get(table)
+    if model is None:
+        raise ValueError(f"unsupported persist table: {table}")
+    return model
+
+
+def _orm_locator(table: str, locator: dict[str, Any]) -> dict[str, Any]:
+    return _orm_fields_for_table(table, locator)
+
+
+def _locator_where(model: type, table: str, orm_locator: dict[str, Any]):
+    locator_keys = TABLE_LOCATORS[table]
+    clauses = [getattr(model, key) == orm_locator[key] for key in locator_keys]
+    if len(clauses) == 1:
+        return clauses[0]
+    return and_(*clauses)
+
+
+def _value_fields_minus_locator(table: str, orm_fields: dict[str, Any]) -> dict[str, Any]:
+    locator_keys = set(TABLE_LOCATORS[table])
+    return {key: value for key, value in orm_fields.items() if key not in locator_keys}
+
+
+def _persist_result_from_rowcount(rowcount: int) -> PersistResult:
+    return PersistResult(
+        ok=True,
+        rows_affected=rowcount,
+        no_target=rowcount == 0,
+    )
+
+
+def _write_sync_update(
+    db: Session,
+    signed: SignedRecord,
+    *,
+    ctx: PersistContext,
+) -> PersistResult:
+    table = signed.table
+    model = _model_for_table(table)
+    orm_fields = _orm_fields_for_table(table, signed.fields)
+    value_fields = _value_fields_minus_locator(table, orm_fields)
+    if not value_fields:
+        return _reject_persist(
+            db,
+            ctx=ctx,
+            table=table,
+            fields=signed.fields,
+            reject_reason="nothing_to_update",
+            signature_present=bool(signed.signature),
+            operation=signed.operation,
+        )
+    orm_locator = _orm_locator(table, signed.locator)
+    result = db.execute(
+        update(model)
+        .where(_locator_where(model, table, orm_locator))
+        .values(**value_fields),
+    )
+    return _persist_result_from_rowcount(result.rowcount)
+
+
+def _write_sync_delete(
+    db: Session,
+    signed: SignedRecord,
+) -> PersistResult:
+    table = signed.table
+    model = _model_for_table(table)
+    orm_locator = _orm_locator(table, signed.locator)
+    result = db.execute(delete(model).where(_locator_where(model, table, orm_locator)))
+    return _persist_result_from_rowcount(result.rowcount)
+
+
+async def _write_async_delete(
+    db: AsyncSession,
+    signed: SignedRecord,
+) -> PersistResult:
+    table = signed.table
+    model = _model_for_table(table)
+    orm_locator = _orm_locator(table, signed.locator)
+    result = await db.execute(delete(model).where(_locator_where(model, table, orm_locator)))
+    return _persist_result_from_rowcount(result.rowcount)
 
 
 def write_sync(
@@ -169,7 +273,7 @@ def write_sync(
     signed: SignedRecord | None,
     *,
     ctx: PersistContext,
-) -> bool:
+) -> PersistResult:
     """Verify signature and write verbatim to the target fact table (sync Session)."""
     if signed is None:
         return _reject_persist(
@@ -194,6 +298,12 @@ def write_sync(
             operation=signed.operation,
         )
 
+    operation = signed.operation
+    if operation == "update":
+        return _write_sync_update(db, signed, ctx=ctx)
+    if operation == "delete":
+        return _write_sync_delete(db, signed)
+
     orm_fields = _orm_fields_for_table(signed.table, signed.fields)
     table = signed.table
 
@@ -207,15 +317,15 @@ def write_sync(
             ),
         )
         db.add(FactPrice(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     if table == "dim_product":
         db.add(DimProduct(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     if table == "fact_listing":
         db.add(FactListing(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     date_id = orm_fields["date_id"]
 
@@ -228,7 +338,7 @@ def write_sync(
             ),
         )
         db.add(FactCurrencyRate(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     if table == "fact_crypto_price":
         db.execute(
@@ -239,7 +349,7 @@ def write_sync(
             ),
         )
         db.add(FactCryptoPrice(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     if table == "fact_commodity_price":
         db.execute(
@@ -250,7 +360,7 @@ def write_sync(
             ),
         )
         db.add(FactCommodityPrice(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     raise ValueError(f"unsupported sync persist table: {table}")
 
@@ -260,7 +370,7 @@ async def write_async(
     signed: SignedRecord | None,
     *,
     ctx: PersistContext,
-) -> bool:
+) -> PersistResult:
     """Verify signature and write verbatim (async Session)."""
     if signed is None:
         write_reject_data(
@@ -275,7 +385,7 @@ async def write_async(
             signature_present=False,
             operation="insert",
         )
-        return False
+        return PersistResult(ok=False)
 
     reject_reason = _verify_signed_record(signed)
     if reject_reason is not None:
@@ -291,7 +401,10 @@ async def write_async(
             signature_present=bool(signed.signature),
             operation=signed.operation,
         )
-        return False
+        return PersistResult(ok=False)
+
+    if signed.operation == "delete":
+        return await _write_async_delete(db, signed)
 
     orm_fields = _orm_fields_for_table(signed.table, signed.fields)
     table = signed.table
@@ -306,7 +419,7 @@ async def write_async(
             ),
         )
         db.add(FactCurrencyRate(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     if table == "fact_crypto_price":
         await db.execute(
@@ -317,7 +430,7 @@ async def write_async(
             ),
         )
         db.add(FactCryptoPrice(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     if table == "fact_commodity_price":
         await db.execute(
@@ -328,7 +441,7 @@ async def write_async(
             ),
         )
         db.add(FactCommodityPrice(**orm_fields))
-        return True
+        return PersistResult(ok=True, rows_affected=1)
 
     raise ValueError(f"unsupported async persist table: {table}")
 

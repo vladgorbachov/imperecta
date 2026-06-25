@@ -15,7 +15,7 @@ from app.modules.data_firewall.contracts import (
     ColumnContract,
     extract_locator,
 )
-from app.modules.data_firewall.reject_store import write_reject_data
+from app.modules.data_firewall.reject_store import write_reject_data_isolated
 from app.modules.data_firewall.rules import (
     SKIP_CURRENCY_COUNTRY_MISMATCH,
     SKIP_CURRENCY_RAW_TOO_LONG,
@@ -277,8 +277,7 @@ def evaluate_ecommerce(
 
     if not passed and db is not None:
         payload = persist_fields if persist_fields is not None else _extract_snapshot(record)
-        write_reject_data(
-            db,
+        write_reject_data_isolated(
             source=reject_source,
             table_target=table,
             reject_reason=reject_reason or "data_firewall_reject",
@@ -337,8 +336,7 @@ def evaluate_market(
             failed_rules = ["signing_secret_missing"]
 
     if not passed and db is not None:
-        write_reject_data(
-            db,
+        write_reject_data_isolated(
             source=reject_source,
             table_target=table,
             reject_reason=reject_reason or "data_firewall_reject",

@@ -78,6 +78,33 @@ def record_reject_spike_signal(
             capture_exception_if_initialized(exc)
 
 
+def _reject_data_row(
+    *,
+    source: str,
+    table_target: str,
+    reject_reason: str,
+    raw_payload: dict[str, Any],
+    rejected_by: str,
+    failed_rules: list[str] | None = None,
+    marketplace_id: UUID | None = None,
+    listing_id: UUID | None = None,
+    signature_present: bool = False,
+    operation: str = "insert",
+) -> RejectData:
+    return RejectData(
+        source=source,
+        table_target=table_target,
+        operation=operation,
+        marketplace_id=marketplace_id,
+        listing_id=listing_id,
+        reject_reason=reject_reason,
+        failed_rules=failed_rules,
+        raw_payload=raw_payload,
+        signature_present=signature_present,
+        rejected_by=rejected_by,
+    )
+
+
 def write_reject_data(
     db: Session,
     *,
@@ -92,7 +119,7 @@ def write_reject_data(
     signature_present: bool = False,
     operation: str = "insert",
 ) -> None:
-    """Insert reject_data row; failures are logged and never crash the pipeline."""
+    """Insert reject_data row on caller session (flush only); failures are logged."""
     record_reject_spike_signal(
         source=source,
         reject_reason=reject_reason,
@@ -100,17 +127,17 @@ def write_reject_data(
     )
     try:
         db.add(
-            RejectData(
+            _reject_data_row(
                 source=source,
                 table_target=table_target,
-                operation=operation,
+                reject_reason=reject_reason,
+                raw_payload=raw_payload,
+                rejected_by=rejected_by,
+                failed_rules=failed_rules,
                 marketplace_id=marketplace_id,
                 listing_id=listing_id,
-                reject_reason=reject_reason,
-                failed_rules=failed_rules,
-                raw_payload=raw_payload,
                 signature_present=signature_present,
-                rejected_by=rejected_by,
+                operation=operation,
             ),
         )
         db.flush()
@@ -121,3 +148,52 @@ def write_reject_data(
             table_target,
             reject_reason,
         )
+
+
+def write_reject_data_isolated(
+    *,
+    source: str,
+    table_target: str,
+    reject_reason: str,
+    raw_payload: dict[str, Any],
+    rejected_by: str,
+    failed_rules: list[str] | None = None,
+    marketplace_id: UUID | None = None,
+    listing_id: UUID | None = None,
+    signature_present: bool = False,
+    operation: str = "insert",
+) -> None:
+    """Insert reject_data on an independent session that commits regardless of caller txn."""
+    from app.database import sync_session_factory
+
+    record_reject_spike_signal(
+        source=source,
+        reject_reason=reject_reason,
+        rejected_by=rejected_by,
+    )
+    db = sync_session_factory()
+    try:
+        db.add(
+            _reject_data_row(
+                source=source,
+                table_target=table_target,
+                reject_reason=reject_reason,
+                raw_payload=raw_payload,
+                rejected_by=rejected_by,
+                failed_rules=failed_rules,
+                marketplace_id=marketplace_id,
+                listing_id=listing_id,
+                signature_present=signature_present,
+                operation=operation,
+            ),
+        )
+        db.commit()
+    except Exception:
+        logger.exception(
+            "reject_data_isolated_write_failed source=%s table=%s reason=%s",
+            source,
+            table_target,
+            reject_reason,
+        )
+    finally:
+        db.close()
