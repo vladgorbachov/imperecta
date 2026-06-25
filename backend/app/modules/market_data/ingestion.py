@@ -8,23 +8,22 @@ from typing import Any
 import calendar
 import structlog
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models.app_tables import ApiLog
 from app.models.dimensions import DimDate
-from app.models.facts import FactCommodityPrice, FactCryptoPrice, FactCurrencyRate
 from app.modules.data_firewall.firewall import evaluate_market
-from app.modules.persist.writer import PersistContext, write_async
+from app.modules.persist.writer import PersistContext, write_sync
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 
-async def _ensure_dim_date(db: AsyncSession, d: date) -> int:
+def _ensure_dim_date(db: Session, d: date) -> int:
     """Return dim_date.date_id for calendar day, inserting a row if missing."""
     date_id = int(d.strftime("%Y%m%d"))
-    exists = await db.scalar(select(DimDate.date_id).where(DimDate.date_id == date_id))
+    exists = db.scalar(select(DimDate.date_id).where(DimDate.date_id == date_id))
     if exists is not None:
         return date_id
     iso_year, iso_week, iso_weekday = d.isocalendar()
@@ -43,12 +42,12 @@ async def _ensure_dim_date(db: AsyncSession, d: date) -> int:
         is_last_day_of_month=d.day == calendar.monthrange(d.year, d.month)[1],
     )
     db.add(row)
-    await db.flush()
+    db.flush()
     return date_id
 
 
-async def _log_ingestion(
-    db: AsyncSession,
+def _log_ingestion(
+    db: Session,
     *,
     endpoint: str,
     status: str,
@@ -63,6 +62,18 @@ async def _log_ingestion(
             error_message=error_message,
         )
     )
+
+
+def _log_ingestion_error(db: Session, *, endpoint: str, exc: Exception) -> None:
+    """Record ingest failure after rollback so a poisoned transaction still logs."""
+    db.rollback()
+    _log_ingestion(
+        db,
+        endpoint=endpoint,
+        status="error",
+        error_message=str(exc)[:2000],
+    )
+    db.commit()
 
 
 @dataclass
@@ -106,18 +117,17 @@ class CommodityIngestItem:
 class IngestionService:
     """Write forex / crypto / commodity snapshots to star schema facts."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
-    async def persist_forex(self, items: list[ForexIngestItem]) -> int:
+    def persist_forex(self, items: list[ForexIngestItem]) -> int:
         """Insert forex rates for today (replaces same key rows)."""
         if not items:
             return 0
         today = datetime.now(timezone.utc).date()
-        today_id = await _ensure_dim_date(self.db, today)
+        today_id = _ensure_dim_date(self.db, today)
         now = datetime.now(timezone.utc)
         n = 0
-        sync_db = self.db.sync_session
         for item in items:
             fields = {
                 "date_id": today_id,
@@ -130,31 +140,30 @@ class IngestionService:
             outcome = evaluate_market(
                 fields,
                 table="fact_currency_rate",
-                db=sync_db,
+                db=self.db,
                 reject_source="market_forex",
             )
             if not outcome.passed or outcome.signed_record is None:
                 continue
-            wrote = await write_async(
+            wrote = write_sync(
                 self.db,
                 outcome.signed_record,
                 ctx=PersistContext(source="market_forex", date_id=today_id),
             )
             if wrote:
                 n += 1
-        await _log_ingestion(self.db, endpoint="forex", status="success")
-        await self.db.commit()
+        _log_ingestion(self.db, endpoint="forex", status="success")
+        self.db.commit()
         return n
 
-    async def persist_crypto(self, items: list[CryptoIngestItem]) -> int:
+    def persist_crypto(self, items: list[CryptoIngestItem]) -> int:
         """Insert crypto rows for today."""
         if not items:
             return 0
         today = datetime.now(timezone.utc).date()
-        today_id = await _ensure_dim_date(self.db, today)
+        today_id = _ensure_dim_date(self.db, today)
         now = datetime.now(timezone.utc)
         n = 0
-        sync_db = self.db.sync_session
         for item in items:
             fields = {
                 "date_id": today_id,
@@ -171,32 +180,31 @@ class IngestionService:
             outcome = evaluate_market(
                 fields,
                 table="fact_crypto_price",
-                db=sync_db,
+                db=self.db,
                 reject_source="market_crypto",
             )
             if not outcome.passed or outcome.signed_record is None:
                 continue
-            wrote = await write_async(
+            wrote = write_sync(
                 self.db,
                 outcome.signed_record,
                 ctx=PersistContext(source="market_crypto", date_id=today_id),
             )
             if wrote:
                 n += 1
-        await self.db.commit()
-        await _log_ingestion(self.db, endpoint="crypto", status="success")
-        await self.db.commit()
+        self.db.commit()
+        _log_ingestion(self.db, endpoint="crypto", status="success")
+        self.db.commit()
         return n
 
-    async def persist_commodities(self, items: list[CommodityIngestItem]) -> int:
+    def persist_commodities(self, items: list[CommodityIngestItem]) -> int:
         """Insert commodity rows for today."""
         if not items:
             return 0
         today = datetime.now(timezone.utc).date()
-        today_id = await _ensure_dim_date(self.db, today)
+        today_id = _ensure_dim_date(self.db, today)
         now = datetime.now(timezone.utc)
         n = 0
-        sync_db = self.db.sync_session
         for item in items:
             fields = {
                 "date_id": today_id,
@@ -213,20 +221,20 @@ class IngestionService:
             outcome = evaluate_market(
                 fields,
                 table="fact_commodity_price",
-                db=sync_db,
+                db=self.db,
                 reject_source="market_commodities",
             )
             if not outcome.passed or outcome.signed_record is None:
                 continue
-            wrote = await write_async(
+            wrote = write_sync(
                 self.db,
                 outcome.signed_record,
                 ctx=PersistContext(source="market_commodities", date_id=today_id),
             )
             if wrote:
                 n += 1
-        await _log_ingestion(self.db, endpoint="commodities", status="success")
-        await self.db.commit()
+        _log_ingestion(self.db, endpoint="commodities", status="success")
+        self.db.commit()
         return n
 
     async def ingest_all(self, include_commodities: bool = False) -> dict[str, Any]:
@@ -275,11 +283,10 @@ class IngestionService:
                             source="custom",
                         ),
                     )
-                out["forex"] = await self.persist_forex(items)
+                out["forex"] = self.persist_forex(items)
         except Exception as exc:
             logger.exception("ingest forex: %s", exc)
-            await _log_ingestion(self.db, endpoint="forex", status="error", error_message=str(exc)[:2000])
-            await self.db.commit()
+            _log_ingestion_error(self.db, endpoint="forex", exc=exc)
 
         try:
             raw_c, _ = await fetch_crypto_prices()
@@ -297,11 +304,10 @@ class IngestionService:
                     )
                     for index, c in enumerate(raw_c)
                 ]
-                out["crypto"] = await self.persist_crypto(crypto_items)
+                out["crypto"] = self.persist_crypto(crypto_items)
         except Exception as exc:
             logger.exception("ingest crypto: %s", exc)
-            await _log_ingestion(self.db, endpoint="crypto", status="error", error_message=str(exc)[:2000])
-            await self.db.commit()
+            _log_ingestion_error(self.db, endpoint="crypto", exc=exc)
 
         if include_commodities:
             try:
@@ -324,16 +330,10 @@ class IngestionService:
                             change_24h_pct=float(ch) if ch is not None else None,
                         ),
                     )
-                out["commodities"] = await self.persist_commodities(comm_items)
+                out["commodities"] = self.persist_commodities(comm_items)
             except Exception as exc:
                 logger.exception("ingest commodities: %s", exc)
-                await _log_ingestion(
-                    self.db,
-                    endpoint="commodities",
-                    status="error",
-                    error_message=str(exc)[:2000],
-                )
-                await self.db.commit()
+                _log_ingestion_error(self.db, endpoint="commodities", exc=exc)
 
         return out
 
@@ -363,9 +363,8 @@ class IngestionService:
                         change_24h_pct=float(ch) if ch is not None else None,
                     ),
                 )
-            return await self.persist_commodities(comm_items)
+            return self.persist_commodities(comm_items)
         except Exception as exc:
             logger.exception("ingest_commodities_only: %s", exc)
-            await _log_ingestion(self.db, endpoint="commodities", status="error", error_message=str(exc)[:2000])
-            await self.db.commit()
+            _log_ingestion_error(self.db, endpoint="commodities", exc=exc)
             return 0

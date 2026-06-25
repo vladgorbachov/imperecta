@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -285,30 +285,30 @@ async def test_ingestion_persists_all_three_streams(monkeypatch: pytest.MonkeyPa
         ),
     )
 
-    fake_db = SimpleNamespace(commit=AsyncMock())
+    fake_db = SimpleNamespace(commit=MagicMock())
     service = IngestionService(fake_db)
-    persist_forex = AsyncMock(return_value=2)
-    persist_crypto = AsyncMock(return_value=1)
-    persist_commodities = AsyncMock(return_value=1)
+    persist_forex = MagicMock(return_value=2)
+    persist_crypto = MagicMock(return_value=1)
+    persist_commodities = MagicMock(return_value=1)
     service.persist_forex = persist_forex
     service.persist_crypto = persist_crypto
     service.persist_commodities = persist_commodities
 
     result = await service.ingest_all(include_commodities=True)
 
-    assert persist_forex.await_count == 1
-    assert persist_crypto.await_count == 1
-    assert persist_commodities.await_count == 1
+    assert persist_forex.call_count == 1
+    assert persist_crypto.call_count == 1
+    assert persist_commodities.call_count == 1
 
-    forex_items = persist_forex.await_args.args[0]
+    forex_items = persist_forex.call_args.args[0]
     currencies = {item.currency_code for item in forex_items}
     assert currencies == {"USD", "GBP"}
 
-    crypto_items = persist_crypto.await_args.args[0]
+    crypto_items = persist_crypto.call_args.args[0]
     assert crypto_items[0].symbol == "BTC"
     assert crypto_items[0].rank == 1
 
-    commodity_items = persist_commodities.await_args.args[0]
+    commodity_items = persist_commodities.call_args.args[0]
     assert commodity_items[0].symbol == "XAU"
     assert commodity_items[0].commodity_type == "metal"
 

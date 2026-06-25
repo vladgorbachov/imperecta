@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -61,15 +61,15 @@ async def test_forex_ingest_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
         AsyncMock(return_value=([], False)),
     )
 
-    fake_db = SimpleNamespace(commit=AsyncMock())
+    fake_db = SimpleNamespace(commit=MagicMock())
     service = IngestionService(fake_db)
-    persist_forex = AsyncMock(return_value=3)
+    persist_forex = MagicMock(return_value=3)
     service.persist_forex = persist_forex
-    service.persist_crypto = AsyncMock(return_value=0)
+    service.persist_crypto = MagicMock(return_value=0)
 
     await service.ingest_all(include_commodities=False)
 
-    forex_items = persist_forex.await_args.args[0]
+    forex_items = persist_forex.call_args.args[0]
     currencies = {item.currency_code for item in forex_items}
     assert currencies == {"USD", "GBP", "JPY"}
     assert "SEK" not in currencies

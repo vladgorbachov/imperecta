@@ -14,7 +14,7 @@ by test_d1_dashboard_dissolution.py.
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -207,15 +207,15 @@ async def test_ingestion_uses_fetching_module(monkeypatch: pytest.MonkeyPatch) -
         ),
     )
 
-    fake_db = SimpleNamespace(commit=AsyncMock())
+    fake_db = SimpleNamespace(commit=MagicMock())
     service = IngestionService(fake_db)
-    service.persist_forex = AsyncMock(return_value=1)
-    service.persist_crypto = AsyncMock(return_value=1)
-    service.persist_commodities = AsyncMock(return_value=1)
+    service.persist_forex = MagicMock(return_value=1)
+    service.persist_crypto = MagicMock(return_value=1)
+    service.persist_commodities = MagicMock(return_value=1)
 
     result = await service.ingest_all(include_commodities=True)
 
-    assert service.persist_forex.await_count == 1
-    assert service.persist_crypto.await_count == 1
-    assert service.persist_commodities.await_count == 1
+    assert service.persist_forex.call_count == 1
+    assert service.persist_crypto.call_count == 1
+    assert service.persist_commodities.call_count == 1
     assert result == {"forex": 1, "crypto": 1, "commodities": 1}

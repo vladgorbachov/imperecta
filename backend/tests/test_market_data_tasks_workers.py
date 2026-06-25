@@ -51,12 +51,9 @@ def test_fact_table_names_present() -> None:
 
 
 def test_ingest_market_data_wrapper_calls_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wrapper builds a session and dispatches to IngestionService.ingest_all."""
-    engine_mock = MagicMock()
-    engine_mock.dispose = AsyncMock()
+    """The wrapper opens a sync session and dispatches to IngestionService.ingest_all."""
     session = MagicMock()
-    session_factory = MagicMock(return_value=_async_cm(session))
-    monkeypatch.setattr(workers_module, "_make_session_factory", lambda: (engine_mock, session_factory))
+    monkeypatch.setattr(workers_module, "sync_session_factory", lambda: session)
 
     ingest_all_mock = AsyncMock(return_value={"forex": 2, "crypto": 3, "commodities": 1})
     monkeypatch.setattr(
@@ -67,7 +64,7 @@ def test_ingest_market_data_wrapper_calls_contract(monkeypatch: pytest.MonkeyPat
     result = ingest_market_data.run()
 
     ingest_all_mock.assert_awaited_once_with(include_commodities=True)
-    engine_mock.dispose.assert_awaited_once()
+    session.close.assert_called_once()
     assert result["status"] == "ok"
     assert result["counts"] == {"forex": 2, "crypto": 3, "commodities": 1}
     assert result["fact_tables"] == list(FACT_TABLE_NAMES)
@@ -75,11 +72,8 @@ def test_ingest_market_data_wrapper_calls_contract(monkeypatch: pytest.MonkeyPat
 
 def test_ingest_commodities_wrapper_calls_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     """The wrapper dispatches to IngestionService.ingest_commodities_only."""
-    engine_mock = MagicMock()
-    engine_mock.dispose = AsyncMock()
     session = MagicMock()
-    session_factory = MagicMock(return_value=_async_cm(session))
-    monkeypatch.setattr(workers_module, "_make_session_factory", lambda: (engine_mock, session_factory))
+    monkeypatch.setattr(workers_module, "sync_session_factory", lambda: session)
 
     only_mock = AsyncMock(return_value=4)
     monkeypatch.setattr(
@@ -90,7 +84,7 @@ def test_ingest_commodities_wrapper_calls_contract(monkeypatch: pytest.MonkeyPat
     result = ingest_commodities.run()
 
     only_mock.assert_awaited_once_with()
-    engine_mock.dispose.assert_awaited_once()
+    session.close.assert_called_once()
     assert result["status"] == "ok"
     assert result["commodities"] == 4
     assert result["fact_tables"] == list(FACT_TABLE_NAMES)
@@ -100,11 +94,8 @@ def test_ingest_wrapper_returns_error_payload_on_contract_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Contract exceptions are surfaced as {'status': 'error', ...} (no re-raise)."""
-    engine_mock = MagicMock()
-    engine_mock.dispose = AsyncMock()
     session = MagicMock()
-    session_factory = MagicMock(return_value=_async_cm(session))
-    monkeypatch.setattr(workers_module, "_make_session_factory", lambda: (engine_mock, session_factory))
+    monkeypatch.setattr(workers_module, "sync_session_factory", lambda: session)
     monkeypatch.setattr(
         "app.modules.market_data.ingestion.IngestionService.ingest_all",
         AsyncMock(side_effect=RuntimeError("DB unreachable")),
@@ -113,7 +104,7 @@ def test_ingest_wrapper_returns_error_payload_on_contract_failure(
     result = ingest_market_data.run()
     assert result["status"] == "error"
     assert "DB unreachable" in result["message"]
-    engine_mock.dispose.assert_awaited_once()
+    session.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -133,16 +124,3 @@ async def test_ingest_endpoint_dispatches_to_worker_task(monkeypatch: pytest.Mon
 
     delay_mock.assert_called_once_with()
     assert payload == {"status": "enqueued", "task_id": "abc-123"}
-
-
-def _async_cm(target):
-    """Build an async context-manager double that yields `target`."""
-
-    class _AsyncCM:
-        async def __aenter__(self_inner):
-            return target
-
-        async def __aexit__(self_inner, exc_type, exc, tb):
-            return False
-
-    return _AsyncCM()

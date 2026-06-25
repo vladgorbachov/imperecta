@@ -301,4 +301,4 @@ def test_market_data_ingestion_imports_data_firewall() -> None:
 
     source = open(market_ingestion.__file__, encoding="utf-8").read()
     assert "evaluate_market" in source
-    assert "write_async" in source
+    assert "write_sync" in source

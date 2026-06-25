@@ -130,4 +130,4 @@ def test_market_rail_wired_in_stage_1_2() -> None:
 
     source = open(market_ingestion.__file__, encoding="utf-8").read()
     assert "evaluate_market" in source
-    assert "write_async" in source
+    assert "write_sync" in source

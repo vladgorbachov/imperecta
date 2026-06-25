@@ -155,6 +155,41 @@ def write_sync(
         db.add(FactPrice(**orm_fields))
         return True
 
+    date_id = orm_fields["date_id"]
+
+    if table == "fact_currency_rate":
+        db.execute(
+            delete(FactCurrencyRate).where(
+                FactCurrencyRate.date_id == date_id,
+                FactCurrencyRate.currency_code == orm_fields["currency_code"],
+                FactCurrencyRate.source == orm_fields["source"],
+            ),
+        )
+        db.add(FactCurrencyRate(**orm_fields))
+        return True
+
+    if table == "fact_crypto_price":
+        db.execute(
+            delete(FactCryptoPrice).where(
+                FactCryptoPrice.date_id == date_id,
+                FactCryptoPrice.symbol == orm_fields["symbol"],
+                FactCryptoPrice.source == orm_fields["source"],
+            ),
+        )
+        db.add(FactCryptoPrice(**orm_fields))
+        return True
+
+    if table == "fact_commodity_price":
+        db.execute(
+            delete(FactCommodityPrice).where(
+                FactCommodityPrice.date_id == date_id,
+                FactCommodityPrice.symbol == orm_fields["symbol"],
+                FactCommodityPrice.source == orm_fields["source"],
+            ),
+        )
+        db.add(FactCommodityPrice(**orm_fields))
+        return True
+
     raise ValueError(f"unsupported sync persist table: {table}")
 
 

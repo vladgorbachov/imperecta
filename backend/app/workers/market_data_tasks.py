@@ -1,21 +1,15 @@
 """Celery task wrappers for market_data ingestion (Tier-2).
 
 Tier-2 (workers) owns Celery; Tier-1 (market_data) does not. These two wrappers
-only manage an async engine + session and dispatch to the module's Tier-1
-contract (`IngestionService`); the task NAMES match the prior Tier-1
-definitions verbatim so beat schedules and `/markets/ingest` remain compatible.
+only manage a sync DB session for persist and an async fetch bridge into the
+module's Tier-1 contract (`IngestionService`); the task NAMES match the prior
+Tier-1 definitions verbatim so beat schedules and `/markets/ingest` remain compatible.
 """
-
-# TODO(workers): extract a shared async-session helper for Tier-2 task wrappers
-# (duplicated with app.modules.scraper.tasks). Not done in M3b to keep the pass
-# scope-limited; planned alongside the broader worker-tier refactor.
 
 import asyncio
 import logging
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from app.config import Settings
+from app.database import sync_session_factory
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -49,35 +43,15 @@ def _run_async(coro):
         loop.close()
 
 
-def _make_session_factory():
-    settings = Settings()
-    engine = create_async_engine(
-        str(settings.database_url),
-        pool_size=2,
-        max_overflow=0,
-        pool_pre_ping=True,
-        connect_args={"statement_cache_size": 0},
-    )
-    factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
-    )
-    return engine, factory
-
-
 @celery_app.task(name="ingest_market_data", bind=True)
 def ingest_market_data(self):
     async def _do() -> dict:
-        engine, session_factory = _make_session_factory()
+        db = sync_session_factory()
         try:
-            async with session_factory() as db:
-                svc = IngestionService(db)
-                return await svc.ingest_all(include_commodities=True)
+            svc = IngestionService(db)
+            return await svc.ingest_all(include_commodities=True)
         finally:
-            await engine.dispose()
+            db.close()
 
     try:
         result = _run_async(_do())
@@ -90,13 +64,12 @@ def ingest_market_data(self):
 @celery_app.task(name="ingest_commodities", bind=True)
 def ingest_commodities(self):
     async def _do() -> int:
-        engine, session_factory = _make_session_factory()
+        db = sync_session_factory()
         try:
-            async with session_factory() as db:
-                svc = IngestionService(db)
-                return await svc.ingest_commodities_only()
+            svc = IngestionService(db)
+            return await svc.ingest_commodities_only()
         finally:
-            await engine.dispose()
+            db.close()
 
     try:
         n = _run_async(_do())
