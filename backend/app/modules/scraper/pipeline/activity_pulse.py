@@ -9,11 +9,10 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import sync_session_factory
 from app.models.app_tables import ScrapeJob
-from app.modules.admin.parsing_admin import ParsingAdminService
+from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_sync
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 from app.modules.scraper.pipeline.worker_log_relay import (
     push_relay_line,
@@ -47,22 +46,29 @@ def pulse_job_activity_sync(
     if not should_pulse_db(job_id, force=force_db):
         return
 
-    db = sync_session_factory()
     try:
-        job = db.get(ScrapeJob, job_id)
-        if job is None:
-            return
-        metadata = PipelineMetadataStore.extract(job.config)
+        db = sync_session_factory()
+        try:
+            job = db.get(ScrapeJob, job_id)
+            if job is None:
+                return
+            metadata = PipelineMetadataStore.extract(job.config)
+        finally:
+            db.close()
         metadata["last_activity_at"] = datetime.now(UTC).isoformat()
         metadata["current_stage"] = stage
         _append_tail(metadata, line)
-        job.config = {"metadata": deepcopy(metadata)}
-        flag_modified(job, "config")
-        db.commit()
+        write_meta_sync(
+            table="scrape_jobs",
+            operation="update",
+            fields=build_scrape_job_fields(
+                id=job_id,
+                config={"metadata": deepcopy(metadata)},
+            ),
+            reject_source="activity_pulse",
+        )
     except Exception:
         slog.exception("job_activity_pulse_failed", job_id=str(job_id))
-    finally:
-        db.close()
 
 
 def pulse_parent_heartbeat_sync(
@@ -79,23 +85,30 @@ def pulse_parent_heartbeat_sync(
     if not should_pulse_db(parent_job_id, force=force):
         return
 
-    db = sync_session_factory()
     try:
-        job = db.get(ScrapeJob, parent_job_id)
-        if job is None:
-            return
-        metadata = PipelineMetadataStore.extract(job.config)
+        db = sync_session_factory()
+        try:
+            job = db.get(ScrapeJob, parent_job_id)
+            if job is None:
+                return
+            metadata = PipelineMetadataStore.extract(job.config)
+        finally:
+            db.close()
         metadata["last_activity_at"] = datetime.now(UTC).isoformat()
-        job.config = {"metadata": deepcopy(metadata)}
-        flag_modified(job, "config")
-        db.commit()
+        write_meta_sync(
+            table="scrape_jobs",
+            operation="update",
+            fields=build_scrape_job_fields(
+                id=parent_job_id,
+                config={"metadata": deepcopy(metadata)},
+            ),
+            reject_source="activity_pulse",
+        )
     except Exception:
         slog.exception(
             "parent_heartbeat_pulse_failed",
             parent_job_id=str(parent_job_id),
         )
-    finally:
-        db.close()
 
 
 async def pulse_job_activity_async(

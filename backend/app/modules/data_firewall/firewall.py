@@ -310,10 +310,11 @@ def evaluate_market(
     record: dict[str, Any],
     *,
     table: str,
+    operation: str = "insert",
     db: Any | None = None,
     reject_source: str = "market_data",
 ) -> FirewallOutcome:
-    """Market rail: contract validation + sign on pass."""
+    """Market/META rail: structural contract validation + sign on pass."""
     contract = FACT_TABLE_CONTRACTS.get(table)
     if contract is None:
         return FirewallOutcome(
@@ -329,7 +330,7 @@ def evaluate_market(
     signed_record: SignedRecord | None = None
 
     if passed:
-        signed_record = _sign_fields(table, "insert", record)
+        signed_record = _sign_fields(table, operation, record)
         if signed_record is None:
             passed = False
             reject_reason = REJECT_SIGNING_UNAVAILABLE
@@ -344,7 +345,7 @@ def evaluate_market(
             raw_payload=record,
             rejected_by="data_firewall",
             signature_present=False,
-            operation="insert",
+            operation=operation,
         )
 
     return FirewallOutcome(

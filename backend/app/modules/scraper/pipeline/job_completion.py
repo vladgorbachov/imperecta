@@ -9,10 +9,10 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace
+from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 from app.modules.scraper.pipeline.outcome_buckets import (
     BUCKET_FAILED,
@@ -177,13 +177,19 @@ async def complete_pipeline_job(
     if hard_error:
         metadata["error"] = hard_error[:2000]
 
-    job.completed_at = datetime.now(UTC)
-    job.duration_ms = total_ms
-    job.total_listings = listings_created
-    job.successful = prices_saved
-    job.failed = scrape_failed
-    job.status = parent_status
-    job.config = {"metadata": deepcopy(metadata)}
-    flag_modified(job, "config")
-    await db.commit()
+    await write_meta_async(
+        table="scrape_jobs",
+        operation="update",
+        fields=build_scrape_job_fields(
+            id=job.id,
+            status=parent_status,
+            completed_at=datetime.now(UTC),
+            duration_ms=total_ms,
+            total_listings=listings_created,
+            successful=prices_saved,
+            failed=scrape_failed,
+            config={"metadata": deepcopy(metadata)},
+        ),
+        reject_source="pipeline_completion",
+    )
     return metadata

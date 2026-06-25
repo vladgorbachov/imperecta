@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from sqlalchemy import func, or_, select, text
@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
+from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
 from app.modules.scraper.discovery import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
@@ -144,16 +145,24 @@ async def _create_pending_child(
     marketplace = result.scalar_one_or_none()
     if marketplace is None:
         return None
-    job = ScrapeJob(
+    job_id = uuid4()
+    fields = build_scrape_job_fields(
+        id=job_id,
         job_type="discovery",
         status="pending",
         parent_job_id=parent_id,
         marketplace_id=marketplace.id,
         config={"domain": (marketplace.domain or "").strip()},
     )
-    db.add(job)
-    await db.flush()
-    return job.id
+    result = await write_meta_async(
+        table="scrape_jobs",
+        operation="insert",
+        fields=fields,
+        reject_source="orchestrator",
+    )
+    if not result.ok:
+        return None
+    return job_id
 
 
 async def _reap_stale_children(db: AsyncSession, parent_id: UUID) -> int:
@@ -268,16 +277,24 @@ async def _create_pending_scrape_child(
     marketplace = result.scalar_one_or_none()
     if marketplace is None:
         return None
-    job = ScrapeJob(
+    job_id = uuid4()
+    fields = build_scrape_job_fields(
+        id=job_id,
         job_type="scrape",
         status="pending",
         parent_job_id=parent_id,
         marketplace_id=marketplace.id,
         config={"domain": (marketplace.domain or "").strip()},
     )
-    db.add(job)
-    await db.flush()
-    return job.id
+    result = await write_meta_async(
+        table="scrape_jobs",
+        operation="insert",
+        fields=fields,
+        reject_source="orchestrator",
+    )
+    if not result.ok:
+        return None
+    return job_id
 
 
 async def _reap_stale_scrape_children(

@@ -13,7 +13,8 @@ from sqlalchemy import and_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.dimensions import DimProduct
+from app.models.app_tables import ScrapeJob
+from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -31,6 +32,8 @@ slog = structlog.get_logger(__name__)
 
 SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
     "dim_product": frozenset({"insert", "update", "delete"}),
+    "dim_marketplace": frozenset({"insert", "update", "delete"}),
+    "scrape_jobs": frozenset({"insert", "update", "delete"}),
     "fact_listing": frozenset({"insert", "update", "delete"}),
     "fact_price": frozenset({"insert", "delete"}),
     "fact_currency_rate": frozenset({"insert", "delete"}),
@@ -40,6 +43,8 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
 
 _TABLE_MODELS: dict[str, type] = {
     "dim_product": DimProduct,
+    "dim_marketplace": DimMarketplace,
+    "scrape_jobs": ScrapeJob,
     "fact_listing": FactListing,
     "fact_price": FactPrice,
     "fact_currency_rate": FactCurrencyRate,
@@ -124,6 +129,10 @@ def _orm_fields_for_table(table: str, fields: dict[str, Any]) -> dict[str, Any]:
         out["product_id"] = _parse_uuid(out["product_id"])
     if "marketplace_id" in out:
         out["marketplace_id"] = _parse_uuid(out["marketplace_id"])
+    if "parent_job_id" in out:
+        out["parent_job_id"] = _parse_uuid(out["parent_job_id"])
+    if "triggered_by" in out:
+        out["triggered_by"] = _parse_uuid(out["triggered_by"])
     if "id" in out:
         out["id"] = _parse_uuid(out["id"])
     if "scraped_at" in out:
@@ -325,6 +334,14 @@ def write_sync(
 
     if table == "fact_listing":
         db.add(FactListing(**orm_fields))
+        return PersistResult(ok=True, rows_affected=1)
+
+    if table == "scrape_jobs":
+        db.add(ScrapeJob(**orm_fields))
+        return PersistResult(ok=True, rows_affected=1)
+
+    if table == "dim_marketplace":
+        db.add(DimMarketplace(**orm_fields))
         return PersistResult(ok=True, rows_affected=1)
 
     date_id = orm_fields["date_id"]

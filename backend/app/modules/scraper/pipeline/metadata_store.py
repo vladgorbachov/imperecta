@@ -8,10 +8,10 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.app_tables import ScrapeJob
 from app.modules.admin.parsing_admin import ParsingAdminService
+from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
 
 
 class PipelineMetadataStore:
@@ -44,12 +44,18 @@ class PipelineMetadataStore:
         *,
         status: str | None = None,
     ) -> None:
-        """Write metadata to job.config and commit."""
+        """Write metadata to job.config via the META door."""
+        columns: dict[str, Any] = {
+            "config": {"metadata": deepcopy(metadata)},
+        }
         if status is not None:
-            job.status = status
-        job.config = {"metadata": deepcopy(metadata)}
-        flag_modified(job, "config")
-        await self._db.commit()
+            columns["status"] = status
+        await write_meta_async(
+            table="scrape_jobs",
+            operation="update",
+            fields=build_scrape_job_fields(id=job.id, **columns),
+            reject_source="pipeline_metadata",
+        )
 
     async def touch(
         self,

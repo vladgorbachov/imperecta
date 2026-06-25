@@ -19,6 +19,11 @@ from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
+from app.modules.persist.meta_write import (
+    build_dim_marketplace_fields,
+    build_scrape_job_fields,
+    write_meta_async,
+)
 from app.modules.scraper.discovery import (
     DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
     DiscoveryCrawler,
@@ -353,9 +358,17 @@ def discover_one_marketplace(self, child_job_id: str):
                     }
                 marketplace = await db.get(DimMarketplace, job.marketplace_id)
                 if marketplace is None:
-                    job.status = "failed"
-                    job.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
+                    failed_at = datetime.now(timezone.utc)
+                    await write_meta_async(
+                        table="scrape_jobs",
+                        operation="update",
+                        fields=build_scrape_job_fields(
+                            id=job.id,
+                            status="failed",
+                            completed_at=failed_at,
+                        ),
+                        reject_source="discovery_child",
+                    )
                     return {
                         "status": "marketplace_not_found",
                         "child_job_id": str(child_job_id),
@@ -707,17 +720,33 @@ def scrape_one_marketplace(self, child_job_id: str):
                     }
                 marketplace = await db.get(DimMarketplace, job.marketplace_id)
                 if marketplace is None:
-                    job.status = "failed"
-                    job.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
+                    failed_at = datetime.now(timezone.utc)
+                    await write_meta_async(
+                        table="scrape_jobs",
+                        operation="update",
+                        fields=build_scrape_job_fields(
+                            id=job.id,
+                            status="failed",
+                            completed_at=failed_at,
+                        ),
+                        reject_source="scrape_child",
+                    )
                     return {
                         "status": "marketplace_not_found",
                         "child_job_id": str(child_job_id),
                     }
                 code = marketplace.marketplace_code
-                job.status = "running"
-                job.started_at = datetime.now(timezone.utc)
-                await db.commit()
+                started_at = datetime.now(timezone.utc)
+                await write_meta_async(
+                    table="scrape_jobs",
+                    operation="update",
+                    fields=build_scrape_job_fields(
+                        id=job.id,
+                        status="running",
+                        started_at=started_at,
+                    ),
+                    reject_source="scrape_child",
+                )
                 # Stamp scrape relay lines under the PARENT id. The pulse
                 # calls inside _run_scrape_all_pool stamp the CHILD id (the
                 # scrape job_uuid) — that is intentional and unchanged: the
@@ -786,26 +815,40 @@ def scrape_one_marketplace(self, child_job_id: str):
                     isinstance(scrape_result, dict)
                     and scrape_result.get("deadline_exhausted")
                 )
-                job.successful = ok
-                job.failed = failed
-                job.completed_at = datetime.now(timezone.utc)
-                marketplace.last_scrape_at = job.completed_at
-                # Partial-aware terminal status (O5a): hard_error trumps;
-                # budget exit with progress = partial; mixed ok+failed = partial;
-                # all-failed = failed; cohort drained = completed.
+                completed_at = datetime.now(timezone.utc)
                 if hard_error:
-                    job.status = "failed"
+                    terminal_status = "failed"
                 elif deadline_exhausted and ok > 0:
-                    job.status = "partial"
+                    terminal_status = "partial"
                 elif ok > 0 and failed > 0:
-                    job.status = "partial"
+                    terminal_status = "partial"
                 elif failed > 0:
-                    job.status = "failed"
+                    terminal_status = "failed"
                 else:
-                    job.status = "completed"
-                await db.commit()
+                    terminal_status = "completed"
+                await write_meta_async(
+                    table="scrape_jobs",
+                    operation="update",
+                    fields=build_scrape_job_fields(
+                        id=job.id,
+                        status=terminal_status,
+                        successful=ok,
+                        failed=failed,
+                        completed_at=completed_at,
+                    ),
+                    reject_source="scrape_child",
+                )
+                await write_meta_async(
+                    table="dim_marketplace",
+                    operation="update",
+                    fields=build_dim_marketplace_fields(
+                        id=marketplace.id,
+                        last_scrape_at=completed_at,
+                    ),
+                    reject_source="scrape_child",
+                )
                 return {
-                    "status": job.status,
+                    "status": terminal_status,
                     "child_job_id": str(child_job_id),
                     "marketplace_id": str(marketplace.id),
                     "scraped_ok": ok,

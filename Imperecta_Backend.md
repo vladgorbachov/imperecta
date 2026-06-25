@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-23 (head `4f961a9`)  
+**Актуально на:** 2026-06-25 (head `fc3b07d`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию backend; принципы не дублирует.
@@ -200,6 +200,9 @@ Monolith-путь (`run_full_pipeline_test`, `FullPipelineOrchestrator`, `_run_s
 - **product_pool** — search, stats, MV health; pool listings filter: `page_role='product'` OR (`page_role IS NULL` AND `last_price IS NOT NULL`); `display_currency` query → `CurrencyConverter`.
 - **user_products** — products + import; competitors API не в main.
 - **market_data** — providers + `ingest_market_data`.
+- **data_firewall** — Tier-1 gate: `evaluate_ecommerce` / `evaluate_market`, HMAC over `table`+`operation`+`locator`+`fields`, durable reject via `write_reject_data_isolated` on gate fail.
+- **persist** — Tier-1 writer: `write_sync` / `write_async` verify HMAC then INSERT/UPDATE/DELETE; returns `PersistResult` (bool-compatible).
+- **ingestion** — orchestration scrape→firewall→persist (`IngestionService.persist_extracted`).
 - **dashboard / analytics** — read aggregations.
 - **ai_analyst** — sessions, Claude, api_logs.
 - **alerts / digests** — tasks mostly stubs; alerts router не в main.
@@ -356,7 +359,9 @@ GlobalScrapeService.scrape_product(listing_id)
 **Migration `025`:** Supabase security hardening (`supabase_security.py`).  
 **Migration `026`:** Forex nine-currency allowlist + JPY seed.  
 **Migration `027`:** Remove stock tracking; rebuild `mv_daily_price_summary`.  
-**Migration `028`:** `fact_listing.page_role varchar(16)` — gate diagnostics (**head**).
+**Migration `028`:** `fact_listing.page_role varchar(16)` — gate diagnostics.  
+**Migration `029`:** `reject_data.operation` VARCHAR(10) NOT NULL + CHECK (`insert`/`update`/`delete`).  
+**Migration `030`:** `fact_listing.url_hash` NOT NULL — canonical locator (**head**).
 
 **Celery `ensure_fact_price_partitions`:** создаёт партиции на **следующие 3 календарных месяца** (`CREATE TABLE IF NOT EXISTS`). Beat: daily 00:00 (`scheduler.py`).
 
@@ -527,6 +532,18 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | **dashboard/analytics** | Read-only aggregations for UI |
 | **ai_analyst** | Claude sessions, api_logs, entitlement gate |
 | **workers/maintenance** | `ensure_fact_price_partitions`, MV refresh, cleanup retention |
+| **data_firewall** | `evaluate_ecommerce` / `evaluate_market`; contract + HMAC sign; gate reject → `write_reject_data_isolated` |
+| **persist** | `write_sync` / `write_async`: `_verify_signed_record` → insert/update/delete by `SignedRecord.operation`; `PersistResult` |
+
+### 14.12 `data_firewall` + `persist` (Tier-1)
+
+| Компонент | Поведение |
+|-----------|-----------|
+| **Signing** | `sign` / `verify` bind `table`, `operation`, `locator`, `fields` (`signing.py`); `SignedRecord` carries all five |
+| **Gate reject** | On fail + `db`: `write_reject_data_isolated` — independent sync session + commit; survives producer nested savepoint rollback (`reject_store.py`, `firewall.py`) |
+| **Persist reject** | `_reject_persist` → in-txn `write_reject_data` (flush only); Sentry on `invalid_signature` |
+| **CUD ops** | `SUPPORTED_WRITE_OPERATIONS` per table (`writer.py:32–39`); sync UPDATE for `dim_product`/`fact_listing`; sync/async DELETE by `TABLE_LOCATORS`; insert paths unchanged (daily replace for facts) |
+| **Return type** | `PersistResult(ok, rows_affected?, no_target?)` — `bool()` for legacy callers |
 
 ---
 
@@ -544,7 +561,7 @@ Thin FastAPI layer: superuser guard → delegate to `ParsingAdminService`; map `
 | Pipeline | `backend/app/modules/scraper/pipeline/` |
 | Celery | `backend/app/workers/celery_app.py` |
 | Partitions task | `backend/app/workers/maintenance_tasks.py` |
-| Migrations 015–028 | `backend/alembic/versions/015_*.py` … `028_*.py` |
+| Migrations 015–030 | `backend/alembic/versions/015_*.py` … `030_*.py` |
 | Reaper | `backend/app/workers/reaper_tasks.py` |
 | Pipeline status | `parsing_admin.get_pipeline_status`, `api_parsing` GET `/pipeline-status` |
 | Display currency | `backend/app/common/currency.py`, `marketplace_locale.py` |
@@ -1016,7 +1033,7 @@ listing.last_error = None
 
 1. Pre-flight reset уже выполнен; `failure_streak = 0` дополнительно (success ломает streak)  
 2. Enrich `dim_product.name` from title if placeholder (внутри `IngestionService`)  
-3. Evaluate **data_firewall** (`evaluate_ecommerce` in `data_firewall/firewall.py`; rules in `data_firewall/rules.py`, re-exported from `ingestion/gate.py`)  
+3. Evaluate **data_firewall** (`evaluate_ecommerce` in `data_firewall/firewall.py`; rules in `data_firewall/rules.py`, re-exported from `ingestion/gate.py`); on reject → `write_reject_data_isolated` (durable audit row)  
 4. If gate pass + values changed → delete same-day `fact_price`, insert new row (+ `discount_pct` через `_calculate_discount_pct`, + `scrape_job_id` при пайплайн-вызове, `1acd749`), update `last_price_changed_at`  
 5. If gate pass + unchanged → `no_change`, update `last_checked_at` only  
 6. Write `scrape_logs` (`scrape_job_id` уже стэмпится сюда из `GlobalScrapeService.scrape_job_id`)

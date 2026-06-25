@@ -196,7 +196,7 @@ def test_persist_rejects_unsigned() -> None:
         signed,
         ctx=PersistContext(source="ecommerce_scrape"),
     )
-    assert wrote is False
+    assert not wrote
     added = [c.args[0] for c in db.add.call_args_list]
     assert not any(isinstance(a, FactPrice) for a in added)
 
@@ -222,7 +222,7 @@ def test_persist_writes_verbatim_no_mutation() -> None:
         signed,
         ctx=PersistContext(source="ecommerce_scrape", listing_id=listing_id),
     )
-    assert wrote is True
+    assert wrote
     fact_rows = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], FactPrice)]
     assert len(fact_rows) == 1
     row = fact_rows[0]
@@ -364,7 +364,7 @@ def test_data_firewall_fail_closed_without_secret(monkeypatch: pytest.MonkeyPatc
     assert outcome.signed_record is None
     db = MagicMock()
     wrote = write_sync(db, outcome.signed_record, ctx=PersistContext(source="ecommerce_scrape"))
-    assert wrote is False
+    assert not wrote
 
 
 def test_market_data_firewall_wired_bad_source() -> None:

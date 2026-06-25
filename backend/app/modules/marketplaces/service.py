@@ -6,13 +6,14 @@ import hashlib
 import logging
 import re
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimCountry, DimCurrency, DimMarketplace
 from app.models.facts import FactListing
+from app.modules.persist.meta_write import build_dim_marketplace_fields, write_meta_async
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,9 @@ class MarketplaceService:
         label = domain.split(".")[0]
         name = label[:1].upper() + label[1:] if label else domain
 
-        mp = DimMarketplace(
+        mp_id = uuid4()
+        fields = build_dim_marketplace_fields(
+            id=mp_id,
             marketplace_code=marketplace_code,
             name=name[:200],
             source_type="marketplace",
@@ -191,18 +194,29 @@ class MarketplaceService:
             scraper_type="web_api",
             is_active=True,
         )
-        self.db.add(mp)
-        await self.db.commit()
-        await self.db.refresh(mp)
+        result = await write_meta_async(
+            table="dim_marketplace",
+            operation="insert",
+            fields=fields,
+            reject_source="marketplaces",
+        )
+        if not result.ok:
+            raise ValueError("dim_marketplace insert rejected by data firewall")
+        mp = await self.db.get(DimMarketplace, mp_id)
+        assert mp is not None
         return mp, True
 
     async def delete_marketplace(self, marketplace_id: UUID) -> bool:
         mp = await self.db.get(DimMarketplace, marketplace_id)
         if not mp:
             return False
-        await self.db.delete(mp)
-        await self.db.commit()
-        return True
+        result = await write_meta_async(
+            table="dim_marketplace",
+            operation="delete",
+            fields=build_dim_marketplace_fields(id=marketplace_id),
+            reject_source="marketplaces",
+        )
+        return result.ok
 
     async def update_marketplace(
         self,
@@ -229,18 +243,28 @@ class MarketplaceService:
             if duplicate:
                 raise ValueError(f"Domain already in use: {domain}")
             updates = {**updates, "base_url": base, "domain": domain[:255]}
+        applied: dict[str, object] = {}
         for key, value in updates.items():
             if key not in self._UPDATE_KEYS:
                 continue
             if not hasattr(mp, key):
                 continue
             if key in ("requires_js", "is_active"):
-                setattr(mp, key, bool(value))
+                applied[key] = bool(value)
                 continue
             if value is None:
                 continue
-            setattr(mp, key, value)
-        await self.db.commit()
+            applied[key] = value
+        if not applied:
+            return mp
+        result = await write_meta_async(
+            table="dim_marketplace",
+            operation="update",
+            fields=build_dim_marketplace_fields(id=marketplace_id, **applied),
+            reject_source="marketplaces",
+        )
+        if not result.ok:
+            raise ValueError("dim_marketplace update rejected by data firewall")
         await self.db.refresh(mp)
         return mp
 

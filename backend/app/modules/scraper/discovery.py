@@ -21,6 +21,11 @@ from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.classifier import classify_page_role_for_discovery
 from app.modules.data_firewall.firewall import evaluate_market
+from app.modules.persist.meta_write import (
+    build_dim_marketplace_fields,
+    build_scrape_job_fields,
+    write_meta_async,
+)
 from app.modules.persist.writer import (
     PersistContext,
     build_dim_product_fields,
@@ -31,6 +36,30 @@ from app.modules.scraper.locale_selection import build_accept_language_header, e
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
+
+_DISCOVERY_MP_WRITE_KEYS = (
+    "base_url",
+    "last_sitemap_harvest_at",
+    "sitemap_url",
+    "recon_frontier_state",
+    "discovered_category_urls",
+    "category_resume_index",
+    "sitemap_resume_offset",
+    "last_discovery_at",
+    "last_discovery_status",
+    "last_discovery_products_found",
+    "products_in_pool",
+)
+
+
+async def _meta_update_marketplace_snapshot(marketplace: DimMarketplace) -> None:
+    columns = {key: getattr(marketplace, key) for key in _DISCOVERY_MP_WRITE_KEYS}
+    await write_meta_async(
+        table="dim_marketplace",
+        operation="update",
+        fields=build_dim_marketplace_fields(id=marketplace.id, **columns),
+        reject_source="discovery",
+    )
 
 # Days before category recon is re-run for a marketplace.
 CATEGORY_RECON_STALE_DAYS = 7
@@ -1049,28 +1078,36 @@ class DiscoveryCrawler:
         domain = (marketplace.domain or "").strip()
 
         if inner_job is not None:
-            # Orchestrator path (O2): tick pre-created this job as 'pending'
-            # with parent_job_id and marketplace_id already set. Take
-            # ownership without inserting a second row; do not overwrite the
-            # tick-assigned linkage columns.
             job = inner_job
-            job.status = "running"
+            job_columns: dict[str, Any] = {"status": "running"}
             if job.started_at is None:
-                job.started_at = started_at
-            await self.db.commit()
+                job_columns["started_at"] = started_at
+            await write_meta_async(
+                table="scrape_jobs",
+                operation="update",
+                fields=build_scrape_job_fields(id=job.id, **job_columns),
+                reject_source="discovery",
+            )
             await self.db.refresh(job)
         else:
-            job = ScrapeJob(
-                job_type="discovery",
-                marketplace_id=mp_id,
-                parent_job_id=parent_job_id,
-                status="running",
-                started_at=started_at,
-                config={"domain": domain},
+            job_id = uuid4()
+            await write_meta_async(
+                table="scrape_jobs",
+                operation="insert",
+                fields=build_scrape_job_fields(
+                    id=job_id,
+                    job_type="discovery",
+                    marketplace_id=mp_id,
+                    parent_job_id=parent_job_id,
+                    status="running",
+                    started_at=started_at,
+                    config={"domain": domain},
+                ),
+                reject_source="discovery",
             )
-            self.db.add(job)
-            await self.db.commit()
-            await self.db.refresh(job)
+            job = await self.db.get(ScrapeJob, job_id)
+            if job is None:
+                raise RuntimeError(f"discovery job not found after insert: {job_id}")
 
         pages_scanned = 0
         candidate_urls_found = 0
@@ -1263,17 +1300,12 @@ class DiscoveryCrawler:
 
             completed_at = datetime.now(timezone.utc)
             if status == "error":
-                job.status = "failed"
+                job_status = "failed"
             elif status == "partial_budget":
-                job.status = "partial"
+                job_status = "partial"
             else:
-                job.status = "completed"
-            job.completed_at = completed_at
-            job.duration_ms = int((time.perf_counter() - started_perf) * 1000)
-            job.total_listings = candidate_urls_found
-            job.successful = persisted_listings
-            job.failed = len(errors)
-            job.config = {
+                job_status = "completed"
+            job_config = {
                 "domain": domain,
                 "pages_scanned": pages_scanned,
                 "candidate_urls_found": candidate_urls_found,
@@ -1282,7 +1314,6 @@ class DiscoveryCrawler:
                 "rejected_urls": rejected_urls,
                 "discovery_method": "category_crawl",
             }
-
             marketplace.last_discovery_at = completed_at
             marketplace.last_discovery_status = "failed" if status == "error" else status
             marketplace.last_discovery_products_found = persisted_listings
@@ -1295,19 +1326,28 @@ class DiscoveryCrawler:
             )
             marketplace.products_in_pool = int(pool_count or 0)
 
-            await self.db.commit()
+            await write_meta_async(
+                table="scrape_jobs",
+                operation="update",
+                fields=build_scrape_job_fields(
+                    id=job.id,
+                    status=job_status,
+                    completed_at=completed_at,
+                    duration_ms=int((time.perf_counter() - started_perf) * 1000),
+                    total_listings=candidate_urls_found,
+                    successful=persisted_listings,
+                    failed=len(errors),
+                    config=job_config,
+                ),
+                reject_source="discovery",
+            )
+            await _meta_update_marketplace_snapshot(marketplace)
         except Exception as exc:
             logger.exception("Discovery failed for %s", mp_id)
             errors.append(str(exc))
             status = "error"
             completed_at = datetime.now(timezone.utc)
-            job.status = "failed"
-            job.completed_at = completed_at
-            job.duration_ms = int((time.perf_counter() - started_perf) * 1000)
-            job.total_listings = candidate_urls_found
-            job.successful = persisted_listings
-            job.failed = len(errors)
-            job.config = {
+            job_config = {
                 "domain": domain,
                 "pages_scanned": pages_scanned,
                 "candidate_urls_found": candidate_urls_found,
@@ -1318,7 +1358,22 @@ class DiscoveryCrawler:
             }
             marketplace.last_discovery_status = "failed"
             try:
-                await self.db.commit()
+                await write_meta_async(
+                    table="scrape_jobs",
+                    operation="update",
+                    fields=build_scrape_job_fields(
+                        id=job.id,
+                        status="failed",
+                        completed_at=completed_at,
+                        duration_ms=int((time.perf_counter() - started_perf) * 1000),
+                        total_listings=candidate_urls_found,
+                        successful=persisted_listings,
+                        failed=len(errors),
+                        config=job_config,
+                    ),
+                    reject_source="discovery",
+                )
+                await _meta_update_marketplace_snapshot(marketplace)
             except Exception:
                 await self.db.rollback()
 

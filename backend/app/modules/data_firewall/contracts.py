@@ -7,7 +7,8 @@ from typing import Any, TypedDict
 from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
-from app.models.dimensions import DimProduct
+from app.models.app_tables import ScrapeJob
+from app.models.dimensions import DimProduct, DimMarketplace
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -104,6 +105,7 @@ def build_table_contract(model: type) -> dict[str, ColumnContract]:
 
 FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "dim_product": build_table_contract(DimProduct),
+    "dim_marketplace": build_table_contract(DimMarketplace),
     "fact_listing": build_table_contract(FactListing),
     "fact_price": build_table_contract(FactPrice),
     "fact_review": build_table_contract(FactReview),
@@ -114,6 +116,7 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "fact_crypto_price": build_table_contract(FactCryptoPrice),
     "fact_commodity_price": build_table_contract(FactCommodityPrice),
     "fact_fuel_price": build_table_contract(FactFuelPrice),
+    "scrape_jobs": build_table_contract(ScrapeJob),
 }
 
 # Per-table natural keys included in the HMAC locator sub-dict (subset of signed fields).
@@ -121,6 +124,8 @@ TABLE_LOCATORS: dict[str, tuple[str, ...]] = {
     "fact_price": ("listing_id", "date_id"),
     "fact_listing": ("url_hash",),
     "dim_product": ("id",),
+    "dim_marketplace": ("id",),
+    "scrape_jobs": ("id",),
     "fact_currency_rate": ("date_id", "currency_code", "source"),
     "fact_crypto_price": ("date_id", "symbol", "source"),
     "fact_commodity_price": ("date_id", "symbol", "source"),

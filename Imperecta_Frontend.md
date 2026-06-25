@@ -1,6 +1,6 @@
 # Imperecta — Frontend
 
-**Актуально на:** 2026-06-23 (head `4f961a9`)  
+**Актуально на:** 2026-06-25 (head `fc3b07d`)  
 **Стек:** React 19, TypeScript strict, Vite 6, React Router 7, TanStack Query 5, Tailwind 4, Radix/shadcn, Zustand, i18next, axios, framer-motion, recharts, sonner.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию UI; принципы не дублирует.
@@ -9,6 +9,10 @@
 
 | Commit | Суть |
 |--------|------|
+| `fc3b07d` | Backend: isolated gate rejects (`write_reject_data_isolated`); persist CUD UPDATE/DELETE + `PersistResult` |
+| `346bce0` | Backend: HMAC binds `table`+`operation`+`locator`+`fields` |
+| `bd29c22` | Backend/DB: `fact_listing.url_hash` NOT NULL (migration `030`) |
+| `6456625` | Backend: discovery gate writes + Layer 0 registry |
 | `4f961a9` | Backend: structural pool gate, `locale_selection`, L2 prune, migration `028 page_role` |
 | `f8c8439` | Migration 027 asyncpg split (deploy) |
 | `ad6aa57` | Backend: stock columns removed — **G-phase:** убрать `in_stock` из `products.ts` / `markets.ts`, `in_stock_found` из `admin.ts` |

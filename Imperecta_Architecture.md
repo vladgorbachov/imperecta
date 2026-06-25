@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-23 (ветка `main`, head `4f961a9`)  
+**Актуально на:** 2026-06-25 (ветка `main`, head `fc3b07d`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -69,7 +69,7 @@ imperecta/
 │   ├── app/models/
 │   ├── app/modules/          # доменная логика
 │   ├── app/workers/
-│   └── alembic/versions/     # 001 … 028 (head: add fact_listing page_role)
+│   └── alembic/versions/     # 001 … 030 (head: fact_listing url_hash NOT NULL)
 ├── Imperecta_Architecture.md   # продукт, топология, карта файлов (Часть II)
 ├── Imperecta_Backend.md        # API, Celery, parsing (Часть II)
 ├── Imperecta_Frontend.md
@@ -94,9 +94,9 @@ Legacy `app/api/`, `app/services/` удалены.
 | `marketplaces` | `dim_marketplace` CRUD, pool quotas |
 | `scraper` | Discovery, scrape, `pipeline/` orchestrator (см. `Imperecta_Backend.md` §4.3) |
 | `classifier` | Tier-1: PageRole классификация (`classify_page_role_for_discovery` использует слои JSON-LD/og/microdata/structural) — выделено как самостоятельный модуль (ARCHITECTURE_PRINCIPLES §10) |
-| `data_firewall` | Tier-1: контракты колонок, ecommerce/market rules, HMAC signing, `reject_data` на отказ (`firewall.py`, `rules.py`, `contracts.py`, `signing.py`, `reject_store.py`) |
+| `data_firewall` | Tier-1: контракты колонок, ecommerce/market rules, HMAC signing (`table`+`operation`+`locator`+`fields`), durable reject через `write_reject_data_isolated` (`firewall.py`, `rules.py`, `contracts.py`, `signing.py`, `reject_store.py`) |
 | `ingestion` | Tier-1: orchestration scrape→persist (`service.py`, `dto.py`) — вызывает `data_firewall` + `persist`; re-export gate в `gate.py` |
-| `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`: `write_sync` / `write_async`, `build_fact_price_fields`) |
+| `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`: `write_sync` / `write_async`, INSERT/UPDATE/DELETE по `SignedRecord.operation`, `PersistResult`, `build_fact_price_fields`) |
 | `product_pool` | Публичный пул товаров; `/pool/*`, `/markets/overview` |
 | `market_data` | Forex/crypto/commodities/fuel ingestion + `/markets/*` API |
 | `ai_analyst` | Claude chat sessions; entitlement-gated |
@@ -207,7 +207,9 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 **LAYER 0** перестройки «от БД наружу»: единый живой реестр **дверей** гейта и **контактов** backend ↔ PostgreSQL.
 
-Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data` / `_reject_persist`). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
+Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
+
+**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE** (persist — полный CUD dumb primitive; master lock связывает `table`+`operation`+`locator`; reject durable; `reject_data` несёт `operation`). **NEXT:** **LAYER 2** — закрыть bypass-writes из backlog **0b.2**, seam за seam. Оставшиеся gap в **0a.4** — вне закрытых sub-seams.
 
 > **Снимок:** recon `backend/app/**` (gate door catalog + DB-contact inventory). Типы колонок — ORM (`facts.py`, `dimensions.py`, `app_tables.py`, `reject_data.py`, `core.py`). `file:line` — evidence из recon; при дрейфе кода перепривязать grep/read.
 
@@ -221,8 +223,8 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 | door (function) | file:line | purpose | FROM (who may call) | TO (produces) | lock steps (ordered) | lock strength | known lock-gap |
 |-----------------|-----------|---------|---------------------|---------------|----------------------|---------------|----------------|
-| `evaluate_ecommerce` | `data_firewall/firewall.py:184–195` | E-commerce extract → signed row (default `fact_price`) | Scrape/ingestion: `marketplace_id` + `CurrencyResolver` + optional `persist_fields` (`ingestion/service.py:194–201`) | On pass + `persist_fields`: `SignedRecord`; on fail + `db`: `reject_data` | 1) `evaluate_ecommerce_rules` — 5 checks (`rules.py:108–159`, DB read whitelist `rules.py:65–75`) 2) `page_role in (listing,hub)` → reject (`firewall.py:210–220`) 3) `page_role=unknown` → log only (`221–227`) 4) If `passed and persist_fields`: `_validate_against_contract` (`239–244`) 5) `_sign_fields` / `sign(fields)` (`251`, `165–169`) 6) sign fail → `signing_unavailable` (`252–256`) 7) If `not passed and db`: `write_reject_data` (`258–271`) | **PARTIAL** | `unknown` page_role not blocked; contract only on keys present (`firewall.py:116–119`); HMAC не связывает `table`; `passed=True` без `signed_record` если `persist_fields is None` (`237–238`) |
-| `evaluate_market` | `data_firewall/firewall.py:289–295` | Market/discovery dict → signed dim/fact row | Caller supplies `table` + field dict (`discovery.py:171+`, `market_data/ingestion.py:147+`) | On pass: `SignedRecord`; on fail + `db`: `reject_data` | 1) `unknown_table` if no contract (`297–306`) 2) `_validate_against_contract` (`308`) 3) `_sign_fields` (`311–316`) 4) If `not passed and db`: `write_reject_data` (`318–328`) | **PARTIAL** | No e-commerce rules; sparse contract; 11 contracted tables (`contracts.py:105–117`) vs 6 `write_sync` branches; HMAC не связывает `table` |
+| `evaluate_ecommerce` | `data_firewall/firewall.py:204+` | E-commerce extract → signed row (default `fact_price`) | Scrape/ingestion: `marketplace_id` + `CurrencyResolver` + optional `persist_fields` (`ingestion/service.py:194–201`) | On pass + `persist_fields`: `SignedRecord`; on fail + `db`: `reject_data` | 1) `evaluate_ecommerce_rules` — 5 checks (`rules.py:108–159`, DB read whitelist `rules.py:65–75`) 2) `page_role in (listing,hub)` → reject (`firewall.py:210–220`) 3) `page_role=unknown` → log only (`221–227`) 4) If `passed and persist_fields`: `_validate_against_contract` (`239–244`) 5) `_sign_fields` (`251`, `165–189`) 6) sign fail → `signing_unavailable` (`252–256`) 7) If `not passed and db`: `write_reject_data_isolated` (`278–291`) | **PARTIAL** | `unknown` page_role not blocked; contract only on keys present (`firewall.py:116–119`); `passed=True` без `signed_record` если `persist_fields is None` (`237–238`) |
+| `evaluate_market` | `data_firewall/firewall.py:309+` | Market/discovery dict → signed dim/fact row | Caller supplies `table` + field dict (`discovery.py:171+`, `market_data/ingestion.py:147+`) | On pass: `SignedRecord`; on fail + `db`: `reject_data` | 1) `unknown_table` if no contract (`297–306`) 2) `_validate_against_contract` (`308`) 3) `_sign_fields` (`311–316`) 4) If `not passed and db`: `write_reject_data_isolated` (`338–348`) | **PARTIAL** | No e-commerce rules; sparse contract; 11 contracted tables (`contracts.py:105–117`) vs 6 `write_sync` insert branches; 5 tables still `raise` at persist |
 | `evaluate_ecommerce_rules` | `data_firewall/rules.py:108–113` | Rules-only rail (5 checks); **not** package export | Internal from `evaluate_ecommerce` (`firewall.py:197–201`); legacy alias `evaluate_gate` | `GateOutcome` only — no `SignedRecord` | 1) `product_name_ok` 2) `currency_ok` 3) `price_ok` 4) `currency_raw_sane_ok` 5) `currency_country_match_ok` (`115–128`) | **WEAK** | No contract, no signing, no persist ticket |
 | `evaluate_gate` | `ingestion/gate.py:16` | Legacy alias → `evaluate_ecommerce_rules`; **outside** package wall | Legacy callers of `ingestion.gate` | `GateOutcome` only | Same 5 rules | **WEAK** | Bypasses full wall (no contract/sign/persist guard) |
 
@@ -230,52 +232,84 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 **Persist read doors: 0** — grep `select(`, `.scalar`, `.get(` в `persist/writer.py`: **NOT FOUND**.
 
+**Диспетчеризация `write_sync` / `write_async`:** после `_verify_signed_record` — по `signed.operation`:
+- **`insert`** — прежние ветки (ORM INSERT; для `fact_price` и трёх market facts — DELETE по replace-key + INSERT, daily replace);
+- **`update`** (sync only, U-1) — `_write_sync_update`: локатор `signed.locator` → `update(model).where(locator).values(...)` только по **non-locator** полям из `signed.fields` (partial update);
+- **`delete`** — `_write_sync_delete` / `_write_async_delete`: только `signed.locator`, value fields не требуются.
+
+**Возврат:** `PersistResult(ok, rows_affected, no_target)` (`writer.py:78–87`); `__bool__` → `ok` — insert callers без изменений; `rowcount == 0` → `no_target=True` (честное уведомление об отсутствии цели, не ошибка).
+
 | door | file:line | table | op | re-verifies HMAC? | session | notes |
 |------|-----------|-------|-----|-------------------|---------|-------|
-| `write_sync` (null `signed`) | `persist/writer.py:135–143` | `unknown` (reject) | reject insert | N/A | caller `Session` | `_reject_persist` → `missing_signed_record` |
-| `write_sync` (bad signature) | `persist/writer.py:145–153` | `signed.table` | reject insert | **Yes** — `verify(signed.fields, signed.signature)` | caller `Session` | `_reject_persist` → `invalid_signature` |
-| `write_sync` → `fact_price` | `persist/writer.py:158–168` | `fact_price` | DELETE by `(listing_id, date_id)` + INSERT | Yes (`145`) | caller `Session` | `_orm_fields_for_table` coercion (`155`, `58–79`) |
-| `write_sync` → `dim_product` | `persist/writer.py:170–172` | `dim_product` | INSERT only | Yes | caller `Session` | No replace/delete |
-| `write_sync` → `fact_listing` | `persist/writer.py:174–176` | `fact_listing` | INSERT only | Yes | caller `Session` | No replace/delete |
-| `write_sync` → `fact_currency_rate` | `persist/writer.py:180–189` | `fact_currency_rate` | DELETE by `(date_id, currency_code, source)` + INSERT | Yes | caller `Session` | daily replace |
-| `write_sync` → `fact_crypto_price` | `persist/writer.py:191–200` | `fact_crypto_price` | DELETE by `(date_id, symbol, source)` + INSERT | Yes | caller `Session` | daily replace |
-| `write_sync` → `fact_commodity_price` | `persist/writer.py:202–211` | `fact_commodity_price` | DELETE by `(date_id, symbol, source)` + INSERT | Yes | caller `Session` | daily replace |
-| `write_sync` (unsupported) | `persist/writer.py:213` | — | `raise ValueError` | Yes (if reached) | — | `fact_review`, `fact_promo`, `fact_search_trend`, `fact_tariff`, `fact_fuel_price` — contract exists, no branch |
-| `write_async` (null `signed`) | `persist/writer.py:223–235` | `unknown` | reject insert | N/A | `AsyncSession.sync_session` | direct `write_reject_data`, not `_reject_persist` |
-| `write_async` (bad signature) | `persist/writer.py:237–249` | `signed.table` | reject insert | **Yes** `verify(...)` | `db.sync_session` | |
-| `write_async` → `fact_currency_rate` | `persist/writer.py:255–264` | `fact_currency_rate` | DELETE+INSERT | Yes | `AsyncSession` | |
-| `write_async` → `fact_crypto_price` | `persist/writer.py:266–275` | `fact_crypto_price` | DELETE+INSERT | Yes | `AsyncSession` | |
-| `write_async` → `fact_commodity_price` | `persist/writer.py:277–286` | `fact_commodity_price` | DELETE+INSERT | Yes | `AsyncSession` | |
-| `write_async` (unsupported) | `persist/writer.py:288` | — | `raise ValueError` | — | — | No `fact_price`, `dim_product`, `fact_listing`; **runtime callers в `backend/app/**` — NOT FOUND** |
-| `write_reject_data` | `data_firewall/reject_store.py:81–114` | `reject_data` | insert + flush | No HMAC | caller `Session` | Producer + persist reject path; **не** через `write_sync` |
-| `_reject_persist` | `persist/writer.py:82–125` | `reject_data` | insert via `write_reject_data` | No (already failed verify) | caller `Session` | Sentry escalate (`91–112`); **AUDIT GAP:** reject inside nested savepoint may roll back (`discovery.py:165–209`) |
+| `write_sync` (dispatch) | `persist/writer.py:271+` | per `signed.table` | `insert` / `update` / `delete` | **Yes** — master-lock перед exec | caller `Session` | маршрут по `signed.operation` после `_verify_signed_record` |
+| `write_sync` (null `signed`) | `persist/writer.py:278–287` | `unknown` (reject) | reject insert | N/A | caller `Session` | `_reject_persist` → `missing_signed_record` |
+| `write_sync` (bad signature) | `persist/writer.py:289–299` | `signed.table` | reject insert | **Yes** — `_verify_signed_record` | caller `Session` | `_reject_persist` → `invalid_signature` / `locator_mismatch` / `unsupported_operation` |
+| `write_sync` (update, U-1) | `persist/writer.py:220–246` | `dim_product`, `fact_listing` | UPDATE by `signed.locator` | Yes | caller `Session` | `_write_sync_update`; SET non-locator fields; пустой value set → `nothing_to_update` reject |
+| `write_sync` (delete) | `persist/writer.py:249–257` | `dim_product`, `fact_listing`, `fact_price`, `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | DELETE by `signed.locator` only | Yes | caller `Session` | `_write_sync_delete`; `PersistResult.rows_affected` / `no_target` |
+| `write_sync` → `fact_price` | `persist/writer.py:310–320` | `fact_price` | `insert`: DELETE `(listing_id, date_id)` + INSERT | Yes | caller `Session` | daily replace insert path |
+| `write_sync` → `dim_product` | `persist/writer.py:322–324` | `dim_product` | `insert` (+ `update`/`delete` через dispatch) | Yes | caller `Session` | |
+| `write_sync` → `fact_listing` | `persist/writer.py:326–328` | `fact_listing` | `insert` (+ `update`/`delete` через dispatch) | Yes | caller `Session` | |
+| `write_sync` → `fact_currency_rate` | `persist/writer.py:332–341` | `fact_currency_rate` | `insert`: DELETE replace-key + INSERT | Yes | caller `Session` | daily replace |
+| `write_sync` → `fact_crypto_price` | `persist/writer.py:343–352` | `fact_crypto_price` | `insert`: DELETE replace-key + INSERT | Yes | caller `Session` | daily replace |
+| `write_sync` → `fact_commodity_price` | `persist/writer.py:354–363` | `fact_commodity_price` | `insert`: DELETE replace-key + INSERT | Yes | caller `Session` | daily replace |
+| `write_sync` (unsupported) | `persist/writer.py:365` | — | `raise ValueError` | Yes (if reached) | — | `fact_review`, `fact_promo`, `fact_search_trend`, `fact_tariff`, `fact_fuel_price` — contract exists, no branch |
+| `write_async` (dispatch) | `persist/writer.py:368+` | per `signed.table` | `insert` / `delete` | **Yes** | `AsyncSession` | **нет async UPDATE** — replace tables only |
+| `write_async` (null `signed`) | `persist/writer.py:371–385` | `unknown` | reject insert | N/A | `AsyncSession.sync_session` | direct `write_reject_data`, not `_reject_persist` |
+| `write_async` (bad signature) | `persist/writer.py:387–403` | `signed.table` | reject insert | **Yes** `_verify_signed_record` | `db.sync_session` | |
+| `write_async` (delete) | `persist/writer.py:405–406` | `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | DELETE by `signed.locator` | Yes | `AsyncSession` | `_write_async_delete` |
+| `write_async` → `fact_currency_rate` | `persist/writer.py:411–420` | `fact_currency_rate` | `insert`: DELETE+INSERT | Yes | `AsyncSession` | |
+| `write_async` → `fact_crypto_price` | `persist/writer.py:422–431` | `fact_crypto_price` | `insert`: DELETE+INSERT | Yes | `AsyncSession` | |
+| `write_async` → `fact_commodity_price` | `persist/writer.py:433–442` | `fact_commodity_price` | `insert`: DELETE+INSERT | Yes | `AsyncSession` | |
+| `write_async` (unsupported) | `persist/writer.py:446` | — | `raise ValueError` | — | — | No `fact_price`, `dim_product`, `fact_listing`; **runtime callers в `backend/app/**` — NOT FOUND** |
+| `write_reject_data` | `data_firewall/reject_store.py:108–150` | `reject_data` | insert + flush | No HMAC | caller `Session` | flush-only; in-txn callers (`writer._reject_persist`, прямой reject в `write_async`) — **не** через `write_sync` |
+| `write_reject_data_isolated` | `data_firewall/reject_store.py:153+` | `reject_data` | insert + commit | No HMAC | независимая sync-сессия (`sync_session_factory`) | durable reject-канал гейта (`evaluate_ecommerce`, `evaluate_market`); коммит вне business savepoint продюсера; зеркало `_persist_technical_error_log` |
+| `_reject_persist` | `persist/writer.py:140+` | `reject_data` | insert via `write_reject_data` | No (already failed verify) | caller `Session` | Sentry escalate; persist reject in-txn (flush-only) |
+
+**`SUPPORTED_WRITE_OPERATIONS`** (`writer.py:32–39`) — единый источник истины; каждая op проходит master-lock verify (`table`+`operation`+`locator`+`fields`) до исполнения:
+
+| table | operations | примечание |
+|-------|------------|------------|
+| `dim_product` | `insert`, `update`, `delete` | full CUD sync |
+| `fact_listing` | `insert`, `update`, `delete` | full CUD sync |
+| `fact_price` | `insert`, `delete` | daily replace покрывает «обновление» через insert-path |
+| `fact_currency_rate` | `insert`, `delete` | daily replace; async DELETE by locator |
+| `fact_crypto_price` | `insert`, `delete` | daily replace; async DELETE by locator |
+| `fact_commodity_price` | `insert`, `delete` | daily replace; async DELETE by locator |
 
 #### 0a.3 Lock mechanism (замки / ключи)
 
-HMAC-SHA256 (`signing.py:69–79`) вычисляется над **только** `canonical_serialize(record_fields)` — sorted keys, канонические значения (`52–58`, `31–48`). **`table` и operation (insert / delete+replace) в подпись НЕ входят.** `verify(record_fields, signature)` (`82–89`) сверяет только поля; `write_sync` / `write_async` затем доверяют `signed.table` **side-band** (`writer.py:145–156`). Это **master-lock-strength finding**: теоретически возможна подмена `table` при валидной подписи полей — **замок №1 для усиления в LAYER 1**.
+HMAC-SHA256 (`signing.py:93–114`) вычисляется над каноническим payload **`canonical_serialize_signed_payload`** (`signing.py:68–82`): подпись связывает **`table` + `operation` + `locator` + `fields`** (не только `fields`). Верхний уровень signed payload: ключи `__table__`, `__operation__`, `__locator__`, `fields` — sorted keys, канонические значения вложенных dict (`signing.py:31–56`, `76–81`).
 
-При незаданном `data_firewall_signing_secret` — fail-closed: `sign` → `None`, `verify` → `False` (`signing.py:61–66, 72–73, 86–88`).
+Сигнатуры API: `sign(*, table, operation, fields, locator) -> str | None` и `verify(*, table, operation, fields, locator, signature) -> bool` (`signing.py:93–136`). Producer-side (`firewall.py:_sign_fields`, `169–189`) извлекает locator через `extract_locator(table, fields)`; per-table ключи locator — **`TABLE_LOCATORS`** в `contracts.py:120–127` (leaf).
 
-`SignedRecord` (`signing.py:92–98`): `table: str`, `fields: dict[str, Any]`, `signature: str` — «ключ», передаваемый от producer-side к DB-side дверям.
+DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно сверяет HMAC, затем defence-in-depth: signed `locator` должен совпадать с `extract_locator(table, fields)` — иначе reject `locator_mismatch`; `operation` должна входить в `SUPPORTED_WRITE_OPERATIONS[table]` (`writer.py:32–39`) — иначе `unsupported_operation`; невалидная подпись → `invalid_signature`. `write_sync` / `write_async` маршрутизируют по `signed.table` только после прохождения `_verify_signed_record` (`writer.py:185–195`).
 
-#### 0a.4 Lock gaps (пробоины — backlog LAYER 1)
+При незаданном `data_firewall_signing_secret` — fail-closed: `sign` → `None`, `verify` → `False` (`signing.py:85–90, 126–135`).
 
-1. **HMAC не связывает `table` / operation** — forgeable table pairing — `signing.py:69–79`, `writer.py:155–156` — **LAYER 1 (signing)**.
-2. **11 contracted tables vs 6 `write_sync` branches** — 5 таблиц проходят `evaluate_market` signing, но `raise` at persist — `contracts.py:105–117`, `writer.py:213` — **LAYER 1**.
+`SignedRecord` (`signing.py:139–147`): `table`, `operation`, `locator`, `fields`, `signature` — «ключ», передаваемый от producer-side к DB-side дверям.
+
+#### 0a.4 Lock gaps (пробоины — residual backlog)
+
+> **Sub-seam 4 (CUD primitives):** gap **#1** и **#5** остаются **CLOSED**; новых пробоин sub-seam 4 не открыл.
+
+1. **HMAC не связывает `table` / operation** — **CLOSED** (sub-seam 2 master-lock): HMAC связывает `table`, `operation`, `locator` и `fields` (`signing.py:68–82`, `93–136`); persist — `_verify_signed_record` (`writer.py:60–75`). Tamper-evidence: `test_stage_1_2.py` (`test_data_firewall_signature_tamper_table_operation_locator`, content-binding verify).
+2. **11 contracted tables vs 6 `write_sync` insert branches** — 5 таблиц проходят `evaluate_market` signing, но `raise` at persist — `contracts.py:105–117`, `writer.py:365` — **LAYER 1**.
 3. **Contract validator:** нет ветки JSONB/ARRAY/text для содержимого; не проверяет отсутствующие NOT NULL — слеп к `dim_product.attributes` / `image_urls` при расширении payload — `firewall.py:110–162`, `dimensions.py:343–349` — hardened under gate-extraction (slice-T); **LAYER 1**.
 4. **`page_role="unknown"` не блокируется** в `evaluate_ecommerce` — только log — `firewall.py:221–227` — **LAYER 1**.
-5. **`reject_data` внутри nested savepoint продюсера** может откатиться с парой (discovery) — reject должен переживать savepoint — `discovery.py:165–209`, `reject_store.py:114` — **LAYER 1**.
+5. **`reject_data` внутри nested savepoint продюсера откатывается с парой** — **CLOSED** (sub-seam 3): гейт пишет reject через независимую audit-сессию (`write_reject_data_isolated`, зеркало `_persist_technical_error_log`) — коммит вне business savepoint; reject переживает `nested.rollback()`; атомарность пары (без orphan `dim_product`) сохранена. Tamper/durability — pure-logic тесты. Единообразно для gate rejects (discovery savepoint path + scrape/market); `writer._reject_persist` без изменений (in-txn `write_reject_data`). Колонка `operation` — закрыта sub-seam 1 (`029`, `reject_store.py:93+`).
 6. **Legacy `evaluate_gate`** (rules-only) обходит полную стену — `ingestion/gate.py:16` — candidate removal — **LAYER 1 / cleanup**.
 
 #### 0a.5 Planned doors (not built — confirmed absent)
 
 | planned door | status | evidence | target layer/phase |
 |--------------|--------|----------|-------------------|
-| `update_validator` (UPDATE door) | planned, not built | grep `update_validator` in `backend/app`: **NOT FOUND** | **LAYER 1** / discovery-reactivation |
+| `update_validator` (gate-side UPDATE door) | planned, not built | grep `update_validator` in `backend/app`: **NOT FOUND** | **LAYER-later** / discovery-reactivation — решает легитимность UPDATE до подписи `operation="update"`; persist UPDATE primitive (U-1) уже готов |
 | `data_export` (read-OUT door) | planned, not built | no symbol in `data_firewall/**` or `persist/**`; model `DataExport` only (`app_tables.py:509–512`) | **Phase 7/8** |
 | `user_data` CRUD (scoped owner door) | planned, not built | grep in gate/persist perimeter: **NOT FOUND** | **Phase 7/8** |
-| `operation` field on `reject_data` | planned, not built | grep `operation` in `models/reject_data.py`: **NOT FOUND** (`reject_data.py:21–35`) | **LAYER 1** |
-| Standalone DELETE door (beyond daily replace) | planned, not built | only DELETE inside replace branches (`writer.py:161–209`); no DELETE-only entry — **NOT FOUND** | **LAYER 1+** |
+| `operation` field on `reject_data` | **built** (sub-seam 1) | миграция `029_reject_data_operation`; `models/reject_data.py:29+`; `reject_store.py:93+` | **LAYER 1** — DONE |
+| `fact_listing.url_hash` NOT NULL locator | **built** (sub-seam 1b) | миграция `030_fact_listing_url_hash_not_null`; `TABLE_LOCATORS` `fact_listing` → `("url_hash",)` (`contracts.py:122`) | **LAYER 1** — DONE |
+| Standalone DELETE door (delete-by-locator) | **built** (sub-seam 4) | `_write_sync_delete` / `_write_async_delete` (`writer.py:249+`, `260+`); универсальный primitive; **ожидает** per-module signed callers | **LAYER 1** — DONE |
+| CUD UPDATE primitive (persist U-1) | **built** (sub-seam 4) | `_write_sync_update` (`writer.py:220+`); `dim_product`, `fact_listing`; async UPDATE — **NOT FOUND** | **LAYER 1** — DONE |
 
 ---
 
@@ -296,9 +330,9 @@ HMAC-SHA256 (`signing.py:69–79`) вычисляется над **только*
 | market_data | `market_data/ingestion.py:147–159` | `fact_currency_rate` | `date_id` Integer; `currency_code` String(3); `rate_to_eur` Numeric(18,8); `rate_to_usd` Numeric(18,8); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:187–199` | `fact_crypto_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `price_usd` Numeric(18,8); `market_cap_usd` Numeric(20,2); `volume_24h_usd` Numeric(20,2); `change_24h_pct` Numeric(8,4); `source` String(30); `rank` SmallInteger; `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:228–240` | `fact_commodity_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `commodity_type` String(20); `price_usd` Numeric(12,4); `price_eur` Numeric(12,4); `change_24h_pct` Numeric(8,4); `unit` String(20); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
-| persist | `persist/writer.py:158–210` | `fact_price`, `dim_product`, `fact_listing`, `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | verbatim signed payload → ORM ctor | (verify HMAC upstream) | `write_sync` | sync |
+| persist | `persist/writer.py:271+` | `fact_price`, `dim_product`, `fact_listing`, `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | verbatim signed payload → ORM insert/update/delete | (verify HMAC upstream) | `write_sync` → `PersistResult` | sync |
 
-`write_async` (`persist/writer.py:216–288`) — определён, **runtime callers в `backend/app/**` — NOT FOUND** (только export).
+`write_async` (`persist/writer.py:368+`) — определён; DELETE-only для market facts; **runtime callers в `backend/app/**` — NOT FOUND** (только export).
 
 #### 0b.2 Bypass writes (мимо дверей — backlog LAYER 2)
 
@@ -407,8 +441,9 @@ HMAC-SHA256 (`signing.py:69–79`) вычисляется над **только*
 
 | module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
 |--------|-----------|-------|----------------------|-----|---------|--------------|
-| data_firewall | `data_firewall/reject_store.py:101–114` | `reject_data` | `source` String(50); `table_target` String(50); `marketplace_id`/`listing_id` UUID; `reject_reason` String(100); `failed_rules` JSONB; `raw_payload` JSONB; `signature_present` Boolean; `rejected_by` String(20) | insert + flush | sync/async | reject-path |
-| persist | `persist/writer.py:102–112` | `reject_data` | те же (invalid signature) | insert via `_reject_persist` | sync | reject-path |
+| data_firewall | `data_firewall/reject_store.py:153+` | `reject_data` | `source`, `table_target`, `operation` String(10), `marketplace_id`/`listing_id` UUID, `reject_reason`, `failed_rules` JSONB, `raw_payload` JSONB, `signature_present`, `rejected_by` | insert + commit (isolated session) | sync | reject-path (gate) |
+| data_firewall | `data_firewall/reject_store.py:108–150` | `reject_data` | те же | insert + flush | sync/async | reject-path (in-txn) |
+| persist | `persist/writer.py:140+` | `reject_data` | те же (verify fail) | insert via `_reject_persist` | sync | reject-path |
 | cleanup | `workers/cleanup_tasks.py:24–35` | `scrape_logs`, `api_logs`, `ai_chat_messages`, `alert_events` | retention DELETE by `created_at` | delete + commit | sync | scrape_logs-api_logs |
 | reaper | `workers/reaper_tasks.py:312–326` | `scrape_jobs` | orphan UPDATE `status=failed` | update + commit | AsyncSession | scrape_jobs-metadata |
 | maintenance | `workers/maintenance_tasks.py:70` | MV | `REFRESH MATERIALIZED VIEW` | DDL | raw conn | maintenance-DDL |
@@ -496,7 +531,7 @@ HMAC-SHA256 (`signing.py:69–79`) вычисляется над **только*
 ## 9. База данных (кратко)
 
 - Star schema + app tables.
-- **Head migration:** `028_add_fact_listing_page_role` (`fact_listing.page_role varchar(16)` — gate diagnostics); `027_remove_in_stock_and_fact_stock` (drop stock columns/table; rebuild `mv_daily_price_summary`); `026_forex_nine_currency_allowlist`; `025_supabase_security_hardening`; `024_reject_data_and_not_a_product`; `023_scrape_logs_currency_rejected`; ранее — `022` scrape children, `021` failure_streak, resumable discovery `016`–`018`, `partial` `019`, `parent_job_id` `020`.
+- **Head migration:** `030_fact_listing_url_hash_not_null` (`fact_listing.url_hash` NOT NULL); `029_reject_data_operation`; `028_add_fact_listing_page_role` (`fact_listing.page_role varchar(16)`); `027_remove_in_stock_and_fact_stock` (drop stock columns/table; rebuild `mv_daily_price_summary`); `026_forex_nine_currency_allowlist`; `025_supabase_security_hardening`; `024_reject_data_and_not_a_product`; `023_scrape_logs_currency_rejected`; ранее — `022` scrape children, `021` failure_streak, resumable discovery `016`–`018`, `partial` `019`, `parent_job_id` `020`.
 - `fact_price` partitioned by `date_id` (`fact_price_YYYYMM` + **`fact_price_default`** safety partition).
 - Без партиции на текущий месяц INSERT в `fact_price` падает (`no partition found for row`).
 - `url_hash` unique на `fact_listing`.
@@ -560,6 +595,10 @@ sequenceDiagram
 
 | Коммит / область | Суть |
 |------------------|------|
+| `fc3b07d` Isolated gate rejects + CUD persist | `write_reject_data_isolated` on gate fail; `PersistResult`; sync UPDATE/DELETE primitives in `persist/writer.py` |
+| `346bce0` HMAC master-lock | Sign/verify bind `table`+`operation`+`locator`+`fields` |
+| `bd29c22` url_hash NOT NULL | Migration `030`; `TABLE_LOCATORS` for `fact_listing` |
+| `6456625` Discovery gate writes | Layer 0 registry; per-pair savepoint path |
 | `4f961a9` Structural pool gate + locale | Discovery: per-URL classify, `page_role` on insert; `trust_sample` removed; `locale_selection.py`; scrape L2 prune non-PDP; migration `028` `fact_listing.page_role`; pool UI filter `page_role=product` |
 | `f8c8439` Migration 027 asyncpg split | Один SQL statement per `op.execute()` в 027 (asyncpg deadlock safety) |
 | `ad6aa57` Remove stock tracking | Drop `in_stock`/`last_in_stock`/`fact_stock`/`scrape_logs.in_stock_found`; modules `data_firewall`/`persist`/`ingestion` без stock path |
@@ -727,7 +766,7 @@ sequenceDiagram
 
 # Часть II. Полная структура файлов репозитория
 
-**Актуально на:** 2026-06-23 (head `4f961a9`) · **Tracked файлов:** 509 (`git ls-files`)
+**Актуально на:** 2026-06-25 (head `fc3b07d`) · **Tracked файлов:** 520 (`git ls-files`)
 
 Список всех tracked файлов приложения (исключая кэши, секреты, build-артефакты). Источник истины — `git ls-files`.
 
@@ -802,7 +841,9 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/alembic/versions/025_supabase_security_hardening.py` | RLS deny policies + REVOKE anon/authenticated (`core/supabase_security.py`). |
 | `backend/alembic/versions/026_forex_nine_currency_allowlist.py` | Seed JPY; purge `fact_currency_rate` вне allowlist 9 валют. |
 | `backend/alembic/versions/027_remove_in_stock_and_fact_stock.py` | Drop stock columns/table; rebuild MV; tighten `alerts.alert_type` CHECK. |
-| `backend/alembic/versions/028_add_fact_listing_page_role.py` | `fact_listing.page_role varchar(16)` — structural gate diagnostics (**head**). |
+| `backend/alembic/versions/028_add_fact_listing_page_role.py` | `fact_listing.page_role varchar(16)` — structural gate diagnostics. |
+| `backend/alembic/versions/029_reject_data_operation.py` | `reject_data.operation` VARCHAR(10) NOT NULL + CHECK. |
+| `backend/alembic/versions/030_fact_listing_url_hash_not_null.py` | `fact_listing.url_hash` NOT NULL — canonical locator (**head**). |
 
 ### 2.3 Корневые пакеты приложения (`backend/app/`)
 
@@ -959,13 +1000,13 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/modules/data_firewall/rules.py` | Ecommerce gate rules (`evaluate_ecommerce_rules`). |
 | `backend/app/modules/data_firewall/firewall.py` | `evaluate_ecommerce`, `evaluate_market`; sign on pass. |
 | `backend/app/modules/data_firewall/signing.py` | HMAC-SHA256 canonical serialize + verify. |
-| `backend/app/modules/data_firewall/reject_store.py` | `write_reject_data` (fail-closed diagnostic table). |
+| `backend/app/modules/data_firewall/reject_store.py` | `write_reject_data` (in-txn flush) + `write_reject_data_isolated` (durable gate reject). |
 
 #### 2.7.5h Persist (`persist/`) — Tier-1
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/persist/writer.py` | `write_sync` / `write_async`: verify signature → verbatim ORM insert; `build_fact_price_fields`. |
+| `backend/app/modules/persist/writer.py` | `write_sync` / `write_async`: verify HMAC → INSERT/UPDATE/DELETE; `PersistResult`; `build_fact_price_fields`. |
 
 #### 2.7.6 Dashboard (`dashboard/`) — удалён
 
@@ -1099,7 +1140,7 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/tests/test_d1_dashboard_dissolution.py` | D1: `dashboard/` модуль удалён. |
 | `backend/tests/test_da1_alerts_digests_dissolution.py` | DA1: `alerts/`+`digests/` распущены. |
 | `backend/tests/test_ing1_ingestion_module.py` | ING1: `ingestion/` Tier-1 orchestration. |
-| `backend/tests/test_data_firewall/` | data_firewall contracts, HMAC, page_role blocks. |
+| `backend/tests/test_data_firewall/` | data_firewall contracts, HMAC tamper, page_role blocks, reject durability, CUD primitives. |
 | `backend/tests/test_migration_027.py` | Migration 027: stock columns/table dropped. |
 | `backend/tests/test_collector_gate_and_locale.py` | Gate/locale/prune: migration 028 asyncpg scan, `select_locale_url`, discovery gate, L2 prune safety. |
 | `backend/tests/test_pool_reset_extended.py` | Extended admin clear-pool maintenance. |
@@ -1617,13 +1658,13 @@ Skill-документы для специализированных AI-аген
 | Admin pipeline UI | `frontend/src/components/admin/DataCollectionTab.tsx`, `PipelineStatusPanel.tsx`, `WorkerLogRelayPanel.tsx` |
 | Display currency | `backend/app/common/currency.py`, `frontend/src/stores/displayCurrencyStore.ts` + `lib/displayCurrency.ts` |
 | Market data | `modules/market_data/{facade,fetching,ingestion,reader,ticker}.py` + `workers/market_data_tasks.py` |
-| Миграции | `backend/alembic/versions/001` … `028` (head: `028_add_fact_listing_page_role`) |
+| Миграции | `backend/alembic/versions/001` … `030` (head: `030_fact_listing_url_hash_not_null`) |
 
 
 
 
 
-### Полное дерево `backend/app/` на head `4f961a9` (2026-06-23)
+### Полное дерево `backend/app/` на head `fc3b07d` (2026-06-25)
 
 ```
 backend/app/
@@ -1696,12 +1737,12 @@ backend/app/
 │   ├── data_firewall/                       Tier-1 validation boundary
 │   │   ├── contracts.py                     FACT_TABLE_CONTRACTS from ORM
 │   │   ├── firewall.py                      evaluate_ecommerce / evaluate_market
-│   │   ├── reject_store.py                  write_reject_data
+│   │   ├── reject_store.py                  write_reject_data + write_reject_data_isolated
 │   │   ├── rules.py                         evaluate_ecommerce_rules
 │   │   └── signing.py                       HMAC sign/verify
 │   │
 │   ├── persist/                             Tier-1 verbatim writer
-│   │   └── writer.py                        write_sync / write_async, build_fact_price_fields
+│   │   └── writer.py                        write_sync / write_async, PersistResult, CUD ops
 │   │
 │   ├── digests/                             ── namespace-only (DA1) ──
 │   │   └── __init__.py
@@ -1810,7 +1851,7 @@ backend/app/
 - **Celery worker** (`app/workers/celery_app.py` `conf.include`): `app.modules.scraper.tasks`, `app.workers.market_data_tasks`, `app.workers.cleanup_tasks`, `app.workers.maintenance_tasks`, `app.workers.reaper_tasks`. (Старые `modules.alerts.tasks`, `modules.digests.tasks`, `modules.market_data.tasks` — удалены.)
 - **Celery beat** (`app/workers/scheduler.py`): `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily 00:00), `refresh_materialized_views` (hourly), `cleanup_old_data` (daily 03:00). Discovery/scrape по расписанию **не запускаются**.
 - **SQLAlchemy модели:** `app/models/{core,dimensions,facts,app_tables}.py`.
-- **Скрейп-пайплайн (актуальный, head `4f961a9`):**
+- **Скрейп-пайплайн (актуальный, head `fc3b07d`):**
   - `modules/classifier/service.py` → `classify_page_role_for_discovery` (og:website weak hub override, `08c23f2`).
   - `locale_selection.py` → hreflang chain + `Accept-Language` on discovery classify fetch.
   - `discovery.py` → per-URL gate (`trust_sample` removed); `_save_product_urls` stamps `page_role=product`.

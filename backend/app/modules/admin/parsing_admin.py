@@ -7,15 +7,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import case, func, select, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
+from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
 
 
 class ParsingAdminService:
@@ -200,28 +200,43 @@ class ParsingAdminService:
         metadata["last_activity_at"] = self._to_iso(started_at)
         if marketplace_codes:
             metadata["marketplace_codes"] = [code.strip() for code in marketplace_codes if code.strip()]
-        job = ScrapeJob(
+        job_id = uuid4()
+        fields = build_scrape_job_fields(
+            id=job_id,
             job_type=self.TEST_PIPELINE_JOB_TYPE,
             status="running",
             started_at=started_at,
             config={"metadata": metadata},
         )
-        self.db.add(job)
         try:
-            await self.db.commit()
-        except IntegrityError as exc:
-            await self.db.rollback()
+            result = await write_meta_async(
+                table="scrape_jobs",
+                operation="insert",
+                fields=fields,
+                reject_source="parsing_admin",
+            )
+            if not result.ok:
+                raise ValueError("scrape_jobs insert rejected by data firewall")
+        except Exception as exc:
             if await self._repair_scrape_job_type_constraint():
-                self.db.add(job)
-                await self.db.commit()
+                result = await write_meta_async(
+                    table="scrape_jobs",
+                    operation="insert",
+                    fields=fields,
+                    reject_source="parsing_admin",
+                )
+                if not result.ok:
+                    raise ValueError(
+                        "scrape_jobs.job_type does not allow 'full_pipeline_test' "
+                        "and automatic constraint repair failed."
+                    ) from exc
             else:
                 raise ValueError(
                     "scrape_jobs.job_type does not allow 'full_pipeline_test' "
                     "and automatic constraint repair failed."
                 ) from exc
-        await self.db.refresh(job)
         return {
-            "job_id": str(job.id),
+            "job_id": str(job_id),
             "started_at": self._to_iso(started_at),
         }
 
@@ -353,12 +368,21 @@ class ParsingAdminService:
         metadata["current_stage"] = "failed"
         metadata["last_activity_at"] = self._to_iso(now)
         metadata["error"] = "cancelled_by_admin"
-        job.status = "failed"
-        job.completed_at = now
-        if job.started_at is not None:
-            job.duration_ms = int((now - job.started_at).total_seconds() * 1000)
-        job.config = {"metadata": metadata}
-        await self.db.commit()
+        duration_ms = (
+            int((now - job.started_at).total_seconds() * 1000) if job.started_at is not None else None
+        )
+        await write_meta_async(
+            table="scrape_jobs",
+            operation="update",
+            fields=build_scrape_job_fields(
+                id=job.id,
+                status="failed",
+                completed_at=now,
+                duration_ms=duration_ms,
+                config={"metadata": metadata},
+            ),
+            reject_source="parsing_admin",
+        )
         return {"job_id": str(job.id), "status": "failed", "cancelled": True}
 
     @staticmethod
@@ -983,15 +1007,24 @@ class ParsingAdminService:
                 f"stale_pipeline_timeout: idle_for_seconds={int(idle_s)} "
                 f"threshold_seconds={effective_timeout_s}"
             )
-            job.status = "failed"
-            job.completed_at = now
-            job.duration_ms = (
+            duration_ms = (
                 int((now - job.started_at).total_seconds() * 1000) if job.started_at is not None else None
             )
-            job.config = {"metadata": stale_metadata}
+            await write_meta_async(
+                table="scrape_jobs",
+                operation="update",
+                fields=build_scrape_job_fields(
+                    id=job.id,
+                    status="failed",
+                    completed_at=now,
+                    duration_ms=duration_ms,
+                    config={"metadata": stale_metadata},
+                ),
+                reject_source="parsing_admin",
+            )
             changed = True
         if changed:
-            await self.db.commit()
+            pass
 
     async def _repair_scrape_job_type_constraint(self) -> bool:
         """Allow full_pipeline_test and scrape in scrape_jobs.job_type CHECK constraint."""

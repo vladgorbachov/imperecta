@@ -1,6 +1,6 @@
 # Imperecta — База данных (Supabase PostgreSQL)
 
-**Актуально на:** 2026-06-23 (alembic head `028`; app `4f961a9`)  
+**Актуально на:** 2026-06-25 (alembic head `030`; app `fc3b07d`)  
 **Источники:** `backend/app/models/`, `backend/alembic/versions/`, runtime rules в `scraper/service.py`.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию схемы; принципы не дублирует.
@@ -16,7 +16,7 @@
 | Backend access | Direct URL, table owner — **RLS bypass** |
 | Supabase REST | RLS enabled (migration 012) |
 | Alembic version | Schema `alembic_meta.alembic_version` |
-| Head revision | `028_add_fact_listing_page_role` |
+| Head revision | `030_fact_listing_url_hash_not_null` |
 
 При старте API: `alembic upgrade head` (subprocess).
 
@@ -53,7 +53,9 @@
 | 025 | `supabase_security_hardening` | RLS deny + REVOKE anon/authenticated (`core/supabase_security.py`) |
 | 026 | `forex_nine_currency_allowlist` | Seed JPY (`is_active=true`); DELETE forex rows вне 9 валют |
 | 027 | `remove_in_stock_and_fact_stock` | Drop stock columns/table; rebuild `mv_daily_price_summary`; tighten `alerts.alert_type` CHECK |
-| 028 | `add_fact_listing_page_role` | `fact_listing.page_role varchar(16)` — structural gate diagnostics (**head**) |
+| 028 | `add_fact_listing_page_role` | `fact_listing.page_role varchar(16)` — structural gate diagnostics |
+| 029 | `reject_data_operation` | `reject_data.operation` VARCHAR(10) NOT NULL + CHECK (`insert`/`update`/`delete`) |
+| 030 | `fact_listing_url_hash_not_null` | `fact_listing.url_hash` NOT NULL — canonical locator (**head**) |
 
 **Правила:** не редактировать старые revisions; один statement per `op.execute()` для asyncpg; `IF NOT EXISTS` для repair.
 
@@ -140,7 +142,7 @@ Market-data facts (6):
 | Column | Role |
 |--------|------|
 | `external_url` | Canonical URL |
-| `url_hash` | SHA256, **UNIQUE** dedup |
+| `url_hash` | SHA256, **NOT NULL**, **UNIQUE** dedup (migration `030`; locator for signed DELETE/UPDATE) |
 | `last_price`, `last_currency_code` | Current snapshot |
 | `consecutive_errors`, `last_error` | Scrape health (this-run; **reset pre-flight** at start of every `scrape_product`) |
 | `failure_streak` | Persistent failure counter across runs (migration `021`); incremented on fail, reset only on success — drives deactivation |
@@ -379,7 +381,7 @@ Normalizer in `Settings.validate_database_url`.
 
 | Column | Write path | Read path |
 |--------|------------|-----------|
-| `url_hash` | `compute_url_hash(url)` on insert | UNIQUE dedup |
+| `url_hash` | `compute_url_hash(url)` on insert; NOT NULL (`030`) | UNIQUE dedup; `TABLE_LOCATORS` key for persist DELETE/UPDATE |
 | `page_role` | `"product"` on gated discovery insert (`4f961a9`); NULL on legacy rows | Pool filter: product OR (NULL + has price) |
 | `last_price`, `last_currency_code` | Updated on successful scrape / no_change check | Pool UI, dashboard |
 | `last_checked_at` | Every scrape attempt | Stale selector: NULL or >6h |
@@ -515,7 +517,7 @@ child jobs → parent_job_id links discovery children to pipeline parent (020)
 
 # Часть II. Полная схема базы данных
 
-**Head migration:** `028_add_fact_listing_page_role` · **Источник:** `backend/app/models/` + migrations `001`–`028`
+**Head migration:** `030_fact_listing_url_hash_not_null` · **Источник:** `backend/app/models/` + migrations `001`–`030`
 
 Полный справочник всех таблиц, колонок, FK и CHECK. Ранее — отдельный `Imperecta_Database_Schema.md`.
 
@@ -927,7 +929,7 @@ erDiagram
 | `seller_id` | UUID | YES | — | **FK** → `dim_seller` SET NULL |
 | `external_url` | TEXT | NO | — | |
 | `page_role` | VARCHAR(16) | YES | — | Structural role at gate (`product` for admitted pool rows; migration `028`) |
-| `url_hash` | VARCHAR(64) | YES | — | UNIQUE — SHA256 dedup |
+| `url_hash` | VARCHAR(64) | NO | — | UNIQUE — SHA256 dedup; NOT NULL since `030` |
 | `external_id` | VARCHAR(200) | YES | — | |
 | `external_name` | VARCHAR(500) | YES | — | |
 | `last_price` | NUMERIC(12,2) | YES | — | snapshot |
@@ -996,9 +998,16 @@ erDiagram
 
 ---
 
-### 5.4 `reject_data` (migration `024`)
+### 5.4 `reject_data` (migrations `024`, `029`)
 
 Diagnostic table for data_firewall / persist rejects. See `models/reject_data.py`.
+
+| Колонка | Тип | NULL | Описание |
+|---------|-----|------|----------|
+| `operation` | VARCHAR(10) | NO | `insert` / `update` / `delete` — attempted CUD op (migration `029`; CHECK) |
+| (остальные) | — | — | `source`, `table_target`, `marketplace_id`, `listing_id`, `reject_reason`, `failed_rules` JSONB, `raw_payload` JSONB, `signature_present`, `rejected_by` |
+
+Gate rejects commit via `write_reject_data_isolated` (independent session); persist rejects flush in caller txn via `write_reject_data`.
 
 ---
 
@@ -1406,5 +1415,5 @@ Migration `012`: `ENABLE ROW LEVEL SECURITY` на public business tables для 
 | Область | Путь |
 |---------|------|
 | ORM | `backend/app/models/*.py` |
-| Migrations | `backend/alembic/versions/001`–`028` |
+| Migrations | `backend/alembic/versions/001`–`030` |
 | Обзор | `Imperecta_Database.md` |

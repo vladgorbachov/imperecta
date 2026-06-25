@@ -11,6 +11,7 @@ import pytest
 from app.modules.scraper import tasks as scraper_tasks
 from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.scraper_pool import ListingFetchResult
+from app.modules.persist.meta_write import MetaWriteResult
 from app.modules.scraper.pipeline import activity_pulse
 from app.modules.scraper.pipeline.worker_log_relay import _last_db_pulse
 
@@ -36,11 +37,22 @@ def test_child_pulse_refreshes_parent(monkeypatch):
 
     db = MagicMock()
     db.get.side_effect = fake_get
-    db.commit = MagicMock()
     db.close = MagicMock()
 
     monkeypatch.setattr(activity_pulse, "sync_session_factory", lambda: db)
     monkeypatch.setattr(activity_pulse, "push_relay_line", lambda *_a, **_k: None)
+
+    def fake_write_meta_sync(*, fields, **_kwargs):
+        from uuid import UUID
+
+        job_id = UUID(str(fields["id"]))
+        if job_id == child_id and "config" in fields:
+            child_job.config = fields["config"]
+        if job_id == parent_id and "config" in fields:
+            parent_job.config = fields["config"]
+        return MetaWriteResult(ok=True)
+
+    monkeypatch.setattr(activity_pulse, "write_meta_sync", fake_write_meta_sync)
     _last_db_pulse.clear()
 
     activity_pulse.pulse_job_activity_sync(
