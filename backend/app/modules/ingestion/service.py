@@ -39,7 +39,12 @@ from app.modules.persist.scrape_gate_fields import (
     build_listing_update_fields,
     build_product_update_fields,
 )
-from app.modules.persist.writer import PersistContext, build_fact_price_fields, write_sync
+from app.modules.persist.writer import (
+    PersistContext,
+    build_fact_price_fields,
+    compute_price_change_pct,
+    write_sync,
+)
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
@@ -265,14 +270,22 @@ class IngestionService:
                 if getattr(data, "original_price", None) is not None
                 else None
             )
+            price_change_pct_value = compute_price_change_pct(
+                new_price=data.price,
+                prior_last_price=listing.last_price,
+            )
             persist_fields = build_fact_price_fields(
                 listing_id=listing.id,
                 date_id=date_id,
                 price=float(data.price),
                 currency_code=currency_code,
                 original_price=original_price_value,
-                discount_pct=getattr(data, "discount_pct", None),
-                price_change_pct=getattr(data, "price_change_pct", None),
+                discount_pct=None,
+                price_change_pct=(
+                    float(price_change_pct_value)
+                    if price_change_pct_value is not None
+                    else None
+                ),
                 scraped_at=now,
                 scrape_job_id=scrape_job_id,
                 price_eur=scrape_price_eur,

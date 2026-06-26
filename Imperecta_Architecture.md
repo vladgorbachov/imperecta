@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-25 (ветка `main`, head `803db02`)  
+**Актуально на:** 2026-06-25 (ветка `main`, head `c4c141b`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -16,7 +16,7 @@
 | Сбор с маркетплейсов | Discovery → scrape → `fact_listing` / `fact_price` |
 | Каталог пользователя | `user_products`, импорт CSV/XLS |
 | Глобальный пул | `product_pool`, поиск по `dim_product` / `fact_listing` |
-| Рыночные виджеты | Forex, crypto, commodities, fuel; dashboard widget math → **`visualisation_calc`** (scaffold) |
+| Рыночные виджеты | Forex, crypto, commodities; dashboard widget math → **`visualisation_calc`** (scaffold); `fact_fuel_price` — таблица сохранена, ingest/read pipeline удалён |
 | Display currency | `local` / `EUR` / `USD` — `fact_currency_rate` + live forex; **local** = TLD→country→currency (`marketplace_locale.py`) |
 | Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`); client-side KPI в `MarketsOverviewSection` — временно, до wiring `visualisation_calc` |
 | Алерты и дайджесты | Celery (часть задач — stubs) |
@@ -100,13 +100,13 @@ Legacy `app/api/`, `app/services/` удалены.
 | `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`, `meta_write.py` META bridge) |
 | `visualisation_calc` | Tier-1 (**scaffold**): все расчёты виджетов дашборда (KPI, movements, volatility, coverage, trend, categories). Читает service-data через planned **data_export** read-OUT door (Phase 7/8); `api.py` / `main.py` — позже. Преемник dissolved `dashboard/` + `analytics/`. |
 | `product_pool` | Публичный пул товаров; `/pool/*`, `/markets/overview` |
-| `currency` | Fiat scrape-path: `price_eur_resolver` (sync read `fact_currency_rate` по scrape-day `date_id`); display FX — пока `common/currency.py` (см. §7.5) |
-| `market_data` | Forex/crypto/commodities ingest + read API `/markets/*`; provider adapters в `providers/`; Celery — `workers/market_data_tasks.py` |
+| `currency` | Единый fiat-home: `price_eur_resolver` (scrape-path EUR), `display_converter` (UI display FX, бывший `common/currency.py`), `forex_fetch` (thin delegate → `market_data.fetching`; `TODO(boundary)` Tier-0→Tier-1 — см. §7.5) |
+| `market_data` | Provider-agnostic triad (forex/crypto/commodities) + общий `provider_queue.gap_fill_fetch`; ingest + read API `/markets/{preferences,instruments,ticker,ingest}`; adapters в `providers/`; Celery — `workers/market_data_tasks.py` |
 | `ai_analyst` | Claude chat sessions; entitlement-gated |
 
 **Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, `entitlements.api`, `ai_analyst.api` — всего **12** роутеров под единым `prefix="/api"` (`main.py:146-160`).
 
-**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `scraper.api` (файл есть, router **не смонтирован** — `/admin/scrape-diagnostics`, discovery triggers), `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже), `meta_write` (внутренний META bridge в `persist/`).
+**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже), `meta_write` (внутренний META bridge в `persist/`). **`scraper/api.py` router удалён** (ранее не смонтирован; `/pool/search`, orphan FE `pipeline-status`, 3 dead `/admin/parsing/*`, `recalculate-quotas` — удалены).
 
 **Удалены / заменены:** `analytics/`, `dashboard/` — dissolved; расчёты виджетов переезжают в **`visualisation_calc/`**. `digests/`, `alerts/` — отсутствуют; API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
 
@@ -189,7 +189,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | Контур | Модуль | Session | Назначение |
 |--------|--------|---------|------------|
 | Scrape-path EUR | `modules/currency/price_eur_resolver.py` | sync `Session` | `resolve_price_eur` → `fact_price.price_eur`, `fact_listing.last_price_eur`; operational SELECT `fact_currency_rate` по **scrape-day `date_id`**; source priority `ecb` → … → `custom` |
-| UI display FX | `common/currency.py` | async `AsyncSession` | `CurrencyConverter.load_latest` — max `date_id` из `fact_currency_rate`, fallback live `fetch_forex_rates("EUR")` (`currency.py:99` — `TODO(boundary)` Tier-0→Tier-1) |
+| UI display FX | `modules/currency/display_converter.py` | async `AsyncSession` | `CurrencyConverter.load_latest` — max `date_id` из `fact_currency_rate`, fallback live через `forex_fetch.fetch_eur_base_pairs` → `market_data.fetching.fetch_forex_rates("EUR")` |
 
 **Display flow (pool/overview):**
 
@@ -197,7 +197,15 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 2. Backend: `product_pool/service.py` → `CurrencyConverter.load_latest` + `compute_display_fields_for_marketplace`.  
 3. Ответ: `display_price`, `display_currency`, `conversion_available`, `local_currency_resolution`; без rate — local + `conversion_available=false`.
 
-**Market-data triad (рефактор в backlog):** forex/crypto/commodities fetch сейчас в `market_data/providers/*` + `fetching.py`; ingest boundary frozen — `ForexIngestItem` / `CryptoIngestItem` / `CommodityIngestItem` → `persist_*` → `evaluate_market` → `write_sync` (`ingestion.py:135–250`). Планируется единый provider-queue per asset class; `source='custom'` на forex/crypto ingest — mapping gap, не отсутствие ECB adapters (`ingestion.py:295`, `314`).
+**Модуль `currency` — единый fiat-home:** `price_eur_resolver` (sync scrape EUR), `display_converter` (перенесён из удалённого `common/currency.py`), `forex_fetch` (thin delegate → `market_data.fetching`; `TODO(boundary)` — полная Tier-0→Tier-1 изоляция отложена).
+
+**Market-data triad — выполнено:** три provider-agnostic source-модуля в `market_data/providers/*` делят **один** примитив очереди `market_data/provider_queue.py` (`gap_fill_fetch` — Q-B gap-filling: провайдеры по порядку, каждый запрашивает только ещё отсутствующие ключи, первый поставивший ключ побеждает, честный `missing` если никто не поставил). Очереди: **forex** — OpenER (`openexchangerates`) → Frankfurter (`ecb`), Binance не применим; **crypto** — Binance (primary, universe по объёму) → CoinGecko (gap-fill), `source` `binance`/`coingecko`; **commodities** — GoldApi (metals) → AlphaVantage (energy) → Yahoo (gap-fill) по каталогу `METAL_ITEMS`+`ENERGY_ITEMS` (главный бенефициар gap-fill; будущие oil/gas/grain = каталог + провайдер). Три отдельных DTO сохранены (DTO-1); `provider_source` на `NormalizedForex` / `NormalizedCrypto` / `NormalizedCommodity`. **FROZEN boundary** без изменений: `*IngestItem` → `persist_*` → `evaluate_market` → `write_sync`; имена Celery-задач `ingest_market_data`, `ingest_commodities`.
+
+**no_change denorm:** `listing_denorm_no_change` пишет `last_currency_code` из нормализованного `persist_fields["currency_code"]` (как success-path), не из raw `data.currency` (`ingestion/service.py`).
+
+**Beat schedule:** `ingest_market_data` каждые 6h (`crontab(minute=5, hour="*/6")`), `ingest_commodities` 4×/день (`crontab(minute=35, hour="2,8,14,20")`) — ранее только manual ingest оставлял `price_eur` NULL в scrape-days без курса.
+
+**Cleanup (удалено):** мёртвый fuel half-pipeline (`FuelHttpAdapter`, `GET /markets/fuel`, `reader.get_fuel`, fuel-ветка ticker, FE fuel-heuristics) — таблица `fact_fuel_price` сохранена; per-class endpoints `/markets/forex`, `/crypto`, `/commodities`, `/refresh-metadata`; `/pool/search`, `/telegram/status`, 3 dead `/admin/parsing/*`, `recalculate-quotas`; orphan FE `pipeline-status`; unmounted `scraper/api.py` router. FE использует `/ticker` + `/instruments` + `/preferences`; shared reader-методы для `/ticker` сохранены.
 
 ### 7.6 Качество scrape (P0)
 
@@ -221,7 +229,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
 
-**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE** (persist — полный CUD dumb primitive; master lock связывает `table`+`operation`+`locator`; reject durable; `reject_data` несёт `operation`). **LAYER 2 progress:** дверь **META** — **DONE**; дверь **LOGS** — **DONE** (+ batch-signing primitive); **DDL/COMMANDS (D-A audit-mark)** — **DONE**; admin destructive whole-pool wipe — **REMOVED**. → **LAYER 2 COMPLETE**. **LAYER 3 — COMPLETE:** scrape→gate→DB полностью маршрутизирован (cat-1 **CLOSED**: enrich/denorm/`dim_date`/housekeeping UPDATE + prune DELETE + `dim_date` INSERT через `update_validator` / `evaluate_ecommerce` / `evaluate_market`); подмодуль **`price_eur_resolver`** (`modules/currency/price_eur_resolver.py`) — **live** (`price_eur` / `last_price_eur`); prune DELETE — **durable commit** на producer session (`scraper/service.py:_prune_confirmed_nonproduct`); dead-code/junk cleanup (seam B) — **DONE**. **NEXT: LAYER 4** — discovery data contract, затем discovery internals (`budget_governor` и др.). Оставшийся bypass: **cat-5** USER/AUTH — **DEFERRED → Phase 7/8** (`user_data` door). Оставшиеся gap в **0a.4** — вне закрытых sub-seams.
+**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE** (persist — полный CUD dumb primitive; master lock связывает `table`+`operation`+`locator`; reject durable; `reject_data` несёт `operation`). **LAYER 2 progress:** дверь **META** — **DONE**; дверь **LOGS** — **DONE** (+ batch-signing primitive); **DDL/COMMANDS (D-A audit-mark)** — **DONE**; admin destructive whole-pool wipe — **REMOVED**. → **LAYER 2 COMPLETE**. **LAYER 3 — COMPLETE:** scrape→gate→DB полностью маршрутизирован (cat-1 **CLOSED**: enrich/denorm/`dim_date`/housekeeping UPDATE + prune DELETE + `dim_date` INSERT через `update_validator` / `evaluate_ecommerce` / `evaluate_market`); подмодуль **`price_eur_resolver`** (`modules/currency/price_eur_resolver.py`) — **live** (`price_eur` / `last_price_eur`); prune DELETE — **durable commit** на producer session (`scraper/service.py:_prune_confirmed_nonproduct`); dead-code/junk cleanup (seam B) — **DONE**; **market-data triad + cleanup** — **COMPLETE** (см. §7.5, `0a.6`). **NEXT:** подмодуль **`visualisation_calc/movements`** (первый live submodule: `price_change_pct` compute-site в ingestion + movements gate read door + service/schemas + index migration), **затем LAYER 4** — discovery data contract, затем discovery internals (`budget_governor` и др.). Оставшийся bypass: **cat-5** USER/AUTH — **DEFERRED → Phase 7/8** (`user_data` door). Оставшиеся gap в **0a.4** — вне закрытых sub-seams.
 
 **Модель дверей (lock-by-threat):** сила замка подбирается под угрозу домена — **META** и **LOGS** = **LIGHT** (структурный контракт `build_table_contract`: типы + nullable + enum CHECK + HMAC; без семантических rules); **`update_validator`** = **SEMANTIC** (per-kind column allowlist + инвариант `reactivation_forbidden` — строже META, слабее полного `evaluate_ecommerce`); полные двери (`evaluate_ecommerce`, аналитический рельс `evaluate_market`) сохраняют семантические rules поверх контракта. На **каждой** двери HMAC-подпись обязательна при проходе в persist (single-record `SignedRecord` или batch `SignedBatch`).
 
@@ -235,7 +243,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Публичная стена пакета `data_firewall/__init__.py:6–11`: `FirewallOutcome`, `SignedRecord`, `evaluate_ecommerce`, `evaluate_market` (внутренний рельс также `evaluate_logs`, `LogsOutcome` — `firewall.py:218+`, `71–77`; **`update_validator`** — `update_validator.py:87+` / `238+`, импорт продюсерами напрямую). ENTRY-двери — `evaluate_ecommerce`, `evaluate_market` (аналитический + META-мультиплекс), **`evaluate_logs`** (LOGS), **`update_validator`** (scrape cat-1 UPDATE/DELETE); мосты — `persist/meta_write.py` (META), `persist/logs_write.py` (LOGS), `persist/maintenance_audit.py` (D-A audit-mark), `persist/scrape_gate_fields.py` (сборка payload для `update_validator`); остальное — типы или внутренние/legacy рельсы.
 
-**Модуль `currency` (LAYER 3 — price_eur):** `backend/app/modules/currency/` — подмодуль **`price_eur_resolver`** (`price_eur_resolver.py`, `resolve_price_eur`). Читает `rate_to_eur` из `fact_currency_rate` через **операционный SELECT** на producer sync `Session` по **scrape-day `date_id`** (тот же `date_id`, что у `fact_price` через `_today_date_id`); read-двери persist **нет**. EUR-base: `price_eur = price` (строки `fact_currency_rate` для `EUR` не требуются); non-EUR: `price × rate_to_eur`, квантование **Numeric(12,2), ROUND_HALF_UP**; отсутствующий курс на scrape-day → честный `NULL`. Приоритет источника при нескольких строках на `(date_id, currency_code)`: `ecb` → `openexchangerates` → `cbr` → `nbu` → `nbk` → `nbb` → `cbu` → `nbg` → `cba` → `cbar` → `custom` (`_RATE_SOURCE_PRIORITY`). Результат подаётся в `build_fact_price_fields` → **`fact_price.price_eur`** и в denorm обоих kinds → **`fact_listing.last_price_eur`** (allowlist `update_validator` kinds `listing_denorm_success` / `listing_denorm_no_change` + ключи `sync_listing_gate_cache` / `_sync_listing_denorm_cache`). Планируемый подмодуль **`currency_converter`** (внешние FX API, единый fiat-rate source для ticker bar) — **не построен**.
+**Модуль `currency` (LAYER 3 — fiat):** `backend/app/modules/currency/` — **`price_eur_resolver`** (`resolve_price_eur`, sync scrape-path EUR); **`display_converter`** (`CurrencyConverter`, UI display FX — перенесён из удалённого `common/currency.py`); **`forex_fetch`** (thin delegate → `market_data.fetching.fetch_forex_rates`; `TODO(boundary)` полная Tier-0→Tier-1 изоляция — backlog). `price_eur_resolver` читает `rate_to_eur` из `fact_currency_rate` через **операционный SELECT** на producer sync `Session` по **scrape-day `date_id`**; read-двери persist **нет**. EUR-base: `price_eur = price`; non-EUR: `price × rate_to_eur`, квантование **Numeric(12,2), ROUND_HALF_UP**; отсутствующий курс на scrape-day → честный `NULL`. Приоритет источника: `ecb` → `openexchangerates` → … → `custom` (`_RATE_SOURCE_PRIORITY`). Результат → `build_fact_price_fields` → **`fact_price.price_eur`** и denorm → **`fact_listing.last_price_eur`** (kinds `listing_denorm_success` / `listing_denorm_no_change`; `last_currency_code` в no_change — из нормализованного `currency_code`).
 
 **DDL/COMMANDS (подход D-A):** гейт здесь — **ROUTER**, не executor. Каждая maintenance-операция (MV refresh, partition create, retention DELETE, CHECK repair) выполняется **как есть** на своём connection (`raw conn` / caller `Session`); параллельно best-effort пишется durable audit-mark через `record_maintenance_audit` / `record_maintenance_audit_async` (`persist/maintenance_audit.py:35+`): `service='maintenance'`, `endpoint='{op}:{target}'`, `method` — короткий глагол (`REFRESH`, `DDL`, `DELETE`, `ALTER`), `status` `success`/`error`, `user_id` где доступен иначе `NULL`, `detail`/counts в `error_message`. Хелпер **проглатывает** собственные сбои — никогда не блокирует maintenance op.
 
@@ -353,13 +361,31 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 |--------------|--------|----------|-------------------|
 | `update_validator` (scrape UPDATE/DELETE door) | **built** (LAYER 3) | `data_firewall/update_validator.py`; `authorize_scrape_update` / `authorize_scrape_delete`; `SCRAPE_UPDATE_ALLOWLIST` kinds: `listing_scrape_start_reset`, `listing_success_streak_reset`, `listing_housekeeping_failure`, `listing_deactivate`, `listing_checked`, `listing_denorm_success`, `listing_denorm_no_change`, `product_enrich` (denorm kinds включают `last_price_eur`) | **LAYER 3** — DONE |
 | `price_eur_resolver` (`resolve_price_eur`) | **built** (LAYER 3) | `modules/currency/price_eur_resolver.py`; operational SELECT `fact_currency_rate` на producer sync session; feeds `fact_price.price_eur` + `fact_listing.last_price_eur` | **LAYER 3** — DONE |
-| Market-data provider-queue triad | **planned** | Extract `market_data/providers/*` → per-asset modules (`currency`/`crypto`/`commodities`) with unified class-level queue + `provider_source` on all DTOs; ingest boundary frozen | **backlog** (parallel to LAYER 4) |
+| Market-data provider-queue triad | **built** | `market_data/provider_queue.py` (`gap_fill_fetch`); adapters forex/crypto/commodities; `provider_source` на всех DTO; ingest boundary frozen; beat schedule — см. §8 | **DONE** |
 | `data_export` (read-OUT door) | planned, not built | no symbol in `data_firewall/**` or `persist/**`; model `DataExport` only (`app_tables.py:509–512`) | **Phase 7/8** |
 | `user_data` CRUD (scoped owner door) | planned, not built | grep in gate/persist perimeter: **NOT FOUND** | **Phase 7/8** |
 | `operation` field on `reject_data` | **built** (sub-seam 1) | миграция `029_reject_data_operation`; `models/reject_data.py:29+`; `reject_store.py:93+` | **LAYER 1** — DONE |
 | `fact_listing.url_hash` NOT NULL locator | **built** (sub-seam 1b) | миграция `030_fact_listing_url_hash_not_null`; `TABLE_LOCATORS` `fact_listing` → `("url_hash",)` (`contracts.py:122`) | **LAYER 1** — DONE |
 | Standalone DELETE door (delete-by-locator) | **built** (sub-seam 4) | `_write_sync_delete` / `_write_async_delete` (`writer.py:249+`, `260+`); универсальный primitive; **ожидает** per-module signed callers | **LAYER 1** — DONE |
 | CUD UPDATE primitive (persist U-1) | **built** (sub-seam 4) | `_write_sync_update` (`writer.py:220+`); `dim_product`, `fact_listing`; async UPDATE — **NOT FOUND** | **LAYER 1** — DONE |
+
+#### 0a.6 Market-data triad (выполнено)
+
+Три asset-class fetch-пути в `market_data/providers/*` используют **один** примитив `market_data/provider_queue.py`:
+
+| Примитив | Семантика |
+|----------|-----------|
+| `InstrumentProvider` | Провайдер запрашивается только по `requested` ⊆ ещё отсутствующих ключей |
+| `gap_fill_fetch` | Q-B gap-filling: очередь провайдеров; первый поставивший ключ побеждает; `GapFillResult.missing` — честное отсутствие |
+| `provider_source` | Стабильный id провайдера на каждом результате |
+
+| Класс | Очередь | `provider_source` / ingest `source` | Примечание |
+|-------|---------|--------------------------------------|------------|
+| Forex | OpenER → Frankfurter | `openexchangerates` / `ecb` | Binance не применим; заменяет hardcode `custom` |
+| Crypto | Binance → CoinGecko | `binance` / `coingecko` | Binance задаёт universe по объёму; CoinGecko gap-fill |
+| Commodities | GoldApi → AlphaVantage → Yahoo | per-provider | Каталог `METAL_ITEMS`+`ENERGY_ITEMS`; главный бенефициар gap-fill |
+
+DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `NormalizedCommodity`); `provider_source` на всех. Ingest boundary **frozen**: `ForexIngestItem` / `CryptoIngestItem` / `CommodityIngestItem` → `persist_*` → `evaluate_market` → `write_sync`; Celery `ingest_market_data`, `ingest_commodities`.
 
 ---
 
@@ -408,7 +434,9 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 > **Cat-1 analytical (scrape-path denorm/enrich/prune + `dim_date`):** **CLOSED → `update_validator` / `evaluate_market` / `evaluate_ecommerce`** — cluster `scrape-fact_listing-denorm` + `dim_date-upsert` маршрутизированы: UPDATE через `authorize_scrape_update` (per-kind allowlist + `reactivation_forbidden`); prune DELETE через `authorize_scrape_delete` + **durable commit** (`_prune_confirmed_nonproduct`, `scraper/service.py:713–715`); `dim_date` INSERT через `evaluate_market` + `write_sync` (`ON CONFLICT DO NOTHING`); `fact_price` несёт **`price_eur`**; listing denorm несёт **`last_price_eur`**. **In-memory ORM sync** после gate-writes: `sync_listing_gate_cache` (`persist/scrape_gate_fields.py:76+`), `_sync_listing_denorm_cache` / `_sync_product_enrich_cache` (`ingestion/service.py:135–154`) — same-session ORM readers остаются согласованными.
 
-> **LAYER-3 REGISTRY (correctness backlog — не routing, не закрыто):** (a) **`listing_denorm_no_change`** пишет `last_currency_code` из raw `data.currency`, не из нормализованного `persist_fields["currency_code"]` — deferred correctness pass; (b) **forex/crypto ingest `source`:** adapters не прокидывают `provider_source` на DTO (`NormalizedForex` / `NormalizedCrypto` — поля нет); ingest hardcode `source='custom'` (`ingestion.py:295`, `314`) при том что fetch идёт через open.er-api/Frankfurter (forex) и Binance/CoinGecko (crypto); commodities propagate `provider_source` → `CommodityIngestItem.source` (`dto.py:39`, `fetching.py:111`); scrape-day `date_id` vs forex snapshot date — для `price_eur_resolver`; (c) **`product_name`** на `ExtractedProduct` — неиспользуемое DTO-поле, **оставлено**; (d) **`discount_pct` / `price_change_pct`** на scrape-path всегда `NULL` — pending features.
+> **LAYER-3 REGISTRY (correctness backlog — не routing):** **(a) `listing_denorm_no_change` / `last_currency_code`** — **RESOLVED:** пишет из нормализованного `persist_fields["currency_code"]` (`ingestion/service.py`); **(b) forex/crypto ingest `source` / `provider_source`** — **RESOLVED:** adapters прокидывают `provider_source` на DTO; ingest пишет реальный `source` (`openexchangerates`/`ecb`/`binance`/`coingecko`); **(c)** **`product_name`** на `ExtractedProduct` — неиспользуемое DTO-поле, **оставлено**; **(d)** **`discount_pct` / `price_change_pct`** на scrape-path всегда `NULL` — pending; compute-site для `price_change_pct` планируется в подмодуле **`visualisation_calc/movements`**; scrape-day `date_id` vs forex snapshot date — operational concern для `price_eur_resolver`.
+
+> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py` (`TelegramStatusResponse`, route `GET /telegram/status` удалён); `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`) — проверить соответствие правилу «no locally-failing DB-dependent tests».
 
 > **Cat-5 USER/AUTH:** **DEFERRED → Phase 7/8** — cluster `users-auth` (planned `user_data` door).
 
@@ -562,9 +590,9 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | module | file:line | table | note |
 |--------|-----------|-------|------|
 | product_pool | `product_pool/service.py:166–260,299–365` | `fact_listing`, `dim_product`, `dim_marketplace`, `fact_price`, `dim_date` | публичный product pool + sparklines → **data_export** |
-| market_data/reader | `market_data/reader.py:94–395` | `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price`, `fact_fuel_price` | dashboard/ticker → **data_export** |
-| common/currency | `common/currency.py:74–78` | `fact_currency_rate` | FX conversion → **data_export** |
-| scraper/api | `scraper/api.py:77–83,172–188` | `scrape_logs`, `fact_listing` | admin diagnostics → **data_export** |
+| market_data/reader | `market_data/reader.py:94–395` | `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | dashboard/ticker → **data_export** |
+| currency/display_converter | `currency/display_converter.py` | `fact_currency_rate` | FX conversion (UI display) → **data_export** |
+| scraper/api | **REMOVED** | — | admin diagnostics router удалён |
 | core/api_admin | `core/api_admin.py:24–29` | `users`, `dim_marketplace`, `dim_product`, `fact_listing` | admin aggregate counts → **data_export** |
 | market_data/facade | `market_data/facade.py:37` | `users` | preferences read path (operational UI; preferences JSONB) |
 
@@ -572,7 +600,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 | factory | defined | used by | commit owner |
 |---------|---------|---------|--------------|
-| `sync_session_factory` | `database.py:22–27` | `discovery._write_pool_dtos_sync:160`; `tasks._run_scrape_all_pool:494`; `tasks._persist_technical_error_log:133`; `activity_pulse:50,82`; `market_data_tasks:49,67`; `cleanup_tasks:22`; `maintenance_tasks:39`; `scraper/api.py:234` | каждый caller (`commit`/`rollback`/`close` локально) |
+| `sync_session_factory` | `database.py:22–27` | `discovery._write_pool_dtos_sync:160`; `tasks._run_scrape_all_pool:494`; `tasks._persist_technical_error_log:133`; `activity_pulse:50,82`; `market_data_tasks:49,67`; `cleanup_tasks:22`; `maintenance_tasks:39` | каждый caller (`commit`/`rollback`/`close` локально) |
 | `async_session_maker` | `database.py:90–96` | `get_db`; `main._ensure_superuser:85`; Celery `_make_session_factory` per task | `get_db` auto-commit (`database.py:105`); Celery owners — явный `commit` |
 | `_make_session_factory` | `scraper/tasks.py:90–99`; `workers/reaper_tasks.py:59–74` | `discover_one_marketplace`, `scrape_one_marketplace`, `orchestrator_tick`, reaper | тело задачи |
 | `get_db` | `database.py:100–108` | FastAPI `DbSession` dependency | dependency: commit on success / rollback on error |
@@ -592,13 +620,13 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | **C2** | Analytical/export read: будущий контур `data_export` |
 | **persist** | Тупой исполнитель: только verify HMAC + verbatim INSERT/REPLACE; без бизнес-логики |
 
-**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + prune durable commit + seam B dead-code cleanup. **NEXT: LAYER 4** — discovery data contract, затем discovery internals. **Параллельный backlog (market-data triad):** unified provider-queue per asset class (`currency` / `crypto` / `commodities` modules), propagation `provider_source`, beat schedule для `ingest_market_data` / `ingest_commodities` (сейчас **NOT IN** `scheduler.py` — только manual `POST /markets/ingest`). **DEFERRED:** `users-auth` → Phase 7/8; reconciliation `common/currency.py` ↔ `currency` module. Admin whole-pool wipe — **REMOVED**.
+**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + prune durable commit + seam B dead-code cleanup + **market-data triad + cleanup** (§7.5, `0a.6`). **NEXT:** **`visualisation_calc/movements`** (первый live submodule), **затем LAYER 4** — discovery data contract, затем discovery internals. **DEFERRED:** `users-auth` → Phase 7/8; `forex_fetch` full Tier isolation. Admin whole-pool wipe — **REMOVED**.
 
 ---
 
 ## 8. Workers
 
-- **Beat:** `orphan-job-reaper` (300s), `pipeline-tick-watchdog` (60s), `ensure_fact_price_partitions` (daily 00:00), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape cron **выключен** — только manual API. **`ingest_market_data` / `ingest_commodities` — NOT IN beat** (`scheduler.py:10–31`); trigger: `POST /api/markets/ingest` (superuser) → `market_data_tasks.ingest_market_data.delay()`.  
+- **Beat:** `orphan-job-reaper` (300s), `pipeline-tick-watchdog` (60s), `ensure_fact_price_partitions` (daily 00:00), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00), **`ingest_market_data`** (каждые 6h, `minute=5`, `hour=*/6`), **`ingest_commodities`** (4×/день, `minute=35`, `hour=2,8,14,20`). Discovery/scrape cron **выключен** — только manual API. Дополнительный trigger: `POST /api/markets/ingest` (superuser) → `market_data_tasks.ingest_market_data.delay()`.  
 - **Result backend:** `None` (экономия Upstash).  
 - Задачи: scraper, `reap_orphan_jobs`, market_data, cleanup, maintenance, stubs (alerts/digests).
 
@@ -700,7 +728,7 @@ sequenceDiagram
 | `0fb6ac2` Local currency | `marketplace_locale.py` + `local_currency_resolution` in API |
 | `c8f464b` Price formatting | `formatPrice` always 2 fraction digits |
 | `3d1eb66` Live forex fallback | `CurrencyConverter`: `fact_currency_rate` → live `fetch_forex_rates` |
-| `fced191` Display currency API | `display_currency` query на products/pool/dashboard; `app/common/currency.py` |
+| `fced191` Display currency API | `display_currency` query на products/pool/dashboard; `app/modules/currency/display_converter.py` |
 | `7f16333` Markets catalog UI | Redesign `MarketsOverviewSection` — product catalog на dashboard |
 | `b6610ea` Display currency UI + httpx-first | `PriceDisplay`, Zustand store; Tier 1 httpx → decodo → playwright |
 | `a3100e5` Scoped scrape + classifier | `marketplace_codes` в scrape; `merge_and_finalize` → schema-aware classifier |
@@ -770,7 +798,7 @@ sequenceDiagram
 |---------|-----------|------|
 | **Lifespan** | `main.py` | Alembic → superuser → create_all → Telegram webhook |
 | **Auth JWT** | `modules/auth/api.py`, `modules/auth/service.py` | Register/login/refresh; Bearer via `common/deps.py` |
-| **Display currency** | `common/currency.py`, `marketplace_locale.py` | `fact_currency_rate` (9-currency allowlist, `026`) → live forex; local = TLD resolution |
+| **Display currency** | `modules/currency/display_converter.py`, `marketplace_locale.py` | `fact_currency_rate` → live forex via `forex_fetch`; local = TLD resolution |
 | **Tiered fetch** | `scraper_pool.py` `_layer_order` | Tier 1 only, policy B: SSR httpx-first / JS-only decodo-first |
 | **data_firewall + persist** | `data_firewall/`, `ingestion/service.py`, `persist/writer.py` | Gate + HMAC sign + verbatim `fact_price` write |
 | **Celery broker** | `workers/celery_app.py` | Redis, no result backend |
@@ -933,8 +961,6 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/common/__init__.py` | Пакет. |
-| `backend/app/common/currency.py` | Конвертация/нормализация валют. |
 | `backend/app/common/deps.py` | FastAPI dependencies (текущий пользователь, БД); импортирует `decode_token` из `common/security.py` (Tier-0). |
 | `backend/app/common/exceptions.py` | Кастомные исключения и обработчики. |
 | `backend/app/common/html_parsing.py` | Общие HTML-утилиты (BeautifulSoup helpers, dedup). |
@@ -1112,47 +1138,50 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 > Модуль фактически распущен. Файлы `api.py`, `models.py`, `schemas.py`, `service.py`, `tasks.py` удалены. Frontend `DigestsPage.tsx` живёт без backend-API.
 
-#### 2.7.8 Currency (`currency/`) — fiat scrape-path
+#### 2.7.8 Currency (`currency/`) — единый fiat-home
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/currency/__init__.py` | Export: `resolve_price_eur` |
+| `backend/app/modules/currency/__init__.py` | Export: `resolve_price_eur`, `CurrencyConverter`, `fetch_eur_base_pairs` |
 | `backend/app/modules/currency/price_eur_resolver.py` | Sync operational read `fact_currency_rate` по `(date_id, currency_code)`; source priority; **не** вызывает external HTTP |
+| `backend/app/modules/currency/display_converter.py` | `CurrencyConverter` — UI display FX (async); max `date_id` + live fallback через `forex_fetch` |
+| `backend/app/modules/currency/forex_fetch.py` | Thin delegate → `market_data.fetching.fetch_forex_rates("EUR")`; `TODO(boundary)` Tier-0→Tier-1 |
 
-> Caller: `ingestion/service.py` (`build_fact_price_fields`). Display FX для UI остаётся в `common/currency.py` (см. §7.5). Планируемый подмодуль provider-queue fetch для fiat rates — **не построен** (сейчас fetch в `market_data/providers/forex_adapter.py`).
+> Caller scrape-path: `ingestion/service.py` (`build_fact_price_fields`). Display FX: `product_pool/service.py` → `CurrencyConverter`. **`common/currency.py` удалён.** Live forex fetch — `market_data/providers/forex_adapter.py` через provider-queue.
 
 #### 2.7.9 Market Data (`market_data/`) — ingest + read API
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/market_data/api.py` | REST `/api/markets/*` (preferences, instruments, forex, crypto, commodities, fuel, ticker, ingest) |
-| `backend/app/modules/market_data/dto.py` | `NormalizedForex`, `NormalizedCrypto`, `NormalizedCommodity` (только commodity имеет `provider_source`) |
+| `backend/app/modules/market_data/api.py` | REST `/api/markets/*` — **только** `preferences`, `instruments`, `ticker`, `ingest` |
+| `backend/app/modules/market_data/dto.py` | `NormalizedForex`, `NormalizedCrypto`, `NormalizedCommodity` — все с `provider_source` |
+| `backend/app/modules/market_data/provider_queue.py` | `gap_fill_fetch`, `InstrumentProvider`, `GapFillResult` — общий Q-B gap-fill примитив |
 | `backend/app/modules/market_data/facade.py` | `MarketsService` — user preferences, commodities DB shape, instrument lists |
-| `backend/app/modules/market_data/fetching.py` | Thin wrappers → unified adapters; dict shapes для `api.py` fallback и `ingestion.py` |
+| `backend/app/modules/market_data/fetching.py` | Thin wrappers → adapters; dict shapes для `ingestion.py` и ticker fallback |
 | `backend/app/modules/market_data/http_config.py` | Timeout/retry из `Settings`; `with_transient_retries` (intra-provider) |
-| `backend/app/modules/market_data/fuel.py` | Read `fact_fuel_price` → legacy dict (`GET /markets/fuel`) |
 | `backend/app/modules/market_data/ingestion.py` | `IngestionService`: fetch → ingest items → `persist_*` → `evaluate_market` → `write_sync` |
-| `backend/app/modules/market_data/reader.py` | `MarketDataService` — read facts (no HTTP) |
+| `backend/app/modules/market_data/reader.py` | `MarketDataService` — read facts forex/crypto/commodities (no HTTP; fuel path удалён) |
 | `backend/app/modules/market_data/schemas.py` | Pydantic response shapes |
 | `backend/app/modules/market_data/ticker.py` | Ticker bar assembly (DB first, live fallback) |
-| `backend/app/modules/market_data/providers/base.py` | ABC: `ForexProviderAdapter`, `CryptoProviderAdapter`, `CommoditiesProviderAdapter` — each `async def fetch() -> list[Normalized*]` |
-| `backend/app/modules/market_data/providers/forex_adapter.py` | `ForexUnifiedAdapter`: configured URL → open.er-api → Frankfurter (class-level batch failover) |
-| `backend/app/modules/market_data/providers/crypto_adapter.py` | `CryptoUnifiedAdapter` → `CryptoCompositeAdapter` (Binance primary, CoinGecko if `<10` items or fail) |
-| `backend/app/modules/market_data/providers/binance_adapter.py` | Binance top-50 USDT pairs |
-| `backend/app/modules/market_data/providers/commodities_adapter.py` | `CommoditiesUnifiedAdapter`: per-instrument Gold API→Yahoo (metals), Alpha Vantage→Yahoo (energy) |
-| `backend/app/modules/market_data/providers/fuel_adapter.py` | `FuelHttpAdapter` — **stub**, 0 ingest wiring; `MARKET_DATA_FUEL_URL` |
+| `backend/app/modules/market_data/providers/base.py` | ABC provider adapters |
+| `backend/app/modules/market_data/providers/forex_adapter.py` | Queue OpenER → Frankfurter via `gap_fill_fetch`; `provider_source` `openexchangerates`/`ecb` |
+| `backend/app/modules/market_data/providers/crypto_adapter.py` | Queue Binance (universe) → CoinGecko gap-fill via `gap_fill_fetch` |
+| `backend/app/modules/market_data/providers/binance_adapter.py` | Binance top USDT pairs by volume |
+| `backend/app/modules/market_data/providers/commodities_adapter.py` | Queue GoldApi → AlphaVantage → Yahoo over `METAL_ITEMS`+`ENERGY_ITEMS` catalog |
 
-**Provider failover patterns (as-is):**
+**Provider queue (Q-B gap-fill):**
 
-| Class | Style | Success predicate |
-|-------|-------|-------------------|
-| Forex | Class-level chain | First non-empty `list[NormalizedForex]` |
-| Crypto | Class-level chain (+ composite inner) | Non-empty list; composite: `len(items) >= 10` for Binance |
-| Commodities | Per-item inside one adapter | Partial batch OK; missing symbols omitted |
+| Class | Queue | Gap-fill роль |
+|-------|-------|---------------|
+| Forex | OpenER → Frankfurter | Каждый провайдер — только missing currencies |
+| Crypto | Binance → CoinGecko | Binance задаёт universe; CoinGecko добирает |
+| Commodities | GoldApi → AlphaVantage → Yahoo | Главный бенефициар gap-fill по каталогу |
 
-**Frontend consumers (2026-06):** `GET /markets/ticker`, `/preferences`, `/instruments`, `/markets/overview`, `/pool/*`; per-class `GET /forex|/crypto|/commodities|/fuel|/refresh-metadata` — **no FE client** (backend-ready).
+**Удалено:** `fuel.py`, `providers/fuel_adapter.py`, `GET /markets/fuel|forex|crypto|commodities|refresh-metadata`; `fact_fuel_price` table сохранена.
 
-> Celery: `backend/app/workers/market_data_tasks.py` — `ingest_market_data` (`ingest_all(include_commodities=True)`), `ingest_commodities` (`ingest_commodities_only`). Удалены `modules/market_data/tasks.py`, `aggregation.py`, `service.py`, `models.py`.
+**Frontend consumers:** `GET /markets/ticker`, `/preferences`, `/instruments`, `/markets/overview`, `/pool/*`; per-class и fuel endpoints — **удалены** (не использовались FE).
+
+> Celery: `backend/app/workers/market_data_tasks.py` — `ingest_market_data`, `ingest_commodities`; beat schedule — §8. Удалены `modules/market_data/tasks.py`, `aggregation.py`, `service.py`, `models.py`.
 
 #### 2.7.10 Marketplaces (`marketplaces/`)
 
@@ -1176,7 +1205,7 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/scraper/api.py` | REST endpoints скрапера (admin/diagnostics). |
+| `backend/app/modules/scraper/api.py` | **REMOVED** (ранее admin/diagnostics router, не смонтирован в `main.py`) |
 | `backend/app/modules/scraper/db_diagnostics.py` | Диагностика БД (constraint repair, проверки целостности). |
 | `backend/app/modules/scraper/discovery.py` | `DiscoveryCrawler` — Phase 0 sitemap, Phase 1 BFS (`recon_frontier_state`), Phase 2 harvest (`category_resume_index`); cooperative deadline; `partial_budget` / `partial` inner job status. |
 | `backend/app/modules/scraper/errors.py` | Кастомные ошибки скрапера. |
@@ -1764,9 +1793,9 @@ Skill-документы для специализированных AI-аген
 | Persistence gate + sign + write | `modules/data_firewall/` + `modules/ingestion/service.py` + `modules/persist/writer.py` (sole owner of `fact_listing` / `fact_price` writes) |
 | Classification | `modules/classifier/service.py:classify_page_role_for_discovery` (Layer 1–3) |
 | Orphan job reaper | `backend/app/workers/reaper_tasks.py:reap_orphan_jobs`, Beat в `scheduler.py` |
-| Admin pipeline UI | `frontend/src/components/admin/DataCollectionTab.tsx`, `PipelineStatusPanel.tsx`, `WorkerLogRelayPanel.tsx` |
-| Display currency | `backend/app/common/currency.py`, `frontend/src/stores/displayCurrencyStore.ts` + `lib/displayCurrency.ts` |
-| Market data | `modules/market_data/{facade,fetching,ingestion,reader,ticker}.py` + `workers/market_data_tasks.py` |
+| Admin pipeline UI | `frontend/src/components/admin/DataCollectionTab.tsx`, `WorkerLogRelayPanel.tsx` (`PipelineStatusPanel` удалён) |
+| Display currency | `modules/currency/display_converter.py`, `frontend/src/stores/displayCurrencyStore.ts` + `lib/displayCurrency.ts` |
+| Market data | `modules/market_data/{provider_queue,facade,fetching,ingestion,reader,ticker}.py` + `workers/market_data_tasks.py` |
 | Миграции | `backend/alembic/versions/001` … `030` (head: `030_fact_listing_url_hash_not_null`) |
 
 
@@ -1865,12 +1894,13 @@ backend/app/
 │   │   ├── gate.py                          Re-export data_firewall rules (evaluate_gate)
 │   │   └── service.py                       IngestionService.persist_extracted
 │   │
-│   ├── market_data/                         Forex / crypto / commodities / fuel
+│   ├── market_data/                         Forex / crypto / commodities (provider-queue triad)
 │   │   ├── api.py                           /api/markets/*
 │   │   ├── dto.py
 │   │   ├── facade.py                        Главный фасад: overview/ticker/history
 │   │   ├── fetching.py                      Координатор провайдеров
 │   │   ├── fuel.py                          Fuel-специфика
+│   │   ├── provider_queue.py                Q-B gap-fill queue primitive
 │   │   ├── ingestion.py                     Запись в fact_*
 │   │   ├── reader.py                        Last-known котировки из БД
 │   │   ├── schemas.py
@@ -1881,8 +1911,7 @@ backend/app/
 │   │       ├── binance_adapter.py
 │   │       ├── commodities_adapter.py
 │   │       ├── crypto_adapter.py
-│   │       ├── forex_adapter.py
-│   │       └── fuel_adapter.py
+│   │       └── forex_adapter.py
 │   │
 │   ├── marketplaces/
 │   │   ├── __init__.py

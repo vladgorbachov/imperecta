@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 from uuid import UUID
 
@@ -555,6 +555,41 @@ async def write_async(
         return PersistResult(ok=True, rows_affected=1)
 
     raise ValueError(f"unsupported async persist table: {table}")
+
+
+MAX_ABS_PRICE_CHANGE_PCT = Decimal("9999.9999")
+_PRICE_CHANGE_PCT_QUANT = Decimal("0.0001")
+
+
+def compute_price_change_pct(
+    new_price: float | Decimal,
+    prior_last_price: float | Decimal | None,
+) -> Decimal | None:
+    """Percent delta from the listing's prior last_price to the new scrape price.
+
+    Returns None when there is no prior price or the prior price is zero.
+    Clamps to fact_price.price_change_pct Numeric(8,4) bounds.
+    """
+    if prior_last_price is None:
+        return None
+
+    prior = (
+        prior_last_price
+        if isinstance(prior_last_price, Decimal)
+        else Decimal(str(prior_last_price))
+    )
+    if prior == 0:
+        return None
+
+    new = new_price if isinstance(new_price, Decimal) else Decimal(str(new_price))
+    pct = (new - prior) / prior * Decimal("100")
+
+    if pct > MAX_ABS_PRICE_CHANGE_PCT:
+        pct = MAX_ABS_PRICE_CHANGE_PCT
+    elif pct < -MAX_ABS_PRICE_CHANGE_PCT:
+        pct = -MAX_ABS_PRICE_CHANGE_PCT
+
+    return pct.quantize(_PRICE_CHANGE_PCT_QUANT, rounding=ROUND_HALF_UP)
 
 
 def build_fact_price_fields(
