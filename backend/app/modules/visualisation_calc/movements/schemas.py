@@ -10,12 +10,20 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class LocalCurrencyResolution(BaseModel):
+    """How the marketplace's local currency was determined for display."""
+
+    currency: str | None = None
+    source: str = "unknown"
+
+
 class MoverItem(BaseModel):
     """Single listing that moved beyond the configured threshold."""
 
     product_name: str
     image_url: str | None = None
     marketplace_name: str
+    marketplace_domain: str | None = None
     country_code: str
     old_price: Decimal | None
     new_price: Decimal
@@ -24,6 +32,12 @@ class MoverItem(BaseModel):
     direction: Literal["up", "down"]
     changed_at: datetime
     old_price_reconstructed: bool = False
+    display_old_price: Decimal | None = None
+    display_new_price: Decimal | None = None
+    display_currency: str | None = None
+    conversion_available: bool = False
+    local_currency_resolution: LocalCurrencyResolution | None = None
+    local_currency_unavailable: bool = False
 
 
 class MoversPage(BaseModel):

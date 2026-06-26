@@ -7,8 +7,8 @@ from app.modules.visualisation_calc.movements.read import (
     read_mover_rows,
 )
 from app.modules.visualisation_calc.movements.schemas import (
-    MoverItem,
     MovementsFilters,
+    MoverItem,
     MoversCoverageMeta,
     MoversKpi,
     MoversPage,

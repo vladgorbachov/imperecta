@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.dimensions import DimCategory, DimCountry, DimMarketplace, DimProduct
@@ -31,6 +31,7 @@ class MoverReadRow:
     image_url: str | None
     marketplace_id: UUID
     marketplace_name: str
+    marketplace_domain: str | None
     country_code: str
     country_name: str
     category_id: UUID | None
@@ -127,6 +128,7 @@ def _base_mover_stmt(filters: MovementsFilters, *, cutoff: datetime):
             DimProduct.image_url,
             FactListing.marketplace_id,
             DimMarketplace.name.label("marketplace_name"),
+            DimMarketplace.domain.label("marketplace_domain"),
             DimMarketplace.country_code,
             DimCountry.name.label("country_name"),
             DimProduct.category_id,
@@ -159,6 +161,7 @@ def _row_to_mover_read_row(row: Any) -> MoverReadRow:
         image_url=row.image_url,
         marketplace_id=row.marketplace_id,
         marketplace_name=row.marketplace_name,
+        marketplace_domain=row.marketplace_domain,
         country_code=row.country_code,
         country_name=row.country_name,
         category_id=row.category_id,

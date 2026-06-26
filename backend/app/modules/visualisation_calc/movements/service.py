@@ -5,10 +5,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.modules.currency import (
+    CurrencyConverter,
+    compute_display_fields_for_marketplace,
+    normalize_display_currency,
+)
 from app.modules.visualisation_calc.movements.read import MoverReadRow, MoversCoverageCounts
 from app.modules.visualisation_calc.movements.schemas import (
-    MoverItem,
+    LocalCurrencyResolution,
     MovementsFilters,
+    MoverItem,
     MoversCoverageMeta,
     MoversKpi,
     MoversPage,
@@ -42,12 +48,67 @@ def _direction_for(pct: Decimal) -> str:
     return "up" if pct > 0 else "down"
 
 
+def _display_amount(value: float | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value)).quantize(_PRICE_QUANT, rounding=ROUND_HALF_UP)
+
+
+def apply_display_currency(
+    items: Sequence[MoverItem],
+    converter: CurrencyConverter | None,
+    display_currency: str,
+) -> None:
+    """Populate display_* fields on mover items (pure, sync, no DB).
+
+    Mirrors product_pool ``_apply_display_currency``: conversion math runs
+    after the sync read thread, using a pre-loaded ``CurrencyConverter``.
+    """
+    if not items:
+        return
+    normalized = normalize_display_currency(display_currency)
+    for item in items:
+        new_fields = compute_display_fields_for_marketplace(
+            amount=item.new_price,
+            currency=item.currency,
+            display_currency=normalized,
+            converter=converter,
+            marketplace_domain=item.marketplace_domain,
+            marketplace_country_code=item.country_code,
+        )
+        old_fields = (
+            compute_display_fields_for_marketplace(
+                amount=item.old_price,
+                currency=item.currency,
+                display_currency=normalized,
+                converter=converter,
+                marketplace_domain=item.marketplace_domain,
+                marketplace_country_code=item.country_code,
+            )
+            if item.old_price is not None
+            else None
+        )
+        item.display_new_price = _display_amount(new_fields.get("display_price"))
+        item.display_old_price = (
+            _display_amount(old_fields.get("display_price"))
+            if old_fields is not None
+            else None
+        )
+        item.display_currency = new_fields.get("display_currency")
+        item.conversion_available = bool(new_fields.get("conversion_available"))
+        resolution = new_fields.get("local_currency_resolution")
+        if isinstance(resolution, dict):
+            item.local_currency_resolution = LocalCurrencyResolution(**resolution)
+        item.local_currency_unavailable = bool(new_fields.get("local_currency_unavailable", False))
+
+
 def _row_to_mover_item(row: MoverReadRow) -> MoverItem:
     old_price, reconstructed = _resolve_old_price(row)
     return MoverItem(
         product_name=row.product_name,
         image_url=row.image_url,
         marketplace_name=row.marketplace_name,
+        marketplace_domain=row.marketplace_domain,
         country_code=row.country_code,
         old_price=old_price,
         new_price=row.new_price,

@@ -15,45 +15,32 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.database import sync_session_factory
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.classifier import classify_page_role_for_discovery
-from app.modules.data_firewall.firewall import evaluate_market
+from app.modules.discovery import cursor_store
+from app.modules.discovery.gate_persist import (
+    PoolInsertDTO,
+    write_pool_dtos_sync,
+)
 from app.modules.persist.meta_write import (
     build_dim_marketplace_fields,
     build_scrape_job_fields,
     write_meta_async,
 )
 from app.modules.persist.writer import (
-    PersistContext,
     build_dim_product_fields,
     build_fact_listing_fields,
-    write_sync,
 )
 from app.modules.scraper.locale_selection import build_accept_language_header, extract_canonical_url
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
 
-_DISCOVERY_MP_WRITE_KEYS = (
-    "base_url",
-    "last_sitemap_harvest_at",
-    "sitemap_url",
-    "recon_frontier_state",
-    "discovered_category_urls",
-    "category_resume_index",
-    "sitemap_resume_offset",
-    "last_discovery_at",
-    "last_discovery_status",
-    "last_discovery_products_found",
-    "products_in_pool",
-)
-
 
 async def _meta_update_marketplace_snapshot(marketplace: DimMarketplace) -> None:
-    columns = {key: getattr(marketplace, key) for key in _DISCOVERY_MP_WRITE_KEYS}
+    columns = cursor_store.snapshot_meta_columns(marketplace)
     await write_meta_async(
         table="dim_marketplace",
         operation="update",
@@ -157,109 +144,6 @@ def _title_from_url(url: str) -> str:
 
 def _normalize_name(name: str) -> str:
     return " ".join((name or "").lower().split())[:500]
-
-
-@dataclass(frozen=True)
-class PoolInsertDTO:
-    """One dim_product + fact_listing pair for gated pool persistence."""
-
-    marketplace_id: UUID
-    dim_product: dict[str, Any]
-    fact_listing: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class PoolWriteResult:
-    """Outcome of a batched sync pool write through data_firewall."""
-
-    inserted: int
-    rejected: int
-
-
-def _write_pool_dtos_sync(dtos: list[PoolInsertDTO]) -> PoolWriteResult:
-    """Persist discovery pool rows via evaluate_market -> write_sync on a sync Session.
-
-    Runs inside asyncio.to_thread — never on DiscoveryCrawler's AsyncSession.
-    One commit per batch; each DTO pair uses a nested savepoint so a failed
-    listing gate/write does not leave an orphan dim_product in the batch.
-    """
-    if not dtos:
-        return PoolWriteResult(inserted=0, rejected=0)
-
-    db = sync_session_factory()
-    inserted = 0
-    rejected = 0
-    try:
-        for dto in dtos:
-            nested = db.begin_nested()
-            try:
-                product_ctx = PersistContext(
-                    source="discovery",
-                    marketplace_id=dto.marketplace_id,
-                )
-                outcome_product = evaluate_market(
-                    dto.dim_product,
-                    table="dim_product",
-                    db=db,
-                    reject_source="discovery",
-                )
-                if (
-                    not outcome_product.passed
-                    or outcome_product.signed_record is None
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                if not write_sync(
-                    db,
-                    outcome_product.signed_record,
-                    ctx=product_ctx,
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                listing_ctx = PersistContext(
-                    source="discovery",
-                    marketplace_id=dto.marketplace_id,
-                )
-                outcome_listing = evaluate_market(
-                    dto.fact_listing,
-                    table="fact_listing",
-                    db=db,
-                    reject_source="discovery",
-                )
-                if (
-                    not outcome_listing.passed
-                    or outcome_listing.signed_record is None
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                if not write_sync(
-                    db,
-                    outcome_listing.signed_record,
-                    ctx=listing_ctx,
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                nested.commit()
-                inserted += 1
-            except Exception:
-                nested.rollback()
-                raise
-
-        db.commit()
-        return PoolWriteResult(inserted=inserted, rejected=rejected)
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
 
 
 @dataclass
@@ -433,7 +317,7 @@ class DiscoveryCrawler:
 
             if pending_in_batch >= SAVE_PRODUCT_URLS_BATCH_SIZE:
                 write_result = await asyncio.to_thread(
-                    _write_pool_dtos_sync,
+                    write_pool_dtos_sync,
                     batch_dtos,
                 )
                 new_count += write_result.inserted
@@ -460,7 +344,7 @@ class DiscoveryCrawler:
 
         if batch_dtos:
             write_result = await asyncio.to_thread(
-                _write_pool_dtos_sync,
+                write_pool_dtos_sync,
                 batch_dtos,
             )
             new_count += write_result.inserted
@@ -468,11 +352,14 @@ class DiscoveryCrawler:
 
     def _should_run_sitemap_harvest(self, marketplace: DimMarketplace) -> bool:
         """Return True if sitemap harvest should run."""
-        if int(getattr(marketplace, "sitemap_resume_offset", 0) or 0) > 0:
+        if cursor_store.get_sitemap_resume_offset(marketplace) > 0:
             return True
-        if marketplace.last_sitemap_harvest_at is None:
+        if cursor_store.get_last_sitemap_harvest_at(marketplace) is None:
             return True
-        age = (datetime.now(tz=timezone.utc) - marketplace.last_sitemap_harvest_at).days
+        age = (
+            datetime.now(tz=timezone.utc)
+            - cursor_store.get_last_sitemap_harvest_at(marketplace)
+        ).days
         return age >= SITEMAP_STALE_DAYS
 
     async def _classify_and_resolve_url(
@@ -646,10 +533,13 @@ class DiscoveryCrawler:
 
         now = datetime.now(tz=timezone.utc)
         if useful:
-            marketplace.last_sitemap_harvest_at = now
+            cursor_store.set_last_sitemap_harvest_at(marketplace, now)
             # Approximation — actual sitemap location is resolved by
             # fetch_sitemap_candidates via robots.txt + common paths.
-            marketplace.sitemap_url = f"{marketplace.base_url.rstrip('/')}/sitemap.xml"
+            cursor_store.set_sitemap_url(
+                marketplace,
+                f"{marketplace.base_url.rstrip('/')}/sitemap.xml",
+            )
         else:
             # Treat as bad harvest: pretend it happened just before the stale
             # threshold so the next discovery cycle retries after
@@ -659,7 +549,7 @@ class DiscoveryCrawler:
                 days=SITEMAP_STALE_DAYS,
                 hours=-SITEMAP_BAD_HARVEST_RETRY_HOURS,
             )
-            marketplace.last_sitemap_harvest_at = now - retry_offset
+            cursor_store.set_last_sitemap_harvest_at(marketplace, now - retry_offset)
 
         await self.db.flush()
         logger.info(
@@ -678,15 +568,18 @@ class DiscoveryCrawler:
 
     def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:
         """Return True if category recon should run."""
-        if int(getattr(marketplace, "category_resume_index", 0) or 0) > 0:
+        if cursor_store.get_category_resume_index(marketplace) > 0:
             return False
-        if marketplace.recon_frontier_state:
+        if cursor_store.load_frontier_state(marketplace):
             return True
-        if not marketplace.discovered_category_urls:
+        if not cursor_store.get_discovered_category_urls(marketplace):
             return True
-        if marketplace.last_category_recon_at is None:
+        if cursor_store.get_last_category_recon_at(marketplace) is None:
             return True
-        age = (datetime.now(tz=timezone.utc) - marketplace.last_category_recon_at).days
+        age = (
+            datetime.now(tz=timezone.utc)
+            - cursor_store.get_last_category_recon_at(marketplace)
+        ).days
         return age >= CATEGORY_RECON_STALE_DAYS
 
     def _publish_category_batch(
@@ -710,17 +603,16 @@ class DiscoveryCrawler:
             if url not in seen:
                 seen.add(url)
                 unique.append(url)
-        marketplace.discovered_category_urls = unique
-        marketplace.category_resume_index = 0
-        marketplace.last_category_recon_at = datetime.now(tz=timezone.utc)
+        cursor_store.set_discovered_category_urls(marketplace, unique)
+        cursor_store.set_category_resume_index(marketplace, 0)
+        cursor_store.set_last_category_recon_at(
+            marketplace,
+            datetime.now(tz=timezone.utc),
+        )
         if queue:
-            marketplace.recon_frontier_state = {
-                "queue": [[u, d] for (u, d) in queue],
-                "visited": list(visited),
-                "listing_urls": [],
-            }
+            cursor_store.apply_frontier(marketplace, queue, visited, [])
         else:
-            marketplace.recon_frontier_state = None
+            cursor_store.clear_frontier(marketplace)
         return unique
 
     async def _phase1_category_recon(
@@ -745,14 +637,9 @@ class DiscoveryCrawler:
         from app.modules.classifier import classify_page_role_for_discovery
         from app.modules.scraper.extractors import extract_internal_links_all
 
-        saved = marketplace.recon_frontier_state
+        saved = cursor_store.load_frontier_state(marketplace)
         if saved:
-            queue: deque[tuple[str, int]] = deque(
-                (str(item[0]), int(item[1]))
-                for item in saved.get("queue", [])
-            )
-            visited: set[str] = set(saved.get("visited", []))
-            listing_urls: list[str] = list(saved.get("listing_urls", []))
+            queue, visited, listing_urls = cursor_store.parse_frontier(saved)
             logger.info(
                 "category_recon_resume marketplace_id=%s queue=%d "
                 "visited=%d listing=%d",
@@ -796,11 +683,7 @@ class DiscoveryCrawler:
                         len(visited),
                     )
                     return unique, False
-                marketplace.recon_frontier_state = {
-                    "queue": [[u, d] for (u, d) in queue],
-                    "visited": list(visited),
-                    "listing_urls": [],
-                }
+                cursor_store.apply_frontier(marketplace, queue, visited, [])
                 await self.db.flush()
                 logger.info(
                     "category_recon_budget_exhausted marketplace_id=%s "
@@ -1171,7 +1054,10 @@ class DiscoveryCrawler:
                         days=SITEMAP_STALE_DAYS,
                         hours=-SITEMAP_TIMEOUT_COOLDOWN_HOURS,
                     )
-                    marketplace.last_sitemap_harvest_at = now - retry_offset
+                    cursor_store.set_last_sitemap_harvest_at(
+                        marketplace,
+                        now - retry_offset,
+                    )
                     await self.db.flush()
                     sitemap_product_urls = []
 
@@ -1187,7 +1073,7 @@ class DiscoveryCrawler:
                 batch = sitemap_product_urls[:remaining]
                 accepted_urls = len(batch)
                 rejected_urls = max(0, len(sitemap_product_urls) - len(batch))
-                start_offset = int(getattr(marketplace, "sitemap_resume_offset", 0) or 0)
+                start_offset = cursor_store.get_sitemap_resume_offset(marketplace)
                 save_deadline = self._headroom_deadline(deadline_monotonic)
                 new_count, next_offset, exhausted = await self._save_product_urls(
                     marketplace.id,
@@ -1197,10 +1083,10 @@ class DiscoveryCrawler:
                 )
                 products_found = new_count
                 if exhausted and next_offset < len(batch):
-                    marketplace.sitemap_resume_offset = next_offset
+                    cursor_store.set_sitemap_resume_offset(marketplace, next_offset)
                     partial_budget = True
                 else:
-                    marketplace.sitemap_resume_offset = 0
+                    cursor_store.set_sitemap_resume_offset(marketplace, 0)
                     partial_budget = False
                 logger.info(
                     "discovery_sitemap_path marketplace_id=%s candidate=%d accepted=%d "
@@ -1246,7 +1132,9 @@ class DiscoveryCrawler:
                     duplicate_urls = 0
                     partial_budget = True
                 else:
-                    harvest_urls = [marketplace.base_url] + (marketplace.discovered_category_urls or [])
+                    harvest_urls = [marketplace.base_url] + (
+                        cursor_store.get_discovered_category_urls(marketplace)
+                    )
                     candidate_urls_found = len(harvest_urls)
                     accepted_urls = min(len(harvest_urls), remaining)
                     rejected_urls = max(0, len(harvest_urls) - accepted_urls)
@@ -1256,9 +1144,7 @@ class DiscoveryCrawler:
                     # start_index between runs → EMPTY WINDOW rule resets the cursor.
                     # This is intentional: quota is a hard ceiling and takes precedence
                     # over category-harvest completeness.
-                    start_index = int(
-                        getattr(marketplace, "category_resume_index", 0) or 0
-                    )
+                    start_index = cursor_store.get_category_resume_index(marketplace)
                     products_found, next_index, phase2_more = (
                         await self._phase2_product_harvest(
                             marketplace,
@@ -1267,7 +1153,7 @@ class DiscoveryCrawler:
                             deadline_monotonic=block_deadline,
                         )
                     )
-                    marketplace.category_resume_index = next_index
+                    cursor_store.set_category_resume_index(marketplace, next_index)
                     # Completion is decided by phase2_more (→ partial_budget), NOT by
                     # next_index. next_index==0 with phase2_more=True means "restart at
                     # 0 next run", not "done".
