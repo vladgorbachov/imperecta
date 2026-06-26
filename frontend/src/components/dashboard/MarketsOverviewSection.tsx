@@ -8,7 +8,7 @@ import {
   Search,
   SlidersHorizontal,
 } from "lucide-react";
-import { marketsApi, marketsQueryKeys, type MarketsOverviewItem } from "@/api/markets";
+import { marketsApi, marketsQueryKeys, type MarketsOverviewItem, type MovementsQueryParams } from "@/api/markets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -84,10 +84,12 @@ function KpiCard({
   label,
   value,
   error,
+  title,
 }: {
   label: string;
   value: string;
   error?: { onRetry: () => void; title: string };
+  title?: string;
 }) {
   return (
     <div className="surface-base rounded-lg p-3">
@@ -96,6 +98,7 @@ function KpiCard({
         <p
           className="text-2xl font-bold tabular-nums"
           style={{ fontFamily: "var(--font-display)" }}
+          title={title}
         >
           {value}
         </p>
@@ -300,6 +303,60 @@ export function MarketsOverviewSection() {
 
   const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
 
+  const movementsFilterParams = useMemo((): MovementsQueryParams => {
+    const params: MovementsQueryParams = { period: "24h", threshold: 5 };
+    if (selectedMarketplaces.length === 1) {
+      const domain = selectedMarketplaces[0];
+      const item = rawItems.find((candidate) => candidate.marketplace_domain === domain);
+      if (item?.marketplace_id) {
+        params.marketplace_id = item.marketplace_id;
+      }
+      if (item?.country_code) {
+        params.country_code = item.country_code;
+      }
+    }
+    return params;
+  }, [selectedMarketplaces, rawItems]);
+
+  const {
+    data: moversKpi,
+    isLoading: moversKpiLoading,
+    isError: moversKpiError,
+    refetch: refetchMoversKpi,
+  } = useQuery({
+    queryKey: marketsQueryKeys.movementsKpi(movementsFilterParams),
+    queryFn: () => marketsApi.getMoversKpi(movementsFilterParams).then((response) => response.data),
+    staleTime: 30_000,
+  });
+  const {
+    data: moversSummary,
+    isLoading: moversSummaryLoading,
+    isError: moversSummaryError,
+    refetch: refetchMoversSummary,
+  } = useQuery({
+    queryKey: marketsQueryKeys.movementsSummary(movementsFilterParams),
+    queryFn: () =>
+      marketsApi.getMoversSummary(movementsFilterParams).then((response) => response.data),
+    staleTime: 30_000,
+  });
+  const {
+    data: moversCoverage,
+    isLoading: moversCoverageLoading,
+    isError: moversCoverageError,
+    refetch: refetchMoversCoverage,
+  } = useQuery({
+    queryKey: marketsQueryKeys.movementsCoverage(movementsFilterParams),
+    queryFn: () =>
+      marketsApi.getMoversCoverage(movementsFilterParams).then((response) => response.data),
+    staleTime: 30_000,
+  });
+
+  const movementsDataReady = moversCoverage?.data_ready === true;
+  const movementsKpisPending =
+    moversKpiLoading || moversSummaryLoading || moversCoverageLoading;
+  const movementsKpisErrored =
+    moversKpiError || moversSummaryError || moversCoverageError;
+
   const orderedItems = useMemo(() => {
     if (sort !== "random") {
       return rawItems;
@@ -339,27 +396,50 @@ export function MarketsOverviewSection() {
     const updated24h = filteredItems.filter(
       (item) => now - parseDateValue(item.last_checked_at) <= 24 * 60 * 60 * 1000,
     ).length;
-    const changedMore5 = filteredItems.filter(
-      (item) => Math.abs(item.price_change_pct ?? 0) > 5,
-    ).length;
-    const averageVolatility =
-      filteredItems.length === 0
-        ? 0
-        : filteredItems.reduce(
-            (acc, item) => acc + Math.abs(item.price_change_pct ?? 0),
-            0,
-          ) / filteredItems.length;
     const lastUpdate = filteredItems.reduce(
       (max, item) => Math.max(max, parseDateValue(item.last_checked_at)),
       0,
     );
     return {
       updated24h: String(updated24h),
-      changedMore5: String(changedMore5),
-      avgVolatility: `${averageVolatility.toFixed(2)}%`,
       lastUpdate: lastUpdate ? new Date(lastUpdate).toLocaleString(locale) : t("common.dash"),
     };
   }, [filteredItems, locale, t]);
+
+  const changedMore5Value = useMemo(() => {
+    if (movementsKpisPending) {
+      return t("common.dash");
+    }
+    if (movementsKpisErrored) {
+      return t("common.dash");
+    }
+    if (!movementsDataReady) {
+      return t("market.overview.kpi.accumulatingData");
+    }
+    return String(moversKpi?.count ?? t("common.dash"));
+  }, [movementsKpisPending, movementsKpisErrored, movementsDataReady, moversKpi, t]);
+
+  const avgVolatilityValue = useMemo(() => {
+    if (movementsKpisPending) {
+      return t("common.dash");
+    }
+    if (movementsKpisErrored) {
+      return t("common.dash");
+    }
+    if (!movementsDataReady) {
+      return t("market.overview.kpi.accumulatingData");
+    }
+    if (moversSummary?.avg_abs_change == null) {
+      return t("common.dash");
+    }
+    const numeric = Number(moversSummary.avg_abs_change);
+    if (Number.isNaN(numeric)) {
+      return t("common.dash");
+    }
+    return `${numeric.toFixed(2)}%`;
+  }, [movementsKpisPending, movementsKpisErrored, movementsDataReady, moversSummary, t]);
+
+  const accumulatingHint = t("market.overview.kpi.accumulatingDataHint");
 
   const totalPoolKpi = poolStatsError
     ? null
@@ -552,8 +632,40 @@ export function MarketsOverviewSection() {
           }
         />
         <KpiCard label={t("market.overview.kpi.updated24h")} value={kpis.updated24h} />
-        <KpiCard label={t("market.overview.kpi.changedMore5")} value={kpis.changedMore5} />
-        <KpiCard label={t("market.overview.kpi.avgVolatility")} value={kpis.avgVolatility} />
+        <KpiCard
+          label={t("market.overview.kpi.changedMore5")}
+          value={changedMore5Value}
+          title={!movementsDataReady && !movementsKpisPending ? accumulatingHint : undefined}
+          error={
+            movementsKpisErrored
+              ? {
+                  onRetry: () => {
+                    void refetchMoversKpi();
+                    void refetchMoversSummary();
+                    void refetchMoversCoverage();
+                  },
+                  title: t("common.error"),
+                }
+              : undefined
+          }
+        />
+        <KpiCard
+          label={t("market.overview.kpi.avgVolatility")}
+          value={avgVolatilityValue}
+          title={!movementsDataReady && !movementsKpisPending ? accumulatingHint : undefined}
+          error={
+            movementsKpisErrored
+              ? {
+                  onRetry: () => {
+                    void refetchMoversKpi();
+                    void refetchMoversSummary();
+                    void refetchMoversCoverage();
+                  },
+                  title: t("common.error"),
+                }
+              : undefined
+          }
+        />
         <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
       </div>
 

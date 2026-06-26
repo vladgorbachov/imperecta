@@ -243,6 +243,8 @@
   "market.overview.untitled": "Без названия",
   "market.overview.kpi.avgVolatility": "Средняя волатильность пула",
   "market.overview.kpi.changedMore5": "Товаров с изменением >5%",
+  "market.overview.kpi.accumulatingData": "Накапливаем данные",
+  "market.overview.kpi.accumulatingDataHint": "История изменений цен ещё формируется. KPI движения появятся после достаточного числа скрапов.",
   "market.overview.kpi.lastUpdate": "Последнее обновление",
   "market.overview.kpi.totalPool": "Всего товаров в пуле",
   "market.overview.kpi.updated24h": "Обновлено за 24ч",

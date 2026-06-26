@@ -246,6 +246,8 @@
   "market.overview.untitled": "Без назви",
   "market.overview.kpi.avgVolatility": "Середня волатильність пулу",
   "market.overview.kpi.changedMore5": "Товарів зі зміною >5%",
+  "market.overview.kpi.accumulatingData": "Накопичуємо дані",
+  "market.overview.kpi.accumulatingDataHint": "Історія змін цін ще формується. KPI руху з’являться після достатньої кількості скрапів.",
   "market.overview.kpi.lastUpdate": "Останнє оновлення",
   "market.overview.kpi.totalPool": "Всього товарів у пулі",
   "market.overview.kpi.updated24h": "Оновлено за 24г",

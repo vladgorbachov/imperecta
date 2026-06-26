@@ -246,6 +246,8 @@
   "market.overview.untitled": "Fără titlu",
   "market.overview.kpi.avgVolatility": "Volatilitatea medie a pool-ului",
   "market.overview.kpi.changedMore5": "Produse cu schimbare >5%",
+  "market.overview.kpi.accumulatingData": "Se acumulează date",
+  "market.overview.kpi.accumulatingDataHint": "Istoricul schimbărilor de preț se formează încă. KPI-urile de mișcare apar după suficiente scrapes.",
   "market.overview.kpi.lastUpdate": "Ultima actualizare",
   "market.overview.kpi.totalPool": "Total produse în pool",
   "market.overview.kpi.updated24h": "Actualizate în 24h",

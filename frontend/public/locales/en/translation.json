@@ -246,6 +246,8 @@
   "market.overview.untitled": "Untitled",
   "market.overview.kpi.avgVolatility": "Average pool volatility",
   "market.overview.kpi.changedMore5": "Products with >5% change",
+  "market.overview.kpi.accumulatingData": "Accumulating data",
+  "market.overview.kpi.accumulatingDataHint": "Price change history is still building. Movement KPIs appear after enough scrapes.",
   "market.overview.kpi.lastUpdate": "Last update",
   "market.overview.kpi.totalPool": "Total products in pool",
   "market.overview.kpi.updated24h": "Updated in 24h",

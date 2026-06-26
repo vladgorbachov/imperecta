@@ -10,17 +10,26 @@ import { MarketsOverviewSection } from "./MarketsOverviewSection";
 const getOverviewMock = vi.fn();
 const getPoolMarketplaceStatsMock = vi.fn();
 const getPoolStatsMock = vi.fn();
+const getMoversKpiMock = vi.fn();
+const getMoversSummaryMock = vi.fn();
+const getMoversCoverageMock = vi.fn();
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
     getOverview: (...args: unknown[]) => getOverviewMock(...args),
     getPoolMarketplaceStats: (...args: unknown[]) => getPoolMarketplaceStatsMock(...args),
     getPoolStats: (...args: unknown[]) => getPoolStatsMock(...args),
+    getMoversKpi: (...args: unknown[]) => getMoversKpiMock(...args),
+    getMoversSummary: (...args: unknown[]) => getMoversSummaryMock(...args),
+    getMoversCoverage: (...args: unknown[]) => getMoversCoverageMock(...args),
   },
   marketsQueryKeys: {
     overview: (params?: unknown) => ["markets", "overview", params],
     poolMarketplaceStats: () => ["markets", "pool-marketplace-stats"],
     poolStats: () => ["markets", "pool-stats"],
+    movementsKpi: (params?: unknown) => ["markets", "movements", params, "kpi"],
+    movementsSummary: (params?: unknown) => ["markets", "movements", params, "summary"],
+    movementsCoverage: (params?: unknown) => ["markets", "movements", params, "coverage"],
   },
 }));
 
@@ -119,13 +128,64 @@ describe("MarketsOverviewSection", () => {
         total_products: 90,
       },
     });
+    getMoversKpiMock.mockResolvedValue({ data: { count: 4 } });
+    getMoversSummaryMock.mockResolvedValue({
+      data: {
+        up_count: 2,
+        down_count: 1,
+        unchanged_count: 0,
+        biggest_gainer: null,
+        biggest_loser: null,
+        avg_abs_change: "6.25",
+        buckets: [],
+      },
+    });
+    getMoversCoverageMock.mockResolvedValue({
+      data: {
+        listings_with_change: 12,
+        listings_total: 90,
+        data_ready: true,
+      },
+    });
   });
 
-  it("renders KPI cards", async () => {
+  it("renders KPI cards from movements endpoints", async () => {
     renderSection();
     await screen.findByText("market.overview.kpi.totalPool");
     expect(screen.getByText("market.overview.kpi.updated24h")).toBeInTheDocument();
     expect(screen.getByText("market.overview.kpi.avgVolatility")).toBeInTheDocument();
+    expect(await screen.findByText("4")).toBeInTheDocument();
+    expect(screen.getByText("6.25%")).toBeInTheDocument();
+    expect(getMoversKpiMock).toHaveBeenCalled();
+    expect(getMoversSummaryMock).toHaveBeenCalled();
+    expect(getMoversCoverageMock).toHaveBeenCalled();
+  });
+
+  it("shows accumulating data state when coverage is not ready", async () => {
+    getMoversCoverageMock.mockResolvedValue({
+      data: {
+        listings_with_change: 0,
+        listings_total: 10,
+        data_ready: false,
+      },
+    });
+    getMoversKpiMock.mockResolvedValue({ data: { count: 0 } });
+    getMoversSummaryMock.mockResolvedValue({
+      data: {
+        up_count: 0,
+        down_count: 0,
+        unchanged_count: 0,
+        biggest_gainer: null,
+        biggest_loser: null,
+        avg_abs_change: null,
+        buckets: [],
+      },
+    });
+
+    renderSection();
+    const accumulating = await screen.findAllByText("market.overview.kpi.accumulatingData");
+    expect(accumulating.length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("0.00%")).not.toBeInTheDocument();
   });
 
   it("renders product cards with image and external product link", async () => {

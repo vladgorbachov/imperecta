@@ -243,6 +243,8 @@
   "market.overview.untitled": "بدون اسم",
   "market.overview.kpi.avgVolatility": "متوسط تقلب التجميعة",
   "market.overview.kpi.changedMore5": "المنتجات بتغير أكبر من 5%",
+  "market.overview.kpi.accumulatingData": "جمع البيانات",
+  "market.overview.kpi.accumulatingDataHint": "سجل تغيرات الأسعار لا يزال قيد التكوين. ستظهر مؤشرات الحركة بعد عدد كافٍ من عمليات السحب.",
   "market.overview.kpi.lastUpdate": "آخر تحديث",
   "market.overview.kpi.totalPool": "إجمالي المنتجات في التجميعة",
   "market.overview.kpi.updated24h": "تم تحديثها خلال 24 ساعة",

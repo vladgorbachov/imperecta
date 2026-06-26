@@ -243,6 +243,8 @@
   "market.overview.untitled": "Sans titre",
   "market.overview.kpi.avgVolatility": "Volatilité moyenne du pool",
   "market.overview.kpi.changedMore5": "Produits avec variation >5%",
+  "market.overview.kpi.accumulatingData": "Accumulation des données",
+  "market.overview.kpi.accumulatingDataHint": "L'historique des variations de prix se construit encore. Les KPI de mouvement apparaîtront après suffisamment de scrapes.",
   "market.overview.kpi.lastUpdate": "Dernière mise à jour",
   "market.overview.kpi.totalPool": "Total produits dans le pool",
   "market.overview.kpi.updated24h": "Mis à jour en 24h",
