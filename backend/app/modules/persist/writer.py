@@ -5,16 +5,18 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 import structlog
 from sqlalchemy import and_, delete, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog
-from app.models.dimensions import DimMarketplace, DimProduct
+from app.models.dimensions import DimDate, DimMarketplace, DimProduct
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
+    "dim_date": frozenset({"insert"}),
     "dim_product": frozenset({"insert", "update", "delete"}),
     "dim_marketplace": frozenset({"insert", "update", "delete"}),
     "scrape_jobs": frozenset({"insert", "update", "delete"}),
@@ -44,6 +47,7 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
 }
 
 _TABLE_MODELS: dict[str, type] = {
+    "dim_date": DimDate,
     "dim_product": DimProduct,
     "dim_marketplace": DimMarketplace,
     "scrape_jobs": ScrapeJob,
@@ -370,6 +374,20 @@ def write_sync(
         db.add(DimMarketplace(**orm_fields))
         return PersistResult(ok=True, rows_affected=1)
 
+    if table == "dim_date":
+        full_date = orm_fields.get("full_date")
+        if isinstance(full_date, str):
+            from datetime import date as date_type
+
+            orm_fields = {**orm_fields, "full_date": date_type.fromisoformat(full_date)}
+        stmt = (
+            pg_insert(DimDate)
+            .values(**orm_fields)
+            .on_conflict_do_nothing(index_elements=["date_id"])
+        )
+        result = db.execute(stmt)
+        return _persist_result_from_rowcount(result.rowcount)
+
     date_id = orm_fields["date_id"]
 
     if table == "fact_currency_rate":
@@ -550,9 +568,10 @@ def build_fact_price_fields(
     price_change_pct: float | None,
     scraped_at: datetime,
     scrape_job_id: UUID | None,
+    price_eur: float | Decimal | None = None,
 ) -> dict[str, Any]:
     """Assemble the exact fact_price columns that the firewall signs."""
-    return {
+    fields: dict[str, Any] = {
         "listing_id": listing_id,
         "date_id": date_id,
         "price": price,
@@ -563,6 +582,11 @@ def build_fact_price_fields(
         "scraped_at": scraped_at,
         "scrape_job_id": scrape_job_id,
     }
+    if price_eur is not None:
+        fields["price_eur"] = float(price_eur)
+    else:
+        fields["price_eur"] = None
+    return fields
 
 
 def build_dim_product_fields(

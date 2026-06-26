@@ -31,10 +31,10 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
         "listing_deactivate": frozenset({"is_active"}),
         "listing_checked": frozenset({"last_checked_at"}),
         "listing_denorm_success": frozenset(
-            {"last_price", "last_currency_code", "last_price_changed_at"},
+            {"last_price", "last_currency_code", "last_price_changed_at", "last_price_eur"},
         ),
         "listing_denorm_no_change": frozenset(
-            {"last_checked_at", "last_price", "last_currency_code"},
+            {"last_checked_at", "last_price", "last_currency_code", "last_price_eur"},
         ),
     },
     "dim_product": {

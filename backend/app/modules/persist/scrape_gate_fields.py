@@ -2,8 +2,41 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from uuid import UUID
+
+
+def build_dim_date_fields(
+    *,
+    date_id: int,
+    full_date: date,
+    year: int,
+    quarter: int,
+    month: int,
+    month_name: str,
+    week_iso: int,
+    day_of_month: int,
+    day_of_week: int,
+    day_name: str,
+    is_weekend: bool,
+    is_last_day_of_month: bool,
+) -> dict[str, Any]:
+    """Full dim_date row for evaluate_market insert."""
+    return {
+        "date_id": date_id,
+        "full_date": full_date,
+        "year": year,
+        "quarter": quarter,
+        "month": month,
+        "month_name": month_name,
+        "week_iso": week_iso,
+        "day_of_month": day_of_month,
+        "day_of_week": day_of_week,
+        "day_name": day_name,
+        "is_weekend": is_weekend,
+        "is_last_day_of_month": is_last_day_of_month,
+    }
 
 
 def build_listing_update_fields(*, url_hash: str, **delta: Any) -> dict[str, Any]:
@@ -26,3 +59,23 @@ def build_product_delete_fields(*, product_id: UUID | str) -> dict[str, Any]:
     """Locator-only payload for dim_product DELETE."""
     pid = product_id if isinstance(product_id, str) else str(product_id)
     return {"id": pid}
+
+
+_LISTING_GATE_CACHE_KEYS = (
+    "consecutive_errors",
+    "last_error",
+    "failure_streak",
+    "is_active",
+    "last_checked_at",
+    "last_price",
+    "last_currency_code",
+    "last_price_changed_at",
+    "last_price_eur",
+)
+
+
+def sync_listing_gate_cache(listing: Any, delta: dict[str, Any]) -> None:
+    """Mirror gate-written listing columns on the in-session ORM instance."""
+    for key in _LISTING_GATE_CACHE_KEYS:
+        if key in delta:
+            setattr(listing, key, delta[key])

@@ -16,7 +16,7 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Awaitable, TypeVar
+from typing import Any, Awaitable, TypeVar
 from uuid import UUID
 
 import structlog
@@ -34,12 +34,17 @@ from app.modules.ingestion.service import (
     _today_date_id,
 )
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
-from app.modules.data_firewall.update_validator import authorize_scrape_delete
+from app.modules.data_firewall.update_validator import (
+    authorize_scrape_delete,
+    authorize_scrape_update,
+)
 from app.modules.persist.logs_write import build_scrape_log_fields, persist_logs_batch
 from app.modules.persist.maintenance_audit import record_maintenance_audit
 from app.modules.persist.scrape_gate_fields import (
     build_listing_delete_fields,
+    build_listing_update_fields,
     build_product_delete_fields,
+    sync_listing_gate_cache,
 )
 from app.modules.persist.writer import PersistContext, write_sync
 from app.modules.scraper.fetch_backends import backend_id_persisted
@@ -287,6 +292,128 @@ class GlobalScrapeService:
             listing, new_price, new_currency
         )
 
+    def _persist_listing_gate_update(
+        self,
+        *,
+        kind: str,
+        fields: dict[str, Any],
+        listing: FactListing,
+        source: str,
+    ) -> bool:
+        """Authorize a scrape listing UPDATE and write via persist on this session."""
+        outcome = authorize_scrape_update(
+            table="fact_listing",
+            kind=kind,
+            fields=fields,
+            db=self.db,
+            reject_source=source,
+        )
+        if not outcome.passed or outcome.signed_record is None:
+            return False
+        result = write_sync(
+            self.db,
+            outcome.signed_record,
+            ctx=PersistContext(
+                source=source,
+                marketplace_id=listing.marketplace_id,
+                listing_id=listing.id,
+            ),
+        )
+        return result.ok
+
+    def _route_listing_scrape_start_reset(self, listing: FactListing) -> bool:
+        """Reset consecutive_errors / last_error at scrape start (pre-branch)."""
+        delta = {"consecutive_errors": 0, "last_error": None}
+        fields = build_listing_update_fields(url_hash=listing.url_hash, **delta)
+        ok = self._persist_listing_gate_update(
+            kind="listing_scrape_start_reset",
+            fields=fields,
+            listing=listing,
+            source="scraper_listing_scrape_start_reset",
+        )
+        if ok:
+            sync_listing_gate_cache(listing, delta)
+        return ok
+
+    def _route_listing_success_streak_reset(self, listing: FactListing) -> bool:
+        """Clear failure_streak after a successful scrape."""
+        delta = {"failure_streak": 0}
+        fields = build_listing_update_fields(url_hash=listing.url_hash, **delta)
+        ok = self._persist_listing_gate_update(
+            kind="listing_success_streak_reset",
+            fields=fields,
+            listing=listing,
+            source="scraper_listing_success_streak_reset",
+        )
+        if ok:
+            sync_listing_gate_cache(listing, delta)
+        return ok
+
+    def _route_listing_checked(
+        self,
+        listing: FactListing,
+        *,
+        checked_at: datetime,
+    ) -> bool:
+        """Record last_checked_at for honest absent or success paths."""
+        delta = {"last_checked_at": checked_at}
+        fields = build_listing_update_fields(url_hash=listing.url_hash, **delta)
+        ok = self._persist_listing_gate_update(
+            kind="listing_checked",
+            fields=fields,
+            listing=listing,
+            source="scraper_listing_checked",
+        )
+        if ok:
+            sync_listing_gate_cache(listing, delta)
+        return ok
+
+    def _route_failure_housekeeping_updates(
+        self,
+        listing: FactListing,
+        *,
+        listing_id: UUID,
+        result: PoolScrapeResult,
+    ) -> None:
+        """Failure counters + optional deactivate (separate kinds; no allowlist widening)."""
+        if not result.success:
+            hk_delta = {
+                "consecutive_errors": (listing.consecutive_errors or 0) + 1,
+                "last_error": result.error or "scrape_failed",
+                "failure_streak": (listing.failure_streak or 0) + 1,
+            }
+            hk_fields = build_listing_update_fields(
+                url_hash=listing.url_hash,
+                **hk_delta,
+            )
+            if self._persist_listing_gate_update(
+                kind="listing_housekeeping_failure",
+                fields=hk_fields,
+                listing=listing,
+                source="scraper_listing_housekeeping_failure",
+            ):
+                sync_listing_gate_cache(listing, hk_delta)
+
+            if hk_delta["failure_streak"] >= LISTING_DEACTIVATE_AFTER_ERRORS:
+                deactivate_delta = {"is_active": False}
+                deactivate_fields = build_listing_update_fields(
+                    url_hash=listing.url_hash,
+                    **deactivate_delta,
+                )
+                if self._persist_listing_gate_update(
+                    kind="listing_deactivate",
+                    fields=deactivate_fields,
+                    listing=listing,
+                    source="scraper_listing_deactivate",
+                ):
+                    sync_listing_gate_cache(listing, deactivate_delta)
+                    logger.warning(
+                        "LISTING_DEACTIVATED listing_id=%s failure_streak=%d url=%s",
+                        listing_id,
+                        hk_delta["failure_streak"],
+                        listing.external_url,
+                    )
+
     def _persist_listing_housekeeping_or_fail(
         self,
         listing: FactListing,
@@ -455,8 +582,7 @@ class GlobalScrapeService:
             listing_id=str(listing_id),
             url=(listing.external_url or "")[:200],
         )
-        listing.consecutive_errors = 0
-        listing.last_error = None
+        self._route_listing_scrape_start_reset(listing)
 
         if fetch.html:
             result = self.pool.build_scrape_result_from_html(
@@ -504,8 +630,12 @@ class GlobalScrapeService:
         listing: FactListing,
         *,
         page_role: str,
-    ) -> None:
-        """DELETE listing and its 1:1 dim_product when scrape confirms non-product."""
+    ) -> bool:
+        """DELETE listing and its orphan dim_product when scrape confirms non-product.
+
+        Commits durably on this sync session so the DELETE pair survives early return
+        and batch-end db.close() without relying on a later listing commit.
+        """
         product_id = listing.product_id
         listing_url = listing.external_url
         prune_ctx = PersistContext(
@@ -519,8 +649,29 @@ class GlobalScrapeService:
             db=self.db,
             reject_source="scraper_prune",
         )
-        if listing_outcome.passed and listing_outcome.signed_record is not None:
-            write_sync(self.db, listing_outcome.signed_record, ctx=prune_ctx)
+        if not listing_outcome.passed or listing_outcome.signed_record is None:
+            logger.error(
+                "scrape_prune_listing_rejected listing_id=%s page_role=%s",
+                listing.id,
+                page_role,
+            )
+            self.db.rollback()
+            return False
+
+        listing_result = write_sync(
+            self.db,
+            listing_outcome.signed_record,
+            ctx=prune_ctx,
+        )
+        if not listing_result.ok:
+            logger.error(
+                "scrape_prune_listing_persist_failed listing_id=%s page_role=%s",
+                listing.id,
+                page_role,
+            )
+            self.db.rollback()
+            return False
+
         self.db.flush()
         other_listings = (
             self.db.execute(
@@ -537,14 +688,49 @@ class GlobalScrapeService:
                 db=self.db,
                 reject_source="scraper_prune",
             )
-            if product_outcome.passed and product_outcome.signed_record is not None:
-                write_sync(self.db, product_outcome.signed_record, ctx=prune_ctx)
-        self.db.flush()
+            if not product_outcome.passed or product_outcome.signed_record is None:
+                logger.error(
+                    "scrape_prune_product_rejected listing_id=%s product_id=%s",
+                    listing.id,
+                    product_id,
+                )
+                self.db.rollback()
+                return False
+            product_result = write_sync(
+                self.db,
+                product_outcome.signed_record,
+                ctx=prune_ctx,
+            )
+            if not product_result.ok:
+                logger.error(
+                    "scrape_prune_product_persist_failed listing_id=%s product_id=%s",
+                    listing.id,
+                    product_id,
+                )
+                self.db.rollback()
+                return False
+
+        try:
+            self.db.flush()
+            self.db.commit()
+        except Exception as exc:
+            logger.error(
+                "scrape_prune_commit_failed listing_id=%s err=%s",
+                listing.id,
+                exc,
+                exc_info=True,
+            )
+            self.db.rollback()
+            if _is_read_only_error(exc):
+                _invalidate_session(self.db)
+            return False
+
         logger.info(
             "scrape_pruned_nonproduct url=%s page_role=%s",
             (listing_url or "")[:200],
             page_role,
         )
+        return True
 
     def _persist_scrape_pool_result(
         self,
@@ -568,7 +754,13 @@ class GlobalScrapeService:
                 error_category="parse",
                 flush=True,
             )
-            self._prune_confirmed_nonproduct(listing, page_role=nonproduct_role)
+            pruned = self._prune_confirmed_nonproduct(listing, page_role=nonproduct_role)
+            if not pruned:
+                slog.error(
+                    "scrape_prune_not_committed",
+                    listing_id=str(listing_id),
+                    page_role=nonproduct_role,
+                )
             result.log_status = "not_a_product"
             slog.info(
                 "pool_scrape_done",
@@ -580,7 +772,7 @@ class GlobalScrapeService:
 
         data = result.data
         if result.success:
-            listing.failure_streak = 0
+            self._route_listing_success_streak_reset(listing)
 
         is_partial = bool(result.is_partial)
         forced_log_status: str | None = None
@@ -588,19 +780,13 @@ class GlobalScrapeService:
 
         if not result.success or not data:
             if not result.success:
-                listing.consecutive_errors = (listing.consecutive_errors or 0) + 1
-                listing.last_error = result.error or "scrape_failed"
-                listing.failure_streak = (listing.failure_streak or 0) + 1
-                if listing.failure_streak >= LISTING_DEACTIVATE_AFTER_ERRORS:
-                    listing.is_active = False
-                    logger.warning(
-                        "LISTING_DEACTIVATED listing_id=%s failure_streak=%d url=%s",
-                        listing_id,
-                        listing.failure_streak,
-                        listing.external_url,
-                    )
+                self._route_failure_housekeeping_updates(
+                    listing,
+                    listing_id=listing_id,
+                    result=result,
+                )
             if _is_honest_absent_scrape_result(result):
-                listing.last_checked_at = now
+                self._route_listing_checked(listing, checked_at=now)
             persist_fail = self._persist_listing_housekeeping_or_fail(
                 listing,
                 url=listing.external_url,
@@ -609,7 +795,7 @@ class GlobalScrapeService:
             if persist_fail is not None:
                 return persist_fail
         else:
-            listing.last_checked_at = now
+            self._route_listing_checked(listing, checked_at=now)
             product_name_ok = bool(
                 getattr(data, "product_name", None)
                 or getattr(data, "title", None),
@@ -718,8 +904,7 @@ class GlobalScrapeService:
             listing_id=str(listing_id),
             url=(listing.external_url or "")[:200],
         )
-        listing.consecutive_errors = 0
-        listing.last_error = None
+        self._route_listing_scrape_start_reset(listing)
         try:
             result = _run_coro_in_worker(
                 self.pool.scrape_product(
