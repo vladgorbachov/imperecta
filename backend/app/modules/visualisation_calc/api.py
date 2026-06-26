@@ -12,6 +12,15 @@ from fastapi import APIRouter, Query
 from app.common.deps import CurrentUser, DbSession
 from app.database import sync_session_factory
 from app.modules.currency import CurrencyConverter, normalize_display_currency
+from app.modules.visualisation_calc.coverage.read import (
+    read_country_rollup,
+    read_marketplace_breakdown,
+)
+from app.modules.visualisation_calc.coverage.schemas import CoverageBreakdown
+from app.modules.visualisation_calc.coverage.service import (
+    build_country_rollup,
+    build_marketplace_breakdown,
+)
 from app.modules.visualisation_calc.kpi.read import read_dashboard_kpi
 from app.modules.visualisation_calc.kpi.schemas import DashboardKpi
 from app.modules.visualisation_calc.kpi.service import build_dashboard_kpi
@@ -107,6 +116,25 @@ async def get_dashboard_kpi(
         marketplace_id=marketplace_id,
     )
     return build_dashboard_kpi(updated_24h, last_update)
+
+
+@router.get("/geo-coverage", response_model=CoverageBreakdown)
+async def get_geo_coverage(
+    _current_user: CurrentUser,
+    db: DbSession,
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+    marketplace_id: UUID | None = Query(default=None),
+) -> CoverageBreakdown:
+    """Geographic listing coverage: country roll-up or per-marketplace breakdown."""
+    if country_code is None:
+        rows = await read_country_rollup(db, marketplace_id=marketplace_id)
+        return build_country_rollup(rows)
+    rows = await read_marketplace_breakdown(
+        db,
+        country_code=country_code,
+        marketplace_id=marketplace_id,
+    )
+    return build_marketplace_breakdown(rows)
 
 
 @router.get("/movements", response_model=MoversPage)
