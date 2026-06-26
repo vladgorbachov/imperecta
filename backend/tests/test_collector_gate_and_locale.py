@@ -166,7 +166,9 @@ async def test_discovery_gate_rejects_nonproduct() -> None:
         return "product", url
 
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
-    accepted, stats = await crawler._filter_urls_by_role(urls, marketplace_locale="fi")
+    accepted, stats = await crawler._filter_urls_by_role(
+        urls, requires_js=False, scrape_tier=1, marketplace_locale="fi",
+    )
     assert stats["mode"] == "full"
     assert len(accepted) == 2
     assert all("/p/" in u for u in accepted)
@@ -186,7 +188,9 @@ async def test_discovery_no_trust_sample_blind_accept(monkeypatch) -> None:
 
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
-    accepted, stats = await crawler._filter_urls_by_role(urls, marketplace_locale=None)
+    accepted, stats = await crawler._filter_urls_by_role(
+        urls, requires_js=False, scrape_tier=1, marketplace_locale=None,
+    )
     assert stats["mode"] == "full_large"
     assert len(calls) == 150
     assert len(accepted) == 149

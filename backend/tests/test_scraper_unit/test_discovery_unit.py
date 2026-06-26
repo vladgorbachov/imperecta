@@ -104,7 +104,7 @@ async def test_filter_urls_by_role_empty():
     from unittest.mock import MagicMock
 
     crawler = disc.DiscoveryCrawler(MagicMock(), MagicMock())
-    accepted, stats = await crawler._filter_urls_by_role([])
+    accepted, stats = await crawler._filter_urls_by_role([], requires_js=False, scrape_tier=1)
     assert accepted == []
     assert stats["mode"] == "empty"
 
@@ -125,7 +125,9 @@ async def test_filter_urls_by_role_full_mode():
 
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
 
-    accepted, stats = await crawler._filter_urls_by_role(list(roles), marketplace_locale=None)
+    accepted, stats = await crawler._filter_urls_by_role(
+        list(roles), requires_js=False, scrape_tier=1, marketplace_locale=None,
+    )
     assert stats["mode"] == "full"
     assert len(accepted) == 2
     assert stats["accepted"] == 2
@@ -142,7 +144,9 @@ async def test_filter_urls_by_role_large_list_classifies_all(monkeypatch):
     )
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
 
-    accepted, stats = await crawler._filter_urls_by_role(urls, marketplace_locale=None)
+    accepted, stats = await crawler._filter_urls_by_role(
+        urls, requires_js=False, scrape_tier=1, marketplace_locale=None,
+    )
     assert stats["mode"] == "full_large"
     assert crawler._classify_and_resolve_url.await_count == 150
     assert len(accepted) == 1
@@ -165,7 +169,9 @@ async def test_filter_urls_by_role_reject_sample(monkeypatch):
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
 
-    accepted, stats = await crawler._filter_urls_by_role(urls, marketplace_locale=None)
+    accepted, stats = await crawler._filter_urls_by_role(
+        urls, requires_js=False, scrape_tier=1, marketplace_locale=None,
+    )
     assert stats["mode"] == "reject_sample"
     assert len(accepted) == 1
 
@@ -723,7 +729,7 @@ class TestPhase1BatchPublish:
         crawler = disc.DiscoveryCrawler(db, pool)
 
         with patch(
-            "app.modules.classifier.classify_page_role_for_discovery",
+            "app.modules.discovery.classifier_adapter.classify_page_role",
             return_value="listing",
         ), patch(
             "app.modules.scraper.extractors.extract_internal_links_all",

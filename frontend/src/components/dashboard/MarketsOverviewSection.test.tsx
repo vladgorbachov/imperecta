@@ -14,12 +14,14 @@ const getMoversKpiMock = vi.fn();
 const getMoversSummaryMock = vi.fn();
 const getMoversCoverageMock = vi.fn();
 const getMoversMock = vi.fn();
+const getDashboardKpiMock = vi.fn();
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
     getOverview: (...args: unknown[]) => getOverviewMock(...args),
     getPoolMarketplaceStats: (...args: unknown[]) => getPoolMarketplaceStatsMock(...args),
     getPoolStats: (...args: unknown[]) => getPoolStatsMock(...args),
+    getDashboardKpi: (...args: unknown[]) => getDashboardKpiMock(...args),
     getMovers: (...args: unknown[]) => getMoversMock(...args),
     getMoversKpi: (...args: unknown[]) => getMoversKpiMock(...args),
     getMoversSummary: (...args: unknown[]) => getMoversSummaryMock(...args),
@@ -29,6 +31,7 @@ vi.mock("@/api/markets", () => ({
     overview: (params?: unknown) => ["markets", "overview", params],
     poolMarketplaceStats: () => ["markets", "pool-marketplace-stats"],
     poolStats: () => ["markets", "pool-stats"],
+    dashboardKpi: (params?: unknown) => ["markets", "dashboard-kpi", params],
     movements: (params?: unknown) => ["markets", "movements", params],
     movementsKpi: (params?: unknown) => ["markets", "movements", params, "kpi"],
     movementsSummary: (params?: unknown) => ["markets", "movements", params, "summary"],
@@ -159,6 +162,12 @@ describe("MarketsOverviewSection", () => {
         has_more: false,
       },
     });
+    getDashboardKpiMock.mockResolvedValue({
+      data: {
+        updated_24h: 12,
+        last_update: "2026-05-21T10:00:00Z",
+      },
+    });
   });
 
   it("renders KPI cards from movements endpoints", async () => {
@@ -167,10 +176,37 @@ describe("MarketsOverviewSection", () => {
     expect(screen.getByText("market.overview.kpi.updated24h")).toBeInTheDocument();
     expect(screen.getByText("market.overview.kpi.avgVolatility")).toBeInTheDocument();
     expect(await screen.findByText("4")).toBeInTheDocument();
+    expect(await screen.findByText("12")).toBeInTheDocument();
     expect(screen.getByText("6.25%")).toBeInTheDocument();
     expect(getMoversKpiMock).toHaveBeenCalled();
     expect(getMoversSummaryMock).toHaveBeenCalled();
     expect(getMoversCoverageMock).toHaveBeenCalled();
+    expect(getDashboardKpiMock).toHaveBeenCalled();
+  });
+
+  it("renders dashboard KPI empty state from server", async () => {
+    getDashboardKpiMock.mockResolvedValue({
+      data: {
+        updated_24h: 0,
+        last_update: null,
+      },
+    });
+
+    renderSection();
+    await screen.findByText("market.overview.kpi.updated24h");
+    expect(await screen.findByText("0")).toBeInTheDocument();
+    const dashValues = screen.getAllByText("common.dash");
+    expect(dashValues.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows dashboard KPI error state with retry", async () => {
+    getDashboardKpiMock.mockRejectedValue(new Error("dashboard kpi failed"));
+
+    renderSection();
+    await screen.findByText("market.overview.kpi.updated24h");
+    await waitFor(() => {
+      expect(screen.getAllByTitle("common.error").length).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it("shows accumulating data state when coverage is not ready", async () => {

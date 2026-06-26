@@ -132,6 +132,18 @@ export interface PoolStatsResponse {
   last_updated?: string | null;
 }
 
+// --- Dashboard KPI (pool freshness over full visible listing set) ---
+
+export interface DashboardKpi {
+  updated_24h: number;
+  last_update: string | null;
+}
+
+export interface DashboardKpiParams {
+  country_code?: string;
+  marketplace_id?: string;
+}
+
 // --- Movements (server-side price_change_pct aggregates) ---
 
 export interface MovementsQueryParams {
@@ -244,6 +256,9 @@ export const marketsApi = {
   getPoolStats: () =>
     apiClient.get<PoolStatsResponse>("/pool/stats"),
 
+  getDashboardKpi: (params?: DashboardKpiParams) =>
+    apiClient.get<DashboardKpi>("/markets/dashboard-kpi", { params }),
+
   getMovers: (params?: MovementsQueryParams) =>
     apiClient.get<MoversPage>("/markets/movements", { params }),
 
@@ -288,6 +303,13 @@ export const marketsQueryKeys = {
     ] as const,
   poolMarketplaceStats: () => [...marketsQueryKeys.all, "pool-marketplace-stats"] as const,
   poolStats: () => [...marketsQueryKeys.all, "pool-stats"] as const,
+  dashboardKpi: (params?: DashboardKpiParams) =>
+    [
+      ...marketsQueryKeys.all,
+      "dashboard-kpi",
+      params?.country_code ?? null,
+      params?.marketplace_id ?? null,
+    ] as const,
   movements: (params?: MovementsQueryParams) =>
     [
       ...marketsQueryKeys.all,

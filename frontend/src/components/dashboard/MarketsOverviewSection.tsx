@@ -35,6 +35,7 @@ import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
+import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 type SortKey = "random" | "recent" | "gainers" | "losers" | "volatile" | "trending";
@@ -62,14 +63,6 @@ function formatPercent(value?: number | null): string {
     return "—";
   }
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
-}
-
-function parseDateValue(value?: string | null): number {
-  if (!value) {
-    return 0;
-  }
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 /** Stable pseudo-random rank for a listing id, seeded once per session. */
@@ -304,8 +297,8 @@ export function MarketsOverviewSection() {
 
   const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
 
-  const movementsFilterParams = useMemo((): MovementsQueryParams => {
-    const params: MovementsQueryParams = { period: "24h", threshold: 5 };
+  const kpiScopeParams = useMemo((): Pick<MovementsQueryParams, "country_code" | "marketplace_id"> => {
+    const params: Pick<MovementsQueryParams, "country_code" | "marketplace_id"> = {};
     if (selectedMarketplaces.length === 1) {
       const domain = selectedMarketplaces[0];
       const item = rawItems.find((candidate) => candidate.marketplace_domain === domain);
@@ -318,6 +311,26 @@ export function MarketsOverviewSection() {
     }
     return params;
   }, [selectedMarketplaces, rawItems]);
+
+  const movementsFilterParams = useMemo(
+    (): MovementsQueryParams => ({
+      period: "24h",
+      threshold: 5,
+      ...kpiScopeParams,
+    }),
+    [kpiScopeParams],
+  );
+
+  const {
+    data: dashboardKpi,
+    isLoading: dashboardKpiLoading,
+    isError: dashboardKpiError,
+    refetch: refetchDashboardKpi,
+  } = useQuery({
+    queryKey: marketsQueryKeys.dashboardKpi(kpiScopeParams),
+    queryFn: () => marketsApi.getDashboardKpi(kpiScopeParams).then((response) => response.data),
+    staleTime: 30_000,
+  });
 
   const {
     data: moversKpi,
@@ -392,20 +405,38 @@ export function MarketsOverviewSection() {
     });
   }, [orderedItems, selectedMarketplaces, historyOnly, priceMin, priceMax]);
 
-  const kpis = useMemo(() => {
-    const now = Date.now();
-    const updated24h = filteredItems.filter(
-      (item) => now - parseDateValue(item.last_checked_at) <= 24 * 60 * 60 * 1000,
-    ).length;
-    const lastUpdate = filteredItems.reduce(
-      (max, item) => Math.max(max, parseDateValue(item.last_checked_at)),
-      0,
-    );
-    return {
-      updated24h: String(updated24h),
-      lastUpdate: lastUpdate ? new Date(lastUpdate).toLocaleString(locale) : t("common.dash"),
-    };
-  }, [filteredItems, locale, t]);
+  const updated24hValue = useMemo(() => {
+    if (dashboardKpiLoading) {
+      return t("common.dash");
+    }
+    if (dashboardKpiError) {
+      return t("common.dash");
+    }
+    if (dashboardKpi == null) {
+      return t("common.dash");
+    }
+    return String(dashboardKpi.updated_24h);
+  }, [dashboardKpi, dashboardKpiError, dashboardKpiLoading, t]);
+
+  const lastUpdateValue = useMemo(() => {
+    if (dashboardKpiLoading) {
+      return t("common.dash");
+    }
+    if (dashboardKpiError) {
+      return t("common.dash");
+    }
+    if (!dashboardKpi?.last_update) {
+      return t("common.dash");
+    }
+    return formatRelativeTime(dashboardKpi.last_update, locale);
+  }, [dashboardKpi, dashboardKpiError, dashboardKpiLoading, locale, t]);
+
+  const lastUpdateTitle = useMemo(() => {
+    if (dashboardKpiLoading || dashboardKpiError || !dashboardKpi?.last_update) {
+      return undefined;
+    }
+    return new Date(dashboardKpi.last_update).toLocaleString(locale);
+  }, [dashboardKpi, dashboardKpiError, dashboardKpiLoading, locale]);
 
   const changedMore5Value = useMemo(() => {
     if (movementsKpisPending) {
@@ -632,7 +663,20 @@ export function MarketsOverviewSection() {
               : undefined
           }
         />
-        <KpiCard label={t("market.overview.kpi.updated24h")} value={kpis.updated24h} />
+        <KpiCard
+          label={t("market.overview.kpi.updated24h")}
+          value={updated24hValue}
+          error={
+            dashboardKpiError
+              ? {
+                  onRetry: () => {
+                    void refetchDashboardKpi();
+                  },
+                  title: t("common.error"),
+                }
+              : undefined
+          }
+        />
         <KpiCard
           label={t("market.overview.kpi.changedMore5")}
           value={changedMore5Value}
@@ -667,7 +711,21 @@ export function MarketsOverviewSection() {
               : undefined
           }
         />
-        <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
+        <KpiCard
+          label={t("market.overview.kpi.lastUpdate")}
+          value={lastUpdateValue}
+          title={lastUpdateTitle}
+          error={
+            dashboardKpiError
+              ? {
+                  onRetry: () => {
+                    void refetchDashboardKpi();
+                  },
+                  title: t("common.error"),
+                }
+              : undefined
+          }
+        />
       </div>
 
       <MarketMoversWidget

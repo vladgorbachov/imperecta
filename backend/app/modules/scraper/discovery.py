@@ -18,8 +18,7 @@ from app.config import Settings
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.classifier import classify_page_role_for_discovery
-from app.modules.discovery import cursor_store, url_canonicalizer
+from app.modules.discovery import classifier_adapter, cursor_store, fetch_adapter, url_canonicalizer
 from app.modules.discovery.gate_persist import (
     PoolInsertDTO,
     write_pool_dtos_sync,
@@ -366,14 +365,18 @@ class DiscoveryCrawler:
         self,
         url: str,
         *,
+        requires_js: bool,
+        scrape_tier: int,
         marketplace_locale: str | None,
         accept_language: str | None,
     ) -> tuple[str, str]:
         """Fetch, resolve canonical URL, and return (page_role, pool_url)."""
         try:
-            _html, soup = await self.pool.scrape_page_for_analysis(
+            _html, soup = await fetch_adapter.fetch_page(
+                self.pool,
                 url,
-                static_fetch=True,
+                requires_js=requires_js,
+                scrape_tier=scrape_tier,
                 accept_language=accept_language,
             )
         except Exception:
@@ -383,7 +386,7 @@ class DiscoveryCrawler:
         try:
             canonical = url_canonicalizer.canonical_from_soup(soup, url)
             pool_url = url_canonicalizer.pool_url(canonical, url)
-            role = classify_page_role_for_discovery(soup, pool_url)
+            role = classifier_adapter.classify_page_role(soup, pool_url)
             return role, pool_url
         except Exception:
             return "unknown", url
@@ -392,6 +395,8 @@ class DiscoveryCrawler:
         self,
         urls: list[str],
         *,
+        requires_js: bool,
+        scrape_tier: int,
         marketplace_locale: str | None = None,
     ) -> tuple[list[str], dict[str, int | float | str | None]]:
         """Classify every candidate URL structurally; admit only page_role=product.
@@ -421,6 +426,8 @@ class DiscoveryCrawler:
             async with semaphore:
                 role, pool_url = await self._classify_and_resolve_url(
                     target_url,
+                    requires_js=requires_js,
+                    scrape_tier=scrape_tier,
                     marketplace_locale=marketplace_locale,
                     accept_language=accept_language,
                 )
@@ -495,8 +502,11 @@ class DiscoveryCrawler:
         """Structural product-ness gate for category-harvest candidate URLs."""
         if not urls:
             return []
+        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
         accepted, _stats = await self._filter_urls_by_role(
             urls,
+            requires_js=requires_js,
+            scrape_tier=scrape_tier,
             marketplace_locale=marketplace.locale,
         )
         return accepted
@@ -524,8 +534,11 @@ class DiscoveryCrawler:
             marketplace_locale=marketplace.locale,
         )
 
+        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
         filtered_urls, classify_stats = await self._filter_urls_by_role(
             raw_urls,
+            requires_js=requires_js,
+            scrape_tier=scrape_tier,
             marketplace_locale=marketplace.locale,
         )
         rejected_count = len(raw_urls) - len(filtered_urls)
@@ -634,8 +647,9 @@ class DiscoveryCrawler:
         """
         from collections import deque
 
-        from app.modules.classifier import classify_page_role_for_discovery
         from app.modules.scraper.extractors import extract_internal_links_all
+
+        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
 
         saved = cursor_store.load_frontier_state(marketplace)
         if saved:
@@ -703,13 +717,15 @@ class DiscoveryCrawler:
                     f"discovery recon visited={len(visited)} "
                     f"listing={len(listing_urls)}"
                 )
-            _html, soup = await self.pool.scrape_page_for_analysis(
+            _html, soup = await fetch_adapter.fetch_page(
+                self.pool,
                 current_url,
-                static_fetch=True,
+                requires_js=requires_js,
+                scrape_tier=scrape_tier,
             )
             if soup is None:
                 continue
-            role = classify_page_role_for_discovery(soup, marketplace.base_url)
+            role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
             logger.debug(
                 "recon_page marketplace_id=%s url=%s depth=%d role=%s",
                 marketplace.id,
@@ -750,13 +766,15 @@ class DiscoveryCrawler:
                 fallback_url = f"{marketplace.base_url.rstrip('/')}{fallback}"
                 if fallback_url in visited:
                     continue
-                _html, soup = await self.pool.scrape_page_for_analysis(
+                _html, soup = await fetch_adapter.fetch_page(
+                    self.pool,
                     fallback_url,
-                    static_fetch=True,
+                    requires_js=requires_js,
+                    scrape_tier=scrape_tier,
                 )
                 if soup is None:
                     continue
-                role = classify_page_role_for_discovery(soup, marketplace.base_url)
+                role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
                 if role in ("listing", "hub"):
                     listing_urls.append(fallback_url)
 
@@ -814,6 +832,8 @@ class DiscoveryCrawler:
             extract_product_links,
         )
 
+        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
+
         total_saved = 0
         empty_streak = 0
         total_categories = len(category_urls)
@@ -856,9 +876,11 @@ class DiscoveryCrawler:
                     next_index = absolute_idx
                     break
 
-                _html, soup = await self.pool.scrape_page_for_analysis(
+                _html, soup = await fetch_adapter.fetch_page(
+                    self.pool,
                     current_url,
-                    static_fetch=True,
+                    requires_js=requires_js,
+                    scrape_tier=scrape_tier,
                 )
                 if soup is None:
                     break
