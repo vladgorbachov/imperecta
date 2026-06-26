@@ -95,12 +95,17 @@ class ProductPoolService:
         search: str | None,
         marketplace_id: UUID | None,
         category: str | None,
+        country_code: str | None = None,
     ):
         if search:
             like = f"%{search}%"
             stmt = stmt.where(DimProduct.name.ilike(like))
         if marketplace_id is not None:
             stmt = stmt.where(FactListing.marketplace_id == marketplace_id)
+        if country_code:
+            stmt = stmt.where(
+                DimMarketplace.country_code == country_code.strip().upper(),
+            )
         if category:
             cat = f"%{category}%"
             stmt = stmt.where(
@@ -148,6 +153,7 @@ class ProductPoolService:
         search: str | None = None,
         marketplace_id: UUID | None = None,
         category: str | None = None,
+        country_code: str | None = None,
         limit: int = 20,
         offset: int = 0,
         include_blocked_countries: bool = False,
@@ -155,7 +161,13 @@ class ProductPoolService:
     ) -> tuple[list[dict[str, Any]], int]:
         latest_pc = _latest_price_change_subquery()
         stmt = self._base_listing_stmt(latest_pc)
-        stmt = self._apply_filters(stmt, search=search, marketplace_id=marketplace_id, category=category)
+        stmt = self._apply_filters(
+            stmt,
+            search=search,
+            marketplace_id=marketplace_id,
+            category=category,
+            country_code=country_code,
+        )
         stmt = self._apply_country_visibility_filter(
             stmt,
             include_blocked_countries=include_blocked_countries,
@@ -176,6 +188,7 @@ class ProductPoolService:
             search=search,
             marketplace_id=marketplace_id,
             category=category,
+            country_code=country_code,
         )
         count_base = self._apply_country_visibility_filter(
             count_base,
