@@ -12,7 +12,7 @@ from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _today_date_id
-from fixtures.scraper_fixtures import _pg_available, pg_session
+from fixtures.scraper_fixtures import _pg_available, patch_resolve_price_eur_for_unit, pg_session
 
 
 def _session_with_listing(
@@ -67,6 +67,7 @@ def _session_with_listing(
 
 def test_scrape_product_success_with_title_only(monkeypatch):
     """Title (no product_name field) + price + currency yields success log status."""
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()

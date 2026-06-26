@@ -12,15 +12,21 @@ from app.modules.market_data.http_config import (
     DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
     with_transient_retries,
 )
+from app.modules.market_data.provider_queue import InstrumentProvider, gap_fill_fetch
 from app.modules.market_data.providers.base import ForexProviderAdapter
 
 logger = logging.getLogger(__name__)
 OPEN_ER_FALLBACK_URL = "https://open.er-api.com/v6/latest/EUR"
 FRANKFURTER_FALLBACK_URL = "https://api.frankfurter.app/latest?from=EUR"
 
+FOREX_PROVIDER_OPENEXCHANGERATES = "openexchangerates"
+FOREX_PROVIDER_ECB = "ecb"
+
 
 class ForexOpenErAdapter(ForexProviderAdapter):
     """open.er-api adapter. Normalizes to NormalizedForex."""
+
+    provider_source = FOREX_PROVIDER_OPENEXCHANGERATES
 
     def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
         self.base_url = base_url or OPEN_ER_FALLBACK_URL
@@ -59,6 +65,7 @@ class ForexOpenErAdapter(ForexProviderAdapter):
                         spread=spread,
                         change_24h=None,
                         refreshed_at=refreshed_at,
+                        provider_source=self.provider_source,
                     )
                 )
             except Exception as error:
@@ -71,6 +78,8 @@ class ForexOpenErAdapter(ForexProviderAdapter):
 
 class ForexFrankfurterAdapter(ForexProviderAdapter):
     """Frankfurter API adapter. Normalizes to NormalizedForex."""
+
+    provider_source = FOREX_PROVIDER_ECB
 
     def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
         self.base_url = base_url or FRANKFURTER_FALLBACK_URL
@@ -102,6 +111,7 @@ class ForexFrankfurterAdapter(ForexProviderAdapter):
                         spread=spread,
                         change_24h=None,
                         refreshed_at=refreshed_at,
+                        provider_source=self.provider_source,
                     )
                 )
             except Exception as error:
@@ -109,46 +119,150 @@ class ForexFrankfurterAdapter(ForexProviderAdapter):
         return items
 
 
+class _QueuedForexProvider:
+    """Wraps a forex adapter for gap-fill queue (keyed by quote currency code)."""
+
+    def __init__(
+        self,
+        adapter: ForexProviderAdapter,
+        *,
+        provider_source: str,
+        base: str,
+        retry_attempts: int,
+    ) -> None:
+        self._adapter = adapter
+        self._provider_source = provider_source
+        self._base = base.upper()
+        self._retry_attempts = retry_attempts
+
+    @property
+    def provider_source(self) -> str:
+        return self._provider_source
+
+    async def fetch_instruments(self, requested: frozenset[str]) -> dict[str, NormalizedForex]:
+        if not requested:
+            return {}
+
+        items = await with_transient_retries(
+            self._adapter.fetch,
+            retry_attempts=self._retry_attempts,
+            label=self._adapter.__class__.__name__,
+        )
+        base_prefix = f"{self._base}/"
+        out: dict[str, NormalizedForex] = {}
+        for dto in items:
+            pair = dto.symbol.upper()
+            if not pair.startswith(base_prefix):
+                continue
+            quote = pair.split("/")[-1].strip().upper()
+            if quote not in requested or len(quote) != 3:
+                continue
+            out[quote] = dto.model_copy(update={"provider_source": self._provider_source})
+        return out
+
+
+def build_forex_queue_providers(
+    *,
+    timeout: float,
+    retry_attempts: int,
+    base: str = "EUR",
+) -> list[_QueuedForexProvider]:
+    """Ordered forex providers mirroring legacy ForexUnifiedAdapter precedence."""
+    configured = (Settings().market_data_forex_url or "").strip()
+    providers: list[_QueuedForexProvider] = []
+
+    if configured:
+        if "open.er-api.com" in configured:
+            providers.append(
+                _QueuedForexProvider(
+                    ForexOpenErAdapter(base_url=configured, timeout=timeout),
+                    provider_source=FOREX_PROVIDER_OPENEXCHANGERATES,
+                    base=base,
+                    retry_attempts=retry_attempts,
+                ),
+            )
+        elif "frankfurter.app" in configured:
+            providers.append(
+                _QueuedForexProvider(
+                    ForexFrankfurterAdapter(base_url=configured, timeout=timeout),
+                    provider_source=FOREX_PROVIDER_ECB,
+                    base=base,
+                    retry_attempts=retry_attempts,
+                ),
+            )
+        else:
+            providers.append(
+                _QueuedForexProvider(
+                    ForexOpenErAdapter(base_url=configured, timeout=timeout),
+                    provider_source=FOREX_PROVIDER_OPENEXCHANGERATES,
+                    base=base,
+                    retry_attempts=retry_attempts,
+                ),
+            )
+
+    providers.extend(
+        [
+            _QueuedForexProvider(
+                ForexOpenErAdapter(timeout=timeout),
+                provider_source=FOREX_PROVIDER_OPENEXCHANGERATES,
+                base=base,
+                retry_attempts=retry_attempts,
+            ),
+            _QueuedForexProvider(
+                ForexFrankfurterAdapter(timeout=timeout),
+                provider_source=FOREX_PROVIDER_ECB,
+                base=base,
+                retry_attempts=retry_attempts,
+            ),
+        ],
+    )
+    return providers
+
+
+async def fetch_forex_normalized(
+    *,
+    base: str = "EUR",
+    timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    retry_attempts: int = 0,
+    requested_currencies: frozenset[str] | None = None,
+) -> list[NormalizedForex]:
+    """Fetch forex via cross-provider gap-fill queue."""
+    if requested_currencies is None:
+        requested_currencies = Settings().forex_allowed_currency_set - {"EUR"}
+
+    providers = build_forex_queue_providers(
+        timeout=timeout,
+        retry_attempts=retry_attempts,
+        base=base,
+    )
+    result = await gap_fill_fetch(providers, requested_currencies)
+    if result.missing:
+        slog_missing = sorted(result.missing)
+        logger.debug("forex_queue_missing_currencies count=%d keys=%s", len(slog_missing), slog_missing[:20])
+
+    normalized: list[NormalizedForex] = []
+    for quote, (dto, source) in result.items.items():
+        normalized.append(dto.model_copy(update={"provider_source": source}))
+    normalized.sort(key=lambda item: item.symbol)
+    return normalized
+
+
 class ForexUnifiedAdapter(ForexProviderAdapter):
     """Unified forex adapter: configured source -> open.er fallback -> Frankfurter fallback."""
+
+    provider_source = FOREX_PROVIDER_OPENEXCHANGERATES
 
     def __init__(
         self,
         timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
         retry_attempts: int = 0,
     ):
-        configured = (Settings().market_data_forex_url or "").strip()
         self.timeout = timeout
         self._retry_attempts = retry_attempts
-        self._configured = configured
 
     async def fetch(self) -> list[NormalizedForex]:
-        adapters: list[ForexProviderAdapter] = []
-        if self._configured:
-            if "open.er-api.com" in self._configured:
-                adapters.append(ForexOpenErAdapter(base_url=self._configured, timeout=self.timeout))
-            elif "frankfurter.app" in self._configured:
-                adapters.append(ForexFrankfurterAdapter(base_url=self._configured, timeout=self.timeout))
-            else:
-                adapters.append(ForexOpenErAdapter(base_url=self._configured, timeout=self.timeout))
-
-        adapters.extend(
-            [
-                ForexOpenErAdapter(timeout=self.timeout),
-                ForexFrankfurterAdapter(timeout=self.timeout),
-            ]
+        return await fetch_forex_normalized(
+            base="EUR",
+            timeout=self.timeout,
+            retry_attempts=self._retry_attempts,
         )
-
-        for adapter in adapters:
-            name = adapter.__class__.__name__
-            try:
-                data = await with_transient_retries(
-                    adapter.fetch,
-                    retry_attempts=self._retry_attempts,
-                    label=name,
-                )
-                if data:
-                    return data
-            except Exception as error:
-                logger.warning("Forex provider %s failed: %s", name, error)
-        return []

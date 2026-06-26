@@ -43,6 +43,25 @@ def load_active_listings_from_db(limit: int = 72) -> Sequence[ListingRow]:
         session.close()
 
 
+def patch_resolve_price_eur_for_unit(monkeypatch) -> None:
+    """Stub FX lookup so unit tests never query fact_currency_rate."""
+
+    def _resolve(
+        *,
+        price: float,
+        currency_code: str,
+        date_id: int,
+        db,
+        **_: object,
+    ) -> float | None:
+        code = (currency_code or "").strip().upper()
+        if code == "EUR":
+            return round(float(price), 2)
+        return None
+
+    monkeypatch.setattr("app.modules.ingestion.service.resolve_price_eur", _resolve)
+
+
 def _fake_run_coro(result: PoolScrapeResult):
     """Return fixed scrape result; close pool coroutine to avoid RuntimeWarning."""
 

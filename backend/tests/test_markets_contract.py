@@ -28,16 +28,16 @@ async def test_markets_ingest_ok_for_superuser(client, superuser_headers):
 
 
 @pytest.mark.asyncio
-async def test_markets_forex_returns_stored_data(client, auth_headers):
-    """Forex endpoint returns items when data exists; empty list when none."""
-    resp = await client.get("/api/markets/forex", headers=auth_headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "items" in data
-    assert "pairs" in data
-    assert "last_refreshed_at" in data
-    assert isinstance(data["items"], list)
-    assert isinstance(data["pairs"], list)
+async def test_removed_market_endpoints_not_registered(client, auth_headers):
+    """Per-class market read endpoints were removed (ticker/instruments remain)."""
+    for path in (
+        "/api/markets/forex",
+        "/api/markets/crypto",
+        "/api/markets/commodities",
+        "/api/markets/refresh-metadata",
+    ):
+        resp = await client.get(path, headers=auth_headers)
+        assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -59,16 +59,6 @@ async def test_markets_overview_returns_stored_data(client, auth_headers):
         first_item = data["items"][0]
         assert "recent_prices" in first_item
         assert isinstance(first_item["recent_prices"], list)
-
-
-@pytest.mark.asyncio
-async def test_markets_refresh_metadata_returns_items(client, auth_headers):
-    """Refresh metadata endpoint returns status items."""
-    resp = await client.get("/api/markets/refresh-metadata", headers=auth_headers)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "items" in data
-    assert isinstance(data["items"], list)
 
 
 @pytest.mark.asyncio

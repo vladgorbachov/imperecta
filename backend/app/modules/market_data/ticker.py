@@ -6,7 +6,7 @@ has no rows yet (pre-first-ingest). `_legacy_ticker_rows_from_db` converts the
 reader's tuples into the legacy ticker shape consumed by `api.py /markets/ticker`.
 
 The live-fallback branch mirrors `reader.get_ticker` parity: exactly-saved
-favorites per class, empty class emits nothing, no slice caps, no fuel, and
+favorites per class, empty class emits nothing, no slice caps, and
 forex crosses/inverses via `derive_forex_pairs` over live EUR-base rates.
 """
 
@@ -55,16 +55,6 @@ def _legacy_ticker_rows_from_db(rows: list[dict]) -> list[dict]:
                 "change": row.get("change_pct"),
                 "prefix": "$",
                 "suffix": f"/{unit}" if unit else "",
-            })
-        elif t == "fuel":
-            cc = row.get("currency_code", "")
-            items.append({
-                "type": "fuel",
-                "label": row["symbol"],
-                "value": row["price"],
-                "change": row.get("change_pct"),
-                "prefix": "",
-                "suffix": f" {cc}/L" if cc else "",
             })
     return items
 

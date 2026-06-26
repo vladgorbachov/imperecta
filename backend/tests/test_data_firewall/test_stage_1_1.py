@@ -112,7 +112,8 @@ def test_page_role_on_extracted_product_from_classifier() -> None:
 
 
 def test_contract_structure_loaded() -> None:
-    assert len(FACT_TABLE_CONTRACTS) == 15
+    assert len(FACT_TABLE_CONTRACTS) == 16
+    assert "dim_date" in FACT_TABLE_CONTRACTS
     assert "scrape_jobs" in FACT_TABLE_CONTRACTS
     assert "dim_marketplace" in FACT_TABLE_CONTRACTS
     assert "fact_price" in FACT_TABLE_CONTRACTS

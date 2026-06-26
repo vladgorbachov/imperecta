@@ -43,6 +43,7 @@ def test_removed_legacy_endpoints_not_found(admin_client):
         == 404
     )
     assert admin_client.delete("/api/admin/products/clear-test-data").status_code == 404
+    assert admin_client.post("/api/admin/products/clear-pool").status_code == 404
     assert admin_client.post("/api/admin/marketplaces/deduplicate").status_code in (404, 405)
     assert admin_client.delete("/api/auth/avatar").status_code == 404
     assert admin_client.post("/api/admin/pool/trigger-scrape").status_code == 404
@@ -67,6 +68,7 @@ def test_removed_scraper_admin_endpoints_not_in_openapi_schema(admin_client):
     assert "/api/admin/error-distribution" not in paths
     assert "/api/pool/products/bulk" not in paths
     assert "/api/admin/products/clear-test-data" not in paths
+    assert "/api/admin/products/clear-pool" not in paths
     assert "/api/admin/marketplaces/deduplicate" not in paths
     assert "/api/auth/avatar" not in paths
     assert "/api/admin/pool/trigger-scrape" not in paths

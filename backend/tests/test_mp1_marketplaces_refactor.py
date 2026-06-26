@@ -7,10 +7,9 @@ Verifies:
 2. Per-shop CSS selector keys and the legacy `scraper_type` knob are absent
    from MarketplaceService._UPDATE_KEYS (Universality).
 3. Dead schemas and dead service methods (PART 0.3) cannot be imported.
-4. recalculate_quotas uses the named DEFAULT_TOTAL_POOL_SIZE constant; the
-   bare literal 50_000 is not buried in any signature.
+4. DEFAULT_TOTAL_POOL_SIZE constant remains for scraper quota math.
 5. /logs route is gone from the live FastAPI app (outcome b: DELETED).
-6. Admin CRUD (list/add/update/delete/recalculate) still wired with the
+6. Admin CRUD (list/add/update/delete) still wired with the
    expected (method, path) pairs.
 7. Module artefacts (init.py without underscores, placeholder models.py)
    are gone; a proper __init__.py is present.
@@ -102,7 +101,6 @@ EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/admin/marketplaces"),
     ("PATCH", "/api/admin/marketplaces/{marketplace_id}"),
     ("DELETE", "/api/admin/marketplaces/{marketplace_id}"),
-    ("POST", "/api/admin/marketplaces/recalculate-quotas"),
 }
 
 REMOVED_ROUTE_PATH = "/api/admin/marketplaces/{marketplace_id}/logs"
@@ -174,11 +172,8 @@ def test_dead_methods_gone() -> None:
             )
 
 
-def test_quota_constant_replaces_magic_number() -> None:
-    """recalculate_quotas defaults to DEFAULT_TOTAL_POOL_SIZE, not a bare 50_000."""
-    sig = inspect.signature(MarketplaceService.recalculate_quotas)
-    default = sig.parameters["total_pool_size"].default
-    assert default == DEFAULT_TOTAL_POOL_SIZE
+def test_quota_constant_defined() -> None:
+    """DEFAULT_TOTAL_POOL_SIZE remains the single named quota ceiling."""
     assert DEFAULT_TOTAL_POOL_SIZE == 50_000
 
     service_source = Path(marketplaces_service.__file__).read_text(encoding="utf-8")
@@ -195,6 +190,11 @@ def test_quota_constant_replaces_magic_number() -> None:
     )
 
 
+def test_recalculate_quotas_route_removed() -> None:
+    live = _live_routes()
+    assert ("POST", "/api/admin/marketplaces/recalculate-quotas") not in live
+
+
 def test_logs_route_deleted() -> None:
     """The /logs route is the outcome (b) deletion target."""
     live = _live_routes()
@@ -203,7 +203,7 @@ def test_logs_route_deleted() -> None:
 
 
 def test_admin_marketplace_crud_intact() -> None:
-    """Five expected (method, path) pairs survive MP1."""
+    """Four expected (method, path) pairs survive MP1."""
     live = _live_routes()
     missing = EXPECTED_ROUTES - live
     assert not missing, f"Expected admin marketplace routes vanished: {sorted(missing)}"
@@ -239,13 +239,12 @@ def test_scraper_edge_intact() -> None:
 
 
 def test_marketplace_service_public_surface() -> None:
-    """Admin CRUD service exposes exactly the 5 operations behind the 5 routes."""
+    """Admin CRUD service exposes exactly the 4 operations behind the 4 routes."""
     public = {n for n in dir(MarketplaceService) if not n.startswith("_")}
     expected = {
         "add_by_url",
         "delete_marketplace",
         "list_marketplaces",
-        "recalculate_quotas",
         "update_marketplace",
     }
     assert public == expected, (

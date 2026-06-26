@@ -262,6 +262,7 @@ class IngestionService:
             raw_fx = await fetch_forex_rates("EUR")
             if raw_fx:
                 pairs: dict[str, float] = {}
+                sources: dict[str, str] = {}
                 for row in raw_fx:
                     cur = row.get("pair", "").split("/")[-1].strip()
                     if len(cur) != 3:
@@ -269,6 +270,9 @@ class IngestionService:
                     r = float(row.get("rate", 0))
                     if r > 0:
                         pairs[cur] = r
+                        provider_source = row.get("provider_source")
+                        if provider_source:
+                            sources[cur] = str(provider_source)
                 usd_per_eur = pairs.get("USD")
                 allowed = Settings().forex_allowed_currency_set
                 for allowed_code in allowed:
@@ -292,7 +296,7 @@ class IngestionService:
                             currency_code=cur,
                             rate_to_eur=rate_to_eur,
                             rate_to_usd=rate_to_usd,
-                            source="custom",
+                            source=sources.get(cur, "openexchangerates"),
                         ),
                     )
                 out["forex"] = self.persist_forex(items)
@@ -311,7 +315,7 @@ class IngestionService:
                         market_cap_usd=float(c["market_cap"]) if c.get("market_cap") else None,
                         volume_24h_usd=None,
                         change_24h_pct=float(c["change_24h"]) if c.get("change_24h") is not None else None,
-                        source="custom",
+                        source=c.get("provider_source") or "binance",
                         rank=index + 1,
                     )
                     for index, c in enumerate(raw_c)

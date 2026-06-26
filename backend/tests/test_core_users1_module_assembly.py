@@ -168,7 +168,6 @@ def test_parsing_admin_user_code_gone(method: str) -> None:
         "trigger_full_pipeline_test",
         "get_test_runs",
         "get_job_status",
-        "get_pipeline_status",
         "get_marketplaces_detailed",
         "get_job_live_feed",
         "get_active_pipeline_job",

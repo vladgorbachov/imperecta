@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class NormalizedForex(BaseModel):
-    """Normalized forex pair. No provider-specific fields."""
+    """Normalized forex pair. No provider-specific fields except provider_source."""
 
     symbol: str = Field(..., max_length=20)
     bid: Decimal = Field(..., ge=0)
@@ -15,16 +15,18 @@ class NormalizedForex(BaseModel):
     spread: Decimal = Field(..., ge=0)
     change_24h: float | None = None
     refreshed_at: datetime
+    provider_source: str | None = None
 
 
 class NormalizedCrypto(BaseModel):
-    """Normalized crypto asset. No provider-specific fields."""
+    """Normalized crypto asset. No provider-specific fields except provider_source."""
 
     symbol: str = Field(..., max_length=20)
     price: Decimal = Field(..., ge=0)
     change_24h: float | None = None
     market_cap: Decimal | None = None
     refreshed_at: datetime
+    provider_source: str | None = None
 
 
 class NormalizedCommodity(BaseModel):

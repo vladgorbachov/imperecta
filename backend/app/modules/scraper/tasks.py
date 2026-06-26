@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import case, func, or_, select, text
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -44,9 +44,10 @@ from app.modules.scraper.proxy_provider_limiter import SCRAPE_FETCH_PARALLELISM
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _run_coro_in_worker
 from app.workers.celery_app import celery_app
-from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
 
 slog = structlog.get_logger(__name__)
+
+
 def _run_async(coro):
     """Run async coroutine from sync Celery task safely."""
     try:
@@ -57,40 +58,6 @@ def _run_async(coro):
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="tasks-async-bridge") as executor:
         future = executor.submit(asyncio.run, coro)
         return future.result()
-
-
-def _needs_scrape_logs_constraint_repair(exc: Exception) -> bool:
-    """Detect old scrape_logs CHECK that rejects technical_error."""
-    message = str(exc).lower()
-    if "scrape_logs" not in message:
-        return False
-    if "technical_error" not in message:
-        return False
-    return (
-        "scrape_logs_status_check" in message
-        or "ck_scrape_logs_status" in message
-        or "check constraint" in message
-    )
-
-
-def _repair_scrape_logs_status_constraint(db) -> bool:
-    """Repair scrape_logs status CHECK to include technical_error."""
-    allowed = ",".join(f"'{status}'" for status in CANONICAL_SCRAPE_LOG_STATUSES)
-    try:
-        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS ck_scrape_logs_status"))
-        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS scrape_logs_status_check"))
-        db.execute(
-            text(
-                "ALTER TABLE scrape_logs "
-                "ADD CONSTRAINT ck_scrape_logs_status "
-                f"CHECK (status IN ({allowed}))"
-            )
-        )
-        db.commit()
-        return True
-    except Exception:
-        db.rollback()
-        return False
 
 
 def _make_session_factory() -> tuple:

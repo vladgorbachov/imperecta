@@ -19,9 +19,3 @@ class TelegramUnlinkResponse(BaseModel):
 
     unlinked: bool
 
-
-class TelegramStatusResponse(BaseModel):
-    """GET /telegram/status body."""
-
-    linked: bool
-    chat_id: int | None

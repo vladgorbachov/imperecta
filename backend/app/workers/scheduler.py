@@ -28,4 +28,14 @@ celery_app.conf.beat_schedule = {
         "task": "cleanup_old_data",
         "schedule": crontab(hour=3, minute=0),
     },
+    # Market-data ingest: keep fact_currency_rate / crypto / commodity snapshots fresh
+    # so scrape-day price_eur resolves (forex+crypto every 6h; commodities 4x/day).
+    "ingest-market-data": {
+        "task": "ingest_market_data",
+        "schedule": crontab(minute=5, hour="*/6"),
+    },
+    "ingest-commodities": {
+        "task": "ingest_commodities",
+        "schedule": crontab(minute=35, hour="2,8,14,20"),
+    },
 }

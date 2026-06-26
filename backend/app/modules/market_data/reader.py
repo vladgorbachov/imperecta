@@ -1,32 +1,29 @@
 """DB read facade for the market_data v2 star schema.
 
-`MarketDataService` reads the latest snapshot of forex / crypto / commodity /
-fuel facts and exposes the shapes consumed by `api.py`, `facade.MarketsService`,
-`ticker.get_ticker_data`, and `fuel.get_fuel_prices`. It performs no external
-HTTP — all upstream fetch lives in `providers/`, wrapped by `fetching.py`.
+`MarketDataService` reads the latest snapshot of forex / crypto / commodity
+facts and exposes the shapes consumed by `api.py`, `facade.MarketsService`,
+and `ticker.get_ticker_data`. It performs no external HTTP — all upstream
+fetch lives in `providers/`, wrapped by `fetching.py`.
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any, Iterable
 
 from sqlalchemy import asc, func, nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.app_tables import ApiLog
 from app.models.core import User
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
     FactCurrencyRate,
-    FactFuelPrice,
 )
 from app.config import Settings
 from app.modules.market_data.forex_pairs import derive_forex_pairs
 
 
 class MarketDataService:
-    """Read forex, crypto, commodities, and fuel from v2 fact tables."""
+    """Read forex, crypto, and commodities from v2 fact tables."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -128,29 +125,13 @@ class MarketDataService:
         rows = self._dedupe_commodity_rows(list(result.scalars().all()))
         return [self._commodity_to_dict(r) for r in rows]
 
-    async def get_fuel(self, country_code: str) -> list[dict[str, Any]]:
-        """Latest fuel prices for country from fact_fuel_price."""
-        code = country_code.upper()
-        latest_date = await self.db.scalar(
-            select(func.max(FactFuelPrice.date_id)).where(FactFuelPrice.country_code == code),
-        )
-        if not latest_date:
-            return []
-        result = await self.db.execute(
-            select(FactFuelPrice)
-            .where(FactFuelPrice.date_id == latest_date)
-            .where(FactFuelPrice.country_code == code)
-            .order_by(FactFuelPrice.fuel_type),
-        )
-        return [self._fuel_to_dict(r) for r in result.scalars().all()]
-
     async def get_preferences(self, user: User) -> dict[str, Any]:
         """User preferences from users.preferences JSONB."""
         prefs = user.preferences or {}
         return {
             "dashboard_widgets": prefs.get(
                 "dashboard_widgets",
-                ["forex", "crypto", "commodities", "fuel"],
+                ["forex", "crypto", "commodities"],
             ),
             "forex_favorites": prefs.get("forex_favorites", []),
             "crypto_favorites": prefs.get("crypto_favorites", []),
@@ -279,29 +260,6 @@ class MarketDataService:
         options.sort(key=lambda item: item["symbol"])
         return options
 
-    async def get_refresh_metadata(self) -> list[dict[str, Any]]:
-        """Latest api_logs rows for market_data service (refresh audit)."""
-        result = await self.db.execute(
-            select(ApiLog)
-            .where(ApiLog.service == "market_data")
-            .order_by(ApiLog.created_at.desc())
-            .limit(50),
-        )
-        rows = list(result.scalars().all())
-        out: list[dict[str, Any]] = []
-        for log in rows:
-            ep = (log.endpoint or "").strip() or "unknown"
-            refresh_type = ep.split("/")[0] if ep else "market_data"
-            out.append({
-                "refresh_type": refresh_type,
-                "last_successful_refresh": log.created_at if log.status == "success" else None,
-                "last_failed_refresh": log.created_at if log.status != "success" else None,
-                "provider_source": ep,
-                "country_scope": None,
-                "error_message": log.error_message if log.status != "success" else None,
-            })
-        return out
-
     def _crypto_to_dict(self, r: FactCryptoPrice) -> dict[str, Any]:
         return {
             "symbol": r.symbol,
@@ -329,85 +287,3 @@ class MarketDataService:
             "source": r.source,
             "fetched_at": r.fetched_at,
         }
-
-    def _fuel_to_dict(self, r: FactFuelPrice) -> dict[str, Any]:
-        return {
-            "fuel_type": r.fuel_type,
-            "price_local": float(r.price_local),
-            "currency_code": r.currency_code,
-            "price_eur": float(r.price_eur) if r.price_eur is not None else None,
-            "change_week_pct": float(r.change_week_pct) if r.change_week_pct is not None else None,
-            "source": r.source,
-            "fetched_at": r.fetched_at,
-        }
-
-    async def build_forex_api_response_async(
-        self,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], datetime | None]:
-        """Build MarketsForexResponse-compatible item and pair dicts from DB facts."""
-        latest_date = await self.db.scalar(select(func.max(FactCurrencyRate.date_id)))
-        if not latest_date:
-            return [], [], None
-        result = await self.db.execute(
-            select(FactCurrencyRate)
-            .where(FactCurrencyRate.date_id == latest_date)
-            .order_by(FactCurrencyRate.currency_code, FactCurrencyRate.source),
-        )
-        rows = self._dedupe_currency_rows(list(result.scalars().all()))
-        currency_rows = self._currency_rows_from_facts(rows)
-        last_at: datetime | None = None
-        items: list[dict[str, Any]] = []
-        for r in rows:
-            if r.currency_code not in self._forex_allowed_codes():
-                continue
-            if r.currency_code == "EUR":
-                continue
-            rte = float(r.rate_to_eur)
-            if rte and rte > 0:
-                display = 1.0 / rte
-            else:
-                display = rte
-            if r.fetched_at and (last_at is None or r.fetched_at > last_at):
-                last_at = r.fetched_at
-            items.append({
-                "symbol": f"EUR/{r.currency_code}",
-                "bid": Decimal(str(round(display, 6))),
-                "ask": Decimal(str(round(display, 6))),
-                "spread": Decimal("0"),
-                "change_24h": None,
-                "refreshed_at": r.fetched_at or datetime.now(timezone.utc),
-            })
-        pair_items: list[dict[str, Any]] = []
-        for pair in derive_forex_pairs(currency_rows):
-            pair_items.append({
-                "symbol": pair["symbol"],
-                "base": pair["base"],
-                "quote": pair["quote"],
-                "rate": Decimal(str(round(pair["rate"], 6))),
-            })
-        return items, pair_items, last_at
-
-    async def build_crypto_api_response_async(self) -> tuple[list[dict[str, Any]], datetime | None, bool]:
-        """Build MarketsCryptoResponse-compatible items."""
-        latest_date = await self.db.scalar(select(func.max(FactCryptoPrice.date_id)))
-        if not latest_date:
-            return [], None, False
-        result = await self.db.execute(
-            select(FactCryptoPrice)
-            .where(FactCryptoPrice.date_id == latest_date)
-            .order_by(nullslast(asc(FactCryptoPrice.rank)), FactCryptoPrice.symbol),
-        )
-        rows = self._dedupe_crypto_rows(list(result.scalars().all()))
-        last_at: datetime | None = None
-        items: list[dict[str, Any]] = []
-        for r in rows:
-            if r.fetched_at and (last_at is None or r.fetched_at > last_at):
-                last_at = r.fetched_at
-            items.append({
-                "symbol": r.symbol,
-                "price": Decimal(str(float(r.price_usd))),
-                "change_24h": float(r.change_24h_pct) if r.change_24h_pct is not None else None,
-                "market_cap": Decimal(str(float(r.market_cap_usd))) if r.market_cap_usd is not None else None,
-                "refreshed_at": r.fetched_at or datetime.now(timezone.utc),
-            })
-        return items, last_at, False

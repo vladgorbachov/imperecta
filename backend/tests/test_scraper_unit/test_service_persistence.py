@@ -12,6 +12,7 @@ from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, LISTING_DEACTIVATE_AFTER_ERRORS
+from fixtures.scraper_fixtures import patch_resolve_price_eur_for_unit
 
 
 def _session_with_listing(
@@ -100,6 +101,7 @@ def test_scrape_resets_errors_before_worker(monkeypatch):
 
 def test_log_status_set_on_result(monkeypatch):
     """PoolScrapeResult.log_status reflects _determine_log_status after persist."""
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()

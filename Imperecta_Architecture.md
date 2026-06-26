@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-17 (ветка `main`, head `52697c3`)  
+**Актуально на:** 2026-06-25 (ветка `main`, head `803db02`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -86,7 +86,7 @@ Legacy `app/api/`, `app/services/` удалены.
 
 | Модуль (Tier-1) | Роль |
 |--------|------|
-| `core` | `api_admin` (`/admin/stats`, claude-status, clear-pool), `admin_service`, `pool_maintenance` — что осталось после выноса auth/users/telegram |
+| `core` | `api_admin` (`/admin/stats`, claude-status), `admin_service`, `supabase_security` — что осталось после выноса auth/users/telegram |
 | `auth` | JWT issuance, register/login/refresh/me, password hashing; `decode_token` в Tier-0 `common/security.py` |
 | `users` | Self-service `/users/me` + admin user CRUD `/admin/users/*`; plans (trial→enterprise), language, role |
 | `telegram` | Webhook handler `/telegram/webhook`; secret-token verification |
@@ -100,12 +100,13 @@ Legacy `app/api/`, `app/services/` удалены.
 | `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`, `meta_write.py` META bridge) |
 | `visualisation_calc` | Tier-1 (**scaffold**): все расчёты виджетов дашборда (KPI, movements, volatility, coverage, trend, categories). Читает service-data через planned **data_export** read-OUT door (Phase 7/8); `api.py` / `main.py` — позже. Преемник dissolved `dashboard/` + `analytics/`. |
 | `product_pool` | Публичный пул товаров; `/pool/*`, `/markets/overview` |
-| `market_data` | Forex/crypto/commodities/fuel ingestion + `/markets/*` API |
+| `currency` | Fiat scrape-path: `price_eur_resolver` (sync read `fact_currency_rate` по scrape-day `date_id`); display FX — пока `common/currency.py` (см. §7.5) |
+| `market_data` | Forex/crypto/commodities ingest + read API `/markets/*`; provider adapters в `providers/`; Celery — `workers/market_data_tasks.py` |
 | `ai_analyst` | Claude chat sessions; entitlement-gated |
 
 **Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, `entitlements.api`, `ai_analyst.api` — всего **12** роутеров под единым `prefix="/api"` (`main.py:146-160`).
 
-**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `scraper.api` (admin-internal/diagnostics), `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже), `meta_write` (внутренний META bridge в `persist/`).
+**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `scraper.api` (файл есть, router **не смонтирован** — `/admin/scrape-diagnostics`, discovery triggers), `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже), `meta_write` (внутренний META bridge в `persist/`).
 
 **Удалены / заменены:** `analytics/`, `dashboard/` — dissolved; расчёты виджетов переезжают в **`visualisation_calc/`**. `digests/`, `alerts/` — отсутствуют; API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
 
@@ -181,13 +182,22 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Подробно: `Imperecta_Backend.md`, `Imperecta_Database.md`.
 
-### 7.5 Display currency (EUR/USD)
+### 7.5 Display currency (EUR/USD) и fiat-модули
+
+**Два контура fiat (не смешивать):**
+
+| Контур | Модуль | Session | Назначение |
+|--------|--------|---------|------------|
+| Scrape-path EUR | `modules/currency/price_eur_resolver.py` | sync `Session` | `resolve_price_eur` → `fact_price.price_eur`, `fact_listing.last_price_eur`; operational SELECT `fact_currency_rate` по **scrape-day `date_id`**; source priority `ecb` → … → `custom` |
+| UI display FX | `common/currency.py` | async `AsyncSession` | `CurrencyConverter.load_latest` — max `date_id` из `fact_currency_rate`, fallback live `fetch_forex_rates("EUR")` (`currency.py:99` — `TODO(boundary)` Tier-0→Tier-1) |
+
+**Display flow (pool/overview):**
 
 1. Frontend: `display_currency` в query (`local` \| `EUR` \| `USD`).  
-2. Backend: `CurrencyConverter.load_latest` — `fact_currency_rate` → fallback live forex.  
-3. Ответ: `display_price`, `display_currency`, `conversion_available`; без rate — local + `conversion_available=false`.
+2. Backend: `product_pool/service.py` → `CurrencyConverter.load_latest` + `compute_display_fields_for_marketplace`.  
+3. Ответ: `display_price`, `display_currency`, `conversion_available`, `local_currency_resolution`; без rate — local + `conversion_available=false`.
 
-Модули: `app/common/currency.py`, products/pool/dashboard API.
+**Market-data triad (рефактор в backlog):** forex/crypto/commodities fetch сейчас в `market_data/providers/*` + `fetching.py`; ingest boundary frozen — `ForexIngestItem` / `CryptoIngestItem` / `CommodityIngestItem` → `persist_*` → `evaluate_market` → `write_sync` (`ingestion.py:135–250`). Планируется единый provider-queue per asset class; `source='custom'` на forex/crypto ingest — mapping gap, не отсутствие ECB adapters (`ingestion.py:295`, `314`).
 
 ### 7.6 Качество scrape (P0)
 
@@ -211,9 +221,9 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
 
-**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE** (persist — полный CUD dumb primitive; master lock связывает `table`+`operation`+`locator`; reject durable; `reject_data` несёт `operation`). **LAYER 2 progress:** дверь **META** — **DONE** (cat-2 operational metadata `scrape_jobs` + `dim_marketplace` маршрутизированы; проверено на prod — live pipeline run создал parent+child jobs через дверь, статус `pending`→`running`, ноль `reject_data`). **NEXT LAYER-2 door:** **LOGS** (`scrape_logs` / `api_logs`). Оставшиеся gap в **0a.4** — вне закрытых sub-seams.
+**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE** (persist — полный CUD dumb primitive; master lock связывает `table`+`operation`+`locator`; reject durable; `reject_data` несёт `operation`). **LAYER 2 progress:** дверь **META** — **DONE**; дверь **LOGS** — **DONE** (+ batch-signing primitive); **DDL/COMMANDS (D-A audit-mark)** — **DONE**; admin destructive whole-pool wipe — **REMOVED**. → **LAYER 2 COMPLETE**. **LAYER 3 — COMPLETE:** scrape→gate→DB полностью маршрутизирован (cat-1 **CLOSED**: enrich/denorm/`dim_date`/housekeeping UPDATE + prune DELETE + `dim_date` INSERT через `update_validator` / `evaluate_ecommerce` / `evaluate_market`); подмодуль **`price_eur_resolver`** (`modules/currency/price_eur_resolver.py`) — **live** (`price_eur` / `last_price_eur`); prune DELETE — **durable commit** на producer session (`scraper/service.py:_prune_confirmed_nonproduct`); dead-code/junk cleanup (seam B) — **DONE**. **NEXT: LAYER 4** — discovery data contract, затем discovery internals (`budget_governor` и др.). Оставшийся bypass: **cat-5** USER/AUTH — **DEFERRED → Phase 7/8** (`user_data` door). Оставшиеся gap в **0a.4** — вне закрытых sub-seams.
 
-**Модель дверей (lock-by-threat):** сила замка подбирается под угрозу домена — **META** = **LIGHT** (структурный контракт `build_table_contract`: типы + nullable + enum CHECK + HMAC `table`+`operation`+`locator`+`fields`; без семантических rules); полные двери (`evaluate_ecommerce`, аналитический рельс `evaluate_market`) сохраняют семантические rules поверх контракта. На **каждой** двери HMAC-подпись обязательна при проходе в persist.
+**Модель дверей (lock-by-threat):** сила замка подбирается под угрозу домена — **META** и **LOGS** = **LIGHT** (структурный контракт `build_table_contract`: типы + nullable + enum CHECK + HMAC; без семантических rules); **`update_validator`** = **SEMANTIC** (per-kind column allowlist + инвариант `reactivation_forbidden` — строже META, слабее полного `evaluate_ecommerce`); полные двери (`evaluate_ecommerce`, аналитический рельс `evaluate_market`) сохраняют семантические rules поверх контракта. На **каждой** двери HMAC-подпись обязательна при проходе в persist (single-record `SignedRecord` или batch `SignedBatch`).
 
 > **Снимок:** recon `backend/app/**` (gate door catalog + DB-contact inventory). Типы колонок — ORM (`facts.py`, `dimensions.py`, `app_tables.py`, `reject_data.py`, `core.py`). `file:line` — evidence из recon; при дрейфе кода перепривязать grep/read.
 
@@ -223,13 +233,20 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 #### 0a.1 Producer-side doors (входы в гейт)
 
-Публичная стена пакета `data_firewall/__init__.py:6–11`: `FirewallOutcome`, `SignedRecord`, `evaluate_ecommerce`, `evaluate_market`. ENTRY-двери — два `evaluate_*` (аналитический и META-мультиплекс на общем `evaluate_market`); мост META — `persist/meta_write.py` (`write_meta_sync` / `write_meta_async`); остальное — типы или внутренние/legacy рельсы.
+Публичная стена пакета `data_firewall/__init__.py:6–11`: `FirewallOutcome`, `SignedRecord`, `evaluate_ecommerce`, `evaluate_market` (внутренний рельс также `evaluate_logs`, `LogsOutcome` — `firewall.py:218+`, `71–77`; **`update_validator`** — `update_validator.py:87+` / `238+`, импорт продюсерами напрямую). ENTRY-двери — `evaluate_ecommerce`, `evaluate_market` (аналитический + META-мультиплекс), **`evaluate_logs`** (LOGS), **`update_validator`** (scrape cat-1 UPDATE/DELETE); мосты — `persist/meta_write.py` (META), `persist/logs_write.py` (LOGS), `persist/maintenance_audit.py` (D-A audit-mark), `persist/scrape_gate_fields.py` (сборка payload для `update_validator`); остальное — типы или внутренние/legacy рельсы.
+
+**Модуль `currency` (LAYER 3 — price_eur):** `backend/app/modules/currency/` — подмодуль **`price_eur_resolver`** (`price_eur_resolver.py`, `resolve_price_eur`). Читает `rate_to_eur` из `fact_currency_rate` через **операционный SELECT** на producer sync `Session` по **scrape-day `date_id`** (тот же `date_id`, что у `fact_price` через `_today_date_id`); read-двери persist **нет**. EUR-base: `price_eur = price` (строки `fact_currency_rate` для `EUR` не требуются); non-EUR: `price × rate_to_eur`, квантование **Numeric(12,2), ROUND_HALF_UP**; отсутствующий курс на scrape-day → честный `NULL`. Приоритет источника при нескольких строках на `(date_id, currency_code)`: `ecb` → `openexchangerates` → `cbr` → `nbu` → `nbk` → `nbb` → `cbu` → `nbg` → `cba` → `cbar` → `custom` (`_RATE_SOURCE_PRIORITY`). Результат подаётся в `build_fact_price_fields` → **`fact_price.price_eur`** и в denorm обоих kinds → **`fact_listing.last_price_eur`** (allowlist `update_validator` kinds `listing_denorm_success` / `listing_denorm_no_change` + ключи `sync_listing_gate_cache` / `_sync_listing_denorm_cache`). Планируемый подмодуль **`currency_converter`** (внешние FX API, единый fiat-rate source для ticker bar) — **не построен**.
+
+**DDL/COMMANDS (подход D-A):** гейт здесь — **ROUTER**, не executor. Каждая maintenance-операция (MV refresh, partition create, retention DELETE, CHECK repair) выполняется **как есть** на своём connection (`raw conn` / caller `Session`); параллельно best-effort пишется durable audit-mark через `record_maintenance_audit` / `record_maintenance_audit_async` (`persist/maintenance_audit.py:35+`): `service='maintenance'`, `endpoint='{op}:{target}'`, `method` — короткий глагол (`REFRESH`, `DDL`, `DELETE`, `ALTER`), `status` `success`/`error`, `user_id` где доступен иначе `NULL`, `detail`/counts в `error_message`. Хелпер **проглатывает** собственные сбои — никогда не блокирует maintenance op.
 
 | door (function) | file:line | purpose | FROM (who may call) | TO (produces) | lock steps (ordered) | lock strength | known lock-gap |
 |-----------------|-----------|---------|---------------------|---------------|----------------------|---------------|----------------|
 | `evaluate_ecommerce` | `data_firewall/firewall.py:204+` | E-commerce extract → signed row (default `fact_price`) | Scrape/ingestion: `marketplace_id` + `CurrencyResolver` + optional `persist_fields` (`ingestion/service.py:194–201`) | On pass + `persist_fields`: `SignedRecord`; on fail + `db`: `reject_data` | 1) `evaluate_ecommerce_rules` — 5 checks (`rules.py:108–159`, DB read whitelist `rules.py:65–75`) 2) `page_role in (listing,hub)` → reject (`firewall.py:210–220`) 3) `page_role=unknown` → log only (`221–227`) 4) If `passed and persist_fields`: `_validate_against_contract` (`239–244`) 5) `_sign_fields` (`251`, `165–189`) 6) sign fail → `signing_unavailable` (`252–256`) 7) If `not passed and db`: `write_reject_data_isolated` (`278–291`) | **PARTIAL** | `unknown` page_role not blocked; contract only on keys present (`firewall.py:116–119`); `passed=True` без `signed_record` если `persist_fields is None` (`237–238`) |
-| **META door** (`evaluate_market` + `meta_write`) | `firewall.py:309+`; `meta_write.py:56+` | Reentrant multiplex: operational metadata `scrape_jobs` + `dim_marketplace` → signed row по `operation` (`insert` / `update` / `delete`) | Async producers: `write_meta_async` → `asyncio.to_thread` + `sync_session_factory` + `write_meta_sync` (precedent `discovery.py` pool bridge); sync: `write_meta_sync` / `activity_pulse.py` | On pass: `SignedRecord` + `write_sync` + commit; on fail: `write_reject_data_isolated` | 1) `unknown_table` if no contract 2) `_validate_against_contract` (types + nullable + enum CHECK; **без** semantic rules) 3) `_sign_fields` с `operation` + locator `("id",)` (`contracts.py:127–128`) 4) reject isolated on fail | **LIGHT** | JSONB cols signed but content-blind (inert-data); нет thread pool внутри гейта — один sync session на вызов моста |
-| `evaluate_market` (аналитический рельс) | `data_firewall/firewall.py:309+` | Market/discovery dict → signed dim/fact row | Caller supplies `table` + field dict (`discovery.py:200+`, `market_data/ingestion.py:147+`) | On pass: `SignedRecord`; on fail + `db`: `reject_data` | 1) `unknown_table` if no contract 2) `_validate_against_contract` 3) `_sign_fields` (`operation` default `insert`) 4) If `not passed and db`: `write_reject_data_isolated` | **PARTIAL** | No e-commerce rules; sparse contract; 13 contracted tables (`contracts.py:106–119`) vs 8 `write_sync` branches; 5 analytical tables still `raise` at persist |
+| **META door** (`evaluate_market` + `meta_write`) | `firewall.py:411+`; `meta_write.py:56+` | Reentrant multiplex: operational metadata `scrape_jobs` + `dim_marketplace` → signed row по `operation` (`insert` / `update` / `delete`) | Async producers: `write_meta_async` → `asyncio.to_thread` + `sync_session_factory` + `write_meta_sync` (precedent `discovery.py` pool bridge); sync: `write_meta_sync` / `activity_pulse.py` | On pass: `SignedRecord` + `write_sync` + commit; on fail: `write_reject_data_isolated` | 1) `unknown_table` if no contract 2) `_validate_against_contract` (types + nullable + enum CHECK; **без** semantic rules) 3) `_sign_fields` с `operation` + locator `("id",)` (`contracts.py:130`) 4) reject isolated on fail | **LIGHT** | JSONB cols signed but content-blind (inert-data); нет thread pool внутри гейта — один sync session на вызов моста |
+| **LOGS door** (`evaluate_logs`) | `firewall.py:218–303` | Append-only audit: `scrape_logs` + `api_logs`, **INSERT-ONLY** | `persist/logs_write.py` (`persist_logs_batch`, `write_logs_sync`, `write_logs_async`); producers: `scraper/service.py` batch flush, `tasks.py`, `market_data/ingestion.py`, `ai_analyst/service.py`; **D-A:** `persist/maintenance_audit.py` (`record_maintenance_audit` / `_async`) | On pass: `SignedBatch` + `write_batch_sync`; partial batch OK | 1) per-row `_validate_against_contract` (LIGHT) 2) invalid rows → `write_reject_data_isolated` **по одной** (`254–264`) 3) valid rows → `sign_batch` + `SignedBatch` (`269–298`) 4) signing fail → isolated reject per valid row (`276–290`) | **LIGHT** | locator `()` (`contracts.py:134–135`); content-blind на `Text` (`url`, `error_message`, `endpoint`); **bad-row-in-batch:** valid → один `SignedBatch`, invalid → isolated reject; честные `inserted_count` / `rejected_count`; batch не отбрасывается целиком |
+| **DDL/COMMANDS (D-A audit-mark)** | `persist/maintenance_audit.py:35+` | Audit trail maintenance ops в `api_logs` — **не** исполняет DDL | `maintenance_tasks.py`, `cleanup_tasks.py`, `scraper/service.py` (CHECK repair), `admin/parsing_admin.py` (job_type CHECK) | `write_logs_sync` → `evaluate_logs` → `sign_batch` → `write_batch_sync` → `api_logs` | 1) caller выполняет DDL/DELETE на своём connection 2) `record_maintenance_audit` / `_async` пишет mark рядом 3) swallow failure — op не блокируется | **LIGHT** (audit only) | DDL statements остаются direct; exempt-by-design от routing, но оставляют durable `api_logs` trail |
+| **`update_validator` door** (`authorize_scrape_update` / `authorize_scrape_delete`) | `data_firewall/update_validator.py:87+` / `238+` | Scrape-owned UPDATE/DELETE: per-kind **COLUMN ALLOWLIST** + semantic invariant | `scraper/service.py` (housekeeping/deactivate/prune); `ingestion/service.py` (enrich/denorm) | On pass: `SignedRecord` (`operation` `update`/`delete`) + `write_sync` | 1) `SCRAPE_UPDATE_ALLOWLIST` kind lookup (`24–43`) 2) locator keys present (`TABLE_LOCATORS`) 3) changed ⊆ allowed 4) **`is_active` may be False or absent, never True** (`reactivation_forbidden`, `192–207`) 5) `_sign_fields` 6) isolated reject on fail (`_isolated_reject`, `65–84`) | **SEMANTIC** | Locators: `fact_listing` → `url_hash`; `dim_product` → `id`. Reject reasons: `unknown_update_kind`, `column_not_allowed`, `missing_locator`, `reactivation_forbidden`, `nothing_to_update`, `signing_unavailable`, `unknown_delete_table`, `unexpected_delete_field` |
+| `evaluate_market` (аналитический рельс) | `data_firewall/firewall.py:411+` | Market/discovery dict → signed dim/fact row | Caller supplies `table` + field dict (`discovery.py:200+`, `market_data/ingestion.py:147+`) | On pass: `SignedRecord`; on fail + `db`: `reject_data` | 1) `unknown_table` if no contract 2) `_validate_against_contract` 3) `_sign_fields` (`operation` default `insert`) 4) If `not passed and db`: `write_reject_data_isolated` | **PARTIAL** | No e-commerce rules; sparse contract; 15 contracted tables (`contracts.py:106–121`) vs 8 `write_sync` + 2 `write_batch_sync` branches; 5 analytical tables still `raise` at persist |
 | `evaluate_ecommerce_rules` | `data_firewall/rules.py:108–113` | Rules-only rail (5 checks); **not** package export | Internal from `evaluate_ecommerce` (`firewall.py:197–201`); legacy alias `evaluate_gate` | `GateOutcome` only — no `SignedRecord` | 1) `product_name_ok` 2) `currency_ok` 3) `price_ok` 4) `currency_raw_sane_ok` 5) `currency_country_match_ok` (`115–128`) | **WEAK** | No contract, no signing, no persist ticket |
 | `evaluate_gate` | `ingestion/gate.py:16` | Legacy alias → `evaluate_ecommerce_rules`; **outside** package wall | Legacy callers of `ingestion.gate` | `GateOutcome` only | Same 5 rules | **WEAK** | Bypasses full wall (no contract/sign/persist guard) |
 
@@ -249,7 +266,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | `write_sync` (dispatch) | `persist/writer.py:271+` | per `signed.table` | `insert` / `update` / `delete` | **Yes** — master-lock перед exec | caller `Session` | маршрут по `signed.operation` после `_verify_signed_record` |
 | `write_sync` (null `signed`) | `persist/writer.py:278–287` | `unknown` (reject) | reject insert | N/A | caller `Session` | `_reject_persist` → `missing_signed_record` |
 | `write_sync` (bad signature) | `persist/writer.py:289–299` | `signed.table` | reject insert | **Yes** — `_verify_signed_record` | caller `Session` | `_reject_persist` → `invalid_signature` / `locator_mismatch` / `unsupported_operation` |
-| `write_sync` (update, U-1) | `persist/writer.py:229–255` | `dim_product`, `fact_listing`, `scrape_jobs`, `dim_marketplace` | UPDATE by `signed.locator` (`id`) | Yes | caller `Session` | `_write_sync_update`; SET non-locator fields; пустой value set → `nothing_to_update` reject |
+| `write_sync` (update, U-1) | `persist/writer.py:229–255` | `dim_product`, `fact_listing`, `scrape_jobs`, `dim_marketplace` | UPDATE by `signed.locator` | Yes | caller `Session` | `_write_sync_update`; SET non-locator fields; `fact_listing` locator **`url_hash`**; `dim_product` locator **`id`**; пустой value set → `nothing_to_update` reject |
 | `write_sync` (delete) | `persist/writer.py:258–266` | `dim_product`, `fact_listing`, `scrape_jobs`, `dim_marketplace`, `fact_price`, `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | DELETE by `signed.locator` only | Yes | caller `Session` | `_write_sync_delete`; `PersistResult.rows_affected` / `no_target` |
 | `write_sync` → `fact_price` | `persist/writer.py:310–320` | `fact_price` | `insert`: DELETE `(listing_id, date_id)` + INSERT | Yes | caller `Session` | daily replace insert path |
 | `write_sync` → `dim_product` | `persist/writer.py:322–324` | `dim_product` | `insert` (+ `update`/`delete` через dispatch) | Yes | caller `Session` | |
@@ -259,6 +276,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | `write_sync` → `fact_commodity_price` | `persist/writer.py:354–363` | `fact_commodity_price` | `insert`: DELETE replace-key + INSERT | Yes | caller `Session` | daily replace |
 | `write_sync` → `scrape_jobs` | `persist/writer.py:339–341` | `scrape_jobs` | `insert` (+ `update`/`delete` через dispatch) | Yes | caller `Session` | META door; locator `("id",)` |
 | `write_sync` → `dim_marketplace` | `persist/writer.py:343–345` | `dim_marketplace` | `insert` (+ `update`/`delete` через dispatch) | Yes | caller `Session` | META door; locator `("id",)` |
+| `write_sync` → `dim_date` | `persist/writer.py:376–388` | `dim_date` | `insert`: `pg_insert` + `ON CONFLICT DO NOTHING` по `date_id` | Yes | caller `Session` | idempotent upsert; producer `ingestion/service.py:_today_date_id` через `evaluate_market` |
 | `write_sync` (unsupported) | `persist/writer.py:365+` | — | `raise ValueError` | Yes (if reached) | — | `fact_review`, `fact_promo`, `fact_search_trend`, `fact_tariff`, `fact_fuel_price` — contract exists, no branch |
 | `write_async` (dispatch) | `persist/writer.py:368+` | per `signed.table` | `insert` / `delete` | **Yes** | `AsyncSession` | **нет async UPDATE** — replace tables only |
 | `write_async` (null `signed`) | `persist/writer.py:371–385` | `unknown` | reject insert | N/A | `AsyncSession.sync_session` | direct `write_reject_data`, not `_reject_persist` |
@@ -268,18 +286,25 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | `write_async` → `fact_crypto_price` | `persist/writer.py:422–431` | `fact_crypto_price` | `insert`: DELETE+INSERT | Yes | `AsyncSession` | |
 | `write_async` → `fact_commodity_price` | `persist/writer.py:433–442` | `fact_commodity_price` | `insert`: DELETE+INSERT | Yes | `AsyncSession` | |
 | `write_async` (unsupported) | `persist/writer.py:446` | — | `raise ValueError` | — | — | No `fact_price`, `dim_product`, `fact_listing`; **runtime callers в `backend/app/**` — NOT FOUND** |
+| `write_batch_sync` | `persist/writer.py:411–458` | `scrape_logs`, `api_logs` | `insert` (batch) | **Yes** — `_verify_signed_batch` (`87–104`) | caller `Session` | `db.add_all`; identity PK server-gen — **без** locator addressing |
+| `write_batch_sync` (null `signed`) | `persist/writer.py:418–427` | `unknown` | reject insert | N/A | caller `Session` | `_reject_persist` → `missing_signed_batch` |
+| `write_batch_sync` (bad signature) | `persist/writer.py:429–439` | `signed.table` | reject insert | **Yes** `_verify_signed_batch` | caller `Session` | `invalid_signature` / `unsupported_operation` |
+| **D-A maintenance audit** | `persist/maintenance_audit.py:35+` → `logs_write.write_logs_sync` | `api_logs` | `insert` (batch of 1) | **Yes** — через LOGS (`evaluate_logs` → `sign_batch`) | отдельная sync-сессия внутри `write_logs_sync` | DDL/COMMANDS trail: `service='maintenance'`, `endpoint='{op}:{target}'`; **DDL statements сами не проходят persist** — остаются direct на raw conn / caller session |
 | `write_reject_data` | `data_firewall/reject_store.py:108–150` | `reject_data` | insert + flush | No HMAC | caller `Session` | flush-only; in-txn callers (`writer._reject_persist`, прямой reject в `write_async`) — **не** через `write_sync` |
 | `write_reject_data_isolated` | `data_firewall/reject_store.py:153+` | `reject_data` | insert + commit | No HMAC | независимая sync-сессия (`sync_session_factory`) | durable reject-канал гейта (`evaluate_ecommerce`, `evaluate_market`); коммит вне business savepoint продюсера; зеркало `_persist_technical_error_log` |
 | `_reject_persist` | `persist/writer.py:140+` | `reject_data` | insert via `write_reject_data` | No (already failed verify) | caller `Session` | Sentry escalate; persist reject in-txn (flush-only) |
 
-**`SUPPORTED_WRITE_OPERATIONS`** (`writer.py:32–39`) — единый источник истины; каждая op проходит master-lock verify (`table`+`operation`+`locator`+`fields`) до исполнения:
+**`SUPPORTED_WRITE_OPERATIONS`** (`writer.py:33–43`) — единый источник истины; single-record ops проходят `_verify_signed_record`; batch — `_verify_signed_batch`:
 
 | table | operations | примечание |
 |-------|------------|------------|
+| `dim_date` | `insert` | locator `("date_id",)`; `FACT_TABLE_CONTRACTS` + `_TABLE_MODELS` (`contracts.py:107`, `writer.py:35,49`) |
+| `scrape_logs` | `insert` | LOGS door; batch-only (`write_batch_sync`); locator `()` |
+| `api_logs` | `insert` | LOGS door; batch-only; locator `()` |
 | `scrape_jobs` | `insert`, `update`, `delete` | META door; full CUD sync |
 | `dim_marketplace` | `insert`, `update`, `delete` | META door; full CUD sync |
-| `dim_product` | `insert`, `update`, `delete` | full CUD sync |
-| `fact_listing` | `insert`, `update`, `delete` | full CUD sync |
+| `fact_listing` | `insert`, `update`, `delete` | full CUD sync; UPDATE/DELETE producers — scrape cat-1 (`update_validator`) |
+| `dim_product` | `insert`, `update`, `delete` | full CUD sync; UPDATE/DELETE producers — scrape enrich/prune (`update_validator`) |
 | `fact_price` | `insert`, `delete` | daily replace покрывает «обновление» через insert-path |
 | `fact_currency_rate` | `insert`, `delete` | daily replace; async DELETE by locator |
 | `fact_crypto_price` | `insert`, `delete` | daily replace; async DELETE by locator |
@@ -287,17 +312,29 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 **META JSONB (content-blind):** колонки `scrape_jobs.config`, `dim_marketplace.discovered_category_urls`, `dim_marketplace.recon_frontier_state` входят в signed `fields` и HMAC, но контракт не eval'ит содержимое JSONB (inert-data rule); санитизация на read-OUT — planned `data_export`.
 
+**LOGS Text (content-blind):** `scrape_logs.url`, `scrape_logs.error_message`, `api_logs.endpoint`, `api_logs.error_message` — в signed `rows`, контракт не eval'ит содержимое; identity PK (`id` BigInteger autoincrement) server-gen, продюсер не адресует существующую строку.
+
 #### 0a.3 Lock mechanism (замки / ключи)
 
-HMAC-SHA256 (`signing.py:93–114`) вычисляется над каноническим payload **`canonical_serialize_signed_payload`** (`signing.py:68–82`): подпись связывает **`table` + `operation` + `locator` + `fields`** (не только `fields`). Верхний уровень signed payload: ключи `__table__`, `__operation__`, `__locator__`, `fields` — sorted keys, канонические значения вложенных dict (`signing.py:31–56`, `76–81`).
+**Single-record signing** — HMAC-SHA256 (`signing.py:93–114`) над **`canonical_serialize_signed_payload`** (`signing.py:68–82`): подпись связывает **`table` + `operation` + `locator` + `fields`**. API: `sign` / `verify` + `SignedRecord` (`signing.py:202–210`). Producer-side `_sign_fields` (`firewall.py:169–189`) → `extract_locator` + `TABLE_LOCATORS` (`contracts.py:125–136`). DB-side: `_verify_signed_record` (`writer.py:65–84`).
 
-Сигнатуры API: `sign(*, table, operation, fields, locator) -> str | None` и `verify(*, table, operation, fields, locator, signature) -> bool` (`signing.py:93–136`). Producer-side (`firewall.py:_sign_fields`, `169–189`) извлекает locator через `extract_locator(table, fields)`; per-table ключи locator — **`TABLE_LOCATORS`** в `contracts.py:120–127` (leaf).
+**Batch signing (REUSABLE primitive)** — один HMAC на весь batch; single-record path **без изменений**:
 
-DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно сверяет HMAC, затем defence-in-depth: signed `locator` должен совпадать с `extract_locator(table, fields)` — иначе reject `locator_mismatch`; `operation` должна входить в `SUPPORTED_WRITE_OPERATIONS[table]` (`writer.py:32–39`) — иначе `unsupported_operation`; невалидная подпись → `invalid_signature`. `write_sync` / `write_async` маршрутизируют по `signed.table` только после прохождения `_verify_signed_record` (`writer.py:185–195`).
+| primitive | file:line | role |
+|-----------|-----------|------|
+| `canonical_serialize_signed_batch_payload` | `signing.py:139–153` | канонический payload: `__table__`, `__operation__`, `__locator__`, `rows[]` |
+| `sign_batch` / `verify_batch` | `signing.py:156–199` | HMAC-SHA256 hex над batch payload |
+| `SignedBatch` | `signing.py:213–221` | `table`, `operation`, `locator`, `rows`, `signature` |
+| `_verify_signed_batch` | `writer.py:87–104` | persist-side re-verify; пустой `locator` → skip per-row locator match |
+| `write_batch_sync` | `writer.py:411–458` | `db.add_all` после verify |
 
-При незаданном `data_firewall_signing_secret` — fail-closed: `sign` → `None`, `verify` → `False` (`signing.py:85–90, 126–135`).
+**Потребители batch primitive:** дверь **LOGS** (`evaluate_logs` → `SignedBatch`); planned **DATA_EXPORT** read-OUT и любые high-volume gate paths переиспользуют те же `sign_batch` / `write_batch_sync` mechanics. `scrape_logs` — per-listing буфер → batch flush (до ~200k/run, `tasks.py:500–501`), не per-row gate calls.
 
-`SignedRecord` (`signing.py:139–147`): `table`, `operation`, `locator`, `fields`, `signature` — «ключ», передаваемый от producer-side к DB-side дверям.
+Сигнатуры single-record API: `sign` / `verify` (`signing.py:93–136`). Верхний уровень signed payload: `__table__`, `__operation__`, `__locator__`, `fields` — sorted keys, канонические значения (`signing.py:31–56`, `76–81`). `write_sync` / `write_async` маршрутизируют по `signed.table` только после `_verify_signed_record` (`writer.py:185–195`).
+
+При незаданном `data_firewall_signing_secret` — fail-closed: `sign` / `sign_batch` → `None`, `verify` / `verify_batch` → `False` (`signing.py:85–90`, `126–135`, `164–166`).
+
+`SignedRecord` (`signing.py:202–210`) — single-row ticket; `SignedBatch` (`signing.py:213–221`) — batch ticket для LOGS и будущих batch consumers.
 
 #### 0a.4 Lock gaps (пробоины — residual backlog)
 
@@ -314,7 +351,9 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 
 | planned door | status | evidence | target layer/phase |
 |--------------|--------|----------|-------------------|
-| `update_validator` (gate-side UPDATE door) | planned, not built | grep `update_validator` in `backend/app`: **NOT FOUND** | **LAYER-later** / discovery-reactivation — решает легитимность UPDATE до подписи `operation="update"`; persist UPDATE primitive (U-1) уже готов |
+| `update_validator` (scrape UPDATE/DELETE door) | **built** (LAYER 3) | `data_firewall/update_validator.py`; `authorize_scrape_update` / `authorize_scrape_delete`; `SCRAPE_UPDATE_ALLOWLIST` kinds: `listing_scrape_start_reset`, `listing_success_streak_reset`, `listing_housekeeping_failure`, `listing_deactivate`, `listing_checked`, `listing_denorm_success`, `listing_denorm_no_change`, `product_enrich` (denorm kinds включают `last_price_eur`) | **LAYER 3** — DONE |
+| `price_eur_resolver` (`resolve_price_eur`) | **built** (LAYER 3) | `modules/currency/price_eur_resolver.py`; operational SELECT `fact_currency_rate` на producer sync session; feeds `fact_price.price_eur` + `fact_listing.last_price_eur` | **LAYER 3** — DONE |
+| Market-data provider-queue triad | **planned** | Extract `market_data/providers/*` → per-asset modules (`currency`/`crypto`/`commodities`) with unified class-level queue + `provider_source` on all DTOs; ingest boundary frozen | **backlog** (parallel to LAYER 4) |
 | `data_export` (read-OUT door) | planned, not built | no symbol in `data_firewall/**` or `persist/**`; model `DataExport` only (`app_tables.py:509–512`) | **Phase 7/8** |
 | `user_data` CRUD (scoped owner door) | planned, not built | grep in gate/persist perimeter: **NOT FOUND** | **Phase 7/8** |
 | `operation` field on `reject_data` | **built** (sub-seam 1) | миграция `029_reject_data_operation`; `models/reject_data.py:29+`; `reject_store.py:93+` | **LAYER 1** — DONE |
@@ -326,7 +365,7 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 
 ### 0b. Реестр контактов с БД (DB-Contacts Registry)
 
-Инвариант: аналитические **записи** в fact/dim — через гейт; **persist** — тупой исполнитель; всё в **0b.2** — шов **LAYER 2**.
+Инвариант: аналитические **записи** в fact/dim — через гейт; **persist** — тупой исполнитель; cat-1 scrape cluster — **CLOSED** (маршрутизирован через `update_validator` + `evaluate_ecommerce` + `evaluate_market` для `dim_date`); оставшийся bypass в **0b.2:** cat-5 USER/AUTH → Phase 7/8.
 
 #### 0b.1 Gate writes (через двери — эталон)
 
@@ -336,8 +375,8 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 | discovery | `scraper/discovery.py:185–188` | `dim_product` | те же (signed fields) | — | `write_sync` | sync |
 | discovery | `scraper/discovery.py:198–203` | `fact_listing` | `product_id` UUID; `marketplace_id` UUID; `external_url` Text; `url_hash` String(64); `is_active` Boolean; `page_role` String(16) | `evaluate_market` | — | sync |
 | discovery | `scraper/discovery.py:212–215` | `fact_listing` | те же | — | `write_sync` | sync |
-| ingestion | `ingestion/service.py:194–202` | `fact_price` | `listing_id` UUID; `date_id` Integer; `price` Numeric(12,2); `currency_code` String(3); `original_price` Numeric(12,2); `discount_pct` Numeric(5,2); `price_change_pct` Numeric(8,4); `scraped_at` DateTime(tz); `scrape_job_id` UUID | `evaluate_ecommerce` | — | sync |
-| ingestion | `ingestion/service.py:240–248` | `fact_price` | те же | — | `write_sync` | sync |
+| ingestion | `ingestion/service.py:252–278` | `fact_price` | `listing_id` UUID; `date_id` Integer; `price` Numeric(12,2); `currency_code` String(3); `original_price` Numeric(12,2); **`price_eur` Numeric(12,2)**; `discount_pct` Numeric(5,2); `price_change_pct` Numeric(8,4); `scraped_at` DateTime(tz); `scrape_job_id` UUID | `evaluate_ecommerce` (+ `resolve_price_eur` operational read) | — | sync |
+| ingestion | `ingestion/service.py:325–353` | `fact_price` | те же (signed payload) | — | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:147–159` | `fact_currency_rate` | `date_id` Integer; `currency_code` String(3); `rate_to_eur` Numeric(18,8); `rate_to_usd` Numeric(18,8); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:187–199` | `fact_crypto_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `price_usd` Numeric(18,8); `market_cap_usd` Numeric(20,2); `volume_24h_usd` Numeric(20,2); `change_24h_pct` Numeric(8,4); `source` String(30); `rank` SmallInteger; `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:228–240` | `fact_commodity_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `commodity_type` String(20); `price_usd` Numeric(12,4); `price_eur` Numeric(12,4); `change_24h_pct` Numeric(8,4); `unit` String(20); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
@@ -345,12 +384,33 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 | META bridge | `persist/meta_write.py:56+` / `94+` | `scrape_jobs`, `dim_marketplace` | signed columns per `build_scrape_job_fields` / `build_dim_marketplace_fields` | `evaluate_market` (`operation`) | `write_sync` → `PersistResult` + commit | sync (`to_thread` из async) |
 | discovery | `scraper/discovery.py:57+` | `dim_marketplace` | cursor/discovery snapshot cols | META (`write_meta_async`) | — | async→sync bridge |
 | discovery / tasks / orchestrator / admin / marketplaces / job_completion / metadata_store / activity_pulse | `meta_write` call-sites | `scrape_jobs`, `dim_marketplace` | lifecycle + cursor fields | META | `write_meta_async` / `write_meta_sync` | per call-site |
+| LOGS bridge | `persist/logs_write.py:120+` / `160+` / `183+` | `scrape_logs`, `api_logs` | field dicts per `build_scrape_log_fields` / `build_api_log_fields` | `evaluate_logs` | `write_batch_sync` → `PersistResult` + commit | sync (`to_thread` из async) |
+| scraper | `scraper/service.py:328–343` | `scrape_logs` | per-listing batch (`flush_scrape_logs`) | LOGS (`persist_logs_batch`) | — | sync |
+| scraper | `scraper/tasks.py:155–159` | `scrape_logs` | technical-error row | LOGS (`write_logs_sync`) | — | sync (own session) |
+| market_data | `market_data/ingestion.py:70–76` | `api_logs` | ingest audit row | LOGS (`persist_logs_batch`) | — | sync |
+| ai_analyst | `ai_analyst/service.py:115–129` | `api_logs` | Claude call audit | LOGS (`write_logs_async`) | — | async→sync bridge |
+| D-A maintenance audit | `persist/maintenance_audit.py:35+` | `api_logs` | `service='maintenance'`, `endpoint='{op}:{target}'`, `method`, `status`, optional `user_id`, `error_message` (detail) | LOGS (`write_logs_sync` / `record_maintenance_audit_async`) | `write_batch_sync` | sync / async→sync bridge |
+| ingestion | `ingestion/service.py:86–98` | `dim_date` | full `DimDate` row (`date_id`, `full_date`, calendar denorm cols) | `evaluate_market` (`insert`) | `write_sync` ON CONFLICT DO NOTHING | sync |
+| ingestion | `ingestion/service.py:189–219` | `dim_product` | `name`, `name_normalized`, `image_url` (kind `product_enrich`) | `update_validator` | `write_sync` UPDATE | sync |
+| ingestion | `ingestion/service.py:327–353` | `fact_listing` | denorm kinds `listing_denorm_no_change` / `listing_denorm_success` (вкл. **`last_price_eur` Numeric(12,2)**) | `update_validator` | `write_sync` UPDATE | sync |
+| scraper | `scraper/service.py:324–415` | `fact_listing` | housekeeping kinds: `listing_scrape_start_reset`, `listing_success_streak_reset`, `listing_checked`, `listing_housekeeping_failure`, `listing_deactivate` | `update_validator` | `write_sync` UPDATE | sync |
+| scraper | `scraper/service.py:628–733` | `fact_listing`, `dim_product` | prune DELETE (locator-only); **durable `commit`** пары listing + условный orphan `dim_product` до early-return | `authorize_scrape_delete` | `write_sync` DELETE + `commit` | sync |
 
 `write_async` (`persist/writer.py:368+`) — определён; DELETE-only для market facts; **runtime callers в `backend/app/**` — NOT FOUND** (только export).
 
 #### 0b.2 Bypass writes (мимо дверей — backlog LAYER 2)
 
-> **Cat-2 operational metadata (~39 write-sites, `scrape_jobs` lifecycle + `dim_marketplace` cursors):** **CLOSED** — маршрутизированы через дверь **META** (sub-seam **2a** single-row + sub-seam **2b** bulk expanded to N single-row по locator `id`). Исключение: DDL-site `parsing_admin.py:999–1009` (`ck_scrape_jobs_job_type`) — **cat-4** maintenance-DDL, **не** META.
+> **Cat-2 operational metadata (~39 write-sites, `scrape_jobs` lifecycle + `dim_marketplace` cursors):** **CLOSED** — маршрутизированы через дверь **META** (sub-seam **2a** single-row + sub-seam **2b** bulk expanded to N single-row по locator `id`). Исключение: DDL-site `parsing_admin.py:999–1009` (`ck_scrape_jobs_job_type`) — **cat-4** maintenance-DDL, **AUDITED (D-A)**.
+
+> **Cat-3 log/audit (~8 write-sites, `scrape_logs` + `api_logs` INSERT):** **CLOSED** — маршрутизированы через дверь **LOGS** (`evaluate_logs` + batch signing). Исключения **cat-4**, **не** LOGS: retention DELETE (`cleanup_tasks.py:23–27`) — **AUDITED (D-A)**; DDL CHECK repair (`scraper/service.py:171–199`) — **AUDITED (D-A)**. Деструктивный admin whole-pool wipe (ранее TRUNCATE `scrape_logs` и др.) — **REMOVED**, не в активном backlog.
+
+> **Cat-4 maintenance (benign DDL/retention):** **AUDITED (D-A)** — op остаётся direct на своём connection (`workers/maintenance_tasks.py`: `_has_active_scrape_job`, `_refresh_mv`, `ensure_fact_price_partitions`; `core/supabase_security.py`: `harden_table_statements`; CHECK repairs `scraper/service.py`, `admin/parsing_admin.py`; retention DELETE `cleanup_tasks.py`); параллельно `record_maintenance_audit` / `record_maintenance_audit_async` пишет durable след в `api_logs` через LOGS door. Exempt-by-design от routing, но с audit trail. Деструктивный сброс всего пула — **REMOVED**.
+
+> **Cat-1 analytical (scrape-path denorm/enrich/prune + `dim_date`):** **CLOSED → `update_validator` / `evaluate_market` / `evaluate_ecommerce`** — cluster `scrape-fact_listing-denorm` + `dim_date-upsert` маршрутизированы: UPDATE через `authorize_scrape_update` (per-kind allowlist + `reactivation_forbidden`); prune DELETE через `authorize_scrape_delete` + **durable commit** (`_prune_confirmed_nonproduct`, `scraper/service.py:713–715`); `dim_date` INSERT через `evaluate_market` + `write_sync` (`ON CONFLICT DO NOTHING`); `fact_price` несёт **`price_eur`**; listing denorm несёт **`last_price_eur`**. **In-memory ORM sync** после gate-writes: `sync_listing_gate_cache` (`persist/scrape_gate_fields.py:76+`), `_sync_listing_denorm_cache` / `_sync_product_enrich_cache` (`ingestion/service.py:135–154`) — same-session ORM readers остаются согласованными.
+
+> **LAYER-3 REGISTRY (correctness backlog — не routing, не закрыто):** (a) **`listing_denorm_no_change`** пишет `last_currency_code` из raw `data.currency`, не из нормализованного `persist_fields["currency_code"]` — deferred correctness pass; (b) **forex/crypto ingest `source`:** adapters не прокидывают `provider_source` на DTO (`NormalizedForex` / `NormalizedCrypto` — поля нет); ingest hardcode `source='custom'` (`ingestion.py:295`, `314`) при том что fetch идёт через open.er-api/Frankfurter (forex) и Binance/CoinGecko (crypto); commodities propagate `provider_source` → `CommodityIngestItem.source` (`dto.py:39`, `fetching.py:111`); scrape-day `date_id` vs forex snapshot date — для `price_eur_resolver`; (c) **`product_name`** на `ExtractedProduct` — неиспользуемое DTO-поле, **оставлено**; (d) **`discount_pct` / `price_change_pct`** на scrape-path всегда `NULL` — pending features.
+
+> **Cat-5 USER/AUTH:** **DEFERRED → Phase 7/8** — cluster `users-auth` (planned `user_data` door).
 
 #### discovery — `dim_marketplace` cursors / `scrape_jobs` metadata — **CLOSED → META**
 
@@ -370,21 +430,23 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 
 #### scrape-service — denorm / prune / logs
 
+> **cat-1** denorm/enrich/prune/`dim_date` — **CLOSED → `update_validator`**; log rows — **CLOSED → LOGS**.
+
 | module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
 |--------|-----------|-------|----------------------|-----|---------|--------------|
-| ingestion | `ingestion/service.py:56–83` | `dim_date` | `date_id` Integer; `full_date` Date; year/quarter/month/… Boolean/Integer/String | upsert (ON CONFLICT DO NOTHING) | sync | dim_date-upsert |
-| ingestion | `ingestion/service.py:340–349` | `dim_product` | `name` String(500); `name_normalized` String(500); `image_url` Text | update in-place | sync | scrape-fact_listing-denorm |
-| ingestion | `ingestion/service.py:229–231,251–253` | `fact_listing` | `last_checked_at` DateTime(tz); `last_price` Numeric(12,2); `last_currency_code` String(3); `last_price_changed_at` DateTime(tz) | update in-place | sync | scrape-fact_listing-denorm |
-| ingestion | `ingestion/service.py:294–295` | txn | bundles gate + bypass denorm/enrich | commit | sync | scrape-fact_listing-denorm |
-| scraper/service | `scraper/service.py:427–428` | `fact_listing` | `consecutive_errors` Integer; `last_error` Text | update | sync | scrape-fact_listing-denorm |
-| scraper/service | `scraper/service.py:541–545,552–553` | `fact_listing` | `consecutive_errors`, `failure_streak` Integer; `last_error` Text; `is_active` Boolean | update | sync | scrape-fact_listing-denorm |
-| scraper/service | `scraper/service.py:562` | `fact_listing` | `last_checked_at` DateTime(tz) | update | sync | scrape-fact_listing-denorm |
-| scraper/service | `scraper/service.py:480–494` | `fact_listing`, `dim_product` | row DELETE | delete | sync | scrape-fact_listing-denorm |
-| scraper/service | `scraper/service.py:348–350` | `scrape_logs` | `scrape_job_id`, `listing_id`, `marketplace_id`, `status` String(50), `url` Text, `price_found` Numeric(12,2), `duration_ms` Integer, `scraper_type`, `error_message`, `error_category` | insert | sync | scrape_logs-api_logs |
-| scraper/service | `scraper/service.py:279–280` | `fact_listing` | failure-path fields above | flush + commit | sync | scrape-fact_listing-denorm |
-| scraper/service | `scraper/service.py:174–175,186–195` | `scrape_logs` | DDL: widen `status`, rebuild CHECK | DDL | sync | maintenance-DDL |
-| scraper/tasks | `scraper/tasks.py:150–151` | `scrape_logs` | INSERT SET: `scrape_job_id` UUID; `listing_id` UUID; `marketplace_id` UUID; `status` String(50); `url` Text; `error_message` Text; `scraper_type` String(30); `error_category` String(30). NOT NULL default: `retry_count` Integer; server `id` BigInteger; `created_at` DateTime(tz) | insert | sync | scrape_logs-api_logs |
-| scraper/tasks | `scraper/tasks.py:74–83` | `scrape_logs` | DDL CHECK repair | DDL | sync | maintenance-DDL |
+| ingestion | `ingestion/service.py:71–106` | `dim_date` | full `DimDate` row | insert (idempotent) | sync | dim_date-upsert — **CLOSED → evaluate_market** |
+| ingestion | `ingestion/service.py:423–466` | `dim_product` | `name`, `name_normalized`, `image_url` | update | sync | scrape-fact_listing-denorm — **CLOSED → update_validator** (`product_enrich`) |
+| ingestion | `ingestion/service.py:299–353` | `fact_listing` | `last_checked_at`, `last_price`, `last_currency_code`, `last_price_changed_at`, **`last_price_eur`** | update | sync | scrape-fact_listing-denorm — **CLOSED → update_validator** |
+| ingestion | `ingestion/service.py:393–395` | txn | bundles `evaluate_ecommerce` + cat-1 updates | commit | sync | scrape-fact_listing-denorm — **CLOSED** |
+| scraper/service | `scraper/service.py:324–336` | `fact_listing` | `consecutive_errors`, `last_error` | update | sync | scrape-fact_listing-denorm — **CLOSED → update_validator** (`listing_scrape_start_reset`) |
+| scraper/service | `scraper/service.py:338–350` | `fact_listing` | `failure_streak` | update | sync | scrape-fact_listing-denorm — **CLOSED → update_validator** (`listing_success_streak_reset`) |
+| scraper/service | `scraper/service.py:371–415` | `fact_listing` | `consecutive_errors`, `last_error`, `failure_streak`, `is_active` | update | sync | scrape-fact_listing-denorm — **CLOSED → update_validator** (housekeeping/deactivate) |
+| scraper/service | `scraper/service.py:352–369` | `fact_listing` | `last_checked_at` | update | sync | scrape-fact_listing-denorm — **CLOSED → update_validator** (`listing_checked`) |
+| scraper/service | `scraper/service.py:628–667` | `fact_listing`, `dim_product` | prune DELETE by locator | delete | sync | scrape-fact_listing-denorm — **CLOSED → authorize_scrape_delete** |
+| scraper/service | `scraper/service.py:474–490` | `scrape_logs` | batch flush | insert (batch) | sync | scrape_logs-api_logs — **CLOSED → LOGS** |
+| scraper/service | `scraper/service.py:417–445` | txn | failure-path housekeeping commit | commit | sync | scrape-fact_listing-denorm — **CLOSED** |
+| scraper/service | `scraper/service.py:171–199` | `scrape_logs` | DDL: widen `status`, rebuild CHECK | DDL | sync | maintenance-DDL — **AUDITED (D-A)** |
+| scraper/tasks | `scraper/tasks.py:155–159` | `scrape_logs` | technical-error row | insert (batch of 1) | sync | scrape_logs-api_logs — **CLOSED → LOGS** |
 | scraper/tasks | `scraper/tasks.py:356–358` | `scrape_jobs` | `status`, `completed_at` | update + commit | AsyncSession | scrape_jobs-metadata — **CLOSED → META** |
 | scraper/tasks | `scraper/tasks.py:710–712,718–720,792–806` | `scrape_jobs`, `dim_marketplace` | `scrape_jobs` UPDATE: `status` String(20); `completed_at` DateTime(tz) (`710–712`); `started_at` DateTime(tz) (`718–720`); `successful` Integer; `failed` Integer; `completed_at` DateTime(tz); `status` String(20) terminal (`789–805`). `dim_marketplace` UPDATE: `last_scrape_at` DateTime(tz) (`792`) | update + commit | AsyncSession | scrape_jobs-metadata — **CLOSED → META** |
 | scraper/pipeline/activity_pulse | `scraper/pipeline/activity_pulse.py:59–61,89–91` | `scrape_jobs` | `config.metadata` JSONB (`last_activity_at`, `current_stage`, `worker_log_tail`) | update + commit | sync | scrape_jobs-metadata — **CLOSED → META** |
@@ -407,27 +469,23 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 
 | module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
 |--------|-----------|-------|----------------------|-----|---------|--------------|
-| market_data | `market_data/ingestion.py:33–52` | `dim_date` | full row (см. `DimDate`) | insert + flush | sync | dim_date-upsert |
-| market_data | `market_data/ingestion.py:63–71` | `api_logs` | `service` String(50); `endpoint` String(500); `method` String(10); `status` String(20); `error_message` Text | insert | sync | scrape_logs-api_logs |
-| market_data | `market_data/ingestion.py:76–83` | `api_logs` | error audit after rollback | insert + commit | sync | scrape_logs-api_logs |
+| market_data | `market_data/ingestion.py:30–52` | `dim_date` | full row (см. `DimDate`) | `evaluate_market` + `write_sync` ON CONFLICT DO NOTHING | sync | dim_date-upsert — **CLOSED → evaluate_market** (ingestion path; scrape path — `ingestion/service.py:_today_date_id`) |
+| market_data | `market_data/ingestion.py:70–76` | `api_logs` | `service`, `endpoint`, `method`, `status`, optional `error_message` | insert (batch) | sync | scrape_logs-api_logs — **CLOSED → LOGS** |
+| market_data | `market_data/ingestion.py:79–88` | `api_logs` | error audit after rollback | insert + commit | sync | scrape_logs-api_logs — **CLOSED → LOGS** |
 | market_data | `market_data/ingestion.py:163,202–204,244` | txn | post-gated fact batch | commit | sync | market_data |
 | market_data | `market_data/reader.py:167–168` | `users` | `preferences` JSONB | update + commit | AsyncSession | users-auth |
 
-#### admin / pool reset
+#### admin parsing / core bootstrap
 
 | module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
 |--------|-----------|-------|----------------------|-----|---------|--------------|
 | admin | `admin/parsing_admin.py:209–216` | `scrape_jobs` | INSERT SET: `job_type` String(30)='full_pipeline_test'; `status` String(20)='running'; `started_at` DateTime(tz); `config` JSONB (`metadata` nested). NOT NULL defaults: `total_listings`/`successful`/`failed`/`skipped` Integer; server `id` UUID; `created_at` DateTime(tz); `marketplace_id` NULL | insert + commit | AsyncSession | scrape_jobs-metadata — **CLOSED → META** |
 | admin | `admin/parsing_admin.py:356–361` | `scrape_jobs` | cancel: `status=failed`, `config.metadata` | update + commit | AsyncSession | scrape_jobs-metadata — **CLOSED → META** |
 | admin | `admin/parsing_admin.py:986–994` | `scrape_jobs` | stale pipeline auto-fail | update + commit | AsyncSession | scrape_jobs-metadata — **CLOSED → META** |
-| admin | `admin/parsing_admin.py:999–1009` | `scrape_jobs` | DDL `ck_scrape_jobs_job_type` | DDL | AsyncSession | maintenance-DDL — **cat-4 exempt, NOT META** |
-| pool_maintenance | `core/pool_maintenance.py:90–111` | `alert_events`, `alerts`, `user_products` | nullable FK wipe; DELETE user_products | update/delete | AsyncSession | admin-pool-reset |
-| pool_maintenance | `core/pool_maintenance.py:114–126` | `reject_data`, `fact_price`, `fact_review`, `fact_promo`, `fact_search_trend`, `scrape_logs`, `fact_listing`, `dim_product` | TRUNCATE — whole-table, no columns: `reject_data` (`114`); `fact_price` (`117`); `fact_review`, `fact_promo`, `fact_search_trend` (`118–122`); `scrape_logs` (`124`); `fact_listing` (`125`); `dim_product` (`126`) | truncate | AsyncSession | admin-pool-reset |
-| pool_maintenance | `core/pool_maintenance.py:129–146` | `dim_marketplace` | cursor columns reset (`products_in_pool`, `sitemap_resume_offset`, `discovered_category_urls`, …) | update | AsyncSession | admin-pool-reset — **CLOSED → META** (N single-row, sub-seam 2b) |
-| pool_maintenance | `core/pool_maintenance.py:149` | txn | pool reset commit | commit | AsyncSession | admin-pool-reset |
+| admin | `admin/parsing_admin.py:999–1009` | `scrape_jobs` | DDL `ck_scrape_jobs_job_type` | DDL | AsyncSession | maintenance-DDL — **AUDITED (D-A)** |
 | core | `core/admin_service.py:55–56` | `users` | bootstrap superuser INSERT | insert + commit | AsyncSession | users-auth |
 
-#### users / auth / telegram / ai
+#### users / auth / telegram / ai — **cat-5 DEFERRED → Phase 7/8** (`user_data` door)
 
 | module | file:line | table | column(s) + ORM type | op | session | seam-cluster |
 |--------|-----------|-------|----------------------|-----|---------|--------------|
@@ -441,7 +499,7 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 | telegram | `telegram/api.py:156–157,171–173` | `users` | link code / unlink | update + flush | AsyncSession | users-auth |
 | ai_analyst | `ai_analyst/service.py:79–80` | `ai_chat_sessions` | INSERT SET: `user_id` UUID; `context_type` String(30); `context_id` UUID; `title` String(300). NOT NULL defaults: `message_count` Integer; `total_tokens` Integer; `is_archived` Boolean; server `id` UUID; `created_at`/`updated_at` DateTime(tz) | insert + flush | AsyncSession | users-auth |
 | ai_analyst | `ai_analyst/service.py:82–83,124–125` | `ai_chat_messages` | `session_id`, `role` String(10), `content` Text | insert + flush | AsyncSession | users-auth |
-| ai_analyst | `ai_analyst/service.py:114–125` | `api_logs` | Claude call audit | insert + flush | AsyncSession | scrape_logs-api_logs |
+| ai_analyst | `ai_analyst/service.py:115–129` | `api_logs` | Claude call audit (`service`, `endpoint`, `status`, `status_code`, `duration_ms`, `tokens_used`) | insert (batch of 1) | AsyncSession→sync bridge | scrape_logs-api_logs — **CLOSED → LOGS** |
 
 #### marketplaces admin — **CLOSED → META**
 
@@ -460,11 +518,11 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 | data_firewall | `data_firewall/reject_store.py:153+` | `reject_data` | `source`, `table_target`, `operation` String(10), `marketplace_id`/`listing_id` UUID, `reject_reason`, `failed_rules` JSONB, `raw_payload` JSONB, `signature_present`, `rejected_by` | insert + commit (isolated session) | sync | reject-path (gate) |
 | data_firewall | `data_firewall/reject_store.py:108–150` | `reject_data` | те же | insert + flush | sync/async | reject-path (in-txn) |
 | persist | `persist/writer.py:140+` | `reject_data` | те же (verify fail) | insert via `_reject_persist` | sync | reject-path |
-| cleanup | `workers/cleanup_tasks.py:24–35` | `scrape_logs`, `api_logs`, `ai_chat_messages`, `alert_events` | retention DELETE by `created_at` | delete + commit | sync | scrape_logs-api_logs |
+| cleanup | `workers/cleanup_tasks.py:23–27` | `scrape_logs`, `api_logs`, `ai_chat_messages`, `alert_events` | retention DELETE by `created_at` | delete + commit | sync | maintenance-DDL — **AUDITED (D-A)** |
 | reaper | `workers/reaper_tasks.py:312–326` | `scrape_jobs` | orphan UPDATE `status=failed` | update + commit | AsyncSession | scrape_jobs-metadata — **CLOSED → META** (N single-row, sub-seam 2b) |
-| maintenance | `workers/maintenance_tasks.py:70` | MV | `REFRESH MATERIALIZED VIEW` | DDL | raw conn | maintenance-DDL |
-| maintenance | `workers/maintenance_tasks.py:130–135` | `fact_price` | `CREATE TABLE … PARTITION OF` | DDL | raw conn | maintenance-DDL |
-| pool_maintenance | `core/pool_maintenance.py:49–50` | `fact_listing`, `dim_product`, `fact_price`, `fact_review`, `fact_promo`, `fact_search_trend`, `scrape_logs`, `reject_data` | ANALYZE — no columns (`_ANALYZE_TABLES`, `pool_maintenance.py:21–30`) | DDL | AsyncSession | maintenance-DDL |
+| maintenance | `workers/maintenance_tasks.py:33–48` | `scrape_jobs` | `_has_active_scrape_job` — guard перед MV refresh | read | sync | maintenance-DDL — **AUDITED (D-A)** |
+| maintenance | `workers/maintenance_tasks.py:51–98` | MV | `_refresh_mv` / `refresh_materialized_views` — `REFRESH MATERIALIZED VIEW` | DDL | raw conn | maintenance-DDL — **AUDITED (D-A)** |
+| maintenance | `workers/maintenance_tasks.py:111–138` | `fact_price` | `ensure_fact_price_partitions` — `CREATE TABLE … PARTITION OF` + `harden_table_statements` (`supabase_security.py`) | DDL | raw conn | maintenance-DDL — **AUDITED (D-A)** |
 
 #### 0b.3 Read contacts (in)
 
@@ -526,19 +584,21 @@ DB-side: `persist/writer.py::_verify_signed_record` (`51–66`) повторно
 
 | Метка | Значение |
 |-------|----------|
-| **A** | Compliant: запись через `evaluate_ecommerce` / `evaluate_market` → `write_sync` |
-| **B** | MUST migrate: bypass — шов LAYER 2; закрыть → убрать прямой контакт |
+| **A** | Compliant: запись через дверь гейта (`evaluate_*` / `update_validator`) → `write_sync` |
+| **B** | MUST migrate: bypass; закрыть → убрать прямой контакт (или **DEFERRED** → Phase 7/8) |
+| **D-A** | Cat-4 benign maintenance: op direct + durable `api_logs` audit-mark через LOGS door |
+| **UV** | Scrape cat-1: `update_validator` allowlist + signed UPDATE/DELETE |
 | **C1** | Operational read: оркестрация, auth, dedup; гейт read пока не требуется |
 | **C2** | Analytical/export read: будущий контур `data_export` |
 | **persist** | Тупой исполнитель: только verify HMAC + verbatim INSERT/REPLACE; без бизнес-логики |
 
-**Порядок LAYER 2 (seam-clusters):** `dim_marketplace-cursors` → `scrape_jobs-metadata` → `scrape-fact_listing-denorm` → `scrape_logs-api_logs` → `dim_date-upsert` → `reject-path` (audit durability) → `users-auth` → `admin-pool-reset` → `market_data` (api_logs) → `maintenance-DDL`.
+**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + prune durable commit + seam B dead-code cleanup. **NEXT: LAYER 4** — discovery data contract, затем discovery internals. **Параллельный backlog (market-data triad):** unified provider-queue per asset class (`currency` / `crypto` / `commodities` modules), propagation `provider_source`, beat schedule для `ingest_market_data` / `ingest_commodities` (сейчас **NOT IN** `scheduler.py` — только manual `POST /markets/ingest`). **DEFERRED:** `users-auth` → Phase 7/8; reconciliation `common/currency.py` ↔ `currency` module. Admin whole-pool wipe — **REMOVED**.
 
 ---
 
 ## 8. Workers
 
-- **Beat:** `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape cron **выключен** — только manual API.  
+- **Beat:** `orphan-job-reaper` (300s), `pipeline-tick-watchdog` (60s), `ensure_fact_price_partitions` (daily 00:00), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape cron **выключен** — только manual API. **`ingest_market_data` / `ingest_commodities` — NOT IN beat** (`scheduler.py:10–31`); trigger: `POST /api/markets/ingest` (superuser) → `market_data_tasks.ingest_market_data.delay()`.  
 - **Result backend:** `None` (экономия Upstash).  
 - Задачи: scraper, `reap_orphan_jobs`, market_data, cleanup, maintenance, stubs (alerts/digests).
 
@@ -618,7 +678,6 @@ sequenceDiagram
 | `4f961a9` Structural pool gate + locale | Discovery: per-URL classify, `page_role` on insert; `trust_sample` removed; `locale_selection.py`; scrape L2 prune non-PDP; migration `028` `fact_listing.page_role`; pool UI filter `page_role=product` |
 | `f8c8439` Migration 027 asyncpg split | Один SQL statement per `op.execute()` в 027 (asyncpg deadlock safety) |
 | `ad6aa57` Remove stock tracking | Drop `in_stock`/`last_in_stock`/`fact_stock`/`scrape_logs.in_stock_found`; modules `data_firewall`/`persist`/`ingestion` без stock path |
-| `cdb8af8` Extended pool reset | `clear-pool`: TRUNCATE pool + `reject_data`, cursor wipe, MV refresh + ANALYZE |
 | `0e14ac5` Supabase security 025 | `supabase_security.py` + migration: RLS deny, revoke client roles |
 | `de8063b` data_firewall 1.2 | HMAC sign/verify boundary; `reject_data` writes on fail |
 | `f0a7118` data_firewall module | Extract gate from scraper → `data_firewall` + `persist` |
@@ -945,14 +1004,13 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 #### 2.7.5 Core (`core/`) — сокращён
 
-После Tier-1 разделения в `core/` остались только admin-stats, bootstrap, pool maintenance:
+После Tier-1 разделения в `core/` остались admin-stats, bootstrap superuser и Supabase hardening helpers:
 
 | Файл | Назначение |
 |---|---|
 | `backend/app/modules/core/__init__.py` | Пакет. |
 | `backend/app/modules/core/admin_service.py` | Сервис админ-операций (bootstrap superuser). |
-| `backend/app/modules/core/api_admin.py` | REST endpoints `/api/admin/*` (stats, claude-status, clear-pool). |
-| `backend/app/modules/core/pool_maintenance.py` | Extended blank-slate pool reset (`clear_product_pool_preserve_marketplaces`): TRUNCATE pool tables + `reject_data`, FK prep on alerts, wipe `user_products`, reset discovery cursors on `dim_marketplace`, post-wipe MV refresh + ANALYZE; HTTP 409 if scrape jobs active. |
+| `backend/app/modules/core/api_admin.py` | REST endpoints `/api/admin/*` (stats, claude-status). |
 | `backend/app/modules/core/supabase_security.py` | RLS deny + REVOKE helpers (migrations 025/027, new `fact_price` partitions). |
 
 > Вынесено в отдельные Tier-1 модули: `auth/` (бывш. `core/auth/`, `core/api_auth.py`), `users/` (бывш. `core/users/`), `telegram/` (бывш. `core/api_telegram.py`), `entitlements/` API (бывш. `core/plans/`).
@@ -1054,30 +1112,49 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 > Модуль фактически распущен. Файлы `api.py`, `models.py`, `schemas.py`, `service.py`, `tasks.py` удалены. Frontend `DigestsPage.tsx` живёт без backend-API.
 
-#### 2.7.8 Market Data (`market_data/`) — реструктурирован
+#### 2.7.8 Currency (`currency/`) — fiat scrape-path
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/market_data/api.py` | REST endpoints `/api/markets/*` (overview, ticker, history). |
-| `backend/app/modules/market_data/dto.py` | DTO-объекты. |
-| `backend/app/modules/market_data/facade.py` | Главный фасад: assembled overview/ticker/history. |
-| `backend/app/modules/market_data/fetching.py` | Координатор провайдеров (forex/crypto/commodities/fuel). |
-| `backend/app/modules/market_data/fuel.py` | Логика fuel prices (отдельная по контракту). |
-| `backend/app/modules/market_data/ingestion.py` | Запись в `fact_currency_rate` / `fact_crypto_price` / `fact_commodity_price` / `fact_fuel_price`. |
-| `backend/app/modules/market_data/reader.py` | Чтение last-known котировок из БД. |
-| `backend/app/modules/market_data/schemas.py` | Pydantic-схемы. |
-| `backend/app/modules/market_data/ticker.py` | Tickerbar payload. |
-| `backend/app/modules/market_data/providers/__init__.py` | Пакет провайдеров. |
-| `backend/app/modules/market_data/providers/base.py` | Базовый адаптер. |
-| `backend/app/modules/market_data/providers/binance_adapter.py` | Binance crypto adapter. |
-| `backend/app/modules/market_data/providers/commodities_adapter.py` | Commodities adapter. |
-| `backend/app/modules/market_data/providers/crypto_adapter.py` | Crypto adapter. |
-| `backend/app/modules/market_data/providers/forex_adapter.py` | Forex adapter. |
-| `backend/app/modules/market_data/providers/fuel_adapter.py` | Fuel prices adapter. |
+| `backend/app/modules/currency/__init__.py` | Export: `resolve_price_eur` |
+| `backend/app/modules/currency/price_eur_resolver.py` | Sync operational read `fact_currency_rate` по `(date_id, currency_code)`; source priority; **не** вызывает external HTTP |
 
-> Celery-таски market_data вынесены в `backend/app/workers/market_data_tasks.py` (см. §2.8). Удалены `aggregation.py`, `service.py`, `models.py`, `tasks.py`, `commodities_goldapi_alphavantage.py`, `init.py`.
+> Caller: `ingestion/service.py` (`build_fact_price_fields`). Display FX для UI остаётся в `common/currency.py` (см. §7.5). Планируемый подмодуль provider-queue fetch для fiat rates — **не построен** (сейчас fetch в `market_data/providers/forex_adapter.py`).
 
-#### 2.7.9 Marketplaces (`marketplaces/`)
+#### 2.7.9 Market Data (`market_data/`) — ingest + read API
+
+| Файл | Назначение |
+|---|---|
+| `backend/app/modules/market_data/api.py` | REST `/api/markets/*` (preferences, instruments, forex, crypto, commodities, fuel, ticker, ingest) |
+| `backend/app/modules/market_data/dto.py` | `NormalizedForex`, `NormalizedCrypto`, `NormalizedCommodity` (только commodity имеет `provider_source`) |
+| `backend/app/modules/market_data/facade.py` | `MarketsService` — user preferences, commodities DB shape, instrument lists |
+| `backend/app/modules/market_data/fetching.py` | Thin wrappers → unified adapters; dict shapes для `api.py` fallback и `ingestion.py` |
+| `backend/app/modules/market_data/http_config.py` | Timeout/retry из `Settings`; `with_transient_retries` (intra-provider) |
+| `backend/app/modules/market_data/fuel.py` | Read `fact_fuel_price` → legacy dict (`GET /markets/fuel`) |
+| `backend/app/modules/market_data/ingestion.py` | `IngestionService`: fetch → ingest items → `persist_*` → `evaluate_market` → `write_sync` |
+| `backend/app/modules/market_data/reader.py` | `MarketDataService` — read facts (no HTTP) |
+| `backend/app/modules/market_data/schemas.py` | Pydantic response shapes |
+| `backend/app/modules/market_data/ticker.py` | Ticker bar assembly (DB first, live fallback) |
+| `backend/app/modules/market_data/providers/base.py` | ABC: `ForexProviderAdapter`, `CryptoProviderAdapter`, `CommoditiesProviderAdapter` — each `async def fetch() -> list[Normalized*]` |
+| `backend/app/modules/market_data/providers/forex_adapter.py` | `ForexUnifiedAdapter`: configured URL → open.er-api → Frankfurter (class-level batch failover) |
+| `backend/app/modules/market_data/providers/crypto_adapter.py` | `CryptoUnifiedAdapter` → `CryptoCompositeAdapter` (Binance primary, CoinGecko if `<10` items or fail) |
+| `backend/app/modules/market_data/providers/binance_adapter.py` | Binance top-50 USDT pairs |
+| `backend/app/modules/market_data/providers/commodities_adapter.py` | `CommoditiesUnifiedAdapter`: per-instrument Gold API→Yahoo (metals), Alpha Vantage→Yahoo (energy) |
+| `backend/app/modules/market_data/providers/fuel_adapter.py` | `FuelHttpAdapter` — **stub**, 0 ingest wiring; `MARKET_DATA_FUEL_URL` |
+
+**Provider failover patterns (as-is):**
+
+| Class | Style | Success predicate |
+|-------|-------|-------------------|
+| Forex | Class-level chain | First non-empty `list[NormalizedForex]` |
+| Crypto | Class-level chain (+ composite inner) | Non-empty list; composite: `len(items) >= 10` for Binance |
+| Commodities | Per-item inside one adapter | Partial batch OK; missing symbols omitted |
+
+**Frontend consumers (2026-06):** `GET /markets/ticker`, `/preferences`, `/instruments`, `/markets/overview`, `/pool/*`; per-class `GET /forex|/crypto|/commodities|/fuel|/refresh-metadata` — **no FE client** (backend-ready).
+
+> Celery: `backend/app/workers/market_data_tasks.py` — `ingest_market_data` (`ingest_all(include_commodities=True)`), `ingest_commodities` (`ingest_commodities_only`). Удалены `modules/market_data/tasks.py`, `aggregation.py`, `service.py`, `models.py`.
+
+#### 2.7.10 Marketplaces (`marketplaces/`)
 
 | Файл | Назначение |
 |---|---|
@@ -1086,16 +1163,16 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/modules/marketplaces/schemas.py` | Pydantic-схемы. |
 | `backend/app/modules/marketplaces/service.py` | `MarketplacePoolService` — пересчёт квот, добавление маркетплейсов. |
 
-#### 2.7.10 Product Pool (`product_pool/`)
+#### 2.7.11 Product Pool (`product_pool/`)
 
 | Файл | Назначение |
 |---|---|
 | `backend/app/modules/product_pool/__init__.py` | Пакет. |
-| `backend/app/modules/product_pool/api.py` | REST endpoints `/api/products/pool/*` + `/api/markets/overview`. |
+| `backend/app/modules/product_pool/api.py` | REST `/api/pool/*` + `/api/markets/overview`. |
 | `backend/app/modules/product_pool/schemas.py` | Pydantic-схемы. |
 | `backend/app/modules/product_pool/service.py` | Бизнес-логика глобального пула товаров. |
 
-#### 2.7.11 Scraper (`scraper/`)
+#### 2.7.12 Scraper (`scraper/`)
 
 | Файл | Назначение |
 |---|---|
@@ -1120,7 +1197,7 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 > Удалён в O4c (`868251a`): `pipeline/orchestrator.py` (`FullPipelineOrchestrator`), `pipeline/discovery_phase.py` (`run_discovery_phase` + Z1 reap). Их функции забрали `tick_orchestrator.run_tick` (dispatch + reap), `discover_one_marketplace` (single-MP discovery body) и `scrape_one_marketplace` (single-MP scrape body).
 
-#### 2.7.12 User Products (`user_products/`) — пустой
+#### 2.7.13 User Products (`user_products/`) — пустой
 
 > Каталог `backend/app/modules/user_products/` существует только как `__init__.py`. Все API-файлы и сервис удалены. Frontend `MyProductsTab.tsx` остаётся видимым, но без backend-эндпоинтов.
 
@@ -1131,8 +1208,8 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/workers/__init__.py` | Пакет. |
 | `backend/app/workers/celery_app.py` | Celery application, `conf.include`, broker (Upstash Redis). |
 | `backend/app/workers/cleanup_tasks.py` | `cleanup_old_data` — retention scrape_logs/api_logs/chat/alerts. |
-| `backend/app/workers/maintenance_tasks.py` | `refresh_materialized_views`, `ensure_fact_price_partitions`. |
-| `backend/app/workers/market_data_tasks.py` | Celery: `ingest_forex_rates`, `ingest_crypto_prices`, `ingest_commodities`, `ingest_fuel_prices` (вынесено из `modules/market_data/tasks.py`). |
+| `backend/app/workers/maintenance_tasks.py` | `refresh_materialized_views` (`_has_active_scrape_job`, `_refresh_mv`), `ensure_fact_price_partitions`; Celery beat hourly/daily. |
+| `backend/app/workers/market_data_tasks.py` | Celery: `ingest_market_data` (`IngestionService.ingest_all`, commodities included), `ingest_commodities` (`ingest_commodities_only`). |
 | `backend/app/workers/reaper_tasks.py` | `reap_orphan_jobs` — внешний reaper зависших `status='running'` job'ов; `REAPER_PIPELINE_HEARTBEAT_STALE_SECONDS=600`. |
 | `backend/app/workers/scheduler.py` | Celery Beat: `orphan-job-reaper` (300s), `ensure_fact_price_partitions` (daily), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). Discovery/scrape — **manual** via API. |
 
@@ -1176,7 +1253,6 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/tests/test_data_firewall/` | data_firewall contracts, HMAC tamper, page_role blocks, reject durability, CUD primitives. |
 | `backend/tests/test_migration_027.py` | Migration 027: stock columns/table dropped. |
 | `backend/tests/test_collector_gate_and_locale.py` | Gate/locale/prune: migration 028 asyncpg scan, `select_locale_url`, discovery gate, L2 prune safety. |
-| `backend/tests/test_pool_reset_extended.py` | Extended admin clear-pool maintenance. |
 | `backend/tests/test_supabase_security.py` | supabase_security hardening statements. |
 | `backend/tests/test_market_data_fetch_consolidation.py` | Market Data: консолидация fetch. |
 | `backend/tests/test_market_data_module_baseline.py` | Market Data: baseline contract. |
@@ -1763,8 +1839,7 @@ backend/app/
 │   ├── core/                                Tier-1 admin/bootstrap (без auth/users/telegram/plans)
 │   │   ├── __init__.py
 │   │   ├── admin_service.py                 ensure_superuser bootstrap
-│   │   ├── api_admin.py                     /api/admin/* (stats, claude-status, clear-pool)
-│   │   ├── pool_maintenance.py              Extended blank-slate pool reset + MV refresh
+│   │   ├── api_admin.py                     /api/admin/* (stats, claude-status)
 │   │   └── supabase_security.py             RLS deny + revoke helpers (migrations 025/027)
 │   │
 │   ├── data_firewall/                       Tier-1 validation boundary
@@ -1874,7 +1949,7 @@ backend/app/
     ├── celery_app.py                        Celery application + conf.include
     ├── cleanup_tasks.py                     cleanup_old_data (retention)
     ├── maintenance_tasks.py                 ensure_fact_price_partitions, refresh_materialized_views
-    ├── market_data_tasks.py                 ingest_forex/crypto/commodities/fuel
+    ├── market_data_tasks.py                 ingest_market_data, ingest_commodities
     ├── reaper_tasks.py                      reap_orphan_jobs (heartbeat-aware)
     └── scheduler.py                         beat_schedule (reaper + infra periodics)
 ```

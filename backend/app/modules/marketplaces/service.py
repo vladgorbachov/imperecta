@@ -267,29 +267,3 @@ class MarketplaceService:
             raise ValueError("dim_marketplace update rejected by data firewall")
         await self.db.refresh(mp)
         return mp
-
-    async def recalculate_quotas(
-        self,
-        total_pool_size: int = DEFAULT_TOTAL_POOL_SIZE,
-    ) -> dict:
-        """Distribute product_quota equally among active marketplaces."""
-        active_count = await self.db.scalar(
-            select(func.count())
-            .select_from(DimMarketplace)
-            .where(DimMarketplace.is_active.is_(True)),
-        )
-        if not active_count:
-            return {"message": "No active marketplaces", "quota_per_marketplace": 0}
-
-        quota = total_pool_size // int(active_count)
-        await self.db.execute(
-            update(DimMarketplace)
-            .where(DimMarketplace.is_active.is_(True))
-            .values(product_quota=quota)
-        )
-        await self.db.commit()
-        return {
-            "active_marketplaces": int(active_count),
-            "quota_per_marketplace": quota,
-            "total_pool_size": total_pool_size,
-        }

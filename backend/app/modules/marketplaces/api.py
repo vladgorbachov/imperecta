@@ -129,12 +129,3 @@ async def delete_marketplace(
     if not deleted:
         raise HTTPException(status_code=404, detail="Marketplace not found")
     return {"deleted": True}
-
-
-@router.post("/recalculate-quotas")
-async def recalculate_quotas(
-    db: DbSession,
-    _current_user: CurrentSuperuser,
-) -> dict:
-    svc = MarketplaceService(db)
-    return await svc.recalculate_quotas()

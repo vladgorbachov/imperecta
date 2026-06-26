@@ -34,13 +34,12 @@ def test_telegram_module_imports_clean() -> None:
     for symbol in (
         "TelegramLinkCodeResponse",
         "TelegramUnlinkResponse",
-        "TelegramStatusResponse",
     ):
         assert hasattr(schemas, symbol), f"telegram.schemas.{symbol} missing"
 
 
-def test_telegram_router_mounts_canonical_four_routes() -> None:
-    """All four canonical routes are mounted exactly once under /api/telegram/*."""
+def test_telegram_router_mounts_canonical_three_routes() -> None:
+    """Three canonical routes are mounted exactly once under /api/telegram/*."""
     inventory = sorted(
         {
             (",".join(sorted(r.methods - {"HEAD"})), r.path)
@@ -49,7 +48,6 @@ def test_telegram_router_mounts_canonical_four_routes() -> None:
         }
     )
     assert inventory == [
-        ("GET", "/api/telegram/status"),
         ("POST", "/api/telegram/generate-link-code"),
         ("POST", "/api/telegram/unlink"),
         ("POST", "/api/telegram/webhook"),
@@ -115,12 +113,9 @@ def test_generate_link_code_handler_flushes_and_uses_alnum_code() -> None:
     )
 
 
-def test_unlink_and_status_responses_are_typed() -> None:
-    """The remaining two routes also use typed Pydantic models."""
-    from app.modules.telegram.schemas import (
-        TelegramStatusResponse,
-        TelegramUnlinkResponse,
-    )
+def test_unlink_response_is_typed() -> None:
+    """Unlink route uses a typed Pydantic model."""
+    from app.modules.telegram.schemas import TelegramUnlinkResponse
 
     routes = {
         r.path: r
@@ -128,7 +123,11 @@ def test_unlink_and_status_responses_are_typed() -> None:
         if isinstance(r, APIRoute) and r.path.startswith("/api/telegram/")
     }
     assert routes["/api/telegram/unlink"].response_model is TelegramUnlinkResponse
-    assert routes["/api/telegram/status"].response_model is TelegramStatusResponse
+
+
+def test_telegram_status_route_removed() -> None:
+    paths = {r.path for r in app.routes if isinstance(r, APIRoute)}
+    assert "/api/telegram/status" not in paths
 
 
 # ---------------------------------------------------------------------------
@@ -194,11 +193,10 @@ def test_core_api_telegram_legacy_path_unimportable() -> None:
 
 
 def test_core_admin_cluster_still_imports() -> None:
-    """Phase 5 admin cluster (api_admin/admin_service/pool_maintenance) lives on."""
+    """Phase 5 admin cluster (api_admin/admin_service) lives on."""
     for mod in (
         "app.modules.core.api_admin",
         "app.modules.core.admin_service",
-        "app.modules.core.pool_maintenance",
     ):
         assert importlib.import_module(mod) is not None
 
@@ -213,7 +211,7 @@ def test_core_directory_only_holds_admin_phase5_residue() -> None:
         "__init__.py",
         "api_admin.py",
         "admin_service.py",
-        "pool_maintenance.py",
+        "supabase_security.py",
     }, f"core/ residue drifted: {actual}"
 
 

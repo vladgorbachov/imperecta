@@ -17,9 +17,7 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
     """Non-superuser cannot access parsing admin endpoints."""
     paths = [
         ("GET", "/api/admin/parsing/test-marketplaces"),
-        ("POST", "/api/admin/parsing/run-full-test"),
         ("POST", "/api/admin/parsing/run-pipeline"),
-        ("GET", "/api/admin/parsing/test-runs"),
         ("GET", "/api/admin/parsing/pipeline-runs"),
         ("POST", "/api/admin/parsing/cancel-active-job"),
         ("GET", "/api/admin/parsing/job-status/00000000-0000-0000-0000-000000000001"),
@@ -33,7 +31,6 @@ async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_h
         ("GET", "/api/admin/parsing/marketplaces-detailed"),
         ("GET", "/api/admin/parsing/job-live-feed/00000000-0000-0000-0000-000000000001"),
         ("GET", "/api/admin/parsing/active-job"),
-        ("GET", "/api/admin/parsing/pipeline-status"),
     ]
     for method, path in paths:
         if method == "GET":
@@ -88,7 +85,7 @@ async def test_parsing_admin_get_users_and_marketplaces_detailed(client, superus
 
 
 @pytest.mark.asyncio
-async def test_parsing_admin_run_full_test_and_poll_status(client, superuser_headers, monkeypatch):
+async def test_parsing_admin_run_pipeline_and_poll_status(client, superuser_headers, monkeypatch):
     """Run endpoint returns job identifiers and status endpoint supports polling contract."""
 
     class DummyAsyncResult:
@@ -100,7 +97,7 @@ async def test_parsing_admin_run_full_test_and_poll_status(client, superuser_hea
         lambda *_args, **_kwargs: DummyAsyncResult(),
     )
 
-    run_resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
+    run_resp = await client.post("/api/admin/parsing/run-pipeline", headers=superuser_headers)
     assert run_resp.status_code == 200
     created = run_resp.json()
     assert "job_id" in created
@@ -123,9 +120,13 @@ async def test_parsing_admin_run_full_test_and_poll_status(client, superuser_hea
 
 
 @pytest.mark.asyncio
-async def test_parsing_admin_run_full_test_auto_repairs_constraint(client, superuser_headers):
-    """run-full-test creates a job even when DB initially has stale job_type constraint."""
-    resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
+async def test_parsing_admin_run_pipeline_auto_repairs_constraint(client, superuser_headers, monkeypatch):
+    """run-pipeline creates a job even when DB initially has stale job_type constraint."""
+    monkeypatch.setattr(
+        "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
+        lambda *_args, **_kwargs: type("R", (), {"id": "x"})(),
+    )
+    resp = await client.post("/api/admin/parsing/run-pipeline", headers=superuser_headers)
     assert resp.status_code == 200
     payload = resp.json()
     assert payload.get("job_id")
@@ -133,7 +134,7 @@ async def test_parsing_admin_run_full_test_auto_repairs_constraint(client, super
 
 
 @pytest.mark.asyncio
-async def test_parsing_admin_test_runs_with_limit_and_contract(client, superuser_headers, monkeypatch):
+async def test_parsing_admin_pipeline_runs_with_limit_and_contract(client, superuser_headers, monkeypatch):
     """History endpoint returns expected fields and obeys limit query."""
     class DummyAsyncResult:
         id = "celery-test-id"
@@ -143,12 +144,12 @@ async def test_parsing_admin_test_runs_with_limit_and_contract(client, superuser
         "app.modules.admin.api_parsing.orchestrator_tick.apply_async",
         lambda *_args, **_kwargs: DummyAsyncResult(),
     )
-    run_resp = await client.post("/api/admin/parsing/run-full-test", headers=superuser_headers)
+    run_resp = await client.post("/api/admin/parsing/run-pipeline", headers=superuser_headers)
     assert run_resp.status_code == 200
     job_id = run_resp.json()["job_id"]
 
     list_resp = await client.get(
-        "/api/admin/parsing/test-runs",
+        "/api/admin/parsing/pipeline-runs",
         headers=superuser_headers,
         params={"limit": 1},
     )
@@ -182,10 +183,10 @@ async def test_parsing_admin_job_status_validation(client, superuser_headers):
 
 
 @pytest.mark.asyncio
-async def test_parsing_admin_test_runs_limit_validation(client, superuser_headers):
+async def test_parsing_admin_pipeline_runs_limit_validation(client, superuser_headers):
     """History endpoint validates limit bounds."""
     resp = await client.get(
-        "/api/admin/parsing/test-runs",
+        "/api/admin/parsing/pipeline-runs",
         headers=superuser_headers,
         params={"limit": 0},
     )
@@ -228,29 +229,15 @@ async def test_enqueue_dispatches_tick(client, superuser_headers, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pipeline_status_route_requires_superuser_and_returns_contract(
-    client, superuser_headers
-):
-    """GET /pipeline-status: superuser only, flat object with the frontend contract."""
-    resp = await client.get(
-        "/api/admin/parsing/pipeline-status",
-        headers=superuser_headers,
-    )
-    assert resp.status_code == 200
-    payload = resp.json()
-    assert isinstance(payload, dict)
-    assert "active_job" not in payload  # flat object, not wrapped
-    expected_keys = {
-        "job_id",
-        "status",
-        "current_stage",
-        "started_at",
-        "completed_at",
-        "duration_seconds",
-        "metadata",
-        "discovery",
-    }
-    assert expected_keys.issubset(payload.keys())
-    assert payload["status"] in {"idle", "running", "completed", "failed"}
-    assert isinstance(payload["discovery"], dict)
-    assert set(payload["discovery"].keys()) == {"done", "total", "current_domain"}
+async def test_removed_parsing_routes_not_registered(client, superuser_headers):
+    """Legacy parsing admin routes removed (run-pipeline / pipeline-runs remain)."""
+    for method, path in (
+        ("POST", "/api/admin/parsing/run-full-test"),
+        ("GET", "/api/admin/parsing/test-runs"),
+        ("GET", "/api/admin/parsing/pipeline-status"),
+    ):
+        if method == "POST":
+            resp = await client.post(path, headers=superuser_headers)
+        else:
+            resp = await client.get(path, headers=superuser_headers)
+        assert resp.status_code == 404

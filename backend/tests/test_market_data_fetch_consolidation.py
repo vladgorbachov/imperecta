@@ -96,6 +96,7 @@ def _crypto_dtos() -> list[NormalizedCrypto]:
             change_24h=1.234,
             market_cap=Decimal("1300000000000"),
             refreshed_at=_ts(),
+            provider_source="binance",
         ),
         NormalizedCrypto(
             symbol="ETH",
@@ -103,6 +104,7 @@ def _crypto_dtos() -> list[NormalizedCrypto]:
             change_24h=None,
             market_cap=None,
             refreshed_at=_ts(),
+            provider_source="binance",
         ),
     ]
 
@@ -146,7 +148,7 @@ async def test_fetch_forex_uses_provider_no_cache(monkeypatch: pytest.MonkeyPatc
     assert pairs == sorted(pairs), "Pairs must be sorted ascending"
     assert all(row["pair"].startswith("EUR/") for row in first)
     sample = first[0]
-    assert set(sample.keys()) == {"pair", "rate", "change_24h"}
+    assert set(sample.keys()) == {"pair", "rate", "change_24h", "provider_source"}
 
 
 @pytest.mark.asyncio
@@ -179,6 +181,7 @@ async def test_fetch_crypto_second_bool_always_false(monkeypatch: pytest.MonkeyP
     assert [row["symbol"] for row in items_one] == ["BTC", "ETH"]
     assert items_one[0]["price"] == 65000.5
     assert items_one[0]["change_24h"] == 1.23
+    assert items_one[0]["provider_source"] == "binance"
     assert items_two == items_one
 
 

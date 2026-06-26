@@ -9,7 +9,6 @@ from app.modules.product_pool.schemas import (
     PoolCategoryItem,
     PoolCategorySummary,
     PoolProductsResponse,
-    PoolSearchResponse,
     PoolStatsResponse,
 )
 from app.modules.product_pool.service import ProductPoolService
@@ -111,18 +110,3 @@ async def pool_stats(current_user: CurrentUser, db: DbSession) -> PoolStatsRespo
     payload = await service.get_pool_stats()
     return PoolStatsResponse(**payload)
 
-
-@router.get("/search", response_model=PoolSearchResponse)
-async def search_pool(
-    current_user: CurrentUser,
-    db: DbSession,
-    q: str = Query(..., min_length=2),
-    limit: int = Query(50, ge=1, le=200),
-) -> PoolSearchResponse:
-    service = ProductPoolService(db)
-    items = await service.search_products(
-        query=q,
-        limit=limit,
-        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
-    )
-    return PoolSearchResponse(items=items, total=len(items))

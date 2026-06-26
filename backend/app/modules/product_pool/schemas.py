@@ -96,10 +96,3 @@ class PoolCategorySummary(BaseModel):
     country_code: str | None = None
     product_count: int
     avg_price: float | None = None
-
-
-class PoolSearchResponse(BaseModel):
-    """Typed envelope for /pool/search."""
-
-    items: list[PoolProductItem]
-    total: int

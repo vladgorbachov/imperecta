@@ -25,16 +25,11 @@ type TickerItemData = {
 export function formatTickerValue(item: TickerItemData, locale: string): string {
   const sym = item.symbol ?? "";
   const isForex = sym.includes("/");
-  const isFuel = /gasoline|diesel|lpg|petrol|fuel/i.test(sym);
 
   if (isForex) {
     const quote = sym.split("/")[1] ?? "";
     const decimals = ["USD", "GBP", "CHF", "JPY"].includes(quote) ? 4 : 2;
     return safeFixed(item.price, decimals);
-  }
-  if (isFuel) {
-    const cur = item.currency ?? "";
-    return `${safeFixed(item.price, 1)} ${cur}/L`;
   }
   const normalizedCurrency = (item.currency ?? "").trim().toUpperCase();
   if (!normalizedCurrency) {

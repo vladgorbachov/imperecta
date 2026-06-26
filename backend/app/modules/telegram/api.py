@@ -27,7 +27,6 @@ from app.models.core import User
 from app.modules.alerts.notifications import NotificationMessage, TelegramChannel
 from app.modules.telegram.schemas import (
     TelegramLinkCodeResponse,
-    TelegramStatusResponse,
     TelegramUnlinkResponse,
 )
 
@@ -173,12 +172,3 @@ async def unlink_telegram(
     await db.flush()
     return TelegramUnlinkResponse(unlinked=True)
 
-
-@router.get("/status", response_model=TelegramStatusResponse)
-async def telegram_status(
-    current_user: User = Depends(get_current_user),
-) -> TelegramStatusResponse:
-    return TelegramStatusResponse(
-        linked=current_user.telegram_chat_id is not None,
-        chat_id=current_user.telegram_chat_id,
-    )

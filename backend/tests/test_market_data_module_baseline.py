@@ -21,11 +21,6 @@ PROVIDERS_DIR = Path(providers_pkg.__path__[0])
 EXPECTED_ROUTES: set[str] = {
     "/markets/preferences",
     "/markets/instruments",
-    "/markets/refresh-metadata",
-    "/markets/forex",
-    "/markets/crypto",
-    "/markets/commodities",
-    "/markets/fuel",
     "/markets/ticker",
     "/markets/ingest",
 }
@@ -39,7 +34,6 @@ def test_market_data_imports_clean() -> None:
         "app.modules.market_data.facade",
         "app.modules.market_data.fetching",
         "app.modules.market_data.ticker",
-        "app.modules.market_data.fuel",
         "app.modules.market_data.ingestion",
         "app.modules.market_data.dto",
         "app.modules.market_data.schemas",
@@ -49,7 +43,6 @@ def test_market_data_imports_clean() -> None:
         "app.modules.market_data.providers.commodities_adapter",
         "app.modules.market_data.providers.crypto_adapter",
         "app.modules.market_data.providers.forex_adapter",
-        "app.modules.market_data.providers.fuel_adapter",
     ]
     for module_path in surviving_modules:
         importlib.import_module(module_path)
@@ -90,6 +83,8 @@ def test_no_provider_imports_service() -> None:
         ),
         ("app.modules.market_data.service", "MarketDataService"),
         ("app.modules.market_data.tasks", "ingest_market_data"),
+        ("app.modules.market_data.fuel", "get_fuel_prices"),
+        ("app.modules.market_data.providers.fuel_adapter", "FuelHttpAdapter"),
     ],
 )
 def test_removed_modules_gone(module_path: str, symbol: str) -> None:
@@ -151,7 +146,6 @@ def test_providers_package_discovery_does_not_break() -> None:
         "commodities_adapter",
         "crypto_adapter",
         "forex_adapter",
-        "fuel_adapter",
     }
     missing = expected_subset - found
     assert not missing, f"Provider modules missing after refactor: {missing}"

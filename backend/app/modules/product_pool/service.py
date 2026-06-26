@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.currency import (
+from app.modules.currency import (
     DISPLAY_LOCAL,
     CurrencyConverter,
     compute_display_fields_for_marketplace,
@@ -371,23 +371,6 @@ class ProductPoolService:
             "listings_with_price": int(listings_with_price or 0),
             "last_updated": last_updated,
         }
-
-    async def search_products(
-        self,
-        query: str,
-        limit: int = 50,
-        *,
-        include_blocked_countries: bool = False,
-    ) -> list[dict]:
-        """Search pool by product title."""
-        items, _total = await self.list_products(
-            sort=_SORT_RECENT,
-            search=query,
-            limit=limit,
-            offset=0,
-            include_blocked_countries=include_blocked_countries,
-        )
-        return items
 
 
 def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:

@@ -314,10 +314,13 @@ class IngestionService:
                 data.currency,
             ):
                 now = datetime.now(tz=timezone.utc)
+                normalized_currency = (
+                    persist_fields["currency_code"] if persist_fields else None
+                )
                 denorm_delta = {
                     "last_checked_at": now,
                     "last_price": data.price,
-                    "last_currency_code": data.currency if data.currency else None,
+                    "last_currency_code": normalized_currency,
                     "last_price_eur": scrape_price_eur,
                 }
                 denorm_fields = build_listing_update_fields(

@@ -5,18 +5,17 @@ from __future__ import annotations
 import uuid
 from datetime import timezone
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import select, text
 
-from app.models.app_tables import ScrapeLog
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _today_date_id
-from fixtures.scraper_fixtures import _fake_run_coro, _seed_listing, pg_session
+from fixtures.scraper_fixtures import _fake_run_coro, _seed_listing, patch_resolve_price_eur_for_unit, pg_session
 
 
 def _patch_commit_flush(session) -> None:
@@ -80,7 +79,8 @@ def _build_mock_scrape_session(
 
 
 def test_scrape_product_full_success(monkeypatch):
-    """Successful scrape: clears legacy errors, writes FactPrice, updates product name."""
+    """Successful scrape: clears legacy errors, gate-writes FactPrice, enriches product name."""
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
@@ -112,12 +112,15 @@ def test_scrape_product_full_success(monkeypatch):
     assert res.success is True
     assert listing.last_error is None
     assert listing.consecutive_errors == 0
+    assert listing.last_price == pytest.approx(19.99)
+    assert listing.last_currency_code == "USD"
+    assert product.name == "Widget A"
+    assert res.log_status == "success"
 
     added = [c.args[0] for c in session.add.call_args_list]
     assert any(isinstance(x, FactPrice) for x in added)
     fp = next(x for x in added if isinstance(x, FactPrice))
     assert float(fp.price) == pytest.approx(19.99)
-    assert product.name == "Widget A"
     assert session.commit.called
 
 
@@ -146,18 +149,24 @@ def test_scrape_product_price_not_found_partial(monkeypatch):
     )
     pool = MagicMock(spec=ScraperPool)
     svc = GlobalScrapeService(session, pool)
-    res = svc.scrape_product(listing_id)
+    with patch(
+        "app.modules.scraper.service.persist_logs_batch",
+        return_value=MagicMock(ok=True),
+    ) as mock_logs:
+        res = svc.scrape_product(listing_id)
     assert res.success is False
     assert listing.last_error == "price_not_found"
     assert listing.consecutive_errors == 1
     added = [c.args[0] for c in session.add.call_args_list]
     assert not any(isinstance(x, FactPrice) for x in added)
-    slog = next(x for x in added if isinstance(x, ScrapeLog))
-    assert slog.status == "price_not_found"
+    mock_logs.assert_called_once()
+    log_rows = mock_logs.call_args.kwargs.get("rows") or mock_logs.call_args.args[2]
+    assert log_rows[0]["status"] == "price_not_found"
 
 
 def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
-    """Only title (no product_name field): FactPrice + dim_product.name from title."""
+    """Only title (no product_name field): gate FactPrice + dim_product.name from title."""
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
@@ -228,6 +237,7 @@ def test_today_date_id_deadlock_safe():
 
 def test_fact_price_written_only_when_all_required_fields(monkeypatch):
     """Gate: name (or title), positive price, currency — otherwise no FactPrice row."""
+    patch_resolve_price_eur_for_unit(monkeypatch)
     monkeypatch.setattr(
         "app.modules.scraper.service._today_date_id",
         lambda _db: 20260401,

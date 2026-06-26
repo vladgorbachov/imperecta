@@ -66,6 +66,7 @@ class BinanceCryptoAdapter(CryptoProviderAdapter):
                         change_24h=change_24h,
                         market_cap=None,
                         refreshed_at=refreshed_at,
+                        provider_source="binance",
                     )
                 )
             except Exception as error:

@@ -58,6 +58,7 @@ def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
 
 
 def test_supported_write_operations_matrix() -> None:
+    assert SUPPORTED_WRITE_OPERATIONS["dim_date"] == frozenset({"insert"})
     assert SUPPORTED_WRITE_OPERATIONS["scrape_jobs"] == frozenset({"insert", "update", "delete"})
     assert SUPPORTED_WRITE_OPERATIONS["dim_marketplace"] == frozenset({"insert", "update", "delete"})
     assert SUPPORTED_WRITE_OPERATIONS["fact_listing"] == frozenset({"insert", "update", "delete"})

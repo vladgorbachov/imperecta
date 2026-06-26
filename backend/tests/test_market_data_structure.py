@@ -2,13 +2,13 @@
 M3a structure tests for the market_data module.
 
 Verifies the post-split layout: service.py is retired, every former public
-symbol lives in exactly one new file (reader / facade / fetching / ticker /
-fuel), the api.py route set is unchanged, ticker live-fallback mirrors the
-DB path (exactly-saved favorites, derive_forex_pairs, no fuel), and ingestion
-still reaches fetching.*.
+symbol lives in exactly one new file (reader / facade / fetching / ticker),
+the api.py route set, ticker live-fallback mirrors the DB path
+(exactly-saved favorites, derive_forex_pairs), and ingestion still reaches
+fetching.*.
 
 After TICKER-FIX-B the live-fallback branch mirrors reader.get_ticker parity
-(exactly-saved favorites, no slice caps, no fuel, forex via derive_forex_pairs).
+(exactly-saved favorites, no slice caps, forex via derive_forex_pairs).
 """
 
 import importlib
@@ -27,9 +27,6 @@ from app.modules.market_data import (
     fetching as fetching_mod,
 )
 from app.modules.market_data import (
-    fuel as fuel_mod,
-)
-from app.modules.market_data import (
     reader as reader_mod,
 )
 from app.modules.market_data import (
@@ -41,7 +38,6 @@ from app.modules.market_data.fetching import (
     fetch_crypto_prices,
     fetch_forex_rates,
 )
-from app.modules.market_data.fuel import get_fuel_prices
 from app.modules.market_data.ingestion import IngestionService
 from app.modules.market_data.reader import MarketDataService
 from app.modules.market_data.ticker import get_ticker_data
@@ -49,11 +45,6 @@ from app.modules.market_data.ticker import get_ticker_data
 EXPECTED_MARKETS_ROUTES: set[str] = {
     "/markets/preferences",
     "/markets/instruments",
-    "/markets/refresh-metadata",
-    "/markets/forex",
-    "/markets/crypto",
-    "/markets/commodities",
-    "/markets/fuel",
     "/markets/ticker",
     "/markets/ingest",
 }
@@ -73,7 +64,6 @@ def test_symbols_relocated_to_new_homes() -> None:
     assert fetching_mod.fetch_crypto_prices is fetch_crypto_prices
     assert fetching_mod.fetch_commodities is fetch_commodities
     assert ticker_mod.get_ticker_data is get_ticker_data
-    assert fuel_mod.get_fuel_prices is get_fuel_prices
 
 
 @pytest.mark.parametrize(
@@ -85,7 +75,6 @@ def test_symbols_relocated_to_new_homes() -> None:
         (fetch_crypto_prices, "app.modules.market_data.fetching"),
         (fetch_commodities, "app.modules.market_data.fetching"),
         (get_ticker_data, "app.modules.market_data.ticker"),
-        (get_fuel_prices, "app.modules.market_data.fuel"),
     ],
 )
 def test_each_symbol_defined_in_its_canonical_file(symbol, expected_module: str) -> None:
@@ -105,13 +94,15 @@ def test_routes_unchanged_markets() -> None:
     )
 
 
-def test_currency_module_imports_from_fetching() -> None:
-    """common.currency must reach fetch_forex_rates via the new fetching path."""
-    from app.common import currency
+def test_currency_module_imports_from_forex_fetch() -> None:
+    """display_converter live path must use currency.forex_fetch, not market_data directly."""
+    from app.modules.currency import display_converter
 
-    assert "from app.modules.market_data.fetching import fetch_forex_rates" in (
-        importlib.import_module(currency.__name__).__loader__.get_source(currency.__name__) or ""
-    )
+    source = importlib.import_module(display_converter.__name__).__loader__.get_source(
+        display_converter.__name__,
+    ) or ""
+    assert "from app.modules.currency.forex_fetch import fetch_eur_base_pairs" in source
+    assert "from app.modules.market_data.fetching import fetch_forex_rates" not in source
 
 
 @pytest.mark.asyncio

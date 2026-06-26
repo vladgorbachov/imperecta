@@ -1,4 +1,4 @@
-"""Unified commodities provider (Gold API + Alpha Vantage/Yahoo fallback)."""
+"""Unified commodities provider (Gold API + Alpha Vantage + Yahoo gap-fill queue)."""
 
 import logging
 from datetime import datetime, timezone
@@ -12,14 +12,18 @@ from app.modules.market_data.http_config import (
     DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
     with_transient_retries,
 )
+from app.modules.market_data.provider_queue import gap_fill_fetch
 from app.modules.market_data.providers.base import CommoditiesProviderAdapter
 
 logger = logging.getLogger(__name__)
 
-
 GOLD_API_DEFAULT_BASE_URL = "https://api.gold-api.com/price"
 ALPHA_VANTAGE_QUERY_URL = "https://www.alphavantage.co/query"
 YAHOO_CHART_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+
+COMMODITY_PROVIDER_GOLDAPI = "goldapi"
+COMMODITY_PROVIDER_ALPHA_VANTAGE = "alpha_vantage"
+COMMODITY_PROVIDER_YAHOO = "yahoo"
 
 METAL_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("XAU", "Gold", "oz"),
@@ -28,7 +32,6 @@ METAL_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("XPD", "Palladium", "oz"),
 )
 
-# Internal commodity symbol -> Yahoo Finance futures ticker (symbol mapping only).
 METAL_YAHOO_SYMBOLS: dict[str, str] = {
     "XAU": "GC=F",
     "XAG": "SI=F",
@@ -41,7 +44,29 @@ ENERGY_ITEMS: tuple[tuple[str, str, str, str], ...] = (
     ("BRENT", "Crude Oil (Brent)", "bbl", "BZ=F"),
 )
 
+METAL_SYMBOL_SET = frozenset(symbol for symbol, _, _ in METAL_ITEMS)
+ENERGY_SYMBOL_SET = frozenset(symbol for symbol, _, _, _ in ENERGY_ITEMS)
+
+_COMMODITY_CATALOG: dict[str, dict[str, str | None]] = {}
+for _symbol, _name, _unit in METAL_ITEMS:
+    _COMMODITY_CATALOG[_symbol] = {
+        "name": _name,
+        "unit": _unit,
+        "yahoo_symbol": METAL_YAHOO_SYMBOLS.get(_symbol),
+    }
+for _symbol, _name, _unit, _yahoo in ENERGY_ITEMS:
+    _COMMODITY_CATALOG[_symbol] = {
+        "name": _name,
+        "unit": _unit,
+        "yahoo_symbol": _yahoo,
+    }
+
 _COMMODITY_PRICE_QUANT = Decimal("0.0001")
+
+
+def commodity_catalog_symbols() -> frozenset[str]:
+    """Fixed ingest/UI catalog: metals + energy symbols."""
+    return METAL_SYMBOL_SET | ENERGY_SYMBOL_SET
 
 
 def _quantize_commodity_price(price: Decimal) -> Decimal:
@@ -49,96 +74,33 @@ def _quantize_commodity_price(price: Decimal) -> Decimal:
     return price.quantize(_COMMODITY_PRICE_QUANT, rounding=ROUND_HALF_UP)
 
 
-class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
-    """
-    Unified commodities adapter aligned with Chrome extension data flow:
-    - metals: Gold API, fallback to Yahoo Finance futures chart (GC=F, SI=F, …)
-    - energy: Alpha Vantage, fallback to Yahoo Finance chart endpoint
-    """
+class _CommodityFetchEngine:
+    """Shared HTTP fetch helpers for queue-backed commodity providers."""
 
     def __init__(
         self,
-        base_url: str | None = None,
-        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
-        retry_attempts: int = 0,
-    ):
-        settings = Settings()
-        configured_base = (base_url or settings.market_data_commodities_url or "").strip()
-        self.base_url = configured_base or GOLD_API_DEFAULT_BASE_URL
-        self.gold_api_key = (settings.goldapi_key or "").strip()
-        self.alpha_vantage_key = (settings.alpha_vantage_key or "").strip()
+        *,
+        base_url: str,
+        gold_api_key: str,
+        alpha_vantage_key: str,
+        timeout: float,
+        retry_attempts: int,
+        refreshed_at: datetime,
+    ) -> None:
+        self.base_url = base_url
+        self.gold_api_key = gold_api_key
+        self.alpha_vantage_key = alpha_vantage_key
         self.timeout = timeout
         self._retry_attempts = retry_attempts
+        self.refreshed_at = refreshed_at
 
-    async def fetch(self) -> list[NormalizedCommodity]:
-        """Fetch commodities from unified source chain."""
-        refreshed_at = datetime.now(timezone.utc)
-        items: list[NormalizedCommodity] = []
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for symbol, name, unit in METAL_ITEMS:
-                item = await self._fetch_metal(
-                    client, symbol=symbol, name=name, unit=unit, refreshed_at=refreshed_at
-                )
-                if item is not None:
-                    items.append(item)
-
-            for symbol, name, unit, yahoo_symbol in ENERGY_ITEMS:
-                item = await self._fetch_energy(
-                    client,
-                    symbol=symbol,
-                    name=name,
-                    unit=unit,
-                    yahoo_symbol=yahoo_symbol,
-                    refreshed_at=refreshed_at,
-                )
-                if item is not None:
-                    items.append(item)
-
-        logger.info("Commodities adapter fetched %d items", len(items))
-        return items
-
-    async def _fetch_metal(
+    async def fetch_metal_from_gold_api(
         self,
         client: httpx.AsyncClient,
         *,
         symbol: str,
         name: str,
         unit: str,
-        refreshed_at: datetime,
-    ) -> NormalizedCommodity | None:
-        """Gold API primary; Yahoo metals futures chart fallback (per metal)."""
-        gold_item = await self._fetch_metal_from_gold_api(
-            client, symbol=symbol, name=name, unit=unit, refreshed_at=refreshed_at
-        )
-        if gold_item is not None:
-            return gold_item
-
-        yahoo_symbol = METAL_YAHOO_SYMBOLS.get(symbol)
-        if yahoo_symbol is None:
-            return None
-
-        logger.info(
-            "Gold API unavailable for %s; falling back to Yahoo %s",
-            symbol,
-            yahoo_symbol,
-        )
-        return await self._fetch_from_yahoo_chart(
-            client,
-            symbol=symbol,
-            name=name,
-            unit=unit,
-            yahoo_symbol=yahoo_symbol,
-            refreshed_at=refreshed_at,
-        )
-
-    async def _fetch_metal_from_gold_api(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        symbol: str,
-        name: str,
-        unit: str,
-        refreshed_at: datetime,
     ) -> NormalizedCommodity | None:
         url = f"{self.base_url.rstrip('/')}/{symbol}"
         headers: dict[str, str] = {}
@@ -161,8 +123,8 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 price=price,
                 change_24h=change_24h,
                 unit=unit,
-                refreshed_at=refreshed_at,
-                provider_source="goldapi",
+                refreshed_at=self.refreshed_at,
+                provider_source=COMMODITY_PROVIDER_GOLDAPI,
             )
 
         try:
@@ -175,42 +137,13 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
             logger.warning("Gold API fetch failed for %s: %s", symbol, error)
             return None
 
-    async def _fetch_energy(
+    async def fetch_energy_from_alpha_vantage(
         self,
         client: httpx.AsyncClient,
         *,
         symbol: str,
         name: str,
         unit: str,
-        yahoo_symbol: str,
-        refreshed_at: datetime,
-    ) -> NormalizedCommodity | None:
-        alpha_item = await self._fetch_energy_from_alpha_vantage(
-            client,
-            symbol=symbol,
-            name=name,
-            unit=unit,
-            refreshed_at=refreshed_at,
-        )
-        if alpha_item is not None:
-            return alpha_item
-        return await self._fetch_from_yahoo_chart(
-            client,
-            symbol=symbol,
-            name=name,
-            unit=unit,
-            yahoo_symbol=yahoo_symbol,
-            refreshed_at=refreshed_at,
-        )
-
-    async def _fetch_energy_from_alpha_vantage(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        symbol: str,
-        name: str,
-        unit: str,
-        refreshed_at: datetime,
     ) -> NormalizedCommodity | None:
         if not self.alpha_vantage_key:
             return None
@@ -242,8 +175,8 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 price=latest,
                 change_24h=change_24h,
                 unit=unit,
-                refreshed_at=refreshed_at,
-                provider_source="alpha_vantage",
+                refreshed_at=self.refreshed_at,
+                provider_source=COMMODITY_PROVIDER_ALPHA_VANTAGE,
             )
 
         try:
@@ -255,7 +188,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         except Exception:
             return None
 
-    async def _fetch_from_yahoo_chart(
+    async def fetch_from_yahoo_chart(
         self,
         client: httpx.AsyncClient,
         *,
@@ -263,10 +196,7 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
         name: str,
         unit: str,
         yahoo_symbol: str,
-        refreshed_at: datetime,
     ) -> NormalizedCommodity | None:
-        """Yahoo Finance v8 chart endpoint (shared by metals and energy fallbacks)."""
-
         async def _request() -> NormalizedCommodity:
             response = await client.get(
                 f"{YAHOO_CHART_BASE_URL.rstrip('/')}/{yahoo_symbol}",
@@ -295,8 +225,8 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 price=latest,
                 change_24h=change_24h,
                 unit=unit,
-                refreshed_at=refreshed_at,
-                provider_source="yahoo",
+                refreshed_at=self.refreshed_at,
+                provider_source=COMMODITY_PROVIDER_YAHOO,
             )
 
         try:
@@ -313,3 +243,183 @@ class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
                 error,
             )
             return None
+
+
+class _QueuedGoldApiProvider:
+    """Gold API queue provider for catalog metals."""
+
+    def __init__(self, engine: _CommodityFetchEngine) -> None:
+        self._engine = engine
+
+    @property
+    def provider_source(self) -> str:
+        return COMMODITY_PROVIDER_GOLDAPI
+
+    async def fetch_instruments(self, requested: frozenset[str]) -> dict[str, NormalizedCommodity]:
+        targets = requested & METAL_SYMBOL_SET
+        if not targets:
+            return {}
+        out: dict[str, NormalizedCommodity] = {}
+        async with httpx.AsyncClient(timeout=self._engine.timeout) as client:
+            for symbol in sorted(targets):
+                meta = _COMMODITY_CATALOG[symbol]
+                item = await self._engine.fetch_metal_from_gold_api(
+                    client,
+                    symbol=symbol,
+                    name=str(meta["name"]),
+                    unit=str(meta["unit"]),
+                )
+                if item is not None:
+                    out[symbol] = item
+        return out
+
+
+class _QueuedAlphaVantageProvider:
+    """Alpha Vantage queue provider for catalog energy symbols."""
+
+    def __init__(self, engine: _CommodityFetchEngine) -> None:
+        self._engine = engine
+
+    @property
+    def provider_source(self) -> str:
+        return COMMODITY_PROVIDER_ALPHA_VANTAGE
+
+    async def fetch_instruments(self, requested: frozenset[str]) -> dict[str, NormalizedCommodity]:
+        targets = requested & ENERGY_SYMBOL_SET
+        if not targets:
+            return {}
+        out: dict[str, NormalizedCommodity] = {}
+        async with httpx.AsyncClient(timeout=self._engine.timeout) as client:
+            for symbol in sorted(targets):
+                meta = _COMMODITY_CATALOG[symbol]
+                item = await self._engine.fetch_energy_from_alpha_vantage(
+                    client,
+                    symbol=symbol,
+                    name=str(meta["name"]),
+                    unit=str(meta["unit"]),
+                )
+                if item is not None:
+                    out[symbol] = item
+        return out
+
+
+class _QueuedYahooProvider:
+    """Yahoo chart queue provider for catalog symbols with futures tickers."""
+
+    def __init__(self, engine: _CommodityFetchEngine) -> None:
+        self._engine = engine
+
+    @property
+    def provider_source(self) -> str:
+        return COMMODITY_PROVIDER_YAHOO
+
+    async def fetch_instruments(self, requested: frozenset[str]) -> dict[str, NormalizedCommodity]:
+        out: dict[str, NormalizedCommodity] = {}
+        async with httpx.AsyncClient(timeout=self._engine.timeout) as client:
+            for symbol in sorted(requested):
+                meta = _COMMODITY_CATALOG.get(symbol)
+                yahoo_symbol = meta.get("yahoo_symbol") if meta else None
+                if not yahoo_symbol:
+                    continue
+                item = await self._engine.fetch_from_yahoo_chart(
+                    client,
+                    symbol=symbol,
+                    name=str(meta["name"]),
+                    unit=str(meta["unit"]),
+                    yahoo_symbol=str(yahoo_symbol),
+                )
+                if item is not None:
+                    out[symbol] = item
+        return out
+
+
+def build_commodities_queue_providers(
+    *,
+    engine: _CommodityFetchEngine,
+) -> list[_QueuedGoldApiProvider | _QueuedAlphaVantageProvider | _QueuedYahooProvider]:
+    """Queue order: Gold API metals, Alpha Vantage energy, Yahoo gap-fill."""
+    return [
+        _QueuedGoldApiProvider(engine),
+        _QueuedAlphaVantageProvider(engine),
+        _QueuedYahooProvider(engine),
+    ]
+
+
+def _build_fetch_engine(
+    *,
+    base_url: str | None,
+    timeout: float,
+    retry_attempts: int,
+    refreshed_at: datetime,
+) -> _CommodityFetchEngine:
+    settings = Settings()
+    configured_base = (base_url or settings.market_data_commodities_url or "").strip()
+    return _CommodityFetchEngine(
+        base_url=configured_base or GOLD_API_DEFAULT_BASE_URL,
+        gold_api_key=(settings.goldapi_key or "").strip(),
+        alpha_vantage_key=(settings.alpha_vantage_key or "").strip(),
+        timeout=timeout,
+        retry_attempts=retry_attempts,
+        refreshed_at=refreshed_at,
+    )
+
+
+async def fetch_commodities_normalized(
+    *,
+    base_url: str | None = None,
+    timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    retry_attempts: int = 0,
+    requested_symbols: frozenset[str] | None = None,
+) -> list[NormalizedCommodity]:
+    """Fetch commodities via cross-provider gap-fill over the fixed catalog."""
+    refreshed_at = datetime.now(timezone.utc)
+    engine = _build_fetch_engine(
+        base_url=base_url,
+        timeout=timeout,
+        retry_attempts=retry_attempts,
+        refreshed_at=refreshed_at,
+    )
+    if requested_symbols is None:
+        requested_symbols = commodity_catalog_symbols()
+
+    providers = build_commodities_queue_providers(engine=engine)
+    result = await gap_fill_fetch(providers, requested_symbols)
+    if result.missing:
+        missing = sorted(result.missing)
+        logger.debug(
+            "commodities_queue_missing_symbols count=%d keys=%s",
+            len(missing),
+            missing,
+        )
+
+    normalized: list[NormalizedCommodity] = []
+    for symbol, (dto, source) in result.items.items():
+        normalized.append(dto.model_copy(update={"provider_source": source}))
+    normalized.sort(key=lambda item: item.symbol)
+    logger.info("Commodities queue fetched %d items", len(normalized))
+    return normalized
+
+
+class CommoditiesUnifiedAdapter(CommoditiesProviderAdapter):
+    """
+    Unified commodities adapter aligned with Chrome extension data flow:
+    - metals: Gold API, Yahoo gap-fill
+    - energy: Alpha Vantage, Yahoo gap-fill
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+        retry_attempts: int = 0,
+    ):
+        self.base_url = base_url
+        self.timeout = timeout
+        self._retry_attempts = retry_attempts
+
+    async def fetch(self) -> list[NormalizedCommodity]:
+        return await fetch_commodities_normalized(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            retry_attempts=self._retry_attempts,
+        )

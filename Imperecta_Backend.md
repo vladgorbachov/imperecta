@@ -1,6 +1,6 @@
 # Imperecta — Backend
 
-**Актуально на:** 2026-06-17 (head `52697c3`)  
+**Актуально на:** 2026-06-25 (head `803db02`)  
 **Стек:** Python 3.12, FastAPI 0.1.x API, SQLAlchemy 2 async/sync, Alembic, Celery, Redis, structlog.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable). Этот файл описывает реализацию backend; принципы не дублирует.
@@ -48,7 +48,7 @@
 | `entitlements.api.router` | `/entitlements` |
 | `ai_analyst.api.router` | (внутренний prefix модуля) |
 
-**Не подключены в main.py:** `scraper/api.py` (admin-internal diagnostics), `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже).
+**Не подключены в main.py:** `scraper/api.py` (admin diagnostics: `/admin/discovery/trigger*`, `/admin/scrape-diagnostics`, `/admin/scrape/test-single/*`, `/admin/db-diagnostics`, `/admin/pool/trigger-scrape` — router **не смонтирован**), `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (scaffold — endpoints позже).
 
 **Удалены / заменены:** `dashboard/`, `analytics/` — dissolved; widget calculations → **`visualisation_calc/`**. `digests/`, `alerts/`, `user_products/api_*` — модули или пустые, или удалены. Frontend pages для `/competitors`, `/alerts`, `/digests` сохранены без backend.
 
@@ -82,7 +82,7 @@
 
 - **Auth (`modules/auth/`):** register, login, refresh, me, change-password — отдельный Tier-1 модуль, не подпакет `core/`.
 - **JWT decode (Tier-0):** `app/common/security.py` → `decode_token()`. Используется `common/deps.py` без зависимости вверх в Tier-1; `modules/auth/service.py` реэкспортирует для обратной совместимости (commit `50a93e3`).
-- **Admin (`core/api_admin`):** `/admin/stats`, claude-status, clear-pool.
+- **Admin (`core/api_admin`):** `/admin/stats`, `/admin/claude-status`.
 - **Telegram (`core/api_telegram`):** webhook с проверкой secret header.
 - **Plans:** entitlements (`app/entitlements/plan.py`).
 
@@ -104,17 +104,12 @@
 | POST | `/cancel-active-job` | Отмена + revoke Celery |
 | GET | `/job-status/{job_id}` | Polling статуса |
 | GET | `/worker-log-relay` | Redis log tail (`after`, `limit`≤200, `job_id`) |
-| GET | `/users-detailed` | Список users (`limit`≤2000) |
-| POST | `/users` | Создание user |
-| PATCH | `/users/{id}` | Профиль, plan, language |
-| PATCH | `/users/{id}/status` | activate/deactivate |
-| PATCH | `/users/{id}/role` | superuser on/off |
-| POST | `/users/{id}/reset-password` | Сброс пароля |
-| DELETE | `/users/{id}` | Удаление |
 | GET | `/marketplaces-detailed` | Пагинация `page`, `page_size`≤100 |
 | GET | `/job-live-feed/{job_id}` | Steps из `scrape_logs` |
 | GET | `/active-job` | Текущий running pipeline |
-| GET | `/pipeline-status` | Running → latest → idle (`PipelineStatusPanel`) |
+| GET | `/pipeline-status` | Running → latest → idle (`PipelineStatusPanel` — **orphan**, не смонтирован в UI) |
+
+User CRUD — **`/api/admin/users/*`** (`modules/users/api.py`), не parsing router.
 
 #### Stale job handling
 
@@ -216,15 +211,66 @@ Monolith-путь (`run_full_pipeline_test`, `FullPipelineOrchestrator`, `_run_s
 ### 4.4 Остальные модули
 
 - **marketplaces** — CRUD, `requires_js`, discovery config JSONB.
-- **product_pool** — search, stats, MV health; pool listings filter: `page_role='product'` OR (`page_role IS NULL` AND `last_price IS NOT NULL`); `display_currency` query → `CurrencyConverter`.
-- **user_products** — products + import; competitors API не в main.
-- **market_data** — providers + `ingest_market_data`.
+- **product_pool** — search, stats, MV health; pool listings filter: `page_role='product'` OR (`page_role IS NULL` AND `last_price IS NOT NULL`); `display_currency` query → `CurrencyConverter` (`common/currency.py`).
+- **currency** — `price_eur_resolver.resolve_price_eur`: sync scrape-path EUR from `fact_currency_rate` by scrape-day `date_id`; **no HTTP**. Export: `modules/currency/__init__.py`. Planned: provider-queue fetch submodule (today forex fetch lives in `market_data/providers/forex_adapter.py`).
+- **market_data** — см. §4.5.
 - **data_firewall** — Tier-1 gate: `evaluate_ecommerce` / `evaluate_market`, HMAC over `table`+`operation`+`locator`+`fields`, durable reject via `write_reject_data_isolated` on gate fail.
 - **persist** — Tier-1 writer: `write_sync` / `write_async` + `meta_write.py` META bridge; `PersistResult`.
 - **ingestion** — orchestration scrape→firewall→persist (`IngestionService.persist_extracted`).
 - **visualisation_calc** — Tier-1 (**scaffold**): dashboard widget calculations (KPI, movements, volatility, coverage, trend, categories). Reads via planned `data_export` read-OUT door; `api.py` not wired.
 - **ai_analyst** — sessions, Claude, api_logs.
 - **alerts / digests** — tasks mostly stubs; alerts router не в main.
+- **user_products** — каталог пустой (`__init__.py` only).
+
+### 4.5 `market_data` — ingest, providers, API
+
+**Путь:** `backend/app/modules/market_data/`
+
+| Submodule | Роль |
+|-----------|------|
+| `providers/*` | HTTP adapters → `NormalizedForex` / `NormalizedCrypto` / `NormalizedCommodity` |
+| `fetching.py` | Delegates to `*UnifiedAdapter`; maps DTOs → dict for `api.py` / `ingestion.py` |
+| `http_config.py` | `Settings.market_data_timeout_seconds`, `market_data_retry_attempts`; `with_transient_retries` |
+| `ingestion.py` | `IngestionService`: `ingest_all`, `ingest_commodities_only`; gate boundary `persist_forex/crypto/commodities` |
+| `reader.py` | `MarketDataService` — read `fact_*` (async, no external HTTP) |
+| `facade.py` | `MarketsService` — user-scoped preferences + instrument lists |
+| `ticker.py` | Header ticker payload (DB first, live fallback via `fetching`) |
+| `fuel.py` | Read-only `fact_fuel_price` legacy dict |
+| `api.py` | `/api/markets/*` routes |
+
+**Config (`config.py`):** `market_data_forex_url`, `market_data_crypto_url`, `market_data_commodities_url`, `goldapi_key`, `alpha_vantage_key`, `market_data_fuel_url`, `market_data_timeout_seconds`, `market_data_retry_attempts`, `forex_allowed_currencies`.
+
+**Providers (as-is):**
+
+| Asset | Adapter chain | Failover |
+|-------|---------------|----------|
+| Forex | `ForexUnifiedAdapter` | Configured URL → open.er-api → Frankfurter; first non-empty batch |
+| Crypto | `CryptoUnifiedAdapter` → `CryptoCompositeAdapter` | Configured CoinGecko URL → Binance; fallback CoinGecko if Binance fail or `<10` items |
+| Commodities | `CommoditiesUnifiedAdapter` | Per metal: Gold API → Yahoo; per energy: Alpha Vantage → Yahoo; partial batch OK |
+| Fuel | `FuelHttpAdapter` | Stub — not wired to ingest |
+
+**Ingest boundary (frozen for refactor):** `ForexIngestItem` / `CryptoIngestItem` / `CommodityIngestItem` → `evaluate_market` → `write_sync` (`ingestion.py:135–250`). Forex/crypto currently hardcode `source='custom'` at ingest mapping (`295`, `314`); commodities use `provider_source` from DTO.
+
+#### Endpoints `/api/markets` (`market_data/api.py`)
+
+| Method | Path | FE consumer |
+|--------|------|-------------|
+| GET/PUT | `/preferences` | `TickerSettings` |
+| GET | `/instruments` | `TickerSettings` |
+| GET | `/ticker` | `HeaderTicker` |
+| GET | `/forex`, `/crypto`, `/commodities`, `/fuel`, `/refresh-metadata` | **none** (backend-ready) |
+| POST | `/ingest` | admin `triggerIngest` |
+
+Overview listing: `GET /api/markets/overview` — `product_pool/api.py` (`MarketsOverviewSection`).
+
+**Celery (`workers/market_data_tasks.py`):**
+
+| Task | Entry |
+|------|-------|
+| `ingest_market_data` | `IngestionService.ingest_all(include_commodities=True)` |
+| `ingest_commodities` | `ingest_commodities_only()` |
+
+**Beat:** tasks defined but **not scheduled** in `scheduler.py` (manual ingest via API only).
 
 ---
 
@@ -239,7 +285,7 @@ Monolith-путь (`run_full_pipeline_test`, `FullPipelineOrchestrator`, `_run_s
 
 ### `scheduler.py`
 
-Beat включает reaper + infra (см. `scheduler.py`); **не** включает discovery/scrape cron.
+Beat (`scheduler.py:10–31`): `orphan-job-reaper` (300s), `pipeline-tick-watchdog` (60s), `ensure_fact_price_partitions` (daily 00:00), `refresh_materialized_views` (hourly), `cleanup_old_data` (03:00). **Не включает** discovery/scrape cron и **не включает** `ingest_market_data` / `ingest_commodities` — market ingest только manual (`POST /api/markets/ingest`) или внешний trigger.
 
 ### Задачи
 
@@ -263,16 +309,35 @@ Beat включает reaper + infra (см. `scheduler.py`); **не** включ
 
 ---
 
-## 6. Display currency (`app/common/currency.py`, `app/common/marketplace_locale.py`)
+## 6. Display currency и fiat-модули
+
+### 6.1 `app/common/currency.py` (UI display converter)
 
 | Компонент | Роль |
 |-----------|------|
-| `CurrencyConverter.load_latest` | Курсы из `fact_currency_rate` (max `date_id`); fallback — live `fetch_forex_rates("EUR")` |
+| `CurrencyConverter.load_latest` | Курсы из `fact_currency_rate` (max `date_id`); fallback — live `fetch_forex_rates("EUR")` из `market_data.fetching` (`currency.py:99` — `TODO(boundary)`) |
 | `normalize_display_currency` | `local` \| `EUR` \| `USD` |
-| `apply_display_price_fields` | `(display_price, display_currency, conversion_available)` + **`local_currency_resolution`** |
-| `resolve_local_currency` / `resolve_local_currency_from_parts` | TLD → country (`TLD_TO_COUNTRY`) → currency (`COUNTRY_TO_CURRENCY`); fallback `country_code`, then parsed listing currency |
+| `compute_display_fields_for_marketplace` | `(display_price, display_currency, conversion_available)` + **`local_currency_resolution`** |
 
-**Режим `local` (`0fb6ac2`):**
+**Caller:** `product_pool/service.py` (`list_products`, overview).
+
+### 6.2 `app/modules/currency/price_eur_resolver.py` (scrape-path)
+
+| Function | Роль |
+|----------|------|
+| `resolve_price_eur` | Sync read `fact_currency_rate` по scrape-day `date_id`; source priority `ecb` → … → `custom`; quantize Numeric(12,2) |
+
+**Caller:** `ingestion/service.py` → `fact_price.price_eur`, listing denorm `last_price_eur`.
+
+**Не путать:** display converter (async, latest snapshot) vs scrape resolver (sync, fixed `date_id`).
+
+### 6.3 Locale (`app/common/marketplace_locale.py`)
+
+| Компонент | Роль |
+|-----------|------|
+| `resolve_local_currency` / `resolve_local_currency_from_parts` | TLD → country → currency; fallback `country_code`, parsed listing currency |
+
+**Режим `local`:**
 
 - Предпочитает TLD домена над `dim_marketplace.country_code` (storefront country vs registration).
 - Ответ включает `local_currency_resolution: { currency, source }` где `source` ∈ `tld`, `country_code`, `parse_currency`, `unknown`.
@@ -282,9 +347,8 @@ Beat включает reaper + infra (см. `scheduler.py`); **не** включ
 
 **API с `display_currency` query:**
 
-- `GET /api/products` (`user_products/api_products.py`)
-- `GET /api/pool/*` (`product_pool/api.py`, `service._apply_display_currency`)
-- `GET /api/markets/overview` (`product_pool/api.py`); widget KPI math — planned `visualisation_calc` API (заменит client-side calc в `MarketsOverviewSection`)
+- `GET /api/pool/*` (`product_pool/api.py`)
+- `GET /api/markets/overview` (`product_pool/api.py`)
 
 ---
 

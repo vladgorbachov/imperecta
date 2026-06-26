@@ -15,7 +15,7 @@ from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
-from fixtures.scraper_fixtures import _fake_run_coro
+from fixtures.scraper_fixtures import _fake_run_coro, patch_resolve_price_eur_for_unit
 
 
 def test_scrape_product_pool_raises_exception(monkeypatch):
@@ -72,6 +72,7 @@ def test_scrape_product_pool_raises_exception(monkeypatch):
 
 
 def test_product_name_replace_placeholder_and_title_only(monkeypatch):
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()
@@ -153,6 +154,7 @@ class _PayloadWithProductName:
 
 
 def test_product_name_nonempty_updates_dim_product(monkeypatch):
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()

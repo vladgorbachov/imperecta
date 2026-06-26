@@ -12,13 +12,12 @@ Verifies:
 3. PoolStatsResponse declares exactly the 5 canonical fields; the "legacy
    keys (optional)" block was removed.
 4. /pool/products, /pool/categories, /pool/marketplace-stats, /pool/stats,
-   /pool/search, /markets/overview are all registered AND have response_model
+   /pool/stats, /markets/overview are all registered AND have response_model
    set (no untyped routes left).
 5. Orphan schemas PoolCategoriesResponse and MarketplaceStatsItem are gone;
-   PoolCategorySummary, PoolProductItem, PoolRecentPricePoint, PoolCategoryItem,
-   PoolSearchResponse are present.
+   PoolCategorySummary, PoolProductItem, PoolRecentPricePoint, PoolCategoryItem
+   are present.
 6. Stray init.py / placeholder models.py are gone; __init__.py is present.
-7. search_products still delegates to list_products (single SQL path).
 8. _apply_display_currency reads `price` (canonical) not `current_price`.
 """
 
@@ -38,7 +37,6 @@ from app.modules.product_pool.schemas import (
     PoolProductItem,
     PoolProductsResponse,
     PoolRecentPricePoint,
-    PoolSearchResponse,
     PoolStatsResponse,
 )
 from app.modules.product_pool.service import ProductPoolService, _row_to_pool_item
@@ -216,7 +214,6 @@ def test_live_schemas_present() -> None:
         PoolProductItem,
         PoolProductsResponse,
         PoolRecentPricePoint,
-        PoolSearchResponse,
         PoolStatsResponse,
     ):
         assert cls.__name__ in dir(pool_schemas), f"Missing {cls.__name__}"
@@ -246,7 +243,6 @@ def _route_for(path: str, method: str = "GET"):
         ("/api/pool/categories", "PoolCategoryItem"),
         ("/api/pool/marketplace-stats", "PoolCategorySummary"),
         ("/api/pool/stats", "PoolStatsResponse"),
-        ("/api/pool/search", "PoolSearchResponse"),
     ],
 )
 def test_routes_are_typed(path: str, expected_class_name: str) -> None:
@@ -276,10 +272,5 @@ def test_overview_and_pool_products_both_live() -> None:
         )
 
 
-def test_search_reuses_list_products() -> None:
-    """search_products must remain a thin wrapper over list_products
-    (no forked SQL path)."""
-    src = inspect.getsource(ProductPoolService.search_products)
-    assert "self.list_products(" in src, (
-        "search_products must delegate to list_products."
-    )
+def test_pool_search_route_removed() -> None:
+    assert _route_for("/api/pool/search") is None

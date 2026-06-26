@@ -28,9 +28,6 @@ class RunPipelineRequest(BaseModel):
     )
 
 
-RunFullPipelineTestRequest = RunPipelineRequest
-
-
 @router.get("/test-marketplaces")
 async def get_test_marketplaces(
     _current_user: CurrentSuperuser,
@@ -67,16 +64,6 @@ async def run_pipeline(
     return await _enqueue_pipeline_run(db, body)
 
 
-@router.post("/run-full-test")
-async def run_full_test(
-    _current_user: CurrentSuperuser,
-    db: DbSession,
-    body: RunFullPipelineTestRequest | None = None,
-) -> dict:
-    """Deprecated alias for POST /run-pipeline."""
-    return await _enqueue_pipeline_run(db, body)
-
-
 @router.get("/pipeline-runs")
 async def get_pipeline_runs(
     _current_user: CurrentSuperuser,
@@ -84,17 +71,6 @@ async def get_pipeline_runs(
     limit: int = Query(10, ge=1, le=200),
 ) -> list[dict]:
     """Pipeline run history for admin Data Collection tab (latest runs)."""
-    service = ParsingAdminService(db)
-    return await service.get_test_runs(limit=limit)
-
-
-@router.get("/test-runs")
-async def get_test_runs(
-    _current_user: CurrentSuperuser,
-    db: DbSession,
-    limit: int = Query(50, ge=1, le=200),
-) -> list[dict]:
-    """Deprecated alias for GET /pipeline-runs."""
     service = ParsingAdminService(db)
     return await service.get_test_runs(limit=limit)
 
@@ -184,13 +160,3 @@ async def get_active_job(
     active = await service.get_active_pipeline_job()
     return {"active_job": active}
 
-
-@router.get("/pipeline-status")
-async def get_pipeline_status(
-    _current_user: CurrentSuperuser,
-    db: DbSession,
-) -> dict:
-    """No-id status of the current pipeline (running → latest → idle) for the
-    PipelineStatusPanel polling hook."""
-    service = ParsingAdminService(db)
-    return await service.get_pipeline_status()

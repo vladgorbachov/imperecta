@@ -7,8 +7,6 @@ instrument-listing dicts unchanged.
 """
 
 import asyncio
-from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -19,7 +17,7 @@ from app.modules.market_data.reader import MarketDataService
 
 
 class MarketsService:
-    """Markets domain: user preferences (JSONB), commodities from v2 facts, refresh metadata."""
+    """Markets domain: user preferences (JSONB) and instrument lists for ticker widgets."""
 
     _PREF_KEYS = frozenset({
         "dashboard_widgets",
@@ -40,29 +38,6 @@ class MarketsService:
             raise ValueError("User not found")
         return user
 
-    async def get_commodities_from_db(self) -> tuple[list[dict], datetime | None]:
-        mds = MarketDataService(self.db)
-        rows = await mds.get_commodities()
-        if not rows:
-            return [], None
-        last_at: datetime | None = None
-        raw_items: list[dict] = []
-        for c in rows:
-            fa = c.get("fetched_at")
-            if isinstance(fa, datetime):
-                if last_at is None or fa > last_at:
-                    last_at = fa
-            ref = fa if isinstance(fa, datetime) else datetime.now(timezone.utc)
-            raw_items.append({
-                "symbol": c["symbol"],
-                "name": c.get("name"),
-                "price": Decimal(str(c["price_usd"])),
-                "change_24h": c.get("change_24h_pct"),
-                "unit": c.get("unit"),
-                "refreshed_at": ref,
-            })
-        return raw_items, last_at
-
     async def get_preferences(self) -> dict:
         user = await self._get_user()
         mds = MarketDataService(self.db)
@@ -73,10 +48,6 @@ class MarketsService:
         mds = MarketDataService(self.db)
         clean = {k: v for k, v in updates.items() if k in self._PREF_KEYS and v is not None}
         return await mds.update_preferences(user, clean)
-
-    async def get_refresh_metadata(self) -> list[dict]:
-        mds = MarketDataService(self.db)
-        return await mds.get_refresh_metadata()
 
     async def get_available_instruments(self) -> dict[str, list[dict[str, str]]]:
         """Return available instrument lists for user-configurable ticker widgets."""

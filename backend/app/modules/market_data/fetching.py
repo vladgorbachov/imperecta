@@ -45,6 +45,7 @@ async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
             "pair": pair,
             "rate": round(float(dto.bid), 6),
             "change_24h": dto.change_24h,
+            "provider_source": dto.provider_source,
         })
     normalized.sort(key=lambda row: row["pair"])
     logger.info("Forex rates fetched via unified adapter: %d pairs (base=%s)", len(normalized), base)
@@ -75,6 +76,7 @@ async def fetch_crypto_prices() -> tuple[list[dict], bool]:
             "market_cap": float(dto.market_cap) if dto.market_cap is not None else None,
             "volume_24h": None,
             "image": "",
+            "provider_source": dto.provider_source,
         }
         for dto in items
     ]

@@ -50,13 +50,9 @@ def market_data_service(monkeypatch: pytest.MonkeyPatch) -> MarketDataService:
             }
         ]
 
-    async def get_fuel_should_not_run(self, country_code: str) -> list[dict]:
-        raise AssertionError("get_fuel must not be called from get_ticker")
-
     monkeypatch.setattr(MarketDataService, "get_forex", get_forex)
     monkeypatch.setattr(MarketDataService, "get_crypto", get_crypto)
     monkeypatch.setattr(MarketDataService, "get_commodities", get_commodities)
-    monkeypatch.setattr(MarketDataService, "get_fuel", get_fuel_should_not_run)
     return service
 
 

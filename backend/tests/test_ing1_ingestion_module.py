@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -84,6 +85,7 @@ def _make_listing(**overrides):
         marketplace_id=uuid4(),
         product_id=uuid4(),
         external_url="https://example.com/product",
+        url_hash="test-listing-url-hash",
         last_price=None,
         last_currency_code=None,
         last_price_changed_at=None,
@@ -209,6 +211,9 @@ def patched_ingestion(monkeypatch):
         "app.modules.ingestion.service._today_date_id",
         lambda _db: 20990101,
     )
+    from fixtures.scraper_fixtures import patch_resolve_price_eur_for_unit
+
+    patch_resolve_price_eur_for_unit(monkeypatch)
     yield
 
 
@@ -224,19 +229,16 @@ def test_persist_extracted_writes_fact_price_on_pass(patched_ingestion) -> None:
     svc = IngestionService(db)
     svc._currency_resolver = _FakeResolver({"EUR"})
 
-    result = svc.persist_extracted(
-        data=_make_data(),
-        listing=listing,
-    )
+    with patch(
+        "app.modules.ingestion.service.write_sync",
+        return_value=MagicMock(ok=True, rows_affected=1),
+    ) as mock_write:
+        result = svc.persist_extracted(
+            data=_make_data(),
+            listing=listing,
+        )
 
-    added = [c.args[0] for c in db.add.call_args_list]
-    fact_price_rows = [a for a in added if a.__class__.__name__ == "FactPrice"]
-    assert len(fact_price_rows) == 1
-    row = fact_price_rows[0]
-    assert float(row.price) == 99.99
-    assert row.currency_code == "EUR"
-    assert not hasattr(row, "in_stock")
-
+    assert mock_write.call_count >= 2
     assert listing.last_price == 99.99
     assert listing.last_currency_code == "EUR"
     assert listing.last_price_changed_at is not None
@@ -267,15 +269,36 @@ def test_persist_extracted_no_change_path(patched_ingestion) -> None:
     svc = IngestionService(db)
     svc._currency_resolver = _FakeResolver({"EUR"})
 
-    result = svc.persist_extracted(
-        data=_make_data(),
-        listing=listing,
-    )
+    normalized_fields = {
+        "listing_id": listing.id,
+        "date_id": 20990101,
+        "price": 99.99,
+        "currency_code": "EUR",
+        "original_price": None,
+        "discount_pct": None,
+        "price_change_pct": None,
+        "scraped_at": datetime.now(tz=timezone.utc),
+        "scrape_job_id": None,
+        "price_eur": None,
+    }
 
-    added = [c.args[0] for c in db.add.call_args_list]
-    fact_price_rows = [a for a in added if a.__class__.__name__ == "FactPrice"]
-    assert fact_price_rows == []
+    with (
+        patch(
+            "app.modules.ingestion.service.build_fact_price_fields",
+            return_value=normalized_fields,
+        ),
+        patch(
+            "app.modules.ingestion.service.write_sync",
+            return_value=MagicMock(ok=True, rows_affected=1),
+        ) as mock_write,
+    ):
+        result = svc.persist_extracted(
+            data=_make_data(currency="eur"),
+            listing=listing,
+        )
 
+    assert mock_write.call_count >= 1
+    assert listing.last_currency_code == "EUR"
     assert result.persisted is False
     assert result.log_status == "no_change"
     assert result.skip_reason is None
@@ -322,11 +345,16 @@ def test_persist_extracted_dim_enrichment_only_image_when_absent(
     svc = IngestionService(db)
     svc._currency_resolver = _FakeResolver({"EUR"})
 
-    svc.persist_extracted(
-        data=_make_data(image_url="https://example.com/new-image.jpg"),
-        listing=listing,
-    )
+    with patch(
+        "app.modules.ingestion.service.write_sync",
+        return_value=MagicMock(ok=True, rows_affected=1),
+    ) as mock_write:
+        svc.persist_extracted(
+            data=_make_data(image_url="https://example.com/new-image.jpg"),
+            listing=listing,
+        )
 
+    assert mock_write.call_count >= 1
     assert product.image_url == existing_image
     assert product.name == "Sample Title"
 
@@ -432,10 +460,10 @@ def test_ingestion_does_not_import_parser_or_pool_or_extractor() -> None:
 
 
 def test_parser_keeps_consecutive_error_deactivation_and_scrape_log() -> None:
-    """Parser still owns the consecutive-error LISTING_DEACTIVATE_AFTER_ERRORS
-    path + ScrapeLog write (these are parser concerns, not ingestion)."""
+    """Parser still owns failure_streak deactivation + ScrapeLog queue (not ingestion)."""
     from app.modules.scraper import service as parser_svc
 
-    src = inspect.getsource(parser_svc.GlobalScrapeService._persist_scrape_pool_result)
-    assert "LISTING_DEACTIVATE_AFTER_ERRORS" in src
-    assert "_persist_scrape_log(" in src
+    hk_src = inspect.getsource(parser_svc.GlobalScrapeService._route_failure_housekeeping_updates)
+    assert "LISTING_DEACTIVATE_AFTER_ERRORS" in hk_src
+    pool_src = inspect.getsource(parser_svc.GlobalScrapeService._persist_scrape_pool_result)
+    assert "_persist_scrape_log(" in pool_src
