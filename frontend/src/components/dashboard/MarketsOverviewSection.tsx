@@ -20,6 +20,8 @@ import {
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { MarketMoversWidget } from "@/components/dashboard/MarketMoversWidget";
+import { MarketCoverageWidget } from "@/components/dashboard/MarketCoverageWidget";
+import { CountrySelector } from "@/components/dashboard/CountrySelector";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -247,6 +249,7 @@ export function MarketsOverviewSection() {
 
   const [searchRaw, setSearchRaw] = useState("");
   const [marketplaceSearch, setMarketplaceSearch] = useState("");
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [selectedMarketplaces, setSelectedMarketplaces] = useState<string[]>([]);
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
@@ -265,9 +268,10 @@ export function MarketsOverviewSection() {
       limit: PAGE_LIMIT,
       offset: 0,
       search: debouncedSearch.length >= 2 ? debouncedSearch : undefined,
+      country_code: selectedCountry ?? undefined,
       display_currency: displayCurrency,
     }),
-    [sort, debouncedSearch, displayCurrency],
+    [sort, debouncedSearch, selectedCountry, displayCurrency],
   );
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -297,20 +301,54 @@ export function MarketsOverviewSection() {
 
   const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
 
+  const scopedMarketplaceId = useMemo((): string | undefined => {
+    if (selectedMarketplaces.length !== 1) {
+      return undefined;
+    }
+    const domain = selectedMarketplaces[0];
+    const item = rawItems.find((candidate) => candidate.marketplace_domain === domain);
+    return item?.marketplace_id ?? undefined;
+  }, [selectedMarketplaces, rawItems]);
+
+  const countryRollupParams = useMemo(
+    () => ({
+      marketplace_id: scopedMarketplaceId,
+    }),
+    [scopedMarketplaceId],
+  );
+
+  const {
+    data: countryRollup,
+    isLoading: countryRollupLoading,
+  } = useQuery({
+    queryKey: marketsQueryKeys.geoCoverage(countryRollupParams),
+    queryFn: () =>
+      marketsApi.getGeoCoverage(countryRollupParams).then((response) => response.data),
+    staleTime: 30_000,
+  });
+
+  const countryOptions = useMemo(() => {
+    if (countryRollup?.mode !== "countries") {
+      return [];
+    }
+    return countryRollup.rows
+      .filter((row) => row.country_code)
+      .map((row) => ({
+        code: row.country_code as string,
+        label: row.label,
+      }));
+  }, [countryRollup]);
+
   const kpiScopeParams = useMemo((): Pick<MovementsQueryParams, "country_code" | "marketplace_id"> => {
     const params: Pick<MovementsQueryParams, "country_code" | "marketplace_id"> = {};
-    if (selectedMarketplaces.length === 1) {
-      const domain = selectedMarketplaces[0];
-      const item = rawItems.find((candidate) => candidate.marketplace_domain === domain);
-      if (item?.marketplace_id) {
-        params.marketplace_id = item.marketplace_id;
-      }
-      if (item?.country_code) {
-        params.country_code = item.country_code;
-      }
+    if (selectedCountry) {
+      params.country_code = selectedCountry;
+    }
+    if (scopedMarketplaceId) {
+      params.marketplace_id = scopedMarketplaceId;
     }
     return params;
-  }, [selectedMarketplaces, rawItems]);
+  }, [selectedCountry, scopedMarketplaceId]);
 
   const movementsFilterParams = useMemo(
     (): MovementsQueryParams => ({
@@ -653,6 +691,16 @@ export function MarketsOverviewSection() {
 
   return (
     <section className="space-y-3">
+      <div className="flex justify-start sm:justify-end">
+        <CountrySelector
+          value={selectedCountry}
+          onChange={setSelectedCountry}
+          options={countryOptions}
+          loading={countryRollupLoading}
+          className="w-full max-w-none sm:max-w-[220px]"
+        />
+      </div>
+
       <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           label={t("market.overview.kpi.totalPool")}
@@ -728,10 +776,17 @@ export function MarketsOverviewSection() {
         />
       </div>
 
-      <MarketMoversWidget
-        movementsDataReady={movementsDataReady}
-        displayCurrency={displayCurrency}
-      />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <MarketMoversWidget
+          movementsDataReady={movementsDataReady}
+          displayCurrency={displayCurrency}
+          countryCode={selectedCountry}
+        />
+        <MarketCoverageWidget
+          countryCode={selectedCountry}
+          marketplaceId={scopedMarketplaceId}
+        />
+      </div>
 
       <div className="grid items-start gap-3 lg:grid-cols-[260px_1fr]">
         <aside className="hidden lg:block">

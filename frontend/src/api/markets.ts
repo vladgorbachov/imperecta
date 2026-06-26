@@ -144,6 +144,29 @@ export interface DashboardKpiParams {
   marketplace_id?: string;
 }
 
+// --- Geographic pool coverage (country roll-up / marketplace breakdown) ---
+
+export interface CoverageRow {
+  key: string;
+  label: string;
+  country_code?: string | null;
+  marketplace_id?: string | null;
+  marketplace_domain?: string | null;
+  count: number;
+  share_pct: number | string | null;
+}
+
+export interface CoverageBreakdown {
+  mode: "countries" | "marketplaces";
+  rows: CoverageRow[];
+  total: number;
+}
+
+export interface CoverageParams {
+  country_code?: string;
+  marketplace_id?: string;
+}
+
 // --- Movements (server-side price_change_pct aggregates) ---
 
 export interface MovementsQueryParams {
@@ -235,6 +258,7 @@ export const marketsApi = {
     sort?: string;
     search?: string;
     marketplace_id?: number;
+    country_code?: string;
     limit?: number;
     offset?: number;
     display_currency?: DisplayCurrency;
@@ -244,6 +268,7 @@ export const marketsApi = {
         sort: params?.sort ?? "volatile",
         search: params?.search,
         marketplace_id: params?.marketplace_id,
+        country_code: params?.country_code,
         limit: params?.limit ?? 50,
         offset: params?.offset ?? 0,
         display_currency: params?.display_currency ?? "local",
@@ -258,6 +283,9 @@ export const marketsApi = {
 
   getDashboardKpi: (params?: DashboardKpiParams) =>
     apiClient.get<DashboardKpi>("/markets/dashboard-kpi", { params }),
+
+  getGeoCoverage: (params?: CoverageParams) =>
+    apiClient.get<CoverageBreakdown>("/markets/geo-coverage", { params }),
 
   getMovers: (params?: MovementsQueryParams) =>
     apiClient.get<MoversPage>("/markets/movements", { params }),
@@ -287,6 +315,7 @@ export const marketsQueryKeys = {
     sort?: string;
     search?: string;
     marketplace_id?: number;
+    country_code?: string;
     limit?: number;
     offset?: number;
     display_currency?: DisplayCurrency;
@@ -297,6 +326,7 @@ export const marketsQueryKeys = {
       params?.sort ?? "volatile",
       params?.search ?? "",
       params?.marketplace_id ?? null,
+      params?.country_code ?? null,
       params?.limit ?? 50,
       params?.offset ?? 0,
       params?.display_currency ?? "local",
@@ -307,6 +337,13 @@ export const marketsQueryKeys = {
     [
       ...marketsQueryKeys.all,
       "dashboard-kpi",
+      params?.country_code ?? null,
+      params?.marketplace_id ?? null,
+    ] as const,
+  geoCoverage: (params?: CoverageParams) =>
+    [
+      ...marketsQueryKeys.all,
+      "geo-coverage",
       params?.country_code ?? null,
       params?.marketplace_id ?? null,
     ] as const,

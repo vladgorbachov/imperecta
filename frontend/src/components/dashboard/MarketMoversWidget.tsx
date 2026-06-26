@@ -169,11 +169,13 @@ function MoversSection({
 export interface MarketMoversWidgetProps {
   movementsDataReady: boolean;
   displayCurrency: DisplayCurrency;
+  countryCode?: string | null;
 }
 
 export function MarketMoversWidget({
   movementsDataReady,
   displayCurrency,
+  countryCode = null,
 }: MarketMoversWidgetProps) {
   const { t } = useTranslation();
 
@@ -181,8 +183,9 @@ export function MarketMoversWidget({
     (): MovementsQueryParams => ({
       ...MOVERS_LIST_BASE,
       display_currency: displayCurrency,
+      country_code: countryCode ?? undefined,
     }),
-    [displayCurrency],
+    [displayCurrency, countryCode],
   );
 
   const { data, isLoading, isError } = useQuery({
