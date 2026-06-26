@@ -8,7 +8,7 @@ alwaysApply: true
 
 # Commit message
 Commit message limited by 5 to 7 words
-При коммите и пуше — только код приложения (не тесты, не Imperecta_*.md); см. `.cursor/rules/commit-exclude-tests-docs.mdc`. 
+При коммите и пуше — только код приложения (не тесты, не любые `*.md`); см. `.cursor/rules/commit-exclude-tests-docs.mdc`. 
 
 # Commit trailers (forbidden)
 

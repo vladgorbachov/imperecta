@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
+from app.modules.persist.maintenance_audit import record_maintenance_audit_async
 from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
 
 
@@ -219,6 +220,12 @@ class ParsingAdminService:
                 raise ValueError("scrape_jobs insert rejected by data firewall")
         except Exception as exc:
             if await self._repair_scrape_job_type_constraint():
+                await record_maintenance_audit_async(
+                    op="CHECK REPAIR",
+                    target="scrape_jobs.job_type",
+                    status="success",
+                    detail="ck_scrape_jobs_job_type recreated",
+                )
                 result = await write_meta_async(
                     table="scrape_jobs",
                     operation="insert",

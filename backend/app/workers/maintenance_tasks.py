@@ -14,6 +14,7 @@ from app.config import Settings
 from app.database import sync_engine, sync_session_factory
 from app.models.app_tables import ScrapeJob
 from app.modules.core.supabase_security import harden_table_statements
+from app.modules.persist.maintenance_audit import record_maintenance_audit
 from app.observability.sentry_init import capture_exception_if_initialized
 from app.workers.celery_app import celery_app
 
@@ -80,11 +81,25 @@ def _refresh_one_mv(mv_name: str) -> None:
     try:
         _refresh_mv(mv_name)
     except Exception as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
         slog.error("mv_refresh_failed", mv=mv_name, error=str(exc)[:500])
         capture_exception_if_initialized(exc)
+        record_maintenance_audit(
+            op="REFRESH MV",
+            target=mv_name,
+            status="error",
+            detail=str(exc)[:2000],
+            duration_ms=duration_ms,
+        )
         return
-    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    duration_ms = int(round((time.perf_counter() - started) * 1000))
     slog.info("mv_refresh_ok", mv=mv_name, duration_ms=duration_ms)
+    record_maintenance_audit(
+        op="REFRESH MV",
+        target=mv_name,
+        status="success",
+        duration_ms=duration_ms,
+    )
 
 
 @celery_app.task(name="refresh_materialized_views")
@@ -126,6 +141,7 @@ def ensure_fact_price_partitions() -> None:
             f"CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF fact_price "
             f"FOR VALUES FROM ({start_id}) TO ({end_id})"
         )
+        started = time.perf_counter()
         try:
             with sync_engine.connect() as conn:
                 conn.execute(text(ddl))
@@ -133,6 +149,22 @@ def ensure_fact_price_partitions() -> None:
                 for statement in harden_table_statements(qualified):
                     conn.execute(text(statement))
                 conn.commit()
+            duration_ms = int((time.perf_counter() - started) * 1000)
             logger.info("Ensured partition %s (RLS + client revoke)", partition_name)
-        except Exception:
+            record_maintenance_audit(
+                op="CREATE PARTITION",
+                target=partition_name,
+                status="success",
+                detail="RLS hardened via harden_table_statements",
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
             logger.exception("Failed to create partition %s", partition_name)
+            record_maintenance_audit(
+                op="CREATE PARTITION",
+                target=partition_name,
+                status="error",
+                detail=str(exc)[:2000],
+                duration_ms=duration_ms,
+            )

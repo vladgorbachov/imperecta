@@ -91,10 +91,6 @@ export interface ScrapeDiagnostics {
   sample_result: ScrapePoolResult | null;
 }
 
-export const clearPool = () =>
-  apiClient.post<{ deleted: number; message: string }>("/admin/products/clear-pool");
-
-
 export interface ParsingTestMarketplace {
   id?: string;
   marketplace_code?: string;

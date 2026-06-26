@@ -1,9 +1,7 @@
 """Core admin endpoints (non-parsing)."""
 
-from time import perf_counter
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, text
+from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.config import Settings
@@ -53,27 +51,4 @@ async def admin_claude_status(_current_user: CurrentSuperuser) -> dict:
         "configured": bool(settings.claude_api_key),
         "model": resolved_model or settings.claude_model,
         "model_config": settings.claude_model,
-    }
-
-
-@router.post("/products/clear-pool")
-async def clear_pool(_current_user: CurrentSuperuser, db: DbSession) -> dict:
-    """Clear product pool data; keeps dim_marketplace and dimension seeds."""
-    from app.modules.core.pool_maintenance import (
-        PoolResetBlockedError,
-        clear_product_pool_preserve_marketplaces,
-    )
-
-    started = perf_counter()
-    try:
-        result = await clear_product_pool_preserve_marketplaces(db)
-    except PoolResetBlockedError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
-        ) from exc
-    elapsed_ms = int((perf_counter() - started) * 1000)
-    return {
-        **result,
-        "time_ms": elapsed_ms,
     }

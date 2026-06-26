@@ -34,7 +34,14 @@ from app.modules.ingestion.service import (
     _today_date_id,
 )
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
+from app.modules.data_firewall.update_validator import authorize_scrape_delete
 from app.modules.persist.logs_write import build_scrape_log_fields, persist_logs_batch
+from app.modules.persist.maintenance_audit import record_maintenance_audit
+from app.modules.persist.scrape_gate_fields import (
+    build_listing_delete_fields,
+    build_product_delete_fields,
+)
+from app.modules.persist.writer import PersistContext, write_sync
 from app.modules.scraper.fetch_backends import backend_id_persisted
 from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
@@ -173,6 +180,12 @@ def _repair_scrape_logs_status_column(db: Session) -> bool:
     try:
         db.execute(text("ALTER TABLE scrape_logs ALTER COLUMN status TYPE VARCHAR(50)"))
         db.commit()
+        record_maintenance_audit(
+            op="ALTER",
+            target="scrape_logs.status",
+            status="success",
+            detail="widened to VARCHAR(50)",
+        )
         return True
     except Exception:
         db.rollback()
@@ -193,6 +206,12 @@ def _repair_scrape_logs_status_constraint(db: Session) -> bool:
             )
         )
         db.commit()
+        record_maintenance_audit(
+            op="CHECK REPAIR",
+            target="scrape_logs.status",
+            status="success",
+            detail="ck_scrape_logs_status recreated",
+        )
         return True
     except Exception:
         db.rollback()
@@ -489,7 +508,19 @@ class GlobalScrapeService:
         """DELETE listing and its 1:1 dim_product when scrape confirms non-product."""
         product_id = listing.product_id
         listing_url = listing.external_url
-        self.db.delete(listing)
+        prune_ctx = PersistContext(
+            source="scraper_prune",
+            listing_id=listing.id,
+            marketplace_id=listing.marketplace_id,
+        )
+        listing_outcome = authorize_scrape_delete(
+            table="fact_listing",
+            fields=build_listing_delete_fields(url_hash=listing.url_hash),
+            db=self.db,
+            reject_source="scraper_prune",
+        )
+        if listing_outcome.passed and listing_outcome.signed_record is not None:
+            write_sync(self.db, listing_outcome.signed_record, ctx=prune_ctx)
         self.db.flush()
         other_listings = (
             self.db.execute(
@@ -500,9 +531,14 @@ class GlobalScrapeService:
             or 0
         )
         if other_listings == 0:
-            product = self.db.get(DimProduct, product_id)
-            if product is not None:
-                self.db.delete(product)
+            product_outcome = authorize_scrape_delete(
+                table="dim_product",
+                fields=build_product_delete_fields(product_id=product_id),
+                db=self.db,
+                reject_source="scraper_prune",
+            )
+            if product_outcome.passed and product_outcome.signed_record is not None:
+                write_sync(self.db, product_outcome.signed_record, ctx=prune_ctx)
         self.db.flush()
         logger.info(
             "scrape_pruned_nonproduct url=%s page_role=%s",

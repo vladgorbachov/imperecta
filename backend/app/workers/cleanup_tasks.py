@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import sync_session_factory
 from app.models.app_tables import AIChatMessage, AlertEvent, ApiLog, ScrapeLog
+from app.modules.persist.maintenance_audit import record_maintenance_audit
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,17 @@ def cleanup_old_data():
         deleted_api_logs,
         deleted_chat,
         deleted_alerts,
+    )
+    record_maintenance_audit(
+        op="RETENTION DELETE",
+        target="multi_table",
+        status="success",
+        detail=(
+            f"scrape_logs={deleted_logs} "
+            f"api_logs={deleted_api_logs} "
+            f"ai_chat_messages={deleted_chat} "
+            f"alert_events={deleted_alerts}"
+        ),
     )
     return {
         "deleted_scrape_logs": deleted_logs,
