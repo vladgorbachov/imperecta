@@ -22,6 +22,7 @@ from app.modules.telegram.api import router as telegram_router
 from app.modules.entitlements.api import router as entitlements_router
 from app.modules.market_data.api import router as market_data_router
 from app.modules.marketplaces.api import router as marketplaces_router
+from app.modules.news.api import router as news_router
 from app.modules.product_pool.api import (
     markets_overview_router as markets_overview_router,
 )
@@ -155,6 +156,7 @@ for router in [
     pool_router,
     markets_overview_router,
     market_data_router,
+    news_router,
     visualisation_calc_router,
     entitlements_router,
     ai_router,

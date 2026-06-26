@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     market_data_commodities_url: str | None = None
     goldapi_key: str | None = None
     alpha_vantage_key: str | None = None
+    newsdata_api_key: str | None = None
+    currents_api_key: str | None = None
+    news_cache_ttl_seconds: int = 1200
     market_data_fuel_url: str | None = None
     market_data_timeout_seconds: int
     market_data_retry_attempts: int
