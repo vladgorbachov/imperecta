@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-25 (ветка `main`, head `5b55a9d`)  
+**Актуально на:** 2026-06-17 (ветка `main`, head `21df3e7`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -16,9 +16,9 @@
 | Сбор с маркетплейсов | Discovery → scrape → `fact_listing` / `fact_price` |
 | Каталог пользователя | `user_products`, импорт CSV/XLS |
 | Глобальный пул | `product_pool`, поиск по `dim_product` / `fact_listing` |
-| Рыночные виджеты | Forex, crypto, commodities; dashboard widget math → **`visualisation_calc`** (scaffold); `fact_fuel_price` — таблица сохранена, ingest/read pipeline удалён |
+| Рыночные виджеты | Forex, crypto, commodities; dashboard widget math → **`visualisation_calc`** (`movements/` wired end-to-end); `fact_fuel_price` — таблица сохранена, ingest/read pipeline удалён |
 | Display currency | `local` / `EUR` / `USD` — `fact_currency_rate` + live forex; **local** = TLD→country→currency (`marketplace_locale.py`) |
-| Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`); `visualisation_calc/movements` built — client-side KPI в `MarketsOverviewSection` до `api.py` wiring |
+| Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`); movements KPI (`changedMore5`, `avgVolatility`) — server `/api/markets/movements/*`; catalog — `/markets/overview` |
 | Алерты и дайджесты | Celery (часть задач — stubs) |
 | AI-аналитик | Claude; entitlement по плану (`business` / `pro` / `enterprise`) |
 | Админка | Superuser: Market Overview, **Data Collection**, **Users Management** |
@@ -68,7 +68,7 @@ imperecta/
 │   ├── app/database.py
 │   ├── app/models/
 │   ├── app/modules/          # доменная логика
-│   │   └── visualisation_calc/   # Tier-1: dashboard widget calculations (scaffold)
+│   │   └── visualisation_calc/   # Tier-1: dashboard widget math (`movements/` wired)
 │   ├── app/workers/
 │   └── alembic/versions/     # 001 … 031 (head: movers window index)
 ├── Imperecta_Architecture.md   # продукт, топология, карта файлов (Часть II)
@@ -98,17 +98,17 @@ Legacy `app/api/`, `app/services/` удалены.
 | `data_firewall` | Tier-1: контракты колонок, ecommerce/market rules, HMAC signing (`table`+`operation`+`locator`+`fields`), durable reject через `write_reject_data_isolated` (`firewall.py`, `rules.py`, `contracts.py`, `signing.py`, `reject_store.py`) |
 | `ingestion` | Tier-1: orchestration scrape→persist (`service.py`, `dto.py`) — вызывает `data_firewall` + `persist`; re-export gate в `gate.py` |
 | `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`, `meta_write.py` META bridge) |
-| `visualisation_calc` | Tier-1: расчёты виджетов дашборда (KPI, movements, volatility, coverage, trend, categories). **`movements/` — первый live submodule** (operational sync read как `price_eur_resolver`, см. §2.7.6); остальные submodules — scaffold. Planned **data_export** read-OUT door (Phase 7/8) — для user-data export, не для movements. `api.py` / `main.py` — wiring pending. Преемник dissolved `dashboard/` + `analytics/`. |
+| `visualisation_calc` | Tier-1: расчёты виджетов дашборда. **`movements/` — первый live submodule, wired end-to-end** (compute-site → read/service/schemas → `api.py` → FE; см. §2.7.6, `0a.7`). Остальные submodules — scaffold. Planned **data_export** read-OUT door (Phase 7/8) — для user-data export, не для movements. Преемник dissolved `dashboard/` + `analytics/`. |
 | `product_pool` | Публичный пул товаров; `/pool/*`, `/markets/overview` |
 | `currency` | Единый fiat-home: `price_eur_resolver` (scrape-path EUR), `display_converter` (UI display FX, бывший `common/currency.py`), `forex_fetch` (thin delegate → `market_data.fetching`; `TODO(boundary)` Tier-0→Tier-1 — см. §7.5) |
 | `market_data` | Provider-agnostic triad (forex/crypto/commodities) + общий `provider_queue.gap_fill_fetch`; ingest + read API `/markets/{preferences,instruments,ticker,ingest}`; adapters в `providers/`; Celery — `workers/market_data_tasks.py` |
 | `ai_analyst` | Claude chat sessions; entitlement-gated |
 
-**Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, `entitlements.api`, `ai_analyst.api` — всего **12** роутеров под единым `prefix="/api"` (`main.py:146-160`).
+**Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, **`visualisation_calc.api`** (`/markets/movements*`), `entitlements.api`, `ai_analyst.api` — всего **13** роутеров под единым `prefix="/api"` (`main.py:147-162`).
 
-**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `classifier`, `ingestion`, `data_firewall`, `persist`, **`visualisation_calc`** (`movements/` built; `api.py` route — следующий шаг), `meta_write` (внутренний META bridge в `persist/`). **`scraper/api.py` router удалён** (ранее не смонтирован; `/pool/search`, orphan FE `pipeline-status`, 3 dead `/admin/parsing/*`, `recalculate-quotas` — удалены).
+**Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `classifier`, `ingestion`, `data_firewall`, `persist`, `meta_write` (внутренний META bridge в `persist/`). **`scraper/api.py` router удалён** (ранее не смонтирован; `/pool/search`, orphan FE `pipeline-status`, 3 dead `/admin/parsing/*`, `recalculate-quotas` — удалены).
 
-**Удалены / заменены:** `analytics/`, `dashboard/` — dissolved; расчёты виджетов переезжают в **`visualisation_calc/`**. `digests/`, `alerts/` — отсутствуют; API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
+**Удалены / заменены:** `analytics/`, `dashboard/` — dissolved; расчёты виджетов переезжают в **`visualisation_calc/`** (`movements` — live). `digests/`, `alerts/` — отсутствуют; API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
 
 ---
 
@@ -164,7 +164,7 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 
 Если sitemap дал ≥10 product URLs — **sitemap path** (resumable offset, `016`); иначе category crawl с Phase 2 budget (`017`/`018` resume).  
 При нехватке 15 min budget — `partial_budget` / inner job `partial` (`019`); следующий run продолжает.  
-Sitemap: per-URL structural classify (sample только для early `reject_sample` при <20% product); **trust_sample blind-accept удалён** (`4f961a9`); concurrency 8; bad harvest retry через 1h. Locale: `locale_selection.select_locale_url` (en → marketplace locale → x-default) + `Accept-Language` на classify fetch.
+Sitemap: per-URL structural classify (sample только для early `reject_sample` при <20% product); **trust_sample blind-accept удалён** (`4f961a9`); concurrency 8; bad harvest retry через 1h. Locale/canonical: `locale_selection.build_accept_language_header` + `extract_canonical_url` (`discovery.py:35`, `:497–499`, `:530`); **`select_locale_url` в `discovery.py` не вызывается**. Fetch classify: **только static** (`static_fetch=True`, `discovery.py:489` и др.) — `DimMarketplace.requires_js` / `scrape_tier` **не читаются** (дефект → `fetch_adapter`, `0a.8`). Подробный контракт: `0a.8`.
 
 Подробно: `Imperecta_Backend.md`.
 
@@ -231,7 +231,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
 
-**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE** (persist — полный CUD dumb primitive; master lock связывает `table`+`operation`+`locator`; reject durable; `reject_data` несёт `operation`). **LAYER 2 progress:** дверь **META** — **DONE**; дверь **LOGS** — **DONE** (+ batch-signing primitive); **DDL/COMMANDS (D-A audit-mark)** — **DONE**; admin destructive whole-pool wipe — **REMOVED**. → **LAYER 2 COMPLETE**. **LAYER 3 — COMPLETE:** scrape→gate→DB полностью маршрутизирован (cat-1 **CLOSED**: enrich/denorm/`dim_date`/housekeeping UPDATE + prune DELETE + `dim_date` INSERT через `update_validator` / `evaluate_ecommerce` / `evaluate_market`); подмодуль **`price_eur_resolver`** — **live**; **`price_change_pct` compute-site** в ingestion (§7.5); prune DELETE — **durable commit**; seam B dead-code — **DONE**; **market-data triad + cleanup** — **COMPLETE** (`0a.6`); **`visualisation_calc/movements`** — **COMPLETE** (`0a.7`; `api.py` wiring pending). **NEXT:** movements wiring (`api.py` + FE client-side calc removal), **затем LAYER 4** — discovery data contract, затем discovery internals. Оставшийся bypass: **cat-5** USER/AUTH — **DEFERRED → Phase 7/8**. Оставшиеся gap в **0a.4** — вне закрытых sub-seams.
+**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE**. **LAYER 2 — COMPLETE**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + market-data triad (`0a.6`) + **`visualisation_calc/movements` wired end-to-end** (`0a.7`, §2.7.6). **LAYER 4 OPENED** — discovery data contract записан (`0a.8`); **NEXT:** behavior-preserving submodule extraction (seam-by-seam, bottom-up), затем fix-seams (`budget_governor` starvation, `fetch_adapter` `requires_js`). **DEFERRED:** cat-5 USER/AUTH → Phase 7/8.
 
 **Модель дверей (lock-by-threat):** сила замка подбирается под угрозу домена — **META** и **LOGS** = **LIGHT** (структурный контракт `build_table_contract`: типы + nullable + enum CHECK + HMAC; без семантических rules); **`update_validator`** = **SEMANTIC** (per-kind column allowlist + инвариант `reactivation_forbidden` — строже META, слабее полного `evaluate_ecommerce`); полные двери (`evaluate_ecommerce`, аналитический рельс `evaluate_market`) сохраняют семантические rules поверх контракта. На **каждой** двери HMAC-подпись обязательна при проходе в persist (single-record `SignedRecord` или batch `SignedBatch`).
 
@@ -364,7 +364,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | `update_validator` (scrape UPDATE/DELETE door) | **built** (LAYER 3) | `data_firewall/update_validator.py`; `authorize_scrape_update` / `authorize_scrape_delete`; `SCRAPE_UPDATE_ALLOWLIST` kinds: `listing_scrape_start_reset`, `listing_success_streak_reset`, `listing_housekeeping_failure`, `listing_deactivate`, `listing_checked`, `listing_denorm_success`, `listing_denorm_no_change`, `product_enrich` (denorm kinds включают `last_price_eur`) | **LAYER 3** — DONE |
 | `price_eur_resolver` (`resolve_price_eur`) | **built** (LAYER 3) | `modules/currency/price_eur_resolver.py`; operational SELECT `fact_currency_rate` на producer sync session; feeds `fact_price.price_eur` + `fact_listing.last_price_eur` | **LAYER 3** — DONE |
 | Market-data provider-queue triad | **built** | `market_data/provider_queue.py` (`gap_fill_fetch`); adapters forex/crypto/commodities; `provider_source` на всех DTO; ingest boundary frozen; beat schedule — см. §8 | **DONE** |
-| `visualisation_calc/movements` submodule | **built** | `movements/{read,schemas,service}.py`; migration `031`; `api.py` wiring pending | **DONE** (HTTP pending) |
+| `visualisation_calc/movements` submodule | **wired** | `movements/{read,schemas,service}.py`; `api.py` 4 routes; `main.py` mount; FE `MarketsOverviewSection` | **DONE** |
 | `data_export` (read-OUT door) | planned, not built | no symbol in `data_firewall/**` or `persist/**`; model `DataExport` only (`app_tables.py:509–512`) | **Phase 7/8** |
 | `user_data` CRUD (scoped owner door) | planned, not built | grep in gate/persist perimeter: **NOT FOUND** | **Phase 7/8** |
 | `operation` field on `reject_data` | **built** (sub-seam 1) | миграция `029_reject_data_operation`; `models/reject_data.py:29+`; `reject_store.py:93+` | **LAYER 1** — DONE |
@@ -390,18 +390,102 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `NormalizedCommodity`); `provider_source` на всех. Ingest boundary **frozen**: `ForexIngestItem` / `CryptoIngestItem` / `CommodityIngestItem` → `persist_*` → `evaluate_market` → `write_sync`; Celery `ingest_market_data`, `ingest_commodities`.
 
-#### 0a.7 Movements submodule (`visualisation_calc/movements/`) — выполнено
+#### 0a.7 Movements submodule (`visualisation_calc/movements/`) — выполнено + wired
 
-Первый **live** submodule `visualisation_calc`. **Не смонтирован** в `main.py` — wiring `api.py` следующий шаг.
+Первый **live** submodule `visualisation_calc`, end-to-end: `price_change_pct` compute-site (ingestion) → operational read → `MovementsCalc` → HTTP → frontend.
 
 | Компонент | Назначение |
 |-----------|------------|
 | `movements/schemas.py` | `MoverItem` (вкл. `old_price_reconstructed`), `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters` |
-| `movements/read.py` | **Operational sync SELECT** (как `price_eur_resolver` — рядом с consumer, **не** `data_firewall`; service-data, **без** access-log): JOIN latest `fact_price` (`row_number` latest-per-listing, паттерн `product_pool`) + `rn=2` prior price для честного `old_price` → `fact_listing` (`is_active`, окно по `last_price_changed_at`, semantics A) → `dim_marketplace` → `dim_country` → `dim_product` → optional `dim_category`; строки с `price_change_pct IS NULL` исключены |
-| `movements/service.py` | `MovementsCalc`: `get_movers` / `count_movers` / `movement_summary` / `coverage_meta` — pure calc над typed rows, **без** DB; честность: `NULL ≠ 0%`, `data_ready = listings_with_change > 0`, `0.00` = unchanged |
-| миграция `031_listing_last_price_changed_idx` | partial index `idx_listing_last_price_changed_active ON fact_listing(last_price_changed_at) WHERE is_active AND last_price_changed_at IS NOT NULL`; asyncpg-safe (one `op.execute`) |
+| `movements/read.py` | **Operational sync SELECT** (как `price_eur_resolver` — рядом с consumer, **не** `data_firewall`; service-data, **без** access-log): JOIN latest `fact_price` + `rn=2` prior → `fact_listing` (окно `last_price_changed_at`, semantics A) → dims; `MoverReadRow` frozen dataclass |
+| `movements/service.py` | `MovementsCalc`: `get_movers` / `count_movers` / `movement_summary` / `coverage_meta` — pure calc над typed rows |
+| `visualisation_calc/api.py` | `APIRouter(prefix="/markets")`: `GET /movements`, `/movements/kpi`, `/movements/summary`, `/movements/coverage` (`CurrentUser`); sync read в `asyncio.to_thread` + `sync_session_factory` (как `write_meta_sync`/`write_meta_async`); Pydantic-safe после `db.close()` |
+| `main.py` | `visualisation_calc_router` в списке роутеров (`prefix="/api"`); три `/markets` router — без коллизий (distinct `/movements*` paths) |
+| миграция `031_listing_last_price_changed_idx` | partial index `idx_listing_last_price_changed_active` |
+| **Frontend** | `MarketsOverviewSection.tsx`: `changedMore5` ← `/markets/movements/kpi`; `avgVolatility` ← `/movements/summary.avg_abs_change`; `totalPool`/`updated24h`/`lastUpdate` — без изменений (не movements). `coverage_meta.data_ready=false` → i18n `market.overview.kpi.accumulatingData` / `accumulatingDataHint` (не голый 0%). `markets.ts`: `getMoversKpi`/`Summary`/`Coverage` (+ `getMovers` для будущего list widget) + query keys |
 
-Окно **semantics A:** `last_price_changed_at` обновляется только при реальном изменении цены (`listing_denorm_success`), не на `no_change`.
+Окно **semantics A:** `last_price_changed_at` — только при реальном изменении цены (`listing_denorm_success`).
+
+#### 0a.8 Discovery Data Contract (Layer 4)
+
+Формальный контракт данных discovery: что модуль **входит**, **собирает**, **классифицирует**, **эмитит** и где граница с scrape/ingestion. Источник истины по поведению — `backend/app/modules/scraper/discovery.py` (`DiscoveryCrawler`); каждое утверждение привязано к `file:line` recon. Целевая карта подмодулей — ориентир для behavior-preserving extraction (D-A): сначала извлечение без смены поведения (включая известные дефекты), затем отдельные fix-seams.
+
+**LAYER 4 progress:** contract **OPENED** (`0a.8`). **NEXT:** submodule extraction bottom-up → fix-seams `budget_governor` + `fetch_adapter`.
+
+##### Назначение и граница
+
+Discovery обходит маркетплейс, чтобы найти URL страниц товара (PDP) и записать их в пул: shell `dim_product` + строка `fact_listing`, с курсорами/категориями на `dim_marketplace` и lifecycle на `scrape_jobs` (`discover`: `discovery.py:1065–1105`, META snapshot: `_meta_update_marketplace_snapshot` `:55–62`, `_DISCOVERY_MP_WRITE_KEYS` `:40–52`).
+
+**Эмиссия в пул (только):** `external_url`, `url_hash` (`FactListing.compute_url_hash`, `:395–399`), `page_role="product"` (`:427`), placeholder `dim_product.name` из path URL через `_title_from_url` (`:150–155`, сборка DTO `:409–428`). Gate pool-write принимает только `page_role == "product"` (`_filter_urls_by_role` / `_products_from_results`: `:548–549`).
+
+**Вне scope discovery:** цена, валюта, атрибуты, brand, seller, gallery, product category — зона scrape + ingestion (`evaluate_ecommerce`, parser-completeness gate #8 downstream). Discovery **не** вызывает `evaluate_ecommerce` и **не** пишет `fact_price`.
+
+##### Вход и seed
+
+| Вход | Источник | evidence |
+|------|----------|----------|
+| `base_url` маркетплейса | `DimMarketplace.base_url`; нормализация в `discover()` | `discovery.py:1123–1127` |
+| Resume: `recon_frontier_state` | BFS Phase 1 frontier | `:40–47`, `:683–723`, `:748–799` |
+| Resume: `category_resume_index` | Phase 2 window cursor | `:40–47`, `:1259–1270` |
+| Resume: `sitemap_resume_offset` | Sitemap path batch offset | `:40–47`, `:1190–1203` |
+| Resume: `discovered_category_urls` | Опубликованные категории Phase 1 | `:40–47`, `:1249` |
+| Fallback path-suffixes | Универсальные entry URLs (`/catalog`, `/shop`, …) — **не** per-shop regex | `_seed_candidates`: `:316–347` |
+
+Caller задаёт monotonic deadline: `tasks.py:346–352` (`time.monotonic() + DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS`).
+
+##### Фазы crawl lifecycle
+
+Константы фаз/бюджетов: `discovery.py:69–141` (`MAX_CATEGORY_URLS_PER_RUN=60`, `MAX_PAGES_PER_CATEGORY=50`, `CATEGORY_CONVERGENCE_STREAK=3`, `CATEGORY_PUBLISH_BATCH=60`, `RECON_BFS_MAX_DEPTH=3`, `SITEMAP_MIN_USEFUL_URLS=10`, `SITEMAP_PHASE_BUDGET_SECONDS=300`, `DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`, `SAVE_BUDGET_HEADROOM_FRACTION=0.85`).
+
+| Фаза | Условие / метод | Поведение |
+|------|-----------------|-----------|
+| **0 — sitemap harvest** | `_should_run_sitemap_harvest` → `_phase0_sitemap_harvest` (`:469+`, `:617+`); в `discover()` `:1139–1218` | robots/sitemap pipeline через `ScraperPool.fetch_sitemap_candidates`; если ≥ `SITEMAP_MIN_USEFUL_URLS` (10) product URL → **sitemap path**, прямой save в пул; sub-budget `asyncio.wait_for(..., SITEMAP_PHASE_BUDGET_SECONDS)` |
+| **1 — category BFS recon** | `_phase1_category_recon` (`:726+`); только если sitemap path не сработал | BFS hub/listing, `RECON_BFS_MAX_DEPTH=3`; publish batch ≥ `CATEGORY_PUBLISH_BATCH=60` в `discovered_category_urls` |
+| **2 — product harvest** | `_phase2_product_harvest` (`:891+`); **только если** `phase1_exhausted is False` (`:1233–1247`) | Окно категорий `MAX_CATEGORY_URLS_PER_RUN=60`, pagination ≤ `MAX_PAGES_PER_CATEGORY=50`, convergence `CATEGORY_CONVERGENCE_STREAK=3` |
+
+**Общий бюджет:** один monotonic deadline на marketplace (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`); headroom `_headroom_deadline` × `SAVE_BUDGET_HEADROOM_FRACTION=0.85` (`:350–364`, `:1191`, `:1220`).
+
+**Статусы `DiscoveryResult.status`:** `completed`, `partial_budget`, `partial`, `error`, `no_categories` (`:277–278`, присвоение `:1290–1299`). Inner `scrape_jobs.status`: `failed` при `error`, `partial` при `partial_budget`, иначе `completed` (`:1302–1307`).
+
+##### Классификация (универсальность)
+
+URL → **product** vs category/hub через **структурные** сигналы `classify_page_role_for_discovery` (import `:22`; вызовы `:499`, `:829`, `:876`) — цепочка OG → JSON-LD → Microdata → structural fallback в `modules/classifier/`. **Без** per-shop URL regex. Canonical: `extract_canonical_url` (`locale_selection.py`, `discovery.py:35`, `:497–498`). Pool gate: `_filter_urls_by_role` / `_gate_urls_for_pool` (`:504+`, `:603–615`).
+
+##### Gate handoff (уже gated — as-is, не re-route)
+
+Pool-write closure (Layer 2, discovery pool-write):
+
+1. `PoolInsertDTO` `{ marketplace_id; dim_product[id, name, name_normalized, is_active]; fact_listing[product_id, marketplace_id, external_url, url_hash, is_active, page_role] }` — dataclass `:162–168`, сборка `:412–429`.
+2. Sync bridge `asyncio.to_thread(_write_pool_dtos_sync, …)` — `:435–437`, `:462–464`.
+3. `_write_pool_dtos_sync` (`:179–262`): per-DTO nested savepoint → `evaluate_market` (`dim_product`, `:200–208`) → `write_sync` (`:214–221`) → `evaluate_market` (`fact_listing`, `:227–235`) → `write_sync` (`:241–248`) → batch `commit`.
+4. Dedup read перед emit: `existing_hashes` по `url_hash` (`:396–399`, `:405–407`).
+5. META door: `scrape_jobs` + `dim_marketplace` snapshot (cursors/categories) через `write_meta_async` (`:57–62`, `:1085–1094`, `:1329+`).
+
+Re-route **не** планируется на этом шаге — контракт фиксирует текущий путь.
+
+##### Известные дефекты (contract notes; fix — позже, не в step 1)
+
+| Дефект | Симптом | evidence | Planned fix submodule |
+|--------|---------|----------|----------------------|
+| **STARVATION** | Один shared monotonic budget; Phase-1 BFS frontier resume может съесть весь budget → `phase1_exhausted=True` → Phase 2 **пропущен** → `discovered_category_urls` не обработаны → 0 products (prod: `pandashop_md`, frontier queue≈6799, 33 categories, `partial_budget`, 0 pool) | `:1227–1247` (`phase1_exhausted` → skip Phase 2) | `budget_governor` |
+| **NO `requires_js`** | Discovery всегда `static_fetch=True` (httpx, без JS); `DimMarketplace.requires_js` / `scrape_tier` не consult → JS-heavy shops дают пустой soup | `:489`, `:825`, `:872`, `:978` | `fetch_adapter` |
+
+##### Target submodule map (D-A decomposition)
+
+Стратегия **D-A:** extract preserving behavior first (включая оба дефекта); green baseline на каждом seam; fix-seams — **отдельно** в `budget_governor` и `fetch_adapter`.
+
+| Submodule | Ответственность | Поглощает (текущие symbols / lines) |
+|-----------|-----------------|--------------------------------------|
+| `gate_persist` | Gated pool batch write | `_write_pool_dtos_sync`, `PoolInsertDTO`, `PoolWriteResult` (`:162–262`) |
+| `cursor_store` | Cursor/resume на `dim_marketplace` | `recon_frontier_state`, `category_resume_index`, `sitemap_resume_offset`, `discovered_category_urls`; `_DISCOVERY_MP_WRITE_KEYS`, `_meta_update_marketplace_snapshot` (`:40–62`, Phase 1/2 cursor writes) |
+| `url_canonicalizer` + `dedup` | Canonical URL + hash dedup | `extract_canonical_url` (import `:35`); `FactListing.compute_url_hash`; `existing_hashes` (`:395–407`) |
+| `fetch_adapter` | Fetch decision для classify/harvest | `ScraperPool.scrape_page_for_analysis(static_fetch=True)` (`:487–491` и call-sites); **будущий** `requires_js` / tier |
+| `classifier_adapter` | Structural product gate | `classify_page_role_for_discovery`; `_classify_and_resolve_url`, `_filter_urls_by_role`, `_gate_urls_for_pool` (`:478–615`) |
+| `bfs_walker` | Phase 1 BFS category recon | `_phase1_category_recon` (`:726+`), `RECON_BFS_MAX_DEPTH`, `CATEGORY_PUBLISH_BATCH` |
+| `category_processor` | Phase 2 product harvest | `_phase2_product_harvest` (`:891+`), pagination/convergence constants |
+| `budget_governor` | Per-phase budget allocation | `_headroom_deadline`, `deadline_monotonic` threading; `DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS`; **будущий** starvation fix |
+| `sitemap_harvester` | Phase 0 sitemap | `_should_run_sitemap_harvest`, `_phase0_sitemap_harvest` (`:469+`, `:617+`) |
+| `DiscoveryOrchestrator` | Thin coordinator | `discover()` body (`:1065+`) — фазовая маршрутизация, status assembly (`:1290–1327`), делегирование подмодулям |
 
 ---
 
@@ -413,10 +497,10 @@ DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `No
 
 | module | file:line | table | column(s) + ORM type | gate door | persist primitive | session |
 |--------|-----------|-------|----------------------|-----------|-------------------|---------|
-| discovery | `scraper/discovery.py:171–176` | `dim_product` | `id` UUID; `name` String(500); `name_normalized` String(500); `is_active` Boolean | `evaluate_market` | — | sync |
-| discovery | `scraper/discovery.py:185–188` | `dim_product` | те же (signed fields) | — | `write_sync` | sync |
-| discovery | `scraper/discovery.py:198–203` | `fact_listing` | `product_id` UUID; `marketplace_id` UUID; `external_url` Text; `url_hash` String(64); `is_active` Boolean; `page_role` String(16) | `evaluate_market` | — | sync |
-| discovery | `scraper/discovery.py:212–215` | `fact_listing` | те же | — | `write_sync` | sync |
+| discovery | `scraper/discovery.py:200–208` | `dim_product` | `id` UUID; `name` String(500); `name_normalized` String(500); `is_active` Boolean | `evaluate_market` | — | sync |
+| discovery | `scraper/discovery.py:214–221` | `dim_product` | те же (signed fields) | — | `write_sync` | sync |
+| discovery | `scraper/discovery.py:227–235` | `fact_listing` | `product_id` UUID; `marketplace_id` UUID; `external_url` Text; `url_hash` String(64); `is_active` Boolean; `page_role` String(16) | `evaluate_market` | — | sync |
+| discovery | `scraper/discovery.py:241–248` | `fact_listing` | те же | — | `write_sync` | sync |
 | ingestion | `ingestion/service.py:252–292` | `fact_price` | …; **`price_change_pct` Numeric(8,4)** (via `compute_price_change_pct` + `build_fact_price_fields`) | `evaluate_ecommerce` (+ `resolve_price_eur` operational read) | — | sync |
 | ingestion | `ingestion/service.py:325–353` | `fact_price` | те же (signed payload) | — | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:147–159` | `fact_currency_rate` | `date_id` Integer; `currency_code` String(3); `rate_to_eur` Numeric(18,8); `rate_to_usd` Numeric(18,8); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
@@ -452,7 +536,7 @@ DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `No
 
 > **LAYER-3 REGISTRY (correctness backlog — не routing):** **(a) `listing_denorm_no_change` / `last_currency_code`** — **RESOLVED**; **(b) forex/crypto ingest `source` / `provider_source`** — **RESOLVED**; **(c)** **`product_name`** на `ExtractedProduct` — неиспользуемое DTO-поле, **оставлено**; **(d) `price_change_pct` always-NULL** — **RESOLVED:** `compute_price_change_pct` в ingestion → signed `fact_price.price_change_pct` (§7.5); **`discount_pct`** на scrape-path остаётся `NULL`; scrape-day `date_id` vs forex snapshot date — operational concern для `price_eur_resolver`.
 
-> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py` (`TelegramStatusResponse`, route `GET /telegram/status` удалён); `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`) — проверить соответствие правилу «no locally-failing DB-dependent tests»; **movements `api.py` wiring** + удаление client-side KPI/movements calc в `MarketsOverviewSection.tsx`.
+> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py`; `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`); **`avgVolatility` KPI** сейчас = `movements.avg_abs_change` (mean-abs proxy; заменит submodule `volatility/`); **`GET /movements` + `MoversPage`** готовы, movers-list widget **не построен**; movements KPI наполняются по мере накопления `price_change_pct` (≥2 scrape с изменением цены) — до этого честный accumulating state через `coverage_meta.data_ready`.
 
 > **Cat-5 USER/AUTH:** **DEFERRED → Phase 7/8** — cluster `users-auth` (planned `user_data` door).
 
@@ -574,8 +658,8 @@ DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `No
 
 | module | file:line | table | purpose |
 |--------|-----------|-------|---------|
-| discovery | `scraper/discovery.py:367–368` | `fact_listing` | dedup `url_hash` перед pool write |
-| discovery | `scraper/discovery.py:1092–1094,1290–1295` | `fact_listing` | quota / `products_in_pool` counter |
+| discovery | `scraper/discovery.py:396–399` | `fact_listing` | dedup `url_hash` перед pool write |
+| discovery | `scraper/discovery.py:1129–1132,1321–1327` | `fact_listing` | quota / `products_in_pool` counter |
 | scraper/tasks | `scraper/tasks.py:504–522,565` | `fact_listing`, `dim_marketplace` | scrape cohort selection |
 | scraper/service | `scraper/service.py:390,415,658,798,814` | `dim_marketplace`, `fact_listing`, `dim_product` | scrape context / backlog queries |
 | scraper/tasks | `scraper/tasks.py:342,354,413,696,708,730` | `scrape_jobs`, `dim_marketplace` | child task ownership |
@@ -616,13 +700,13 @@ DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `No
 
 | factory | defined | used by | commit owner |
 |---------|---------|---------|--------------|
-| `sync_session_factory` | `database.py:22–27` | `discovery._write_pool_dtos_sync:160`; `tasks._run_scrape_all_pool:494`; `tasks._persist_technical_error_log:133`; `activity_pulse:50,82`; `market_data_tasks:49,67`; `cleanup_tasks:22`; `maintenance_tasks:39` | каждый caller (`commit`/`rollback`/`close` локально) |
+| `sync_session_factory` | `database.py:22–27` | `discovery._write_pool_dtos_sync:189`; `tasks._run_scrape_all_pool:494`; `tasks._persist_technical_error_log:133`; `activity_pulse:50,82`; `market_data_tasks:49,67`; `cleanup_tasks:22`; `maintenance_tasks:39` | каждый caller (`commit`/`rollback`/`close` локально) |
 | `async_session_maker` | `database.py:90–96` | `get_db`; `main._ensure_superuser:85`; Celery `_make_session_factory` per task | `get_db` auto-commit (`database.py:105`); Celery owners — явный `commit` |
 | `_make_session_factory` | `scraper/tasks.py:90–99`; `workers/reaper_tasks.py:59–74` | `discover_one_marketplace`, `scrape_one_marketplace`, `orchestrator_tick`, reaper | тело задачи |
 | `get_db` | `database.py:100–108` | FastAPI `DbSession` dependency | dependency: commit on success / rollback on error |
 | `sync_engine` / raw connection | `database.py:16–20`; `maintenance_tasks.py:65–74` | MV refresh, partitions, DB diagnostics | autocommit или `conn.commit()` |
 
-**Dual-session scrape pattern:** async owner (`discover_one_marketplace` / `scrape_one_marketplace` на AsyncSession) off-load'ит pool writes в `await asyncio.to_thread(_run_scrape_all_pool, …)` (`tasks.py:762–768`), внутри которого открывается **отдельный** `sync_session_factory()` (`tasks.py:494`). Gate writes discovery pool — тот же паттерн (`discovery.py:406–409` → `_write_pool_dtos_sync:160`).
+**Dual-session scrape pattern:** async owner (`discover_one_marketplace` / `scrape_one_marketplace` на AsyncSession) off-load'ит pool writes в `await asyncio.to_thread(_run_scrape_all_pool, …)` (`tasks.py:762–768`), внутри которого открывается **отдельный** `sync_session_factory()` (`tasks.py:494`). Gate writes discovery pool — тот же паттерн (`discovery.py:435–437`, `462–464` → `_write_pool_dtos_sync:179–262`).
 
 #### 0b.5 Legend
 
@@ -636,7 +720,7 @@ DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `No
 | **C2** | Analytical/export read: будущий контур `data_export` |
 | **persist** | Тупой исполнитель: только verify HMAC + verbatim INSERT/REPLACE; без бизнес-логики |
 
-**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + prune durable commit + seam B cleanup + **market-data triad** (`0a.6`) + **`visualisation_calc/movements`** (`0a.7`). **NEXT:** movements wiring (`api.py` route + FE switch), **затем LAYER 4** — discovery data contract. **DEFERRED:** `users-auth` → Phase 7/8; `forex_fetch` full Tier isolation. Admin whole-pool wipe — **REMOVED**.
+**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** … + **`visualisation_calc/movements` wired** (`0a.7`, §2.7.6). **LAYER 4 OPENED** — discovery data contract (`0a.8`); **NEXT:** behavior-preserving submodule extraction, затем fix-seams `budget_governor` + `fetch_adapter`. **DEFERRED:** `users-auth` → Phase 7/8; `forex_fetch` full Tier isolation. Admin whole-pool wipe — **REMOVED**.
 
 ---
 
@@ -1127,23 +1211,21 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 #### 2.7.6 Visualisation Calc (`visualisation_calc/`)
 
-> **Преемник** dissolved `dashboard/` + `analytics/`. Владеет **всеми расчётами** виджетов дашборда; frontend только отображает shaped payloads. **Read-access:** `movements/read.py` — operational sync SELECT по образцу `price_eur_resolver` (service-data, **не** planned `data_export` read-OUT door; `data_export` остаётся Phase 7/8 для user-data export). **`movements/` — built**; остальные submodules — scaffold (docstrings only). **`api.py` не в `main.py`** — wiring следующий шаг.
+> **Преемник** dissolved `dashboard/` + `analytics/`. **`movements/` — первый live submodule, wired end-to-end** (§7.5 compute-site → `0a.7` → §2.7.6 API → `MarketsOverviewSection`). Read-access: operational sync SELECT (`movements/read.py`), **не** planned `data_export` (Phase 7/8). Остальные submodules — scaffold.
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/visualisation_calc/__init__.py` | Пакет (пустой marker). |
-| `backend/app/modules/visualisation_calc/api.py` | HTTP surface для computed widget payloads (**router в `main.py` — pending**). |
-| `backend/app/modules/visualisation_calc/schemas.py` | Shared response schemas (top-level). |
-| `backend/app/modules/visualisation_calc/kpi/service.py` | KPI: total pool, updated-in-24h, last-update — **scaffold**. |
-| `backend/app/modules/visualisation_calc/movements/schemas.py` | `MoverItem`, `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters`. |
-| `backend/app/modules/visualisation_calc/movements/read.py` | Operational sync SELECT + `MoverReadRow`; join graph см. `0a.7`. |
-| `backend/app/modules/visualisation_calc/movements/service.py` | `MovementsCalc` — pure consumer typed rows (`get_movers`, `count_movers`, `movement_summary`, `coverage_meta`). |
-| `backend/app/modules/visualisation_calc/volatility/service.py` | Volatility aggregates — **scaffold**. |
-| `backend/app/modules/visualisation_calc/coverage/service.py` | Market coverage — **scaffold**. |
-| `backend/app/modules/visualisation_calc/trend/service.py` | Average-price trend — **scaffold**. |
-| `backend/app/modules/visualisation_calc/categories/service.py` | Hot categories — **scaffold**. |
+| `backend/app/modules/visualisation_calc/api.py` | `APIRouter(prefix="/markets")`: `GET /movements`, `/movements/kpi`, `/movements/summary`, `/movements/coverage`; `asyncio.to_thread` + `sync_session_factory` → sync read + `MovementsCalc`; mounted в `main.py` (`prefix="/api"`) |
+| `backend/app/modules/visualisation_calc/movements/schemas.py` | `MoverItem`, `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters` |
+| `backend/app/modules/visualisation_calc/movements/read.py` | `read_mover_rows`, `read_coverage_counts` + `MoverReadRow` |
+| `backend/app/modules/visualisation_calc/movements/service.py` | `MovementsCalc` |
+| `backend/app/modules/visualisation_calc/kpi/service.py` | KPI aggregates — **scaffold** |
+| `backend/app/modules/visualisation_calc/volatility/service.py` | Volatility — **scaffold** (заменит avg-abs proxy в KPI) |
+| `backend/app/modules/visualisation_calc/coverage/service.py` | Market coverage — **scaffold** |
+| `backend/app/modules/visualisation_calc/trend/service.py` | Average-price trend — **scaffold** |
+| `backend/app/modules/visualisation_calc/categories/service.py` | Hot categories — **scaffold** |
 
-**Связь с frontend:** `MarketsOverviewSection.tsx` (`/dashboard`) — KPI/movements всё ещё на клиенте; переключение на `visualisation_calc` API — после `api.py` wiring (REGISTRY backlog).
+**Связь с frontend (`MarketsOverviewSection.tsx`):** movements KPI — server (`marketsApi.getMoversKpi` / `getMoversSummary` / `getMoversCoverage`); `changedMore5` и `avgVolatility` сняты с client-side `useMemo` по overview items. Каталог продуктов — `/markets/overview` (per-card `price_change_pct` на карточке). При `data_ready=false` — accumulating signal (i18n `accumulatingData` / `accumulatingDataHint`, 8 locales). `getMovers`/`MoversPage` — API готов, list widget **не построен**.
 
 #### 2.7.6 (legacy) Dashboard (`dashboard/`) — удалён
 
@@ -1977,7 +2059,7 @@ backend/app/
 │   │
 │   ├── visualisation_calc/                  Tier-1 — dashboard widget math
 │   │   ├── __init__.py
-│   │   ├── api.py                           HTTP surface (router в main.py — pending)
+│   │   ├── api.py                           /api/markets/movements* (visualisation_calc router)
 │   │   ├── schemas.py                       Shared response schemas
 │   │   ├── kpi/service.py                   KPI aggregates (scaffold)
 │   │   ├── movements/

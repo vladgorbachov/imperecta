@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/collapsible";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { ErrorState } from "@/components/ui-custom/ErrorState";
+import { MarketMoversWidget } from "@/components/dashboard/MarketMoversWidget";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -668,6 +669,11 @@ export function MarketsOverviewSection() {
         />
         <KpiCard label={t("market.overview.kpi.lastUpdate")} value={kpis.lastUpdate} />
       </div>
+
+      <MarketMoversWidget
+        movementsDataReady={movementsDataReady}
+        displayCurrency={displayCurrency}
+      />
 
       <div className="grid items-start gap-3 lg:grid-cols-[260px_1fr]">
         <aside className="hidden lg:block">

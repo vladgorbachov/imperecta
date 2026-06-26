@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 import app.modules.scraper.discovery as disc
+from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
 from app.models.dimensions import DimMarketplace
 
 
@@ -21,8 +22,8 @@ def _patch_pool_write(monkeypatch, *, slow_seconds: float | None = None) -> dict
         if slow_seconds:
             await asyncio.sleep(slow_seconds)
         state["batches"].append(list(dtos))
-        assert func is disc._write_pool_dtos_sync
-        return disc.PoolWriteResult(inserted=len(dtos), rejected=0)
+        assert func is write_pool_dtos_sync
+        return PoolWriteResult(inserted=len(dtos), rejected=0)
 
     monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
     return state

@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketsOverviewSection } from "./MarketsOverviewSection";
@@ -13,12 +13,14 @@ const getPoolStatsMock = vi.fn();
 const getMoversKpiMock = vi.fn();
 const getMoversSummaryMock = vi.fn();
 const getMoversCoverageMock = vi.fn();
+const getMoversMock = vi.fn();
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
     getOverview: (...args: unknown[]) => getOverviewMock(...args),
     getPoolMarketplaceStats: (...args: unknown[]) => getPoolMarketplaceStatsMock(...args),
     getPoolStats: (...args: unknown[]) => getPoolStatsMock(...args),
+    getMovers: (...args: unknown[]) => getMoversMock(...args),
     getMoversKpi: (...args: unknown[]) => getMoversKpiMock(...args),
     getMoversSummary: (...args: unknown[]) => getMoversSummaryMock(...args),
     getMoversCoverage: (...args: unknown[]) => getMoversCoverageMock(...args),
@@ -27,6 +29,7 @@ vi.mock("@/api/markets", () => ({
     overview: (params?: unknown) => ["markets", "overview", params],
     poolMarketplaceStats: () => ["markets", "pool-marketplace-stats"],
     poolStats: () => ["markets", "pool-stats"],
+    movements: (params?: unknown) => ["markets", "movements", params],
     movementsKpi: (params?: unknown) => ["markets", "movements", params, "kpi"],
     movementsSummary: (params?: unknown) => ["markets", "movements", params, "summary"],
     movementsCoverage: (params?: unknown) => ["markets", "movements", params, "coverage"],
@@ -147,6 +150,15 @@ describe("MarketsOverviewSection", () => {
         data_ready: true,
       },
     });
+    getMoversMock.mockResolvedValue({
+      data: {
+        items: [],
+        total: 0,
+        limit: 10,
+        offset: 0,
+        has_more: false,
+      },
+    });
   });
 
   it("renders KPI cards from movements endpoints", async () => {
@@ -183,8 +195,13 @@ describe("MarketsOverviewSection", () => {
     });
 
     renderSection();
-    const accumulating = await screen.findAllByText("market.overview.kpi.accumulatingData");
-    expect(accumulating.length).toBeGreaterThanOrEqual(2);
+    await screen.findByText("market.overview.movements.title");
+    await waitFor(() => {
+      expect(screen.getAllByText("market.overview.kpi.accumulatingData").length).toBeGreaterThanOrEqual(
+        2,
+      );
+    });
+    expect(screen.getByText("market.overview.kpi.accumulatingDataHint")).toBeInTheDocument();
     expect(screen.queryByText("0.00%")).not.toBeInTheDocument();
   });
 

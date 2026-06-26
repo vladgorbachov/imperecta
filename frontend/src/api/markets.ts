@@ -144,6 +144,29 @@ export interface MovementsQueryParams {
   limit?: number;
   offset?: number;
   sort_by?: "abs_change" | "changed_at";
+  display_currency?: DisplayCurrency | string;
+}
+
+/** Single mover row from GET /markets/movements (mirrors backend MoverItem). */
+export interface MoverItem {
+  product_name: string;
+  image_url?: string | null;
+  marketplace_name: string;
+  marketplace_domain?: string | null;
+  country_code: string;
+  old_price: number | string | null;
+  new_price: number | string;
+  currency: string;
+  price_change_pct: number | string;
+  direction: "up" | "down";
+  changed_at: string;
+  old_price_reconstructed: boolean;
+  display_old_price?: number | string | null;
+  display_new_price?: number | string | null;
+  display_currency?: string | null;
+  conversion_available?: boolean;
+  local_currency_resolution?: LocalCurrencyResolution | null;
+  local_currency_unavailable?: boolean;
 }
 
 export interface MoversKpi {
@@ -161,8 +184,8 @@ export interface MoversSummary {
   up_count: number;
   down_count: number;
   unchanged_count: number;
-  biggest_gainer: unknown | null;
-  biggest_loser: unknown | null;
+  biggest_gainer: MoverItem | null;
+  biggest_loser: MoverItem | null;
   avg_abs_change: number | string | null;
   buckets: MoversSummaryBucket[];
 }
@@ -174,7 +197,7 @@ export interface MoversCoverageMeta {
 }
 
 export interface MoversPage {
-  items: unknown[];
+  items: MoverItem[];
   total: number;
   limit: number;
   offset: number;
@@ -278,6 +301,7 @@ export const marketsQueryKeys = {
       params?.limit ?? 20,
       params?.offset ?? 0,
       params?.sort_by ?? "abs_change",
+      params?.display_currency ?? "local",
     ] as const,
   movementsKpi: (params?: MovementsQueryParams) =>
     [...marketsQueryKeys.movements(params), "kpi"] as const,

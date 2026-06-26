@@ -12,6 +12,9 @@ from fastapi import APIRouter, Query
 from app.common.deps import CurrentUser, DbSession
 from app.database import sync_session_factory
 from app.modules.currency import CurrencyConverter, normalize_display_currency
+from app.modules.visualisation_calc.kpi.read import read_dashboard_kpi
+from app.modules.visualisation_calc.kpi.schemas import DashboardKpi
+from app.modules.visualisation_calc.kpi.service import build_dashboard_kpi
 from app.modules.visualisation_calc.movements.read import (
     read_coverage_counts,
     read_mover_rows,
@@ -88,6 +91,22 @@ def _get_movers_coverage_sync(filters: MovementsFilters) -> MoversCoverageMeta:
         return MovementsCalc.coverage_meta(filters, counts)
     finally:
         db.close()
+
+
+@router.get("/dashboard-kpi", response_model=DashboardKpi)
+async def get_dashboard_kpi(
+    _current_user: CurrentUser,
+    db: DbSession,
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+    marketplace_id: UUID | None = Query(default=None),
+) -> DashboardKpi:
+    """Pool freshness KPIs over the full visible listing set (uncapped)."""
+    updated_24h, last_update = await read_dashboard_kpi(
+        db,
+        country_code=country_code,
+        marketplace_id=marketplace_id,
+    )
+    return build_dashboard_kpi(updated_24h, last_update)
 
 
 @router.get("/movements", response_model=MoversPage)

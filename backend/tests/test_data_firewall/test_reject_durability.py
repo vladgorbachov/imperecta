@@ -11,7 +11,10 @@ from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.data_firewall.reject_store import write_reject_data_isolated
 from app.modules.data_firewall.signing import reset_signing_settings_cache
 from app.modules.persist.writer import build_dim_product_fields, build_fact_listing_fields
-from app.modules.scraper import discovery as disc
+from app.modules.discovery.gate_persist import (
+    PoolInsertDTO,
+    write_pool_dtos_sync,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +36,7 @@ def test_reject_survives_business_savepoint_rollback() -> None:
         url_hash="hash1",
     )
     listing_fields["url_hash"] = None
-    dto = disc.PoolInsertDTO(
+    dto = PoolInsertDTO(
         marketplace_id=marketplace_id,
         dim_product=build_dim_product_fields(
             product_id=product_id,
@@ -47,11 +50,11 @@ def test_reject_survives_business_savepoint_rollback() -> None:
     business_db.begin_nested.return_value = nested
     audit_db = MagicMock()
 
-    with patch("app.modules.scraper.discovery.sync_session_factory", return_value=business_db), patch(
+    with patch("app.modules.discovery.gate_persist.sync_session_factory", return_value=business_db), patch(
         "app.database.sync_session_factory",
         return_value=audit_db,
-    ), patch("app.modules.scraper.discovery.write_sync", return_value=True):
-        result = disc._write_pool_dtos_sync([dto])
+    ), patch("app.modules.discovery.gate_persist.write_sync", return_value=True):
+        result = write_pool_dtos_sync([dto])
 
     assert result.inserted == 0
     assert result.rejected == 1

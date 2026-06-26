@@ -19,7 +19,7 @@ from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.classifier import classify_page_role_for_discovery
-from app.modules.discovery import cursor_store
+from app.modules.discovery import cursor_store, url_canonicalizer
 from app.modules.discovery.gate_persist import (
     PoolInsertDTO,
     write_pool_dtos_sync,
@@ -33,7 +33,7 @@ from app.modules.persist.writer import (
     build_dim_product_fields,
     build_fact_listing_fields,
 )
-from app.modules.scraper.locale_selection import build_accept_language_header, extract_canonical_url
+from app.modules.scraper.locale_selection import build_accept_language_header
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -276,11 +276,11 @@ class DiscoveryCrawler:
 
         work_urls = urls[start_offset:] if start_offset > 0 else urls
         normalized_urls = [u for u in work_urls if u]
-        hash_by_url = {url: FactListing.compute_url_hash(url) for url in normalized_urls}
-        existing_hashes_result = await self.db.execute(
-            select(FactListing.url_hash).where(FactListing.url_hash.in_(list(hash_by_url.values()))),
+        hash_by_url = {url: url_canonicalizer.url_hash(url) for url in normalized_urls}
+        existing_hashes = await url_canonicalizer.load_existing_url_hashes(
+            self.db,
+            list(hash_by_url.values()),
         )
-        existing_hashes = {row[0] for row in existing_hashes_result.all() if row[0]}
 
         new_count = 0
         pending_in_batch = 0
@@ -381,8 +381,8 @@ class DiscoveryCrawler:
         if soup is None:
             return "unknown", url
         try:
-            canonical = extract_canonical_url(soup, url)
-            pool_url = canonical or url
+            canonical = url_canonicalizer.canonical_from_soup(soup, url)
+            pool_url = url_canonicalizer.pool_url(canonical, url)
             role = classify_page_role_for_discovery(soup, pool_url)
             return role, pool_url
         except Exception:
@@ -434,7 +434,7 @@ class DiscoveryCrawler:
             for _source_url, role, pool_url in results:
                 if role != "product":
                     continue
-                url_hash = FactListing.compute_url_hash(pool_url)
+                url_hash = url_canonicalizer.url_hash(pool_url)
                 if url_hash in seen_hashes:
                     continue
                 seen_hashes.add(url_hash)

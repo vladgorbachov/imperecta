@@ -14,7 +14,10 @@ from app.modules.persist.writer import (
     build_fact_listing_fields,
     build_fact_price_fields,
 )
-from app.modules.scraper import discovery as disc
+from app.modules.discovery.gate_persist import (
+    PoolInsertDTO,
+    write_pool_dtos_sync,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +80,7 @@ def test_build_fact_price_fields_unchanged_shape() -> None:
 
 
 def test_write_pool_dtos_sync_empty_batch() -> None:
-    result = disc._write_pool_dtos_sync([])
+    result = write_pool_dtos_sync([])
     assert result.inserted == 0
     assert result.rejected == 0
 
@@ -85,7 +88,7 @@ def test_write_pool_dtos_sync_empty_batch() -> None:
 def test_write_pool_dtos_sync_commits_successful_pair() -> None:
     product_id = uuid4()
     marketplace_id = uuid4()
-    dto = disc.PoolInsertDTO(
+    dto = PoolInsertDTO(
         marketplace_id=marketplace_id,
         dim_product=build_dim_product_fields(
             product_id=product_id,
@@ -103,8 +106,8 @@ def test_write_pool_dtos_sync_commits_successful_pair() -> None:
     nested = MagicMock()
     db.begin_nested.return_value = nested
 
-    with patch("app.modules.scraper.discovery.sync_session_factory", return_value=db), patch(
-        "app.modules.scraper.discovery.evaluate_market",
+    with patch("app.modules.discovery.gate_persist.sync_session_factory", return_value=db), patch(
+        "app.modules.discovery.gate_persist.evaluate_market",
         return_value=FirewallOutcome(
             passed=True,
             reject_reason=None,
@@ -119,8 +122,8 @@ def test_write_pool_dtos_sync_commits_successful_pair() -> None:
                 signature="sig",
             ),
         ),
-    ), patch("app.modules.scraper.discovery.write_sync", return_value=True):
-        result = disc._write_pool_dtos_sync([dto])
+    ), patch("app.modules.discovery.gate_persist.write_sync", return_value=True):
+        result = write_pool_dtos_sync([dto])
 
     assert result.inserted == 1
     assert result.rejected == 0
@@ -132,7 +135,7 @@ def test_write_pool_dtos_sync_commits_successful_pair() -> None:
 def test_write_pool_dtos_sync_rolls_back_batch_on_exception() -> None:
     product_id = uuid4()
     marketplace_id = uuid4()
-    dto = disc.PoolInsertDTO(
+    dto = PoolInsertDTO(
         marketplace_id=marketplace_id,
         dim_product=build_dim_product_fields(
             product_id=product_id,
@@ -150,12 +153,12 @@ def test_write_pool_dtos_sync_rolls_back_batch_on_exception() -> None:
     nested = MagicMock()
     db.begin_nested.return_value = nested
 
-    with patch("app.modules.scraper.discovery.sync_session_factory", return_value=db), patch(
-        "app.modules.scraper.discovery.evaluate_market",
+    with patch("app.modules.discovery.gate_persist.sync_session_factory", return_value=db), patch(
+        "app.modules.discovery.gate_persist.evaluate_market",
         side_effect=RuntimeError("boom"),
     ):
         with pytest.raises(RuntimeError, match="boom"):
-            disc._write_pool_dtos_sync([dto])
+            write_pool_dtos_sync([dto])
 
     db.rollback.assert_called_once()
     db.close.assert_called_once()
@@ -165,7 +168,7 @@ def test_write_pool_dtos_sync_rolls_back_batch_on_exception() -> None:
 def test_write_pool_dtos_sync_rejects_pair_without_committing_orphan() -> None:
     product_id = uuid4()
     marketplace_id = uuid4()
-    dto = disc.PoolInsertDTO(
+    dto = PoolInsertDTO(
         marketplace_id=marketplace_id,
         dim_product=build_dim_product_fields(
             product_id=product_id,
@@ -205,11 +208,11 @@ def test_write_pool_dtos_sync_rejects_pair_without_committing_orphan() -> None:
         signed_record=None,
     )
 
-    with patch("app.modules.scraper.discovery.sync_session_factory", return_value=db), patch(
-        "app.modules.scraper.discovery.evaluate_market",
+    with patch("app.modules.discovery.gate_persist.sync_session_factory", return_value=db), patch(
+        "app.modules.discovery.gate_persist.evaluate_market",
         side_effect=[product_ok, listing_reject],
-    ), patch("app.modules.scraper.discovery.write_sync", return_value=True):
-        result = disc._write_pool_dtos_sync([dto])
+    ), patch("app.modules.discovery.gate_persist.write_sync", return_value=True):
+        result = write_pool_dtos_sync([dto])
 
     assert result.inserted == 0
     assert result.rejected == 1

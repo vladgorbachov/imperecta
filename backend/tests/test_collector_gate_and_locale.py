@@ -13,6 +13,7 @@ import pytest
 from bs4 import BeautifulSoup
 
 import app.modules.scraper.discovery as disc
+from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.data_firewall.firewall import evaluate_ecommerce
@@ -36,8 +37,8 @@ def _patch_pool_write(monkeypatch) -> dict:
     async def fake_to_thread(func, dtos):
         state["calls"] += 1
         state["batches"].append(list(dtos))
-        assert func is disc._write_pool_dtos_sync
-        return disc.PoolWriteResult(inserted=len(dtos), rejected=0)
+        assert func is write_pool_dtos_sync
+        return PoolWriteResult(inserted=len(dtos), rejected=0)
 
     monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
     return state

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from app.common.deps import get_current_user
 from app.main import app
+from app.modules.currency.display_converter import CurrencyConverter
 from app.modules.visualisation_calc.movements.schemas import (
     MoversCoverageMeta,
     MoversKpi,
@@ -125,14 +126,21 @@ async def test_movements_feed_route_returns_page(
     client,
     movements_auth_override,
 ) -> None:
-    with patch(
-        "app.modules.visualisation_calc.api._get_movers_sync",
-        return_value=MoversPage(
-            items=[],
-            total=0,
-            limit=20,
-            offset=0,
-            has_more=False,
+    with (
+        patch(
+            "app.modules.visualisation_calc.api.CurrencyConverter.load_latest",
+            new_callable=AsyncMock,
+            return_value=CurrencyConverter(rates={}, usd_per_eur=None),
+        ),
+        patch(
+            "app.modules.visualisation_calc.api._get_movers_sync",
+            return_value=MoversPage(
+                items=[],
+                total=0,
+                limit=20,
+                offset=0,
+                has_more=False,
+            ),
         ),
     ):
         resp = await client.get(

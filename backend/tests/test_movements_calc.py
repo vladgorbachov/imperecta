@@ -6,8 +6,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
-import pytest
-
 from app.modules.visualisation_calc.movements.read import MoverReadRow, MoversCoverageCounts
 from app.modules.visualisation_calc.movements.schemas import MovementsFilters
 from app.modules.visualisation_calc.movements.service import MovementsCalc
@@ -22,6 +20,7 @@ def _row(
     country: str = "DE",
     marketplace_id=None,
     category_id=None,
+    marketplace_domain: str | None = "example.de",
 ) -> MoverReadRow:
     if pct is None:
         raise ValueError("use _null_pct_row for NULL pct fixtures")
@@ -31,6 +30,7 @@ def _row(
         image_url="https://example.com/img.jpg",
         marketplace_id=marketplace_id or uuid4(),
         marketplace_name="Example Shop",
+        marketplace_domain=marketplace_domain,
         country_code=country,
         country_name="Germany",
         category_id=category_id,
