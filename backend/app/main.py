@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings
 from app.database import Base, engine
+from app.modules.admin.api_alerts import router as admin_alerts_router
 from app.modules.admin.api_parsing import router as admin_parsing_router
 from app.modules.ai_analyst.api import router as ai_router
 from app.modules.auth.api import router as auth_router
@@ -147,6 +148,7 @@ app.add_middleware(
 
 for router in [
     admin_router,
+    admin_alerts_router,
     admin_parsing_router,
     auth_router,
     users_self_router,

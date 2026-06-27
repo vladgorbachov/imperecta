@@ -150,6 +150,7 @@ async def test_overview_invokes_product_pool_list_products(monkeypatch: pytest.M
         sort="not-a-real-sort",
         search=None,
         marketplace_id=None,
+        country_code=None,
         limit=25,
         offset=0,
         display_currency="EUR",

@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog
+from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
 from app.models.dimensions import DimDate, DimMarketplace, DimProduct
 from app.models.facts import (
     FactCommodityPrice,
@@ -44,6 +44,7 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
     "fact_commodity_price": frozenset({"insert", "delete"}),
     "scrape_logs": frozenset({"insert"}),
     "api_logs": frozenset({"insert"}),
+    "service_alerts": frozenset({"insert"}),
 }
 
 _TABLE_MODELS: dict[str, type] = {
@@ -58,6 +59,7 @@ _TABLE_MODELS: dict[str, type] = {
     "fact_commodity_price": FactCommodityPrice,
     "scrape_logs": ScrapeLog,
     "api_logs": ApiLog,
+    "service_alerts": ServiceAlert,
 }
 
 
@@ -173,6 +175,10 @@ def _orm_fields_for_table(table: str, fields: dict[str, Any]) -> dict[str, Any]:
         out["created_at"] = _parse_datetime(out["created_at"])
     if "updated_at" in out:
         out["updated_at"] = _parse_datetime(out["updated_at"])
+    if "triggered_at" in out:
+        out["triggered_at"] = _parse_datetime(out["triggered_at"])
+    if "resolved_at" in out and out["resolved_at"] is not None:
+        out["resolved_at"] = _parse_datetime(out["resolved_at"])
     return out
 
 
@@ -368,6 +374,10 @@ def write_sync(
 
     if table == "scrape_jobs":
         db.add(ScrapeJob(**orm_fields))
+        return PersistResult(ok=True, rows_affected=1)
+
+    if table == "service_alerts":
+        db.add(ServiceAlert(**orm_fields))
         return PersistResult(ok=True, rows_affected=1)
 
     if table == "dim_marketplace":

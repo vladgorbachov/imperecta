@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 import app.modules.scraper.discovery as disc
+from app.modules.discovery import bfs_walker, category_processor
 from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
 from app.models.dimensions import DimMarketplace
 
@@ -340,7 +341,19 @@ class TestResumableSitemap:
 
 
 class TestPhase2CooperativeDeadline:
-    """Cooperative deadline enforcement inside _phase2_product_harvest."""
+    """Cooperative deadline enforcement inside category_processor."""
+
+    @staticmethod
+    async def _run_phase2(crawler, mp, pool, db, urls, **kwargs):
+        return await category_processor.run_product_harvest(
+            mp,
+            pool,
+            db,
+            urls,
+            filter_urls_by_role=crawler._filter_urls_by_role,
+            save_product_urls=crawler._save_product_urls,
+            **kwargs,
+        )
 
     def test_headroom_deadline_arithmetic(self):
         assert disc.DiscoveryCrawler._headroom_deadline(None) is None
@@ -360,12 +373,12 @@ class TestPhase2CooperativeDeadline:
         crawler = disc.DiscoveryCrawler(db, pool)
 
         with patch(
-            "app.modules.scraper.discovery.time.monotonic",
+            "app.modules.discovery.category_processor.time.monotonic",
             return_value=5000.0,
         ):
             urls = [f"https://shop.example/c/{i}" for i in range(10)]
-            total, next_index, more = await crawler._phase2_product_harvest(
-                mp, urls, deadline_monotonic=4999.0,
+            total, next_index, more = await self._run_phase2(
+                crawler, mp, pool, db, urls, deadline_monotonic=4999.0,
             )
 
         assert total == 0
@@ -395,7 +408,7 @@ class TestPhase2CooperativeDeadline:
             return clock["t"]
 
         with patch(
-            "app.modules.scraper.discovery.time.monotonic",
+            "app.modules.discovery.category_processor.time.monotonic",
             side_effect=fake_monotonic,
         ), patch(
             "app.modules.scraper.extractors.extract_links_from_repeated_structure",
@@ -410,8 +423,8 @@ class TestPhase2CooperativeDeadline:
             return_value=(1, 1, False),
         ):
             urls = [f"https://shop.example/c/{i}" for i in range(5)]
-            total, next_index, more = await crawler._phase2_product_harvest(
-                mp, urls, deadline_monotonic=20.0,
+            total, next_index, more = await self._run_phase2(
+                crawler, mp, pool, db, urls, deadline_monotonic=20.0,
             )
 
         assert more is True
@@ -446,9 +459,8 @@ class TestPhase2CooperativeDeadline:
             disc.DiscoveryCrawler,
             "_should_run_category_recon",
             return_value=False,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase2_product_harvest",
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
             new_callable=AsyncMock,
             return_value=(7, 2, True),
         ):
@@ -517,11 +529,11 @@ class TestPhase1FrontierResume:
         crawler = disc.DiscoveryCrawler(db, pool)
 
         with patch(
-            "app.modules.scraper.discovery.time.monotonic",
+            "app.modules.discovery.bfs_walker.time.monotonic",
             return_value=5000.0,
         ):
-            urls, exhausted = await crawler._phase1_category_recon(
-                mp, deadline_monotonic=4000.0,
+            urls, exhausted = await bfs_walker.run_category_bfs(
+                mp, pool, db, deadline_monotonic=4000.0,
             )
 
         assert (urls, exhausted) == ([], True)
@@ -551,9 +563,9 @@ class TestPhase1FrontierResume:
         crawler = disc.DiscoveryCrawler(db, pool)
 
         import logging as _logging
-        with caplog.at_level(_logging.INFO, logger="app.modules.scraper.discovery"):
-            urls, exhausted = await crawler._phase1_category_recon(
-                mp, deadline_monotonic=None,
+        with caplog.at_level(_logging.INFO, logger="app.modules.discovery.bfs_walker"):
+            urls, exhausted = await bfs_walker.run_category_bfs(
+                mp, pool, db, deadline_monotonic=None,
             )
 
         first_call_url = pool.scrape_page_for_analysis.call_args_list[0].args[0]
@@ -582,8 +594,8 @@ class TestPhase1FrontierResume:
         db.flush = AsyncMock()
 
         crawler = disc.DiscoveryCrawler(db, pool)
-        urls, exhausted = await crawler._phase1_category_recon(
-            mp, deadline_monotonic=None,
+        urls, exhausted = await bfs_walker.run_category_bfs(
+            mp, pool, db, deadline_monotonic=None,
         )
 
         assert exhausted is False
@@ -630,14 +642,12 @@ class TestPhase1FrontierResume:
             disc.DiscoveryCrawler,
             "_should_run_category_recon",
             return_value=True,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase1_category_recon",
+        ), patch(
+            "app.modules.discovery.bfs_walker.run_category_bfs",
             new_callable=AsyncMock,
             return_value=(["u"], True),
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase2_product_harvest",
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
             new_callable=AsyncMock,
         ) as phase2_mock:
             result = await crawler.discover(
@@ -666,12 +676,23 @@ class TestPhase1FrontierResume:
         crawler = disc.DiscoveryCrawler(db, MagicMock())
         captured: dict = {"phase1": None, "phase2": None}
 
-        async def fake_phase1(_mp, *, deadline_monotonic=None):
+        async def fake_phase1(marketplace, pool, db, *, deadline_monotonic=None, on_activity=None):
             captured["phase1"] = deadline_monotonic
-            _mp.discovered_category_urls = ["https://x/c1", "https://x/c2"]
+            marketplace.discovered_category_urls = ["https://x/c1", "https://x/c2"]
             return (["https://x/c1", "https://x/c2"], False)
 
-        async def fake_phase2(_mp, _urls, *, start_index=0, deadline_monotonic=None):
+        async def fake_phase2(
+            marketplace,
+            pool,
+            db,
+            category_urls,
+            *,
+            start_index=0,
+            deadline_monotonic=None,
+            on_activity=None,
+            filter_urls_by_role=None,
+            save_product_urls=None,
+        ):
             captured["phase2"] = deadline_monotonic
             return (4, 0, False)
 
@@ -684,13 +705,11 @@ class TestPhase1FrontierResume:
             disc.DiscoveryCrawler,
             "_should_run_category_recon",
             return_value=True,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase1_category_recon",
+        ), patch(
+            "app.modules.discovery.bfs_walker.run_category_bfs",
             side_effect=fake_phase1,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase2_product_harvest",
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
             side_effect=fake_phase2,
         ):
             result = await crawler.discover(
@@ -735,8 +754,8 @@ class TestPhase1BatchPublish:
             "app.modules.scraper.extractors.extract_internal_links_all",
             return_value=[],
         ):
-            urls, exhausted = await crawler._phase1_category_recon(
-                mp, deadline_monotonic=None,
+            urls, exhausted = await bfs_walker.run_category_bfs(
+                mp, pool, db, deadline_monotonic=None,
             )
 
         assert exhausted is False
@@ -764,11 +783,11 @@ class TestPhase1BatchPublish:
         crawler = disc.DiscoveryCrawler(db, pool)
 
         with patch(
-            "app.modules.scraper.discovery.time.monotonic",
+            "app.modules.discovery.bfs_walker.time.monotonic",
             return_value=5000.0,
         ):
-            urls, exhausted = await crawler._phase1_category_recon(
-                mp, deadline_monotonic=4000.0,
+            urls, exhausted = await bfs_walker.run_category_bfs(
+                mp, pool, db, deadline_monotonic=4000.0,
             )
 
         assert exhausted is False
@@ -787,11 +806,11 @@ class TestPhase1BatchPublish:
         crawler = disc.DiscoveryCrawler(db, pool)
 
         with patch(
-            "app.modules.scraper.discovery.time.monotonic",
+            "app.modules.discovery.bfs_walker.time.monotonic",
             return_value=5000.0,
         ):
-            urls, exhausted = await crawler._phase1_category_recon(
-                mp, deadline_monotonic=4000.0,
+            urls, exhausted = await bfs_walker.run_category_bfs(
+                mp, pool, db, deadline_monotonic=4000.0,
             )
 
         assert (urls, exhausted) == ([], True)
@@ -815,8 +834,8 @@ class TestPhase1BatchPublish:
         db.flush = AsyncMock()
         crawler = disc.DiscoveryCrawler(db, pool)
 
-        urls, exhausted = await crawler._phase1_category_recon(
-            mp, deadline_monotonic=None,
+        urls, exhausted = await bfs_walker.run_category_bfs(
+            mp, pool, db, deadline_monotonic=None,
         )
 
         assert exhausted is False
@@ -837,12 +856,23 @@ class TestPhase1BatchPublish:
         crawler = disc.DiscoveryCrawler(db, MagicMock())
         published = [f"https://x/c/{i}" for i in range(3)]
 
-        async def fake_phase1(_mp, *, deadline_monotonic=None):
-            _mp.discovered_category_urls = list(published)
+        async def fake_phase1(marketplace, pool, db, *, deadline_monotonic=None, on_activity=None):
+            marketplace.discovered_category_urls = list(published)
             return (published, False)
 
-        async def fake_phase2(_mp, urls, *, start_index=0, deadline_monotonic=None):
-            assert urls == [_mp.base_url] + published
+        async def fake_phase2(
+            marketplace,
+            pool,
+            db,
+            category_urls,
+            *,
+            start_index=0,
+            deadline_monotonic=None,
+            on_activity=None,
+            filter_urls_by_role=None,
+            save_product_urls=None,
+        ):
+            assert category_urls == [marketplace.base_url] + published
             return (2, 0, False)
 
         with patch.object(
@@ -854,13 +884,11 @@ class TestPhase1BatchPublish:
             disc.DiscoveryCrawler,
             "_should_run_category_recon",
             return_value=True,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase1_category_recon",
+        ), patch(
+            "app.modules.discovery.bfs_walker.run_category_bfs",
             side_effect=fake_phase1,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase2_product_harvest",
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
             side_effect=fake_phase2,
         ) as phase2_mock:
             result = await crawler.discover(
@@ -872,7 +900,19 @@ class TestPhase1BatchPublish:
 
 
 class TestPhase2CategoryResume:
-    """Cursor state machine for resumable category harvest in _phase2."""
+    """Cursor state machine for resumable category harvest in category_processor."""
+
+    @staticmethod
+    async def _run_phase2(crawler, mp, pool, db, urls, **kwargs):
+        return await category_processor.run_product_harvest(
+            mp,
+            pool,
+            db,
+            urls,
+            filter_urls_by_role=crawler._filter_urls_by_role,
+            save_product_urls=crawler._save_product_urls,
+            **kwargs,
+        )
 
     @staticmethod
     def _setup_crawler_with_soup():
@@ -894,8 +934,8 @@ class TestPhase2CategoryResume:
         crawler, pool = self._setup_crawler_with_soup()
         urls = [f"https://shop.example/c/{i}" for i in range(3)]
 
-        total, next_index, more = await crawler._phase2_product_harvest(
-            mp, urls, start_index=5,
+        total, next_index, more = await self._run_phase2(
+            crawler, mp, pool, crawler.db, urls, start_index=5,
         )
 
         assert (total, next_index, more) == (0, 0, False)
@@ -926,9 +966,8 @@ class TestPhase2CategoryResume:
             disc.DiscoveryCrawler,
             "_should_run_category_recon",
             return_value=False,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase2_product_harvest",
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
             new_callable=AsyncMock,
             return_value=(5, 7, True),
         ):
@@ -965,9 +1004,8 @@ class TestPhase2CategoryResume:
             disc.DiscoveryCrawler,
             "_should_run_category_recon",
             return_value=False,
-        ), patch.object(
-            disc.DiscoveryCrawler,
-            "_phase2_product_harvest",
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
             new_callable=AsyncMock,
             return_value=(5, 0, False),
         ):
@@ -1025,8 +1063,8 @@ class TestPhase2CategoryResume:
         db.flush = AsyncMock()
 
         crawler = disc.DiscoveryCrawler(db, pool)
-        urls, exhausted = await crawler._phase1_category_recon(
-            mp, deadline_monotonic=None,
+        urls, exhausted = await bfs_walker.run_category_bfs(
+            mp, pool, db, deadline_monotonic=None,
         )
 
         assert exhausted is False

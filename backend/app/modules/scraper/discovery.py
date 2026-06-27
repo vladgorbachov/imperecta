@@ -18,7 +18,14 @@ from app.config import Settings
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.discovery import classifier_adapter, cursor_store, fetch_adapter, url_canonicalizer
+from app.modules.discovery import (
+    bfs_walker,
+    category_processor,
+    classifier_adapter,
+    cursor_store,
+    fetch_adapter,
+    url_canonicalizer,
+)
 from app.modules.discovery.gate_persist import (
     PoolInsertDTO,
     write_pool_dtos_sync,
@@ -66,7 +73,7 @@ CATEGORY_CONVERGENCE_STREAK = 3
 # converges within one budget would otherwise never reach Phase 2. Sized to
 # MAX_CATEGORY_URLS_PER_RUN so a published batch fits exactly one Phase 2
 # window. Universal — small shops still complete in one (sub-threshold) batch.
-CATEGORY_PUBLISH_BATCH = 60
+from app.modules.discovery.bfs_walker import CATEGORY_PUBLISH_BATCH  # re-export for tests
 # Persist batch size for _save_product_urls. Large sitemaps (e.g., 20k+ URLs)
 # cannot be saved in a single transaction within DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS —
 # the monolithic flush takes >14 minutes and gets cancelled by the circuit breaker,
@@ -83,8 +90,7 @@ SAVE_PRODUCT_URLS_BATCH_SIZE = 500
 # status updates, return path) so the caller never has to
 # hard-cancel us mid-commit.
 SAVE_BUDGET_HEADROOM_FRACTION = 0.85
-# Max BFS depth when exploring hub pages for category links.
-RECON_BFS_MAX_DEPTH = 3
+# Max BFS depth when exploring hub pages for category links (see bfs_walker).
 # Min URLs found via sitemap to consider sitemap harvest successful.
 SITEMAP_MIN_USEFUL_URLS = 10
 # Sampling strategy for content-aware sitemap classification.
@@ -494,23 +500,6 @@ class DiscoveryCrawler:
         _log_gate(all_results, accepted)
         return accepted, stats
 
-    async def _gate_urls_for_pool(
-        self,
-        urls: list[str],
-        marketplace: DimMarketplace,
-    ) -> list[str]:
-        """Structural product-ness gate for category-harvest candidate URLs."""
-        if not urls:
-            return []
-        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
-        accepted, _stats = await self._filter_urls_by_role(
-            urls,
-            requires_js=requires_js,
-            scrape_tier=scrape_tier,
-            marketplace_locale=marketplace.locale,
-        )
-        return accepted
-
     async def _phase0_sitemap_harvest(self, marketplace: DimMarketplace) -> list[str]:
         """Phase 0: collect product URLs from XML sitemaps with content-aware filtering.
 
@@ -594,378 +583,6 @@ class DiscoveryCrawler:
             - cursor_store.get_last_category_recon_at(marketplace)
         ).days
         return age >= CATEGORY_RECON_STALE_DAYS
-
-    def _publish_category_batch(
-        self,
-        marketplace: DimMarketplace,
-        listing_urls: list[str],
-        queue,
-        visited: set[str],
-    ) -> list[str]:
-        """Publish the current batch to discovered_category_urls for Phase 2.
-
-        Keeps the BFS frontier (queue/visited) for continuation when the queue
-        is non-empty (resets listing_urls for the next batch); does a true clean
-        completion when the queue is empty (frontier cleared). Replaces
-        discovered_category_urls with this batch (not append) so
-        category_resume_index=0 indexes the fresh work-list.
-        """
-        seen: set[str] = set()
-        unique: list[str] = []
-        for url in listing_urls:
-            if url not in seen:
-                seen.add(url)
-                unique.append(url)
-        cursor_store.set_discovered_category_urls(marketplace, unique)
-        cursor_store.set_category_resume_index(marketplace, 0)
-        cursor_store.set_last_category_recon_at(
-            marketplace,
-            datetime.now(tz=timezone.utc),
-        )
-        if queue:
-            cursor_store.apply_frontier(marketplace, queue, visited, [])
-        else:
-            cursor_store.clear_frontier(marketplace)
-        return unique
-
-    async def _phase1_category_recon(
-        self,
-        marketplace: DimMarketplace,
-        *,
-        deadline_monotonic: float | None = None,
-    ) -> tuple[list[str], bool]:
-        """Phase 1: BFS traversal to discover category/listing URLs.
-
-        Returns (listing_urls, exhausted_budget). Publishes found categories in
-        CATEGORY_PUBLISH_BATCH-sized batches so Phase 2 can harvest before the
-        full BFS completes. On batch publish (threshold or deadline-with-findings)
-        returns (batch, False) so discover() runs Phase 2 the same tick.
-        exhausted=True means nothing was found this tick (no Phase 2 work).
-        On true BFS completion (empty queue) publishes the final batch and
-        clears the frontier. The incoming deadline is already headroom-adjusted
-        by discover() — do not shrink again.
-        """
-        from collections import deque
-
-        from app.modules.scraper.extractors import extract_internal_links_all
-
-        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
-
-        saved = cursor_store.load_frontier_state(marketplace)
-        if saved:
-            queue, visited, listing_urls = cursor_store.parse_frontier(saved)
-            logger.info(
-                "category_recon_resume marketplace_id=%s queue=%d "
-                "visited=%d listing=%d",
-                marketplace.id,
-                len(queue),
-                len(visited),
-                len(listing_urls),
-            )
-        else:
-            logger.info(
-                "category_recon_start marketplace_id=%s url=%s",
-                marketplace.id,
-                marketplace.base_url,
-            )
-            queue = deque([(marketplace.base_url, 0)])
-            visited = {marketplace.base_url}
-            listing_urls = []
-        fallback_seeds = ["/catalog", "/categories", "/shop", "/store", "/all"]
-
-        # Heartbeat cadence inside the BFS: emit every Nth iteration (NOT per
-        # fetch) so the worker_log_tail stays summary-level and DB-touch churn
-        # stays bounded under should_pulse_db's own 15s window.
-        recon_emit_every = 25
-        bfs_iterations = 0
-        while queue:
-            if (
-                deadline_monotonic is not None
-                and time.monotonic() >= deadline_monotonic
-            ):
-                if listing_urls:
-                    unique = self._publish_category_batch(
-                        marketplace, listing_urls, queue, visited,
-                    )
-                    await self.db.flush()
-                    logger.info(
-                        "category_recon_deadline_published marketplace_id=%s "
-                        "published=%d queue=%d visited=%d",
-                        marketplace.id,
-                        len(unique),
-                        len(queue),
-                        len(visited),
-                    )
-                    return unique, False
-                cursor_store.apply_frontier(marketplace, queue, visited, [])
-                await self.db.flush()
-                logger.info(
-                    "category_recon_budget_exhausted marketplace_id=%s "
-                    "queue=%d visited=%d listing=%d",
-                    marketplace.id,
-                    len(queue),
-                    len(visited),
-                    len(listing_urls),
-                )
-                return listing_urls, True
-            current_url, depth = queue.popleft()
-            if depth > RECON_BFS_MAX_DEPTH:
-                continue
-            bfs_iterations += 1
-            if bfs_iterations % recon_emit_every == 0:
-                await self._emit_activity(
-                    f"discovery recon visited={len(visited)} "
-                    f"listing={len(listing_urls)}"
-                )
-            _html, soup = await fetch_adapter.fetch_page(
-                self.pool,
-                current_url,
-                requires_js=requires_js,
-                scrape_tier=scrape_tier,
-            )
-            if soup is None:
-                continue
-            role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
-            logger.debug(
-                "recon_page marketplace_id=%s url=%s depth=%d role=%s",
-                marketplace.id,
-                current_url,
-                depth,
-                role,
-            )
-            if role == "listing":
-                if current_url != marketplace.base_url:
-                    listing_urls.append(current_url)
-                if depth < RECON_BFS_MAX_DEPTH:
-                    for link in extract_internal_links_all(soup, marketplace.base_url):
-                        if link not in visited:
-                            visited.add(link)
-                            queue.append((link, depth + 1))
-                if len(listing_urls) >= CATEGORY_PUBLISH_BATCH:
-                    unique = self._publish_category_batch(
-                        marketplace, listing_urls, queue, visited,
-                    )
-                    await self.db.flush()
-                    logger.info(
-                        "category_recon_batch_published marketplace_id=%s "
-                        "published=%d queue_remaining=%d visited=%d",
-                        marketplace.id,
-                        len(unique),
-                        len(queue),
-                        len(visited),
-                    )
-                    return unique, False
-            elif role in ("hub", "unknown"):
-                for link in extract_internal_links_all(soup, marketplace.base_url):
-                    if link not in visited:
-                        visited.add(link)
-                        queue.append((link, depth + 1))
-
-        if not listing_urls:
-            for fallback in fallback_seeds:
-                fallback_url = f"{marketplace.base_url.rstrip('/')}{fallback}"
-                if fallback_url in visited:
-                    continue
-                _html, soup = await fetch_adapter.fetch_page(
-                    self.pool,
-                    fallback_url,
-                    requires_js=requires_js,
-                    scrape_tier=scrape_tier,
-                )
-                if soup is None:
-                    continue
-                role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
-                if role in ("listing", "hub"):
-                    listing_urls.append(fallback_url)
-
-        unique = self._publish_category_batch(
-            marketplace, listing_urls, queue, visited,
-        )
-        await self.db.flush()
-        logger.info(
-            "category_recon_done marketplace_id=%s listing_urls_found=%d",
-            marketplace.id,
-            len(unique),
-        )
-        return unique, False
-
-    async def _phase2_product_harvest(
-        self,
-        marketplace: DimMarketplace,
-        category_urls: list[str],
-        *,
-        start_index: int = 0,
-        deadline_monotonic: float | None = None,
-    ) -> tuple[int, int, bool]:
-        """Phase 2: crawl each category URL, extract product links, save to pool.
-
-        Processes a window of categories starting at start_index, capped at
-        MAX_CATEGORY_URLS_PER_RUN entries.
-
-        Convergence detection: if CATEGORY_CONVERGENCE_STREAK consecutive
-        categories yield zero NEW persisted PDP, discovery exits early.
-
-        Returns (total_saved, next_index, more_remaining) per the cursor
-        state machine:
-          - DEADLINE before/within absolute_idx → next_index = absolute_idx,
-            more_remaining = True.
-          - CONVERGENCE → next_index = 0, more_remaining = False.
-          - WINDOW EXHAUSTED with end_index < total → next_index = end_index,
-            more_remaining = True.
-          - REACHED END (end_index >= total) → next_index = 0, more = False.
-          - EMPTY WINDOW (start_index >= total, list shrank) →
-            next_index = 0, more_remaining = False.
-
-        next_index is an absolute index into category_urls. The incoming
-        deadline is already headroom-adjusted by discover() — pass through
-        unchanged.
-
-        CRITICAL: next_index and more_remaining are INDEPENDENT signals.
-        next_index==0 with more_remaining=True means "resume from index 0
-        next run" (the very first category hit the deadline); it is NOT a
-        completion signal. Completion is decided solely by
-        more_remaining=False.
-        """
-        from app.modules.scraper.extractors import (
-            detect_next_page,
-            extract_links_from_repeated_structure,
-            extract_product_links,
-        )
-
-        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
-
-        total_saved = 0
-        empty_streak = 0
-        total_categories = len(category_urls)
-        harvest_targets = category_urls[
-            start_index : start_index + MAX_CATEGORY_URLS_PER_RUN
-        ]
-        more_remaining = False
-        next_index = 0
-        converged = False
-
-        for relative_idx, category_url in enumerate(harvest_targets):
-            absolute_idx = start_index + relative_idx
-            if (
-                deadline_monotonic is not None
-                and time.monotonic() >= deadline_monotonic
-            ):
-                logger.info(
-                    "discovery_phase2_budget_exhausted marketplace_id=%s "
-                    "categories_processed=%d categories_total=%d "
-                    "total_saved=%d next_index=%d",
-                    marketplace.id,
-                    absolute_idx,
-                    total_categories,
-                    total_saved,
-                    absolute_idx,
-                )
-                more_remaining = True
-                next_index = absolute_idx
-                break
-
-            saved_for_this_category = 0
-            current_url: str | None = category_url
-            page_num = 0
-            while current_url and page_num < MAX_PAGES_PER_CATEGORY:
-                if (
-                    deadline_monotonic is not None
-                    and time.monotonic() >= deadline_monotonic
-                ):
-                    more_remaining = True
-                    next_index = absolute_idx
-                    break
-
-                _html, soup = await fetch_adapter.fetch_page(
-                    self.pool,
-                    current_url,
-                    requires_js=requires_js,
-                    scrape_tier=scrape_tier,
-                )
-                if soup is None:
-                    break
-
-                await self._emit_activity(
-                    f"discovery GET {current_url[:140]} page={page_num + 1}",
-                )
-
-                product_urls = extract_links_from_repeated_structure(
-                    soup,
-                    marketplace.base_url,
-                    current_url,
-                )
-                if not product_urls:
-                    product_urls = extract_product_links(soup, marketplace.base_url)
-                if product_urls:
-                    gated_urls = await self._gate_urls_for_pool(
-                        product_urls,
-                        marketplace,
-                    )
-                    saved_this_call = 0
-                    save_exhausted = False
-                    if gated_urls:
-                        saved_this_call, _, save_exhausted = (
-                            await self._save_product_urls(
-                                marketplace.id,
-                                gated_urls,
-                                deadline_monotonic=deadline_monotonic,
-                            )
-                        )
-                    saved_for_this_category += saved_this_call
-                    total_saved += saved_this_call
-                    if save_exhausted:
-                        more_remaining = True
-                        next_index = absolute_idx
-                        break
-
-                next_page = detect_next_page(soup, current_url)
-                current_url = next_page
-                page_num += 1
-
-            # Deadline detected in the inner loop wins over convergence:
-            # check before updating empty_streak / convergence.
-            if more_remaining:
-                break
-
-            if saved_for_this_category == 0:
-                empty_streak += 1
-            else:
-                empty_streak = 0
-
-            if empty_streak >= CATEGORY_CONVERGENCE_STREAK:
-                logger.info(
-                    "discovery_phase2_converged marketplace_id=%s "
-                    "categories_processed=%d categories_total=%d total_saved=%d "
-                    "empty_streak=%d",
-                    marketplace.id,
-                    relative_idx + 1,
-                    len(harvest_targets),
-                    total_saved,
-                    empty_streak,
-                )
-                converged = True
-                break
-
-        # Resolve final cursor per the state machine. This runs after the
-        # loop in ALL cases. If the loop broke on a deadline,
-        # more_remaining is already True and next_index already set, so
-        # the first branch is a no-op. Otherwise resolve window-end vs
-        # full-completion vs converged.
-        if more_remaining:
-            pass
-        elif converged:
-            next_index = 0
-            more_remaining = False
-        else:
-            end_index = start_index + len(harvest_targets)
-            if end_index < total_categories:
-                next_index = end_index
-                more_remaining = True
-            else:
-                next_index = 0
-                more_remaining = False
-
-        return total_saved, next_index, more_remaining
 
     async def discover(
         self,
@@ -1133,9 +750,12 @@ class DiscoveryCrawler:
                     # this tick). exhausted=True now means Phase 1 found NOTHING
                     # this tick (empty batch) → no Phase 2 work, skip.
                     _phase1_partial_urls, phase1_exhausted = (
-                        await self._phase1_category_recon(
+                        await bfs_walker.run_category_bfs(
                             marketplace,
+                            self.pool,
+                            self.db,
                             deadline_monotonic=block_deadline,
+                            on_activity=self._emit_activity,
                         )
                     )
                 if phase1_exhausted:
@@ -1168,11 +788,16 @@ class DiscoveryCrawler:
                     # over category-harvest completeness.
                     start_index = cursor_store.get_category_resume_index(marketplace)
                     products_found, next_index, phase2_more = (
-                        await self._phase2_product_harvest(
+                        await category_processor.run_product_harvest(
                             marketplace,
+                            self.pool,
+                            self.db,
                             harvest_urls[:accepted_urls],
                             start_index=start_index,
                             deadline_monotonic=block_deadline,
+                            on_activity=self._emit_activity,
+                            filter_urls_by_role=self._filter_urls_by_role,
+                            save_product_urls=self._save_product_urls,
                         )
                     )
                     cursor_store.set_category_resume_index(marketplace, next_index)

@@ -37,6 +37,7 @@ from app.models.app_tables import (  # noqa: F401
     Digest,
     ScrapeJob,
     ScrapeLog,
+    ServiceAlert,
 )
 
 __all__ = [
@@ -63,6 +64,7 @@ __all__ = [
     "FactFuelPrice",
     "Alert",
     "AlertEvent",
+    "ServiceAlert",
     "Digest",
     "AIChatSession",
     "AIChatMessage",

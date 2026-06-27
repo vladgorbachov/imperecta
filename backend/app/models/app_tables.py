@@ -78,6 +78,11 @@ class Alert(Base):
         nullable=True,
         index=True,
     )
+    alert_class: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'analytic'"),
+    )
     alert_type: Mapped[str] = mapped_column(String(30), nullable=False)
     threshold_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     threshold_value: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
@@ -138,6 +143,11 @@ class AlertEvent(Base):
         ForeignKey("alerts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    alert_class: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'analytic'"),
     )
     listing_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -503,6 +513,56 @@ class ApiLog(Base):
             "idx_api_logs_user",
             "user_id",
             postgresql_where=text("user_id IS NOT NULL"),
+        ),
+    )
+
+
+class ServiceAlert(Base):
+    """Operational service-health alert (no user_id; service-data class)."""
+
+    __tablename__ = "service_alerts"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    alert_class: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'service'"),
+    )
+    module: Mapped[str] = mapped_column(String(64), nullable=False)
+    submodule: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False)
+    anomaly_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('info','warning','error','critical')",
+            name="ck_service_alerts_severity",
+        ),
+        CheckConstraint(
+            "alert_class = 'service'",
+            name="ck_service_alerts_alert_class",
+        ),
+        Index(
+            "idx_service_alerts_module_submodule_triggered",
+            "module",
+            "submodule",
+            "triggered_at",
         ),
     )
 

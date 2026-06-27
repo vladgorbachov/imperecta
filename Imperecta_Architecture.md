@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-17 (ветка `main`, head `21df3e7`)  
+**Актуально на:** 2026-06-25 (ветка `main`, head `e58da78`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -16,9 +16,9 @@
 | Сбор с маркетплейсов | Discovery → scrape → `fact_listing` / `fact_price` |
 | Каталог пользователя | `user_products`, импорт CSV/XLS |
 | Глобальный пул | `product_pool`, поиск по `dim_product` / `fact_listing` |
-| Рыночные виджеты | Forex, crypto, commodities; dashboard widget math → **`visualisation_calc`** (`movements/` wired end-to-end); `fact_fuel_price` — таблица сохранена, ingest/read pipeline удалён |
-| Display currency | `local` / `EUR` / `USD` — `fact_currency_rate` + live forex; **local** = TLD→country→currency (`marketplace_locale.py`) |
-| Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`); movements KPI (`changedMore5`, `avgVolatility`) — server `/api/markets/movements/*`; catalog — `/markets/overview` |
+| Рыночные виджеты | Forex, crypto, commodities; dashboard widget math → **`visualisation_calc`** (`movements/` + `kpi/` live); `fact_fuel_price` — таблица сохранена, ingest/read pipeline удалён |
+| Display currency | `local` / `EUR` / `USD` — `fact_currency_rate` + live forex; **local** = TLD→country→currency (`marketplace_locale.py`); movers list — `display_currency` на `GET /markets/movements` (slice A) |
+| Дашборд и аналитика | KPI, **Markets product catalog** (`/dashboard`); movements KPI (`changedMore5`, `avgVolatility`) — `/api/markets/movements/*`; pool freshness (`updated24h`, `lastUpdate`) — `/api/markets/dashboard-kpi` (slice B); `totalPool` — `/api/pool/stats`; **`MarketMoversWidget`** — movers list; catalog — `/markets/overview` |
 | Алерты и дайджесты | Celery (часть задач — stubs) |
 | AI-аналитик | Claude; entitlement по плану (`business` / `pro` / `enterprise`) |
 | Админка | Superuser: Market Overview, **Data Collection**, **Users Management** |
@@ -98,17 +98,17 @@ Legacy `app/api/`, `app/services/` удалены.
 | `data_firewall` | Tier-1: контракты колонок, ecommerce/market rules, HMAC signing (`table`+`operation`+`locator`+`fields`), durable reject через `write_reject_data_isolated` (`firewall.py`, `rules.py`, `contracts.py`, `signing.py`, `reject_store.py`) |
 | `ingestion` | Tier-1: orchestration scrape→persist (`service.py`, `dto.py`) — вызывает `data_firewall` + `persist`; re-export gate в `gate.py` |
 | `persist` | Tier-1: verbatim write после verify HMAC (`writer.py`, `meta_write.py` META bridge) |
-| `visualisation_calc` | Tier-1: расчёты виджетов дашборда. **`movements/` — первый live submodule, wired end-to-end** (compute-site → read/service/schemas → `api.py` → FE; см. §2.7.6, `0a.7`). Остальные submodules — scaffold. Planned **data_export** read-OUT door (Phase 7/8) — для user-data export, не для movements. Преемник dissolved `dashboard/` + `analytics/`. |
+| `visualisation_calc` | Tier-1: расчёты виджетов дашборда. **Live:** `movements/` (movers feed + KPI aggregates + slice A `display_currency`) и `kpi/` (`GET /dashboard-kpi`, slice B). **Scaffold:** `volatility/`, `coverage/`, `trend/`, `categories/`. Planned **data_export** read-OUT door (Phase 7/8) — для user-data export, не для movements/kpi. Преемник dissolved `dashboard/` + `analytics/`. См. §2.7.6, `0a.7`–`0a.7b`. |
 | `product_pool` | Публичный пул товаров; `/pool/*`, `/markets/overview` |
 | `currency` | Единый fiat-home: `price_eur_resolver` (scrape-path EUR), `display_converter` (UI display FX, бывший `common/currency.py`), `forex_fetch` (thin delegate → `market_data.fetching`; `TODO(boundary)` Tier-0→Tier-1 — см. §7.5) |
 | `market_data` | Provider-agnostic triad (forex/crypto/commodities) + общий `provider_queue.gap_fill_fetch`; ingest + read API `/markets/{preferences,instruments,ticker,ingest}`; adapters в `providers/`; Celery — `workers/market_data_tasks.py` |
 | `ai_analyst` | Claude chat sessions; entitlement-gated |
 
-**Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, **`visualisation_calc.api`** (`/markets/movements*`), `entitlements.api`, `ai_analyst.api` — всего **13** роутеров под единым `prefix="/api"` (`main.py:147-162`).
+**Роутеры в `main.py`:** `core.api_admin`, `admin.api_parsing`, `auth.api`, `users.self_router`, `users.admin_router`, `telegram.api`, `marketplaces.api`, `product_pool.api` (pool + markets_overview), `market_data.api`, **`visualisation_calc.api`** (`/markets/dashboard-kpi`, `/markets/movements*`), `entitlements.api`, `ai_analyst.api` — всего **13** роутеров под единым `prefix="/api"` (`main.py:31`, `main.py:147-162`).
 
 **Не в `main.py` (модули без HTTP-surface или с прямым background usage):** `classifier`, `ingestion`, `data_firewall`, `persist`, `meta_write` (внутренний META bridge в `persist/`). **`scraper/api.py` router удалён** (ранее не смонтирован; `/pool/search`, orphan FE `pipeline-status`, 3 dead `/admin/parsing/*`, `recalculate-quotas` — удалены).
 
-**Удалены / заменены:** `analytics/`, `dashboard/` — dissolved; расчёты виджетов переезжают в **`visualisation_calc/`** (`movements` — live). `digests/`, `alerts/` — отсутствуют; API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
+**Удалены / заменены:** `analytics/`, `dashboard/` — dissolved; расчёты виджетов в **`visualisation_calc/`** (`movements/` + `kpi/` — live). `digests/`, `alerts/` — отсутствуют; API не зарегистрирован. Frontend pages-обёртки (`AlertsPage.tsx`, `CompetitorsPage.tsx`) сохранены без backend support — см. `Imperecta_Frontend.md` §18. `user_products/` — каталог пустой (`__init__.py` only); функциональность не активна.
 
 ---
 
@@ -191,11 +191,12 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | Scrape-path EUR | `modules/currency/price_eur_resolver.py` | sync `Session` | `resolve_price_eur` → `fact_price.price_eur`, `fact_listing.last_price_eur`; operational SELECT `fact_currency_rate` по **scrape-day `date_id`**; source priority `ecb` → … → `custom` |
 | UI display FX | `modules/currency/display_converter.py` | async `AsyncSession` | `CurrencyConverter.load_latest` — max `date_id` из `fact_currency_rate`, fallback live через `forex_fetch.fetch_eur_base_pairs` → `market_data.fetching.fetch_forex_rates("EUR")` |
 
-**Display flow (pool/overview):**
+**Display flow (pool/overview + movements list):**
 
 1. Frontend: `display_currency` в query (`local` \| `EUR` \| `USD`).  
-2. Backend: `product_pool/service.py` → `CurrencyConverter.load_latest` + `compute_display_fields_for_marketplace`.  
-3. Ответ: `display_price`, `display_currency`, `conversion_available`, `local_currency_resolution`; без rate — local + `conversion_available=false`.
+2. Backend pool/overview: `product_pool/service.py` → `CurrencyConverter.load_latest` + `compute_display_fields_for_marketplace`.  
+3. Backend movements list (slice A): `visualisation_calc/api.py` → sync read thread → `apply_display_currency` (`movements/service.py`) с pre-loaded `CurrencyConverter`.  
+4. Ответ: `display_price` / `display_old_price` / `display_new_price`, `display_currency`, `conversion_available`, `local_currency_resolution`; без rate — local + `conversion_available=false`.
 
 **Модуль `currency` — единый fiat-home:** `price_eur_resolver` (sync scrape EUR), `display_converter` (перенесён из удалённого `common/currency.py`), `forex_fetch` (thin delegate → `market_data.fetching`; `TODO(boundary)` — полная Tier-0→Tier-1 изоляция отложена).
 
@@ -231,7 +232,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
 
-**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE**. **LAYER 2 — COMPLETE**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + market-data triad (`0a.6`) + **`visualisation_calc/movements` wired end-to-end** (`0a.7`, §2.7.6). **LAYER 4 OPENED** — discovery data contract записан (`0a.8`); **NEXT:** behavior-preserving submodule extraction (seam-by-seam, bottom-up), затем fix-seams (`budget_governor` starvation, `fetch_adapter` `requires_js`). **DEFERRED:** cat-5 USER/AUTH → Phase 7/8.
+**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE**. **LAYER 2 — COMPLETE**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + market-data triad (`0a.6`) + **`visualisation_calc/movements` wired** (`0a.7`, slice A `display_currency`) + **`visualisation_calc/kpi` dashboard-kpi** (`0a.7b`, slice B) — §2.7.6. **LAYER 4 OPENED** — discovery data contract записан (`0a.8`); **NEXT:** behavior-preserving submodule extraction (seam-by-seam, bottom-up), затем fix-seams (`budget_governor` starvation, `fetch_adapter` `requires_js`). **DEFERRED:** cat-5 USER/AUTH → Phase 7/8.
 
 **Модель дверей (lock-by-threat):** сила замка подбирается под угрозу домена — **META** и **LOGS** = **LIGHT** (структурный контракт `build_table_contract`: типы + nullable + enum CHECK + HMAC; без семантических rules); **`update_validator`** = **SEMANTIC** (per-kind column allowlist + инвариант `reactivation_forbidden` — строже META, слабее полного `evaluate_ecommerce`); полные двери (`evaluate_ecommerce`, аналитический рельс `evaluate_market`) сохраняют семантические rules поверх контракта. На **каждой** двери HMAC-подпись обязательна при проходе в persist (single-record `SignedRecord` или batch `SignedBatch`).
 
@@ -364,7 +365,8 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | `update_validator` (scrape UPDATE/DELETE door) | **built** (LAYER 3) | `data_firewall/update_validator.py`; `authorize_scrape_update` / `authorize_scrape_delete`; `SCRAPE_UPDATE_ALLOWLIST` kinds: `listing_scrape_start_reset`, `listing_success_streak_reset`, `listing_housekeeping_failure`, `listing_deactivate`, `listing_checked`, `listing_denorm_success`, `listing_denorm_no_change`, `product_enrich` (denorm kinds включают `last_price_eur`) | **LAYER 3** — DONE |
 | `price_eur_resolver` (`resolve_price_eur`) | **built** (LAYER 3) | `modules/currency/price_eur_resolver.py`; operational SELECT `fact_currency_rate` на producer sync session; feeds `fact_price.price_eur` + `fact_listing.last_price_eur` | **LAYER 3** — DONE |
 | Market-data provider-queue triad | **built** | `market_data/provider_queue.py` (`gap_fill_fetch`); adapters forex/crypto/commodities; `provider_source` на всех DTO; ingest boundary frozen; beat schedule — см. §8 | **DONE** |
-| `visualisation_calc/movements` submodule | **wired** | `movements/{read,schemas,service}.py`; `api.py` 4 routes; `main.py` mount; FE `MarketsOverviewSection` | **DONE** |
+| `visualisation_calc/movements` submodule | **wired** | `movements/{read,schemas,service}.py`; `api.py` 5 routes (incl. `/movements` + `display_currency`); `main.py` mount; FE `MarketsOverviewSection` + `MarketMoversWidget` | **DONE** |
+| `visualisation_calc/kpi` submodule | **wired** | `kpi/{read,schemas,service}.py`; `GET /markets/dashboard-kpi`; FE `getDashboardKpi` | **DONE** |
 | `data_export` (read-OUT door) | planned, not built | no symbol in `data_firewall/**` or `persist/**`; model `DataExport` only (`app_tables.py:509–512`) | **Phase 7/8** |
 | `user_data` CRUD (scoped owner door) | planned, not built | grep in gate/persist perimeter: **NOT FOUND** | **Phase 7/8** |
 | `operation` field on `reject_data` | **built** (sub-seam 1) | миграция `029_reject_data_operation`; `models/reject_data.py:29+`; `reject_store.py:93+` | **LAYER 1** — DONE |
@@ -390,21 +392,35 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `NormalizedCommodity`); `provider_source` на всех. Ingest boundary **frozen**: `ForexIngestItem` / `CryptoIngestItem` / `CommodityIngestItem` → `persist_*` → `evaluate_market` → `write_sync`; Celery `ingest_market_data`, `ingest_commodities`.
 
-#### 0a.7 Movements submodule (`visualisation_calc/movements/`) — выполнено + wired
+#### 0a.7 Movements submodule (`visualisation_calc/movements/`) — выполнено + wired (slice A)
 
-Первый **live** submodule `visualisation_calc`, end-to-end: `price_change_pct` compute-site (ingestion) → operational read → `MovementsCalc` → HTTP → frontend.
+Первый **live** submodule `visualisation_calc`, end-to-end: `price_change_pct` compute-site (ingestion) → operational read → `MovementsCalc` → HTTP → frontend. **Slice A:** `display_currency` на `GET /markets/movements` — `CurrencyConverter.load_latest` (async) + module-level `apply_display_currency` после sync read thread (`api.py:139-143`).
 
 | Компонент | Назначение |
 |-----------|------------|
-| `movements/schemas.py` | `MoverItem` (вкл. `old_price_reconstructed`), `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters` |
-| `movements/read.py` | **Operational sync SELECT** (как `price_eur_resolver` — рядом с consumer, **не** `data_firewall`; service-data, **без** access-log): JOIN latest `fact_price` + `rn=2` prior → `fact_listing` (окно `last_price_changed_at`, semantics A) → dims; `MoverReadRow` frozen dataclass |
-| `movements/service.py` | `MovementsCalc`: `get_movers` / `count_movers` / `movement_summary` / `coverage_meta` — pure calc над typed rows |
-| `visualisation_calc/api.py` | `APIRouter(prefix="/markets")`: `GET /movements`, `/movements/kpi`, `/movements/summary`, `/movements/coverage` (`CurrentUser`); sync read в `asyncio.to_thread` + `sync_session_factory` (как `write_meta_sync`/`write_meta_async`); Pydantic-safe после `db.close()` |
-| `main.py` | `visualisation_calc_router` в списке роутеров (`prefix="/api"`); три `/markets` router — без коллизий (distinct `/movements*` paths) |
+| `movements/schemas.py` | `MoverItem` (вкл. `marketplace_domain`, `display_*`, `conversion_available`, `local_currency_resolution`, `old_price_reconstructed`), `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters` |
+| `movements/read.py` | **Operational sync SELECT** (service-data, **без** access-log): JOIN latest `fact_price` (`rn=1`) + prior (`rn=2`) → `fact_listing` (`is_active`, `price_change_pct IS NOT NULL`, окно `last_price_changed_at`, semantics A) → dims; `DimMarketplace.domain` → `marketplace_domain` на `MoverReadRow` |
+| `movements/service.py` | `MovementsCalc`: `get_movers` / `count_movers` / `movement_summary` / `coverage_meta` — pure calc; **`apply_display_currency`** — post-read FX через `compute_display_fields_for_marketplace` |
+| `visualisation_calc/api.py` | `APIRouter(prefix="/markets")`: `GET /dashboard-kpi` → `DashboardKpi`; `GET /movements` (+ `display_currency`) → `MoversPage`; `/movements/kpi` → `MoversKpi`; `/movements/summary` → `MoversSummary`; `/movements/coverage` → `MoversCoverageMeta` (`CurrentUser`); movements sync read — `asyncio.to_thread` + `sync_session_factory` |
+| `main.py` | `visualisation_calc_router` import `:31`, mount `:158` (`prefix="/api"`); три `/markets` router — без коллизий (distinct paths) |
 | миграция `031_listing_last_price_changed_idx` | partial index `idx_listing_last_price_changed_active` |
-| **Frontend** | `MarketsOverviewSection.tsx`: `changedMore5` ← `/markets/movements/kpi`; `avgVolatility` ← `/movements/summary.avg_abs_change`; `totalPool`/`updated24h`/`lastUpdate` — без изменений (не movements). `coverage_meta.data_ready=false` → i18n `market.overview.kpi.accumulatingData` / `accumulatingDataHint` (не голый 0%). `markets.ts`: `getMoversKpi`/`Summary`/`Coverage` (+ `getMovers` для будущего list widget) + query keys |
+| **Frontend** | `MarketsOverviewSection.tsx`: `changedMore5` ← `/markets/movements/kpi`; `avgVolatility` ← `/movements/summary.avg_abs_change`; `updated24h`/`lastUpdate` ← `/markets/dashboard-kpi` (`getDashboardKpi`, slice B); `totalPool` ← `/pool/stats` (`getPoolStats`). `MarketMoversWidget.tsx`: `getMovers` + `display_currency`, gainers/losers client-side. `coverage_meta.data_ready=false` → i18n `accumulatingData` / `accumulatingDataHint`. `markets.ts`: `getDashboardKpi`, `getMovers`, movements KPI helpers + query keys (`dashboardKpi`, `movements*`) |
 
 Окно **semantics A:** `last_price_changed_at` — только при реальном изменении цены (`listing_denorm_success`).
+
+#### 0a.7b Dashboard KPI submodule (`visualisation_calc/kpi/`) — выполнено (slice B)
+
+Второй **live** submodule: pool freshness KPIs над полным видимым пулом (`is_active` + `page_role='product'`), без cap overview pagination.
+
+| Компонент | Назначение |
+|-----------|------------|
+| `kpi/schemas.py` | `DashboardKpi { updated_24h: int, last_update: datetime \| None }` |
+| `kpi/read.py` | Async `read_dashboard_kpi(db, country_code?, marketplace_id?)`: `updated_24h` = count с `last_checked_at >= now()-24h`; `last_update` = `MAX(last_checked_at)`; optional country/marketplace filters (зеркало movements entity scope) |
+| `kpi/service.py` | `build_dashboard_kpi` — pure pack read scalars → `DashboardKpi` |
+| `visualisation_calc/api.py` | `GET /markets/dashboard-kpi` → `get_dashboard_kpi` (`api.py:96-109`) |
+| **Frontend** | `MarketsOverviewSection.tsx`: `marketsApi.getDashboardKpi(kpiScopeParams)` для KPI cards `updated24h` / `lastUpdate` (`MarketsOverviewSection.tsx:324-432`) |
+
+**REGISTRY (ещё открыто):** `totalPool` остаётся на `/pool/stats` (не унифицирован с dashboard-kpi); зерно `pool/stats.last_updated` vs `last_checked_at` / `dim_marketplace.last_discovery_at` — разные семантики freshness; `avgVolatility` — proxy `movements.avg_abs_change` до submodule `volatility/`.
 
 #### 0a.8 Discovery Data Contract (Layer 4)
 
@@ -536,7 +552,7 @@ Re-route **не** планируется на этом шаге — контра
 
 > **LAYER-3 REGISTRY (correctness backlog — не routing):** **(a) `listing_denorm_no_change` / `last_currency_code`** — **RESOLVED**; **(b) forex/crypto ingest `source` / `provider_source`** — **RESOLVED**; **(c)** **`product_name`** на `ExtractedProduct` — неиспользуемое DTO-поле, **оставлено**; **(d) `price_change_pct` always-NULL** — **RESOLVED:** `compute_price_change_pct` в ingestion → signed `fact_price.price_change_pct` (§7.5); **`discount_pct`** на scrape-path остаётся `NULL`; scrape-day `date_id` vs forex snapshot date — operational concern для `price_eur_resolver`.
 
-> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py`; `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`); **`avgVolatility` KPI** сейчас = `movements.avg_abs_change` (mean-abs proxy; заменит submodule `volatility/`); **`GET /movements` + `MoversPage`** готовы, movers-list widget **не построен**; movements KPI наполняются по мере накопления `price_change_pct` (≥2 scrape с изменением цены) — до этого честный accumulating state через `coverage_meta.data_ready`.
+> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py`; `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`); **`avgVolatility` KPI** = `movements.avg_abs_change` (mean-abs proxy; заменит submodule `volatility/`); **`totalPool` unification** — KPI card всё ещё на `/pool/stats`, не на `dashboard-kpi`; **`/pool/stats.last_updated` grain** vs `last_checked_at` / `dim_marketplace.last_discovery_at` — разные freshness semantics; movements KPI наполняются по мере накопления `price_change_pct` (≥2 scrape с изменением цены) — до этого честный accumulating state через `coverage_meta.data_ready`.
 
 > **Cat-5 USER/AUTH:** **DEFERRED → Phase 7/8** — cluster `users-auth` (planned `user_data` door).
 
@@ -720,7 +736,7 @@ Re-route **не** планируется на этом шаге — контра
 | **C2** | Analytical/export read: будущий контур `data_export` |
 | **persist** | Тупой исполнитель: только verify HMAC + verbatim INSERT/REPLACE; без бизнес-логики |
 
-**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** … + **`visualisation_calc/movements` wired** (`0a.7`, §2.7.6). **LAYER 4 OPENED** — discovery data contract (`0a.8`); **NEXT:** behavior-preserving submodule extraction, затем fix-seams `budget_governor` + `fetch_adapter`. **DEFERRED:** `users-auth` → Phase 7/8; `forex_fetch` full Tier isolation. Admin whole-pool wipe — **REMOVED**.
+**Порядок LAYER 2 (seam-clusters):** … — **CLOSED**. **LAYER 3 — COMPLETE:** … + **`visualisation_calc/movements` wired** (slice A) + **`visualisation_calc/kpi` dashboard-kpi** (slice B) (`0a.7`–`0a.7b`, §2.7.6). **LAYER 4 OPENED** — discovery data contract (`0a.8`); **NEXT:** behavior-preserving submodule extraction, затем fix-seams `budget_governor` + `fetch_adapter`. **DEFERRED:** `users-auth` → Phase 7/8; `forex_fetch` full Tier isolation. Admin whole-pool wipe — **REMOVED**.
 
 ---
 
@@ -748,7 +764,7 @@ Re-route **не** планируется на этом шаге — контра
 
 - React 19, Router 7, TanStack Query, Zustand (`authStore`, **`displayCurrencyStore`**).  
 - **Dashboard shell:** `DashboardLayout` — flex/grid `min-h-0 min-w-0`, `Scrollable` overlay scrollbar (`3134cef`); `:root font-size: 100%` (`2325052`).  
-- **Dashboard:** `MarketsOverviewSection` — каталог товаров пула (поиск, сортировка, `DisplayCurrencySelector`, `PriceDisplay`).  
+- **Dashboard:** `MarketsOverviewSection` — каталог товаров пула (поиск, сортировка, `DisplayCurrencySelector`, `PriceDisplay`); server KPI cards (`changedMore5`, `avgVolatility`, `updated24h`, `lastUpdate`, `totalPool`); **`MarketMoversWidget`** — movers list (`GET /markets/movements` + `display_currency`).  
 - **Admin:** три таба; Data Collection с live monitor + `WorkerLogRelayPanel`; `PipelineStatusPanel` — orphan (не импортируется).  
 - i18n: 8 языков; русский только superuser.
 
@@ -799,6 +815,11 @@ sequenceDiagram
 
 | Коммит / область | Суть |
 |------------------|------|
+| `e58da78` Discovery fetch classifier adapters KPI | Discovery submodule extraction (`gate_persist`, `cursor_store`); classifier/fetch adapters |
+| `532d439` Discovery canonicalizer movers dashboard KPI | `GET /markets/dashboard-kpi` (slice B); `kpi/{read,schemas,service}`; FE `getDashboardKpi` |
+| `998c39a` Movements display currency discovery helpers | Slice A: `display_currency` на `/markets/movements`; `apply_display_currency`; `marketplace_domain` на `MoverItem` |
+| `21df3e7` Wire movements API and frontend KPIs | `visualisation_calc` router в `main.py`; movements 4 routes; FE movements KPI cards |
+| `5b55a9d` Add price delta and movements calc | `price_change_pct` compute-site; `visualisation_calc/movements` scaffold → calc |
 | `fc3b07d` Isolated gate rejects + CUD persist | `write_reject_data_isolated` on gate fail; `PersistResult`; sync UPDATE/DELETE primitives in `persist/writer.py` |
 | `346bce0` HMAC master-lock | Sign/verify bind `table`+`operation`+`locator`+`fields` |
 | `bd29c22` url_hash NOT NULL | Migration `030`; `TABLE_LOCATORS` for `fact_listing` |
@@ -924,7 +945,9 @@ sequenceDiagram
 | **Data Collection** | `DataCollectionTab.tsx` | Pipeline run/monitor/history; stale badge 300s; `WorkerLogRelayPanel` |
 | **Pipeline status** | `PipelineStatusPanel.tsx` (orphan) | `GET /pipeline-status` — компонент не импортируется; live monitor использует `useParsingJobStatus` |
 | **Worker terminal** | `WorkerLogRelayPanel.tsx` | Poll relay 2s, buffer 120 lines |
-| **Markets catalog** | `MarketsOverviewSection.tsx` | Pool browse + currency + `formatMarketplaceLabel` |
+| **Markets catalog** | `MarketsOverviewSection.tsx` | Pool browse + currency + server KPI cards + `MarketMoversWidget` |
+| **Market movers list** | `MarketMoversWidget.tsx` | `GET /markets/movements` + `display_currency`; gainers/losers grouping client-side |
+| **Dashboard pool KPI** | `markets.ts` `getDashboardKpi` | `GET /markets/dashboard-kpi` — `updated_24h`, `last_update` |
 | **Marketplace labels** | `lib/marketplaceLabel.ts` | Country suffix for local TLD stores; intl .com without suffix |
 | **Admin users** | `AdminPage` Users tab | CRUD via `useAdmin` hooks |
 
@@ -1211,21 +1234,23 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 
 #### 2.7.6 Visualisation Calc (`visualisation_calc/`)
 
-> **Преемник** dissolved `dashboard/` + `analytics/`. **`movements/` — первый live submodule, wired end-to-end** (§7.5 compute-site → `0a.7` → §2.7.6 API → `MarketsOverviewSection`). Read-access: operational sync SELECT (`movements/read.py`), **не** planned `data_export` (Phase 7/8). Остальные submodules — scaffold.
+> **Преемник** dissolved `dashboard/` + `analytics/`. **Live:** `movements/` (movers + KPI aggregates + slice A `display_currency`) и `kpi/` (`GET /dashboard-kpi`, slice B). **Scaffold:** `volatility/`, `coverage/`, `trend/`, `categories/`. Read-access: operational sync SELECT (`movements/read.py`) и async SELECT (`kpi/read.py`) — **не** planned `data_export` (Phase 7/8). См. `0a.7`–`0a.7b`.
 
 | Файл | Назначение |
 |---|---|
-| `backend/app/modules/visualisation_calc/api.py` | `APIRouter(prefix="/markets")`: `GET /movements`, `/movements/kpi`, `/movements/summary`, `/movements/coverage`; `asyncio.to_thread` + `sync_session_factory` → sync read + `MovementsCalc`; mounted в `main.py` (`prefix="/api"`) |
-| `backend/app/modules/visualisation_calc/movements/schemas.py` | `MoverItem`, `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters` |
-| `backend/app/modules/visualisation_calc/movements/read.py` | `read_mover_rows`, `read_coverage_counts` + `MoverReadRow` |
-| `backend/app/modules/visualisation_calc/movements/service.py` | `MovementsCalc` |
-| `backend/app/modules/visualisation_calc/kpi/service.py` | KPI aggregates — **scaffold** |
+| `backend/app/modules/visualisation_calc/api.py` | `APIRouter(prefix="/markets")`: `GET /dashboard-kpi` (`DashboardKpi`, `get_dashboard_kpi`); `GET /movements` (`MoversPage`, `get_movers`, + `display_currency`); `GET /movements/kpi` (`MoversKpi`); `GET /movements/summary` (`MoversSummary`); `GET /movements/coverage` (`MoversCoverageMeta`); mounted `main.py:158` (`prefix="/api"`) |
+| `backend/app/modules/visualisation_calc/movements/schemas.py` | `MoverItem` (+ `marketplace_domain`, `display_*`), `MoversPage`, `MoversSummary`, `MoversCoverageMeta`, `MoversKpi`, `MovementsFilters` |
+| `backend/app/modules/visualisation_calc/movements/read.py` | `read_mover_rows`, `read_coverage_counts` + `MoverReadRow` (`rn=1`/`rn=2`, `is_active`, `last_price_changed_at` window, `price_change_pct IS NOT NULL`) |
+| `backend/app/modules/visualisation_calc/movements/service.py` | `MovementsCalc` + **`apply_display_currency`** |
+| `backend/app/modules/visualisation_calc/kpi/schemas.py` | `DashboardKpi` |
+| `backend/app/modules/visualisation_calc/kpi/read.py` | Async `read_dashboard_kpi` — `updated_24h`, `last_update` |
+| `backend/app/modules/visualisation_calc/kpi/service.py` | `build_dashboard_kpi` — **live** |
 | `backend/app/modules/visualisation_calc/volatility/service.py` | Volatility — **scaffold** (заменит avg-abs proxy в KPI) |
 | `backend/app/modules/visualisation_calc/coverage/service.py` | Market coverage — **scaffold** |
 | `backend/app/modules/visualisation_calc/trend/service.py` | Average-price trend — **scaffold** |
 | `backend/app/modules/visualisation_calc/categories/service.py` | Hot categories — **scaffold** |
 
-**Связь с frontend (`MarketsOverviewSection.tsx`):** movements KPI — server (`marketsApi.getMoversKpi` / `getMoversSummary` / `getMoversCoverage`); `changedMore5` и `avgVolatility` сняты с client-side `useMemo` по overview items. Каталог продуктов — `/markets/overview` (per-card `price_change_pct` на карточке). При `data_ready=false` — accumulating signal (i18n `accumulatingData` / `accumulatingDataHint`, 8 locales). `getMovers`/`MoversPage` — API готов, list widget **не построен**.
+**Связь с frontend:** `MarketsOverviewSection.tsx` — movements KPI (`getMoversKpi` / `getMoversSummary` / `getMoversCoverage`); pool freshness (`getDashboardKpi`); `totalPool` — `getPoolStats`. **`MarketMoversWidget.tsx`** — `getMovers` + `display_currency`, mounted в overview (`MarketsOverviewSection.tsx:731-734`). Каталог — `/markets/overview`. При `data_ready=false` — accumulating signal (i18n `accumulatingData` / `accumulatingDataHint`, 8 locales).
 
 #### 2.7.6 (legacy) Dashboard (`dashboard/`) — удалён
 
@@ -1521,7 +1546,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui + TanStack Query + Zustan
 | `frontend/src/api/auth.ts` | Auth endpoints. |
 | `frontend/src/api/client.ts` | axios/fetch-клиент с interceptor'ами. |
 | `frontend/src/api/entitlements.ts` | `/api/entitlements/*` (план → feature flags). |
-| `frontend/src/api/markets.ts` | Market data endpoints. |
+| `frontend/src/api/markets.ts` | Market data + pool + movements + `getDashboardKpi`; typed `MoverItem`/`MoversPage`. |
 | `frontend/src/api/pipeline.ts` | Pipeline status API (`/api/admin/parsing/...`) для `PipelineStatusPanel`. |
 | `frontend/src/api/products.ts` | Products endpoints. |
 | `frontend/src/api/setupAuth.ts` | Настройка auth headers/refresh. |
@@ -1580,7 +1605,8 @@ React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui + TanStack Query + Zustan
 | Файл | Назначение |
 |---|---|
 | `frontend/src/components/dashboard/MarketsAnalyticsSection.tsx` | Секция Markets Analytics. |
-| `frontend/src/components/dashboard/MarketsOverviewSection.tsx` | Секция Markets Overview. |
+| `frontend/src/components/dashboard/MarketMoversWidget.tsx` | Movers list widget (24h, `getMovers` + `display_currency`). |
+| `frontend/src/components/dashboard/MarketsOverviewSection.tsx` | Секция Markets Overview (catalog + KPI cards + `MarketMoversWidget`). |
 | `frontend/src/components/dashboard/MarketsOverviewSection.test.tsx` | Тест секции. |
 | `frontend/src/components/dashboard/MarketsTickerBar.tsx` | Тикер-бар маркетов. |
 
@@ -2059,13 +2085,16 @@ backend/app/
 │   │
 │   ├── visualisation_calc/                  Tier-1 — dashboard widget math
 │   │   ├── __init__.py
-│   │   ├── api.py                           /api/markets/movements* (visualisation_calc router)
-│   │   ├── schemas.py                       Shared response schemas
-│   │   ├── kpi/service.py                   KPI aggregates (scaffold)
+│   │   ├── api.py                           /api/markets/dashboard-kpi + /api/markets/movements*
+│   │   ├── schemas.py                       Namespace package marker (shared schemas per submodule)
+│   │   ├── kpi/
+│   │   │   ├── read.py                      Async read_dashboard_kpi (slice B)
+│   │   │   ├── schemas.py                   DashboardKpi
+│   │   │   └── service.py                   build_dashboard_kpi (live)
 │   │   ├── movements/
 │   │   │   ├── read.py                      Operational sync SELECT (movers)
-│   │   │   ├── schemas.py                   MoverItem, MoversPage, …
-│   │   │   └── service.py                   MovementsCalc (pure consumer)
+│   │   │   ├── schemas.py                   MoverItem (+ display_*), MoversPage, …
+│   │   │   └── service.py                   MovementsCalc + apply_display_currency
 │   │   ├── volatility/service.py            Volatility (scaffold)
 │   │   ├── coverage/service.py              Market coverage (scaffold)
 │   │   ├── trend/service.py                 Average-price trend (scaffold)

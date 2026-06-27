@@ -7,7 +7,7 @@ from typing import Any, TypedDict
 from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
-from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog
+from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
 from app.models.dimensions import DimProduct, DimMarketplace, DimDate
 from app.models.facts import (
     FactCommodityPrice,
@@ -120,6 +120,7 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "scrape_jobs": build_table_contract(ScrapeJob),
     "scrape_logs": build_table_contract(ScrapeLog),
     "api_logs": build_table_contract(ApiLog),
+    "service_alerts": build_table_contract(ServiceAlert),
 }
 
 # Per-table natural keys included in the HMAC locator sub-dict (subset of signed fields).
@@ -135,6 +136,7 @@ TABLE_LOCATORS: dict[str, tuple[str, ...]] = {
     "fact_commodity_price": ("date_id", "symbol", "source"),
     "scrape_logs": (),
     "api_logs": (),
+    "service_alerts": ("id",),
 }
 
 

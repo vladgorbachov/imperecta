@@ -166,7 +166,7 @@ async def test_phase1_recon_emits_periodic_heartbeat(monkeypatch):
     (counter-gated, NOT per-fetch). With BFS_EMIT_EVERY=25, a 50-iteration
     walk yields 2 heartbeat emits.
     """
-    from app.modules.scraper.discovery import DiscoveryCrawler
+    from app.modules.discovery import bfs_walker
 
     captured: list[str] = []
 
@@ -186,14 +186,12 @@ async def test_phase1_recon_emits_periodic_heartbeat(monkeypatch):
 
     pool.scrape_page_for_analysis = AsyncMock(side_effect=fake_scrape)
 
-    crawler = DiscoveryCrawler(db, pool, on_activity=on_activity)
-
     # Drive 30 iterations (above the 25 emit cadence): preload the queue with
     # 30 distinct URLs at depth=0; classifier "unknown" enqueues no children
     # so the BFS just drains the queue without growing it.
-    # _phase1_category_recon does local imports — patch on the source modules.
+    # run_category_bfs uses module-level imports — patch on the source modules.
     monkeypatch.setattr(
-        "app.modules.classifier.classify_page_role_for_discovery",
+        "app.modules.discovery.classifier_adapter.classify_page_role",
         lambda soup, base: "unknown",
     )
     monkeypatch.setattr(
@@ -215,7 +213,13 @@ async def test_phase1_recon_emits_periodic_heartbeat(monkeypatch):
     marketplace.last_category_recon_at = None
     marketplace.category_resume_index = 0
 
-    await crawler._phase1_category_recon(marketplace, deadline_monotonic=None)
+    await bfs_walker.run_category_bfs(
+        marketplace,
+        pool,
+        db,
+        deadline_monotonic=None,
+        on_activity=on_activity,
+    )
 
     heartbeats = [line for line in captured if "discovery recon" in line]
     # 30 iterations / cadence 25 → exactly one mid-walk heartbeat.

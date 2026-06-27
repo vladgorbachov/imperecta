@@ -17,7 +17,11 @@ vi.mock("@/api/markets", () => ({
   },
 }));
 
-function renderWidget(props: { movementsDataReady: boolean; displayCurrency?: "local" | "EUR" | "USD" }) {
+function renderWidget(props: {
+  movementsDataReady: boolean;
+  displayCurrency?: "local" | "EUR" | "USD";
+  countryCode?: string | null;
+}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -29,6 +33,7 @@ function renderWidget(props: { movementsDataReady: boolean; displayCurrency?: "l
       <MarketMoversWidget
         movementsDataReady={props.movementsDataReady}
         displayCurrency={props.displayCurrency ?? "EUR"}
+        countryCode={props.countryCode ?? null}
       />
     </QueryClientProvider>,
   );
@@ -118,6 +123,24 @@ describe("MarketMoversWidget", () => {
         limit: 10,
         display_currency: "EUR",
       }),
+    );
+  });
+
+  it("passes country_code to getMovers when scoped", async () => {
+    getMoversMock.mockResolvedValue({
+      data: {
+        items: [],
+        total: 0,
+        limit: 10,
+        offset: 0,
+        has_more: false,
+      },
+    });
+
+    renderWidget({ movementsDataReady: true, countryCode: "LV" });
+    await screen.findByText("market.overview.kpi.accumulatingData");
+    expect(getMoversMock).toHaveBeenCalledWith(
+      expect.objectContaining({ country_code: "LV" }),
     );
   });
 

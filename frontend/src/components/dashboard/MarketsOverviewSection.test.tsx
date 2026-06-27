@@ -15,6 +15,7 @@ const getMoversSummaryMock = vi.fn();
 const getMoversCoverageMock = vi.fn();
 const getMoversMock = vi.fn();
 const getDashboardKpiMock = vi.fn();
+const getGeoCoverageMock = vi.fn();
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
@@ -22,6 +23,7 @@ vi.mock("@/api/markets", () => ({
     getPoolMarketplaceStats: (...args: unknown[]) => getPoolMarketplaceStatsMock(...args),
     getPoolStats: (...args: unknown[]) => getPoolStatsMock(...args),
     getDashboardKpi: (...args: unknown[]) => getDashboardKpiMock(...args),
+    getGeoCoverage: (...args: unknown[]) => getGeoCoverageMock(...args),
     getMovers: (...args: unknown[]) => getMoversMock(...args),
     getMoversKpi: (...args: unknown[]) => getMoversKpiMock(...args),
     getMoversSummary: (...args: unknown[]) => getMoversSummaryMock(...args),
@@ -32,6 +34,7 @@ vi.mock("@/api/markets", () => ({
     poolMarketplaceStats: () => ["markets", "pool-marketplace-stats"],
     poolStats: () => ["markets", "pool-stats"],
     dashboardKpi: (params?: unknown) => ["markets", "dashboard-kpi", params],
+    geoCoverage: (params?: unknown) => ["markets", "geo-coverage", params],
     movements: (params?: unknown) => ["markets", "movements", params],
     movementsKpi: (params?: unknown) => ["markets", "movements", params, "kpi"],
     movementsSummary: (params?: unknown) => ["markets", "movements", params, "summary"],
@@ -168,6 +171,13 @@ describe("MarketsOverviewSection", () => {
         last_update: "2026-05-21T10:00:00Z",
       },
     });
+    getGeoCoverageMock.mockResolvedValue({
+      data: {
+        mode: "countries",
+        total: 0,
+        rows: [],
+      },
+    });
   });
 
   it("renders KPI cards from movements endpoints", async () => {
@@ -182,6 +192,7 @@ describe("MarketsOverviewSection", () => {
     expect(getMoversSummaryMock).toHaveBeenCalled();
     expect(getMoversCoverageMock).toHaveBeenCalled();
     expect(getDashboardKpiMock).toHaveBeenCalled();
+    expect(getGeoCoverageMock).toHaveBeenCalled();
   });
 
   it("renders dashboard KPI empty state from server", async () => {
