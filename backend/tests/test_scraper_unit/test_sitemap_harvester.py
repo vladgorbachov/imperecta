@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,6 +26,7 @@ def _make_marketplace(**overrides) -> DimMarketplace:
         locale=None,
         last_sitemap_harvest_at=None,
         sitemap_url=None,
+        sitemap_bad_harvest_streak=0,
     )
     defaults.update(overrides)
     return DimMarketplace(**defaults)
@@ -98,3 +99,180 @@ async def test_harvest_sitemap_not_useful_applies_retry_offset() -> None:
     )
     assert harvest_at < before - expected_offset + timedelta(seconds=5)
     assert harvest_at > before - expected_offset - timedelta(seconds=5)
+
+
+class TestSitemapHarvesterDefenceInDepth:
+    """NODE 4: streak tracking + sitemap harvest alerts."""
+
+    @staticmethod
+    def _pool_and_db(raw_urls: list[str]) -> tuple[MagicMock, AsyncMock]:
+        pool = MagicMock()
+        pool.fetch_sitemap_candidates = AsyncMock(return_value=raw_urls)
+        db = AsyncMock()
+        db.flush = AsyncMock()
+        return pool, db
+
+    @pytest.mark.asyncio
+    async def test_useful_harvest_resets_streak_no_alerts(self) -> None:
+        mp = _make_marketplace(sitemap_bad_harvest_streak=2)
+        pool, db = self._pool_and_db(
+            [f"https://test-mp.example/p/{i}" for i in range(12)],
+        )
+        products = [f"https://test-mp.example/product/{i}" for i in range(12)]
+
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+            return products, {"mode": "full", "accepted": len(products)}
+
+        with patch(
+            "app.modules.discovery.sitemap_harvester.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            result = await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+
+        assert result == products
+        assert cursor_store.get_sitemap_bad_harvest_streak(mp) == 0
+        alert_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_not_useful_increments_streak_alerts_on_third(self) -> None:
+        mp = _make_marketplace()
+        pool, db = self._pool_and_db(
+            [f"https://test-mp.example/p/{i}" for i in range(5)],
+        )
+        few = [f"https://test-mp.example/product/{i}" for i in range(3)]
+
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+            return few, {"mode": "full", "accepted": len(few)}
+
+        with patch(
+            "app.modules.discovery.sitemap_harvester.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+            await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+            await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+
+        assert cursor_store.get_sitemap_bad_harvest_streak(mp) == 3
+        useful_false_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "sitemap_useful_false"
+        ]
+        assert len(useful_false_calls) == 1
+        assert useful_false_calls[0].kwargs["context"]["streak"] == 3
+
+    @pytest.mark.asyncio
+    async def test_sitemap_raw_empty_alerts_when_prior_harvest_known(self) -> None:
+        mp = _make_marketplace(
+            last_sitemap_harvest_at=datetime.now(timezone.utc),
+        )
+        pool, db = self._pool_and_db([])
+
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+            return [], {"mode": "empty"}
+
+        with patch(
+            "app.modules.discovery.sitemap_harvester.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+
+        raw_empty_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "sitemap_raw_empty"
+        ]
+        assert len(raw_empty_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_sitemap_raw_empty_no_alert_on_first_harvest(self) -> None:
+        mp = _make_marketplace(
+            last_sitemap_harvest_at=None,
+            sitemap_url=None,
+        )
+        pool, db = self._pool_and_db([])
+
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+            return [], {"mode": "empty"}
+
+        with patch(
+            "app.modules.discovery.sitemap_harvester.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+
+        raw_empty_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "sitemap_raw_empty"
+        ]
+        assert len(raw_empty_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_sitemap_reject_sample_alerts_when_mode_and_raw_threshold(self) -> None:
+        mp = _make_marketplace()
+        pool, db = self._pool_and_db(
+            [f"https://test-mp.example/p/{i}" for i in range(120)],
+        )
+
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+            return [], {
+                "mode": "reject_sample",
+                "sample_product_ratio": 0.0,
+                "accepted": 0,
+            }
+
+        with patch(
+            "app.modules.discovery.sitemap_harvester.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+
+        reject_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "sitemap_reject_sample"
+        ]
+        assert len(reject_calls) == 1
+        assert reject_calls[0].kwargs["context"]["raw"] == 120
+
+    @pytest.mark.asyncio
+    async def test_sitemap_reject_sample_no_alert_on_full_mode(self) -> None:
+        mp = _make_marketplace()
+        pool, db = self._pool_and_db(
+            [f"https://test-mp.example/p/{i}" for i in range(120)],
+        )
+        products = [f"https://test-mp.example/product/{i}" for i in range(12)]
+
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+            return products, {"mode": "full", "accepted": len(products)}
+
+        with patch(
+            "app.modules.discovery.sitemap_harvester.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            result = await sitemap_harvester.harvest_sitemap(
+                mp, pool, db, filter_urls_by_role=fake_filter,
+            )
+
+        assert len(result) >= SITEMAP_MIN_USEFUL_URLS
+        reject_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "sitemap_reject_sample"
+        ]
+        assert len(reject_calls) == 0

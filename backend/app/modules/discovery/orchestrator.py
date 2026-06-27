@@ -564,6 +564,27 @@ class DiscoveryOrchestrator:
         discovered_urls = cursor_store.get_discovered_category_urls(marketplace)
         resume_index = cursor_store.get_category_resume_index(marketplace)
         categories_len = len(discovered_urls)
+        if resume_index > categories_len:
+            await emit_discovery_service_alert(
+                "cursor_store",
+                "warning",
+                "resume_index_oob",
+                (
+                    f"Category resume index out of range "
+                    f"marketplace_id={marketplace.id}"
+                ),
+                marketplace_id=marketplace.id,
+                context={
+                    "resume_index": resume_index,
+                    "categories_len": categories_len,
+                },
+            )
+            slog.warning(
+                "discovery_resume_index_oob",
+                marketplace_id=str(marketplace.id),
+                resume_index=resume_index,
+                categories_len=categories_len,
+            )
         primary = resume_index < categories_len
         binary = categories_len > 0
         if primary != binary:

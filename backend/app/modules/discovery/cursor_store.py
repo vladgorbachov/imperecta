@@ -17,6 +17,7 @@ DISCOVERY_MP_WRITE_KEYS: tuple[str, ...] = (
     "discovered_category_urls",
     "category_resume_index",
     "sitemap_resume_offset",
+    "sitemap_bad_harvest_streak",
     "last_discovery_at",
     "last_discovery_status",
     "last_discovery_products_found",
@@ -41,6 +42,63 @@ def parse_frontier(
     visited: set[str] = set(saved.get("visited", []))
     listing_urls: list[str] = list(saved.get("listing_urls", []))
     return queue, visited, listing_urls
+
+
+def _cold_start_frontier(
+    marketplace: DimMarketplace,
+) -> tuple[deque[tuple[str, int]], set[str], list[str]]:
+    """Fresh BFS seed — mirrors bfs_walker.run_category_bfs else branch."""
+    base_url = marketplace.base_url
+    queue: deque[tuple[str, int]] = deque([(base_url, 0)])
+    visited: set[str] = {base_url}
+    listing_urls: list[str] = []
+    return queue, visited, listing_urls
+
+
+def _frontier_schema_error_kind(saved: Mapping[str, Any]) -> str | None:
+    """Return an error_kind when saved frontier JSONB fails structural validation."""
+    queue_raw = saved.get("queue")
+    if not isinstance(queue_raw, list):
+        return "queue_not_list"
+    for item in queue_raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            return "queue_item_invalid"
+        try:
+            int(item[1])
+        except (TypeError, ValueError):
+            return "queue_depth_invalid"
+    if not isinstance(saved.get("visited"), list):
+        return "visited_not_list"
+    if not isinstance(saved.get("listing_urls"), list):
+        return "listing_urls_not_list"
+    return None
+
+
+def safe_parse_frontier(
+    marketplace: DimMarketplace,
+) -> tuple[deque[tuple[str, int]], set[str], list[str], bool, str | None]:
+    """Deserialize frontier state; on corruption clear cursors and cold-start.
+
+    Returns (queue, visited, listing_urls, was_corrupted, error_kind).
+    Valid saved state matches parse_frontier output with was_corrupted=False.
+    """
+    saved = load_frontier_state(marketplace)
+    if not saved:
+        queue, visited, listing_urls = _cold_start_frontier(marketplace)
+        return queue, visited, listing_urls, False, None
+
+    error_kind = _frontier_schema_error_kind(saved)
+    if error_kind is None:
+        try:
+            queue, visited, listing_urls = parse_frontier(saved)
+            return queue, visited, listing_urls, False, None
+        except Exception:
+            error_kind = "parse_failed"
+
+    clear_frontier(marketplace)
+    set_category_resume_index(marketplace, 0)
+    queue, visited, listing_urls = _cold_start_frontier(marketplace)
+    return queue, visited, listing_urls, True, error_kind
 
 
 def serialize_frontier(
@@ -83,6 +141,16 @@ def get_sitemap_resume_offset(marketplace: DimMarketplace) -> int:
 def set_sitemap_resume_offset(marketplace: DimMarketplace, offset: int) -> None:
     """Write sitemap_resume_offset on the marketplace ORM instance."""
     marketplace.sitemap_resume_offset = offset
+
+
+def get_sitemap_bad_harvest_streak(marketplace: DimMarketplace) -> int:
+    """Read sitemap_bad_harvest_streak with legacy getattr/or coercion."""
+    return int(getattr(marketplace, "sitemap_bad_harvest_streak", 0) or 0)
+
+
+def set_sitemap_bad_harvest_streak(marketplace: DimMarketplace, streak: int) -> None:
+    """Write sitemap_bad_harvest_streak on the marketplace ORM instance."""
+    marketplace.sitemap_bad_harvest_streak = streak
 
 
 def get_category_resume_index(marketplace: DimMarketplace) -> int:

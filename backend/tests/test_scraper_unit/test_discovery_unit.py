@@ -744,6 +744,53 @@ class TestPhase1FrontierResume:
         assert kwargs["marketplace_id"] == mp.id
 
     @pytest.mark.asyncio
+    async def test_resolve_category_backlog_resume_index_oob_emits_alert(self):
+        mp = _make_marketplace(
+            discovered_category_urls=["https://x/c1"],
+            category_resume_index=5,
+        )
+        crawler = disc.DiscoveryOrchestrator(AsyncMock(), MagicMock())
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            effective = await crawler._resolve_category_backlog(mp)
+
+        assert effective is True
+        oob_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "resume_index_oob"
+        ]
+        assert len(oob_calls) == 1
+        assert oob_calls[0].args[0] == "cursor_store"
+        assert oob_calls[0].kwargs["context"]["resume_index"] == 5
+        assert oob_calls[0].kwargs["context"]["categories_len"] == 1
+
+    @pytest.mark.asyncio
+    async def test_resolve_category_backlog_in_range_no_oob_alert(self):
+        mp = _make_marketplace(
+            discovered_category_urls=["https://x/c1", "https://x/c2"],
+            category_resume_index=1,
+        )
+        crawler = disc.DiscoveryOrchestrator(AsyncMock(), MagicMock())
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            effective = await crawler._resolve_category_backlog(mp)
+
+        assert effective is True
+        oob_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "resume_index_oob"
+        ]
+        assert len(oob_calls) == 0
+
+    @pytest.mark.asyncio
     async def test_resolve_category_backlog_agreement_no_alert(self):
         mp = _make_marketplace(
             discovered_category_urls=["https://x/c1", "https://x/c2"],

@@ -12,10 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
 from app.modules.discovery import classifier_adapter, cursor_store, fetch_adapter
+from app.modules.discovery.alerting import emit_discovery_service_alert
 from app.modules.scraper.extractors import extract_internal_links_all
 from app.modules.scraper.scraper_pool import ScraperPool
 
+import structlog
+
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 CATEGORY_PUBLISH_BATCH = 60
 RECON_BFS_MAX_DEPTH = 3
@@ -77,14 +81,43 @@ async def run_category_bfs(
 
     saved = cursor_store.load_frontier_state(marketplace)
     if saved:
-        queue, visited, listing_urls = cursor_store.parse_frontier(saved)
+        (
+            queue,
+            visited,
+            listing_urls,
+            was_corrupted,
+            error_kind,
+        ) = cursor_store.safe_parse_frontier(marketplace)
+        if was_corrupted:
+            await emit_discovery_service_alert(
+                "cursor_store",
+                "warning",
+                "frontier_deserialize_failed",
+                (
+                    f"Frontier deserialize failed marketplace_id={marketplace.id}"
+                ),
+                marketplace_id=marketplace.id,
+                context={
+                    "error_kind": error_kind or "unknown",
+                    "queue_len": len(queue),
+                    "visited_len": len(visited),
+                },
+            )
+            slog.warning(
+                "discovery_frontier_deserialize_failed",
+                marketplace_id=str(marketplace.id),
+                error_kind=error_kind,
+                queue_len=len(queue),
+                visited_len=len(visited),
+            )
         logger.info(
             "category_recon_resume marketplace_id=%s queue=%d "
-            "visited=%d listing=%d",
+            "visited=%d listing=%d corrupted=%s",
             marketplace.id,
             len(queue),
             len(visited),
             len(listing_urls),
+            was_corrupted,
         )
     else:
         logger.info(

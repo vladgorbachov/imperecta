@@ -21,6 +21,7 @@ def _stub_marketplace(**overrides: object) -> SimpleNamespace:
       "discovered_category_urls": [],
       "category_resume_index": 0,
       "sitemap_resume_offset": 0,
+      "sitemap_bad_harvest_streak": 0,
       "last_discovery_at": None,
       "last_discovery_status": None,
       "last_discovery_products_found": 0,
@@ -97,6 +98,7 @@ def test_int_cursors_and_category_urls_round_trip() -> None:
     now = datetime.now(tz=timezone.utc)
 
     cursor_store.set_sitemap_resume_offset(marketplace, 42)
+    cursor_store.set_sitemap_bad_harvest_streak(marketplace, 2)
     cursor_store.set_category_resume_index(marketplace, 7)
     cursor_store.set_discovered_category_urls(
         marketplace,
@@ -107,6 +109,7 @@ def test_int_cursors_and_category_urls_round_trip() -> None:
     cursor_store.set_sitemap_url(marketplace, "https://shop.example/sitemap.xml")
 
     assert cursor_store.get_sitemap_resume_offset(marketplace) == 42
+    assert cursor_store.get_sitemap_bad_harvest_streak(marketplace) == 2
     assert cursor_store.get_category_resume_index(marketplace) == 7
     assert cursor_store.get_discovered_category_urls(marketplace) == [
         "https://shop.example/c1",
@@ -133,3 +136,92 @@ def test_snapshot_meta_columns_returns_discovery_mp_write_keys_subset() -> None:
     assert snapshot["products_in_pool"] == 12
     assert snapshot["base_url"] == "https://shop.example"
     assert snapshot["last_category_recon_at"] == now
+
+
+def test_safe_parse_frontier_valid_matches_parse_frontier() -> None:
+    serialized = cursor_store.serialize_frontier(
+        deque([("https://shop.example/a", 0)]),
+        {"https://shop.example"},
+        ["https://shop.example/listing-1"],
+    )
+    marketplace = _stub_marketplace(recon_frontier_state=serialized)
+
+    (
+        safe_queue,
+        safe_visited,
+        safe_listing,
+        was_corrupted,
+        error_kind,
+    ) = cursor_store.safe_parse_frontier(marketplace)
+    parsed_queue, parsed_visited, parsed_listing = cursor_store.parse_frontier(
+        serialized,
+    )
+
+    assert was_corrupted is False
+    assert error_kind is None
+    assert list(safe_queue) == list(parsed_queue)
+    assert safe_visited == parsed_visited
+    assert safe_listing == parsed_listing
+
+
+def test_safe_parse_frontier_corrupt_queue_item_cold_starts() -> None:
+    marketplace = _stub_marketplace(
+        recon_frontier_state={
+            "queue": [["https://shop.example/bad"]],
+            "visited": ["https://shop.example"],
+            "listing_urls": [],
+        },
+        category_resume_index=4,
+    )
+
+    queue, visited, listing_urls, was_corrupted, error_kind = (
+        cursor_store.safe_parse_frontier(marketplace)
+    )
+
+    assert was_corrupted is True
+    assert error_kind == "queue_item_invalid"
+    assert marketplace.recon_frontier_state is None
+    assert marketplace.category_resume_index == 0
+    assert list(queue) == [("https://shop.example", 0)]
+    assert visited == {"https://shop.example"}
+    assert listing_urls == []
+
+
+def test_safe_parse_frontier_visited_not_list_cold_starts() -> None:
+    marketplace = _stub_marketplace(
+        recon_frontier_state={
+            "queue": [],
+            "visited": "not-a-list",
+            "listing_urls": [],
+        },
+    )
+
+    _, _, _, was_corrupted, error_kind = cursor_store.safe_parse_frontier(
+        marketplace,
+    )
+
+    assert was_corrupted is True
+    assert error_kind == "visited_not_list"
+    assert marketplace.recon_frontier_state is None
+
+
+def test_safe_parse_frontier_parse_raises_cold_starts(monkeypatch) -> None:
+    marketplace = _stub_marketplace(
+        recon_frontier_state={
+            "queue": [],
+            "visited": [],
+            "listing_urls": [],
+        },
+    )
+
+    def _boom(_saved: object) -> tuple:
+        raise RuntimeError("parse boom")
+
+    monkeypatch.setattr(cursor_store, "parse_frontier", _boom)
+
+    _, _, _, was_corrupted, error_kind = cursor_store.safe_parse_frontier(
+        marketplace,
+    )
+
+    assert was_corrupted is True
+    assert error_kind == "parse_failed"

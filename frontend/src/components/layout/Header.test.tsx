@@ -68,13 +68,15 @@ describe("Header dashboard country selector", () => {
     expect(screen.queryByLabelText("markets.countrySelector.placeholder")).not.toBeInTheDocument();
   });
 
-  it("limits ticker width on the dashboard route", () => {
+  it("keeps ticker full width without artificial max-width cap", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>
         <Header />
       </MemoryRouter>,
     );
 
-    expect(screen.getByTestId("header-ticker").className).toMatch(/max-w-/);
+    const tickerClass = screen.getByTestId("header-ticker").className;
+    expect(tickerClass).not.toMatch(/max-w-/);
+    expect(tickerClass).toMatch(/flex-1/);
   });
 });
