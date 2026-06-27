@@ -21,6 +21,7 @@ import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { MarketMoversWidget } from "@/components/dashboard/MarketMoversWidget";
 import { MarketCoverageWidget } from "@/components/dashboard/MarketCoverageWidget";
+import { MarketNewsWidget } from "@/components/dashboard/MarketNewsWidget";
 import { CountrySelector } from "@/components/dashboard/CountrySelector";
 import { Input } from "@/components/ui/input";
 import {
@@ -787,6 +788,8 @@ export function MarketsOverviewSection() {
           marketplaceId={scopedMarketplaceId}
         />
       </div>
+
+      <MarketNewsWidget countryCode={selectedCountry} />
 
       <div className="grid items-start gap-3 lg:grid-cols-[260px_1fr]">
         <aside className="hidden lg:block">
