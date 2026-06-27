@@ -58,10 +58,15 @@ SITEMAP_PHASE_BUDGET_SECONDS = 300  # 5 minutes
 DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS = 900  # 15 minutes
 
 # Cooldown applied to sitemap_harvest when sitemap times out (asyncio.TimeoutError).
-# Longer than sitemap_harvester.SITEMAP_BAD_HARVEST_RETRY_HOURS because a timeout
+# Longer than SITEMAP_BAD_HARVEST_RETRY_HOURS because a timeout
 # signals a persistent issue (very slow server, anti-bot, network partition) —
 # retrying in an hour would just burn another budget cycle.
 SITEMAP_TIMEOUT_COOLDOWN_HOURS = 24
+
+# Cooldown after a bad (non-useful) sitemap harvest before retry.
+SITEMAP_BAD_HARVEST_RETRY_HOURS = 1
+# Consecutive non-useful sitemap harvests before sitemap_useful_false alert.
+SITEMAP_USEFUL_FALSE_STREAK_THRESHOLD = 3
 
 __all__ = [
     "CATEGORY_PUBLISH_BATCH",
@@ -69,6 +74,7 @@ __all__ = [
     "DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS",
     "SAVE_BUDGET_HEADROOM_FRACTION",
     "SAVE_PRODUCT_URLS_BATCH_SIZE",
+    "SITEMAP_BAD_HARVEST_RETRY_HOURS",
     "SITEMAP_CLASSIFY_CONCURRENCY",
     "SITEMAP_FULL_CLASSIFY_LIMIT",
     "SITEMAP_MIN_USEFUL_URLS",
@@ -77,4 +83,5 @@ __all__ = [
     "SITEMAP_SAMPLE_SIZE",
     "SITEMAP_STALE_DAYS",
     "SITEMAP_TIMEOUT_COOLDOWN_HOURS",
+    "SITEMAP_USEFUL_FALSE_STREAK_THRESHOLD",
 ]

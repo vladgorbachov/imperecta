@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { DataCollectionTab } from "@/components/admin/DataCollectionTab";
+import { AlertsTab } from "@/components/admin/alerts/AlertsTab";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -358,6 +359,7 @@ export function AdminPage() {
           <TabsTrigger value="overview">{t("admin.tabs.marketOverview")}</TabsTrigger>
           <TabsTrigger value="data-collection">{t("admin.tabs.dataCollection")}</TabsTrigger>
           <TabsTrigger value="users-management">{t("admin.tabs.usersManagement")}</TabsTrigger>
+          <TabsTrigger value="alerts">{t("admin.alerts.tab")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -533,6 +535,10 @@ export function AdminPage() {
               setIsDetailsOpen(true);
             }}
           />
+        </TabsContent>
+
+        <TabsContent value="alerts">
+          <AlertsTab />
         </TabsContent>
 
         <TabsContent value="users-management">

@@ -863,14 +863,12 @@ class DiscoveryOrchestrator:
                 phase1_exhausted = False
                 if self._should_run_category_recon(marketplace):
                     discovery_phase = "category_bfs"
-                    _phase1_partial_urls, phase1_exhausted = (
-                        await bfs_walker.run_category_bfs(
-                            marketplace,
-                            self.pool,
-                            self.db,
-                            deadline_monotonic=phase1_deadline,
-                            on_activity=self._emit_activity,
-                        )
+                    _, phase1_exhausted = await bfs_walker.run_category_bfs(
+                        marketplace,
+                        self.pool,
+                        self.db,
+                        deadline_monotonic=phase1_deadline,
+                        on_activity=self._emit_activity,
                     )
                 if phase1_exhausted and not has_backlog:
                     logger.info(

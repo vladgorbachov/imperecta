@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import * as adminApi from "@/api/admin";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
 
@@ -241,4 +241,21 @@ export const useParsingActiveJob = (refetchInterval: number | false = 5000) =>
     queryKey: ["admin", "parsing", "active-job"],
     queryFn: () => adminApi.getParsingActiveJob().then((r) => r.data),
     refetchInterval,
+  });
+
+export const useServiceAlerts = (params: adminApi.ServiceAlertsParams) =>
+  useQuery({
+    queryKey: [
+      "admin",
+      "service_alerts",
+      params.module ?? null,
+      params.submodule ?? null,
+      params.severity ?? null,
+      params.resolved ?? "all",
+      params.limit ?? 50,
+      params.offset ?? 0,
+    ],
+    queryFn: () => adminApi.getServiceAlerts(params).then((r) => r.data),
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
   });

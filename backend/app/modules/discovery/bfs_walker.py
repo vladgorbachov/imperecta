@@ -74,7 +74,12 @@ async def run_category_bfs(
 ) -> tuple[list[str], bool]:
     """Phase 1: BFS traversal to discover category/listing URLs.
 
-    Returns (listing_urls, exhausted_budget). Publishes found categories in
+    Returns (published_batch, exhausted_budget). ``published_batch`` is the
+    listing URLs written to ``discovered_category_urls`` on this exit (batch
+    publish, deadline publish, or final publish). Production callers should
+    read the durable category backlog from ``cursor_store``; the tuple's first
+    element is for observability and tests. ``exhausted_budget=True`` means
+    the phase-1 time budget ran out with nothing published this tick.
     CATEGORY_PUBLISH_BATCH-sized batches so Phase 2 can harvest before the
     full BFS completes. On batch publish (threshold or deadline-with-findings)
     returns (batch, False) so discover() runs Phase 2 the same tick.
@@ -259,7 +264,7 @@ async def run_category_bfs(
         _record_fetch_result(soup)
         if soup is None:
             continue
-        role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
+        role = classifier_adapter.classify_page_role(soup, current_url)
         logger.debug(
             "recon_page marketplace_id=%s url=%s depth=%d role=%s",
             marketplace.id,
@@ -310,7 +315,7 @@ async def run_category_bfs(
             _record_fetch_result(soup)
             if soup is None:
                 continue
-            role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
+            role = classifier_adapter.classify_page_role(soup, fallback_url)
             if role in ("listing", "hub"):
                 listing_urls.append(fallback_url)
 

@@ -13,17 +13,17 @@ from app.models.dimensions import DimMarketplace
 from app.modules.discovery import cursor_store, fetch_adapter
 from app.modules.discovery.alerting import emit_discovery_service_alert
 from app.modules.discovery.category_processor import FilterUrlsByRoleFn
-from app.modules.discovery.constants import SITEMAP_FULL_CLASSIFY_LIMIT
+from app.modules.discovery.constants import (
+    SITEMAP_BAD_HARVEST_RETRY_HOURS,
+    SITEMAP_FULL_CLASSIFY_LIMIT,
+    SITEMAP_MIN_USEFUL_URLS,
+    SITEMAP_STALE_DAYS,
+    SITEMAP_USEFUL_FALSE_STREAK_THRESHOLD,
+)
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
-
-# Values must match discovery/constants.py (orchestrator imports the same).
-SITEMAP_MIN_USEFUL_URLS = 10
-SITEMAP_STALE_DAYS = 3
-SITEMAP_BAD_HARVEST_RETRY_HOURS = 1
-SITEMAP_USEFUL_FALSE_STREAK_THRESHOLD = 3
 
 
 async def harvest_sitemap(
@@ -45,8 +45,11 @@ async def harvest_sitemap(
                           becomes stale again after SITEMAP_BAD_HARVEST_RETRY_HOURS.
 
     Returns only the URLs classified as 'product'.
+
+    ``on_activity`` is accepted for API symmetry with other discovery phases
+    (orchestrator passes ``_emit_activity``) but is intentionally unused here;
+    worker_log_tail hooks for sitemap are not wired yet.
     """
-    # Reserved for future worker_log_tail activity hooks (orchestrator passes callback).
     _ = on_activity
     logger.info(
         "sitemap_harvest_start marketplace_id=%s url=%s",

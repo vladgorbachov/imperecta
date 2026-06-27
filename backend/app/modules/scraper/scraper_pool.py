@@ -411,7 +411,7 @@ class ScraperPool:
     async def fetch_html(
         self, url: str, requires_js: bool = False, *, scrape_tier: int = 1
     ) -> str | None:
-        """Fetch raw HTML via fetch backends. Used by Discovery."""
+        """Fetch raw HTML via fetch backends (discovery uses fetch_adapter)."""
         backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
         for backend_id in backend_ids:
             html, _err = await self._fetch_layer_with_retries(backend_id, url)

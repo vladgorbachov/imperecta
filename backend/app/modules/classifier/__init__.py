@@ -3,7 +3,7 @@
 Owns page-role classification via structural schema.org / OG / JSON-LD /
 Microdata signals plus a Layer-3 structural fallback. Two consumers:
 ``app.modules.scraper.extractors.merge_and_finalize`` (extractor) and
-``app.modules.scraper.discovery._classify_url`` (discovery).
+``app.modules.discovery.classifier_adapter`` (discovery).
 
 Public surface:
     - ``PageRole`` (Literal["product","listing","hub","unknown"]) contract.

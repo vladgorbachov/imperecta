@@ -428,3 +428,48 @@ export const getParsingWorkerLogRelay = (
 
 export const getParsingActiveJob = () =>
   apiClient.get<ParsingActiveJobResponse>("/admin/parsing/active-job");
+
+export type ServiceAlertSeverity = "info" | "warning" | "error" | "critical";
+
+export type ServiceAlertResolvedFilter = "open" | "resolved" | "all";
+
+export interface ServiceAlert {
+  id: string;
+  alert_class: string;
+  module: string;
+  submodule: string;
+  severity: ServiceAlertSeverity;
+  anomaly_type: string;
+  message: string;
+  context: Record<string, unknown> | null;
+  triggered_at: string;
+  resolved_at: string | null;
+}
+
+export interface ServiceAlertsPage {
+  items: ServiceAlert[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ServiceAlertsParams {
+  module?: string;
+  submodule?: string;
+  severity?: string;
+  resolved?: ServiceAlertResolvedFilter;
+  limit?: number;
+  offset?: number;
+}
+
+export const getServiceAlerts = (params?: ServiceAlertsParams) =>
+  apiClient.get<ServiceAlertsPage>("/admin/service_alerts", {
+    params: {
+      resolved: params?.resolved ?? "all",
+      limit: params?.limit ?? 50,
+      offset: params?.offset ?? 0,
+      ...(params?.module ? { module: params.module } : {}),
+      ...(params?.submodule ? { submodule: params.submodule } : {}),
+      ...(params?.severity ? { severity: params.severity } : {}),
+    },
+  });
