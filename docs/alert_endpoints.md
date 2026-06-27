@@ -16,12 +16,17 @@ Operational and analytic alert classes are **separate** (data-class separation).
 | **Path** | `/api/admin/service_alerts` |
 | **Auth** | Superuser only (`get_current_superuser`) |
 | **Data class** | Service-data (no `user_id`) |
-| **First node** | `discovery` / `budget_governor` |
-| **Anomaly types (planned)** | `detector_divergence`, `resume_index_desync` (+ future nodes) |
 | **Purpose** | Operational/health alerts for the admin panel; filter by `module`, `submodule`, `severity`, `resolved` |
-| **Writer** | Artefact 3 (`budget_governor`) via `build_service_alert_fields` + gate persist — **not wired in artefact 2** |
 
 Query filters: `module`, `submodule`, `severity`, `resolved` (`open` \| `resolved` \| `all`), `limit`, `offset`.
+
+#### Emitted anomalies
+
+| module | submodule | anomaly_type | Signals | Purpose |
+|--------|-----------|--------------|---------|---------|
+| `discovery` | `budget_governor` | `resume_index_desync` | Primary backlog detector (`category_resume_index < len(discovered_category_urls)`) disagrees with binary redundancy (`len(discovered_category_urls) > 0`) — resume-index / category-list desync | Defence-in-depth: orchestrator logs structlog warning and writes service alert; effective backlog uses binary (redundancy) until detectors agree |
+
+Writer: `discover()` → `build_service_alert_fields` + `write_service_alert_async` → gate persist.
 
 ### `GET /api/admin/analytic_alerts`
 
@@ -45,8 +50,12 @@ Query filters: `alert_type`, `severity`, `user_id`, `limit`, `offset`.
 
 ## Gate-write (service alerts only)
 
-Artefact 3 inserts via:
+Inserts via:
 
 - `build_service_alert_fields(module, submodule, severity, anomaly_type, message, context=...)`
 - `write_service_alert_sync` / `write_service_alert_async` → `evaluate_market` → `persist`
 - Contract: `FACT_TABLE_CONTRACTS["service_alerts"]`, locator `id`, `TABLE_LOCATORS["service_alerts"] = ("id",)`
+
+## Budget governor (pure calculator)
+
+`discovery/budget_governor.py` — `allocate(headroom_deadline, has_backlog)` returns `(phase1_deadline, phase2_deadline)`. No I/O. Orchestrator owns detection + alerts.

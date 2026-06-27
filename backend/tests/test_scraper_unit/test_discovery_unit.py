@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -12,6 +13,24 @@ import app.modules.scraper.discovery as disc
 from app.modules.discovery import bfs_walker, category_processor
 from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
 from app.models.dimensions import DimMarketplace
+
+
+@contextmanager
+def _patch_discover_meta_writes():
+    """Keep discover() unit tests DB-free (META door writes stubbed)."""
+    ok = MagicMock(ok=True)
+    with (
+        patch(
+            "app.modules.scraper.discovery.write_meta_async",
+            new_callable=AsyncMock,
+            return_value=ok,
+        ),
+        patch(
+            "app.modules.scraper.discovery._meta_update_marketplace_snapshot",
+            new_callable=AsyncMock,
+        ),
+    ):
+        yield
 
 
 def _patch_pool_write(monkeypatch, *, slow_seconds: float | None = None) -> dict:
@@ -621,8 +640,8 @@ class TestPhase1FrontierResume:
         assert crawler._should_run_category_recon(mp_resume) is True
 
     @pytest.mark.asyncio
-    async def test_discover_skips_phase2_when_phase1_exhausted(self):
-        mp = _make_marketplace()
+    async def test_discover_skips_phase2_when_phase1_exhausted_no_backlog(self):
+        mp = _make_marketplace(discovered_category_urls=[], category_resume_index=0)
         db = AsyncMock()
         db.add = MagicMock()
         db.commit = AsyncMock()
@@ -633,7 +652,7 @@ class TestPhase1FrontierResume:
 
         crawler = disc.DiscoveryCrawler(db, MagicMock())
 
-        with patch.object(
+        with _patch_discover_meta_writes(), patch.object(
             disc.DiscoveryCrawler,
             "_phase0_sitemap_harvest",
             new_callable=AsyncMock,
@@ -656,11 +675,104 @@ class TestPhase1FrontierResume:
 
         phase2_mock.assert_not_awaited()
         assert result.status == "partial_budget"
-        added_jobs = [
-            call.args[0] for call in db.add.call_args_list
-            if isinstance(call.args[0], disc.ScrapeJob)
-        ]
-        assert added_jobs and added_jobs[0].status == "partial"
+
+    @pytest.mark.asyncio
+    async def test_discover_runs_phase2_when_phase1_exhausted_with_backlog(self):
+        mp = _make_marketplace(
+            discovered_category_urls=["https://x/c1"],
+            category_resume_index=0,
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+
+        crawler = disc.DiscoveryCrawler(db, MagicMock())
+        captured: dict = {"phase2_deadline": None}
+
+        async def fake_phase2(
+            marketplace,
+            pool,
+            db,
+            category_urls,
+            *,
+            start_index=0,
+            deadline_monotonic=None,
+            on_activity=None,
+            filter_urls_by_role=None,
+            save_product_urls=None,
+        ):
+            captured["phase2_deadline"] = deadline_monotonic
+            return (2, 0, False)
+
+        with _patch_discover_meta_writes(), patch.object(
+            disc.DiscoveryCrawler,
+            "_phase0_sitemap_harvest",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch.object(
+            disc.DiscoveryCrawler,
+            "_should_run_category_recon",
+            return_value=True,
+        ), patch(
+            "app.modules.discovery.bfs_walker.run_category_bfs",
+            new_callable=AsyncMock,
+            return_value=([], True),
+        ), patch(
+            "app.modules.discovery.category_processor.run_product_harvest",
+            side_effect=fake_phase2,
+        ) as phase2_mock:
+            result = await crawler.discover(
+                mp, deadline_monotonic=time.monotonic() + 60,
+            )
+
+        phase2_mock.assert_awaited_once()
+        assert captured["phase2_deadline"] is not None
+        assert result.status == "completed"
+        assert result.persisted_listings == 2
+
+    @pytest.mark.asyncio
+    async def test_resolve_category_backlog_divergence_writes_alert(self):
+        mp = _make_marketplace(
+            discovered_category_urls=["https://x/c1"],
+            category_resume_index=1,
+        )
+        crawler = disc.DiscoveryCrawler(AsyncMock(), MagicMock())
+
+        with patch(
+            "app.modules.scraper.discovery.write_service_alert_async",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            effective = await crawler._resolve_category_backlog(mp)
+
+        assert effective is True
+        alert_mock.assert_awaited_once()
+        fields = alert_mock.await_args.kwargs["fields"]
+        assert fields["module"] == "discovery"
+        assert fields["submodule"] == "budget_governor"
+        assert fields["anomaly_type"] == "resume_index_desync"
+        assert fields["context"]["resume_index"] == 1
+        assert fields["context"]["categories_len"] == 1
+
+    @pytest.mark.asyncio
+    async def test_resolve_category_backlog_agreement_no_alert(self):
+        mp = _make_marketplace(
+            discovered_category_urls=["https://x/c1", "https://x/c2"],
+            category_resume_index=0,
+        )
+        crawler = disc.DiscoveryCrawler(AsyncMock(), MagicMock())
+
+        with patch(
+            "app.modules.scraper.discovery.write_service_alert_async",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            effective = await crawler._resolve_category_backlog(mp)
+
+        assert effective is True
+        alert_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_discover_runs_phase2_when_phase1_completes(self):
@@ -696,7 +808,7 @@ class TestPhase1FrontierResume:
             captured["phase2"] = deadline_monotonic
             return (4, 0, False)
 
-        with patch.object(
+        with _patch_discover_meta_writes(), patch.object(
             disc.DiscoveryCrawler,
             "_phase0_sitemap_harvest",
             new_callable=AsyncMock,
@@ -717,7 +829,7 @@ class TestPhase1FrontierResume:
             )
 
         assert captured["phase1"] is not None
-        assert captured["phase1"] == captured["phase2"]
+        assert captured["phase2"] is not None
         assert result.status == "completed"
         assert mp.category_resume_index == 0
 

@@ -118,9 +118,11 @@ def test_int_cursors_and_category_urls_round_trip() -> None:
 
 
 def test_snapshot_meta_columns_returns_discovery_mp_write_keys_subset() -> None:
+    now = datetime.now(timezone.utc)
     marketplace = _stub_marketplace(
         last_discovery_status="partial_budget",
         products_in_pool=12,
+        last_category_recon_at=now,
         recon_frontier_state={"queue": [], "visited": [], "listing_urls": []},
     )
 
@@ -130,3 +132,4 @@ def test_snapshot_meta_columns_returns_discovery_mp_write_keys_subset() -> None:
     assert snapshot["last_discovery_status"] == "partial_budget"
     assert snapshot["products_in_pool"] == 12
     assert snapshot["base_url"] == "https://shop.example"
+    assert snapshot["last_category_recon_at"] == now

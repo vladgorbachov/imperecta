@@ -20,6 +20,7 @@ from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.discovery import (
     bfs_walker,
+    budget_governor,
     category_processor,
     classifier_adapter,
     cursor_store,
@@ -35,6 +36,10 @@ from app.modules.persist.meta_write import (
     build_scrape_job_fields,
     write_meta_async,
 )
+from app.modules.persist.service_alerts_write import (
+    build_service_alert_fields,
+    write_service_alert_async,
+)
 from app.modules.persist.writer import (
     build_dim_product_fields,
     build_fact_listing_fields,
@@ -42,7 +47,10 @@ from app.modules.persist.writer import (
 from app.modules.scraper.locale_selection import build_accept_language_header
 from app.modules.scraper.scraper_pool import ScraperPool
 
+import structlog
+
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 
 async def _meta_update_marketplace_snapshot(marketplace: DimMarketplace) -> None:
@@ -584,6 +592,51 @@ class DiscoveryCrawler:
         ).days
         return age >= CATEGORY_RECON_STALE_DAYS
 
+    async def _resolve_category_backlog(self, marketplace: DimMarketplace) -> bool:
+        """Resolve effective category backlog; emit service alert on detector divergence.
+
+        Primary: resume_index < len(discovered_category_urls) — unfinished Phase 2 work.
+        Binary redundancy: len(discovered_category_urls) > 0 — coarse backlog signal.
+        On divergence, write a service alert and use the binary (redundancy) value.
+        """
+        discovered_urls = cursor_store.get_discovered_category_urls(marketplace)
+        resume_index = cursor_store.get_category_resume_index(marketplace)
+        categories_len = len(discovered_urls)
+        primary = resume_index < categories_len
+        binary = categories_len > 0
+        if primary != binary:
+            context = {
+                "resume_index": resume_index,
+                "categories_len": categories_len,
+            }
+            message = (
+                f"Category backlog detector divergence "
+                f"marketplace_id={marketplace.id} "
+                f"resume_index={resume_index} categories_len={categories_len}"
+            )
+            slog.warning(
+                "discovery_budget_governor_detector_divergence",
+                marketplace_id=str(marketplace.id),
+                resume_index=resume_index,
+                categories_len=categories_len,
+                primary=primary,
+                binary=binary,
+            )
+            fields = build_service_alert_fields(
+                module="discovery",
+                submodule="budget_governor",
+                severity="warning",
+                anomaly_type="resume_index_desync",
+                message=message,
+                context=context,
+            )
+            await write_service_alert_async(
+                fields=fields,
+                reject_source="discovery",
+            )
+            return binary
+        return primary
+
     async def discover(
         self,
         marketplace: DimMarketplace,
@@ -743,22 +796,23 @@ class DiscoveryCrawler:
                 pages_scanned = 1 if sitemap_product_urls else 0
             else:
                 block_deadline = self._headroom_deadline(deadline_monotonic)
+                has_backlog = await self._resolve_category_backlog(marketplace)
+                phase1_deadline, phase2_deadline = budget_governor.allocate(
+                    block_deadline,
+                    has_backlog,
+                )
                 phase1_exhausted = False
                 if self._should_run_category_recon(marketplace):
-                    # Phase 1 publishes found categories in batches (it returns
-                    # exhausted=False on a publish so Phase 2 harvests the batch
-                    # this tick). exhausted=True now means Phase 1 found NOTHING
-                    # this tick (empty batch) → no Phase 2 work, skip.
                     _phase1_partial_urls, phase1_exhausted = (
                         await bfs_walker.run_category_bfs(
                             marketplace,
                             self.pool,
                             self.db,
-                            deadline_monotonic=block_deadline,
+                            deadline_monotonic=phase1_deadline,
                             on_activity=self._emit_activity,
                         )
                     )
-                if phase1_exhausted:
+                if phase1_exhausted and not has_backlog:
                     logger.info(
                         "discovery_category_path_phase1_exhausted marketplace_id=%s "
                         "remaining=%d",
@@ -781,11 +835,6 @@ class DiscoveryCrawler:
                     accepted_urls = min(len(harvest_urls), remaining)
                     rejected_urls = max(0, len(harvest_urls) - accepted_urls)
                     pages_scanned = accepted_urls
-                    # start_index indexes into the quota-trimmed list. When quota is
-                    # finite and nearly exhausted, accepted_urls may shrink below
-                    # start_index between runs → EMPTY WINDOW rule resets the cursor.
-                    # This is intentional: quota is a hard ceiling and takes precedence
-                    # over category-harvest completeness.
                     start_index = cursor_store.get_category_resume_index(marketplace)
                     products_found, next_index, phase2_more = (
                         await category_processor.run_product_harvest(
@@ -794,16 +843,13 @@ class DiscoveryCrawler:
                             self.db,
                             harvest_urls[:accepted_urls],
                             start_index=start_index,
-                            deadline_monotonic=block_deadline,
+                            deadline_monotonic=phase2_deadline,
                             on_activity=self._emit_activity,
                             filter_urls_by_role=self._filter_urls_by_role,
                             save_product_urls=self._save_product_urls,
                         )
                     )
                     cursor_store.set_category_resume_index(marketplace, next_index)
-                    # Completion is decided by phase2_more (→ partial_budget), NOT by
-                    # next_index. next_index==0 with phase2_more=True means "restart at
-                    # 0 next run", not "done".
                     logger.info(
                         "discovery_category_path marketplace_id=%s candidate=%d accepted=%d "
                         "saved=%d rejected=%d remaining=%d",

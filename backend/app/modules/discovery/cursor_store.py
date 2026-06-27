@@ -21,6 +21,7 @@ DISCOVERY_MP_WRITE_KEYS: tuple[str, ...] = (
     "last_discovery_status",
     "last_discovery_products_found",
     "products_in_pool",
+    "last_category_recon_at",
 )
 
 
