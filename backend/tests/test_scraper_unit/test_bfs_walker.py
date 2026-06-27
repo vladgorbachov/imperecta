@@ -67,6 +67,70 @@ async def test_publish_replaces_discovered_category_urls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_category_bfs_classifies_with_current_page_url() -> None:
+    """Each BFS page is classified against its own URL, not marketplace.base_url."""
+    page_url = "https://shop.example/categories/electronics"
+    mp = MagicMock()
+    mp.id = "mp-id"
+    mp.base_url = "https://shop.example/"
+    mp.recon_frontier_state = {
+        "queue": [[page_url, 0]],
+        "visited": ["https://shop.example/"],
+        "listing_urls": [],
+    }
+    soup = MagicMock()
+    pool = MagicMock()
+    pool.scrape_page_for_analysis = AsyncMock(return_value=("<html></html>", soup))
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    classify_mock = MagicMock(return_value="listing")
+
+    with (
+        patch(
+            "app.modules.discovery.bfs_walker.classifier_adapter.classify_page_role",
+            classify_mock,
+        ),
+        patch(
+            "app.modules.discovery.bfs_walker.extract_internal_links_all",
+            return_value=[],
+        ),
+    ):
+        await bfs_walker.run_category_bfs(mp, pool, db, deadline_monotonic=None)
+
+    classify_mock.assert_called_once_with(soup, page_url)
+
+
+@pytest.mark.asyncio
+async def test_run_category_bfs_fallback_classifies_with_fallback_url() -> None:
+    """Fallback seed pages are classified against the fallback URL."""
+    fallback_url = "https://shop.example/catalog"
+    mp = MagicMock()
+    mp.id = "mp-id"
+    mp.base_url = "https://shop.example/"
+    mp.recon_frontier_state = {
+        "queue": [],
+        "visited": ["https://shop.example/"],
+        "listing_urls": [],
+    }
+    soup = MagicMock()
+    pool = MagicMock()
+    pool.scrape_page_for_analysis = AsyncMock(return_value=("<html></html>", soup))
+    db = AsyncMock()
+    db.flush = AsyncMock()
+    classify_mock = MagicMock(
+        side_effect=lambda _soup, url: "listing" if url.endswith("/catalog") else "hub",
+    )
+
+    with patch(
+        "app.modules.discovery.bfs_walker.classifier_adapter.classify_page_role",
+        classify_mock,
+    ):
+        await bfs_walker.run_category_bfs(mp, pool, db, deadline_monotonic=None)
+
+    assert classify_mock.call_args_list[0] == ((soup, fallback_url),)
+
+
+@pytest.mark.asyncio
 async def test_run_category_bfs_corrupt_frontier_emits_alert_and_proceeds() -> None:
     from uuid import uuid4
 

@@ -9,7 +9,7 @@ import pytest
 
 from app.modules.discovery import cursor_store, sitemap_harvester
 from app.models.dimensions import DimMarketplace
-from app.modules.discovery.sitemap_harvester import (
+from app.modules.discovery.constants import (
     SITEMAP_BAD_HARVEST_RETRY_HOURS,
     SITEMAP_MIN_USEFUL_URLS,
     SITEMAP_STALE_DAYS,
@@ -44,7 +44,7 @@ async def test_harvest_sitemap_useful_sets_fresh_cooldown_and_returns_products()
 
     product_urls = [f"https://test-mp.example/product/{i}" for i in range(12)]
 
-    async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+    async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
         return product_urls, {"mode": "full", "accepted": len(product_urls)}
 
     result = await sitemap_harvester.harvest_sitemap(
@@ -78,7 +78,7 @@ async def test_harvest_sitemap_not_useful_applies_retry_offset() -> None:
 
     few_products = [f"https://test-mp.example/product/{i}" for i in range(3)]
 
-    async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+    async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
         return few_products, {"mode": "full", "accepted": len(few_products)}
 
     result = await sitemap_harvester.harvest_sitemap(
@@ -120,7 +120,7 @@ class TestSitemapHarvesterDefenceInDepth:
         )
         products = [f"https://test-mp.example/product/{i}" for i in range(12)]
 
-        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
             return products, {"mode": "full", "accepted": len(products)}
 
         with patch(
@@ -143,7 +143,7 @@ class TestSitemapHarvesterDefenceInDepth:
         )
         few = [f"https://test-mp.example/product/{i}" for i in range(3)]
 
-        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
             return few, {"mode": "full", "accepted": len(few)}
 
         with patch(
@@ -176,7 +176,7 @@ class TestSitemapHarvesterDefenceInDepth:
         )
         pool, db = self._pool_and_db([])
 
-        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
             return [], {"mode": "empty"}
 
         with patch(
@@ -202,7 +202,7 @@ class TestSitemapHarvesterDefenceInDepth:
         )
         pool, db = self._pool_and_db([])
 
-        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
             return [], {"mode": "empty"}
 
         with patch(
@@ -227,7 +227,7 @@ class TestSitemapHarvesterDefenceInDepth:
             [f"https://test-mp.example/p/{i}" for i in range(120)],
         )
 
-        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
             return [], {
                 "mode": "reject_sample",
                 "sample_product_ratio": 0.0,
@@ -258,7 +258,7 @@ class TestSitemapHarvesterDefenceInDepth:
         )
         products = [f"https://test-mp.example/product/{i}" for i in range(12)]
 
-        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None):
+        async def fake_filter(urls, *, requires_js, scrape_tier, marketplace_locale=None, marketplace_id=None):
             return products, {"mode": "full", "accepted": len(products)}
 
         with patch(

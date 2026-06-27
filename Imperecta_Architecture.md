@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-26 (ветка `main`, head `e3a688c`)  
+**Актуально на:** 2026-06-25 (ветка `main`, head `0223000`)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -93,7 +93,7 @@ Legacy `app/api/`, `app/services/` удалены.
 | `entitlements` | `/entitlements` API surface — runtime feature flags по `UserPlan` (Tier-1); правила тарифов в `app/entitlements/plan.py` (Tier-0 enum) |
 | `admin` | Parsing control plane (`/admin/parsing/*`) — `parsing_admin.py`, `api_parsing.py` |
 | `marketplaces` | `dim_marketplace` CRUD, pool quotas |
-| `discovery` | Marketplace URL discovery + gated pool persistence; `DiscoveryOrchestrator` + 9 submodules (`0a.8`); **`scraper/discovery.py` удалён** |
+| `discovery` | Marketplace URL discovery + gated pool persistence; `DiscoveryOrchestrator` + 10 submodules + `constants.py` + `alerting.py` (`0a.8`); **`scraper/discovery.py` удалён**; LAYER 4 **COMPLETE** (decomposition + §16 defence-in-depth) |
 | `scraper` | Scrape, `pipeline/` tick orchestrator (discovery вынесен в `discovery/`) |
 | `classifier` | Tier-1: PageRole классификация (`classify_page_role_for_discovery` использует слои JSON-LD/og/microdata/structural) — выделено как самостоятельный модуль (ARCHITECTURE_PRINCIPLES §10) |
 | `data_firewall` | Tier-1: контракты колонок, ecommerce/market rules, HMAC signing (`table`+`operation`+`locator`+`fields`), durable reject через `write_reject_data_isolated` (`firewall.py`, `rules.py`, `contracts.py`, `signing.py`, `reject_store.py`) |
@@ -233,7 +233,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
 
-**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE**. **LAYER 2 — COMPLETE**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + market-data triad (`0a.6`) + **`visualisation_calc/movements` wired** (`0a.7`, slice A `display_currency`) + **`visualisation_calc/kpi` dashboard-kpi** (`0a.7b`, slice B) — §2.7.6. **LAYER 4 — discovery DECOMPOSITION COMPLETE** (`0a.8`): `scraper/discovery.py` **удалён**; top-level `discovery/` (10/10 seams). **`budget_governor` G-B COMPLETE** + первый §16 defence-in-depth узел. **NEXT:** equip **каждого** discovery submodule с defence-in-depth (backup + ops alerts + structlog; `budget_governor` уже оснащён) → test run + module finalization (recon discovery beat schedule manual vs scheduled; prod-verify `pandashop_md` 33 categories + pool fill + 12 marketplaces); fix-seam `fetch_adapter` (`requires_js`). **DEFERRED:** cat-5 USER/AUTH → Phase 7/8.
+**LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE**. **LAYER 2 — COMPLETE**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + market-data triad (`0a.6`) + **`visualisation_calc/movements` wired** (`0a.7`, slice A `display_currency`) + **`visualisation_calc/kpi` dashboard-kpi** (`0a.7b`, slice B) — §2.7.6. **LAYER 4 — discovery COMPLETE** (`0a.8`): монолит `scraper/discovery.py` **удалён**; top-level `discovery/` — 10 submodules + `DiscoveryOrchestrator` + `constants.py`; **все 10 узлов** оснащены defence-in-depth по `ARCHITECTURE_PRINCIPLES.md` §16 (19 `anomaly_type`, shared emitter `discovery/alerting.py`); finalization cleanup (stale comments, dedup constants, `current_url` classify fix). **NEXT:** discovery **test run** — recon beat schedule (manual-trigger vs scheduled), manual trigger на `pandashop_md`, prod-verify 33 categories harvest + pool fill + остальные 12 marketplaces; fix-seam `fetch_adapter` (`requires_js`) остаётся **OPEN**. **DEFERRED:** cat-5 USER/AUTH → Phase 7/8.
 
 **Модель дверей (lock-by-threat):** сила замка подбирается под угрозу домена — **META** и **LOGS** = **LIGHT** (структурный контракт `build_table_contract`: типы + nullable + enum CHECK + HMAC; без семантических rules); **`update_validator`** = **SEMANTIC** (per-kind column allowlist + инвариант `reactivation_forbidden` — строже META, слабее полного `evaluate_ecommerce`); полные двери (`evaluate_ecommerce`, аналитический рельс `evaluate_market`) сохраняют семантические rules поверх контракта. На **каждой** двери HMAC-подпись обязательна при проходе в persist (single-record `SignedRecord` или batch `SignedBatch`).
 
@@ -427,7 +427,7 @@ DTO-1: три отдельных DTO (`NormalizedForex`, `NormalizedCrypto`, `No
 
 Формальный контракт данных discovery: что модуль **входит**, **собирает**, **классифицирует**, **эмитит** и где граница с scrape/ingestion. Источник истины — **`backend/app/modules/discovery/`** (`orchestrator.py` — `DiscoveryOrchestrator`, бывш. `DiscoveryCrawler`; **`scraper/discovery.py` монолит удалён**). Исторические `file:line` recon в 0b.x ниже могут ссылаться на бывший `scraper/discovery.py` — актуальные пути: `discovery/orchestrator.py`, `discovery/gate_persist.py`, submodules.
 
-**LAYER 4 progress:** contract **OPENED** (`0a.8`). **DECOMPOSITION COMPLETE (10/10 seams):** `gate_persist`, `cursor_store`, `url_canonicalizer`, `fetch_adapter`, `classifier_adapter`, `bfs_walker`, `category_processor`, `budget_governor`, `sitemap_harvester`, `orchestrator.py` (`DiscoveryOrchestrator`). Плюс `constants.py` (dependency-light tuning). **`budget_governor` G-B COMPLETE.** **NEXT:** defence-in-depth на каждом discovery submodule (§16; `budget_governor` — первый) → test run + module finalization + prod-verify.
+**LAYER 4 progress:** contract **OPENED** (`0a.8`). **COMPLETE:** decomposition (10/10 seams) + defence-in-depth (§16, все узлы) + finalization cleanup. Монолит `scraper/discovery.py` **удалён**; живой модуль — `backend/app/modules/discovery/` (`orchestrator.py` — `DiscoveryOrchestrator`, 10 submodules, `constants.py`, `alerting.py`). **`budget_governor` G-B COMPLETE.** **NEXT:** discovery test run (см. §0a.8 test-run registry ниже).
 
 ##### Назначение и граница
 
@@ -465,7 +465,7 @@ Caller задаёт monotonic deadline: `tasks.py` (`time.monotonic() + DISCOVER
 
 ##### Классификация (универсальность)
 
-URL → **product** vs category/hub через **структурные** сигналы `classify_page_role_for_discovery` — `classifier_adapter` / `modules/classifier/`. **Без** per-shop URL regex. Canonical: `url_canonicalizer`. Pool gate: `classifier_adapter` + `_filter_urls_by_role` на orchestrator.
+URL → **product** vs category/hub через **структурные** сигналы `classify_page_role_for_discovery` — `classifier_adapter` / `modules/classifier/`. **Без** per-shop URL regex. Каждая страница классифицируется по **своему** `current_url` (не подменяется `base_url`); `extract_internal_links_all` использует `base_url` как site root. Canonical: `url_canonicalizer`. Pool gate: `classifier_adapter` + `_filter_urls_by_role` на orchestrator.
 
 ##### Gate handoff (уже gated — as-is, не re-route)
 
@@ -501,20 +501,37 @@ Re-route **не** планируется на этом шаге — контра
 - **(B) Per-phase deadlines:** `bfs_walker.run_category_bfs` получает `phase1_deadline`; `category_processor.run_product_harvest` — `phase2_deadline`; единый `block_deadline` на обе фазы заменён (`discovery.py:799-847`).
 - **(C) Durability:** `last_category_recon_at` в `DISCOVERY_MP_WRITE_KEYS` (`cursor_store.py:12-25`) → `recon_at` в durable META snapshot; ломает perpetual `_should_run_category_recon` loop (`bfs_walker` пишет через `cursor_store.set_last_category_recon_at`).
 
-##### Defence-in-depth: первый узел (`ARCHITECTURE_PRINCIPLES.md` §16)
+##### Defence-in-depth — все узлы discovery (`ARCHITECTURE_PRINCIPLES.md` §16) — COMPLETE
 
-**Узел:** `discovery` / `budget_governor` — **первый** оснащённый по §16.
+**Shared emitter:** `discovery/alerting.py` — `emit_discovery_service_alert` (async **fail-open**); все ops-alerts пишутся в `service_alerts` (`alert_class='service'`, migration `032`) через `write_service_alert_async`.
 
-**D-orch** (orchestrator в `discovery.py`, не в pure governor):
+**Итого 19 `anomaly_type`** (grep-verified по emit sites; сводка для frontend — `docs/alert_endpoints.md`):
 
-| Механизм | Реализация |
-|----------|------------|
-| **Primary backlog detector** | `category_resume_index < len(discovered_category_urls)` |
-| **Binary redundancy** | `len(discovered_category_urls) > 0` |
-| **On divergence** | `build_service_alert_fields` → `write_service_alert_async` (`module='discovery'`, `submodule='budget_governor'`, `anomaly_type='resume_index_desync'`, `severity='warning'`) + structlog `discovery_budget_governor_detector_divergence`; effective `has_backlog` = binary (`orchestrator.py:_resolve_category_backlog`) |
-| **Governor** | остаётся pure calculator (`budget_governor.allocate`) |
+| Submodule | §16 механизмы | `anomaly_type` |
+|-----------|---------------|----------------|
+| `budget_governor` | binary-detector redundancy vs primary backlog detector | `resume_index_desync` |
+| `orchestrator` | META retry-once на snapshot write | `meta_snapshot_write_failed`, `discover_exception`, `discover_status_inconsistent` |
+| `gate_persist` | batch reject / commit observability | `pool_batch_total_reject`, `pool_batch_commit_failed` |
+| `cursor_store` | `safe_parse` cold-start; frontier/resume bounds | `frontier_deserialize_failed`, `resume_index_oob` |
+| `sitemap_harvester` | durable streak `sitemap_bad_harvest_streak` (migration `035`, gate) | `sitemap_raw_empty`, `sitemap_reject_sample`, `sitemap_useful_false` |
+| `category_processor` | Phase 2 yield / convergence | `phase2_zero_yield`, `phase2_converged_empty` |
+| `bfs_walker` | durable streak `phase1_exhausted_streak` (migration `036`, gate) | `phase1_budget_exhausted_no_publish`, `phase1_repeated_exhausted` |
+| `fetch_adapter` | F-phase counters | `fetch_empty_soup_spike` |
+| `url_canonicalizer` | empty-set degrade | `dedup_lookup_failed`, `canonical_missing_rate_high` |
+| `classifier_adapter` | unknown-rate threshold | `classify_unknown_rate_high` |
 
-**Таблица:** `service_alerts` (service-data, `alert_class='service'`, migration `032`). **Admin read:** `GET /api/admin/service_alerts` (`admin/api_alerts.py`). **Registry:** `docs/alert_endpoints.md` (§16.4).
+**D-orch деталь (`budget_governor`):** primary = `category_resume_index < len(discovered_category_urls)`; binary redundancy = `len(discovered_category_urls) > 0`; при divergence → `resume_index_desync` + structlog `discovery_budget_governor_detector_divergence`; effective `has_backlog` = binary (`orchestrator._resolve_category_backlog`). Governor остаётся pure (`budget_governor.allocate`).
+
+##### Alert infrastructure (ops + analytic)
+
+| Класс | Таблица / путь | Admin read | Назначение |
+|-------|----------------|------------|------------|
+| **service-data (ops)** | `service_alerts` | `GET /api/admin/service_alerts` (`admin/api_alerts.py`) | Operational service-health; filters: `module`, `submodule`, `severity`, `resolved` (`open` \| `resolved` \| `all`) |
+| **analytic (client price-alerts)** | `alerts` / `alert_events` | `GET /api/admin/analytic_alerts` | Thin read over client price-alert events |
+
+**Инвариант `alert_class`:** на `alerts`, `alert_events`, `service_alerts` — **нет bare alerts**; каждая строка несёт явный `alert_class` (`service` \| `analytic`; CHECK на `service_alerts`). **RESOLVE write-path** — **read-only** на текущем срезе (filter `resolved`); manual/auto resolve — **LATER** slice после прояснения panel workflow.
+
+**Frontend handoff:** `docs/alert_endpoints.md` — 19 discovery anomalies + endpoint contract (grep-verified против emit sites).
 
 ##### Target submodule map (D-A decomposition) — COMPLETE
 
@@ -522,25 +539,43 @@ Re-route **не** планируется на этом шаге — контра
 
 **Модуль `backend/app/modules/discovery/`** (top-level; `scraper/discovery.py` **удалён**):
 
-| Файл / submodule | Статус | Назначение |
-|------------------|--------|------------|
-| `gate_persist.py` | **DONE** | Gated pool batch write — `PoolInsertDTO`, `write_pool_dtos_sync` |
-| `cursor_store.py` | **DONE** | Cursor/resume на `dim_marketplace`; `DISCOVERY_MP_WRITE_KEYS` (incl. `last_category_recon_at`) |
-| `url_canonicalizer.py` | **DONE** | Canonical URL + hash dedup |
-| `fetch_adapter.py` | **DONE** | Fetch для classify/harvest; fix-seam `requires_js` — OPEN |
-| `classifier_adapter.py` | **DONE** | Structural product gate |
-| `bfs_walker.py` | **DONE** | Phase 1 BFS — `run_category_bfs`, `CATEGORY_PUBLISH_BATCH` |
-| `category_processor.py` | **DONE** | Phase 2 harvest — `run_product_harvest`; live `MAX_CATEGORY_URLS_PER_RUN` / `MAX_PAGES_PER_CATEGORY` / `CATEGORY_CONVERGENCE_STREAK` |
-| `budget_governor.py` | **DONE + G-B** | Pure `allocate()`; §16 D-orch в `orchestrator._resolve_category_backlog` |
-| `sitemap_harvester.py` | **DONE** | Phase 0 sitemap harvest |
-| `orchestrator.py` | **DONE** | `DiscoveryOrchestrator` (бывш. `DiscoveryCrawler`) — thin coordinator: `discover()`, status assembly, callback injection |
-| `constants.py` | **DONE** | Dependency-light tuning (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS`, sitemap budgets, …) — импорт из `tasks.py` / `tick_orchestrator` **без** pull orchestrator |
+| Файл / submodule | Статус | §16 | Назначение |
+|------------------|--------|-----|------------|
+| `gate_persist.py` | **DONE** | **equipped** | Gated pool batch write — `PoolInsertDTO`, `write_pool_dtos_sync` |
+| `cursor_store.py` | **DONE** | **equipped** | Cursor/resume на `dim_marketplace`; `DISCOVERY_MP_WRITE_KEYS` (incl. `last_category_recon_at`, `sitemap_bad_harvest_streak`, `phase1_exhausted_streak`) |
+| `url_canonicalizer.py` | **DONE** | **equipped** | Canonical URL + hash dedup |
+| `fetch_adapter.py` | **DONE** | **equipped** | Fetch для classify/harvest; fix-seam `requires_js` — OPEN |
+| `classifier_adapter.py` | **DONE** | **equipped** | Structural product gate; classify по **`current_url`** (не `base_url`) |
+| `bfs_walker.py` | **DONE** | **equipped** | Phase 1 BFS — `run_category_bfs`, `CATEGORY_PUBLISH_BATCH` |
+| `category_processor.py` | **DONE** | **equipped** | Phase 2 harvest — `run_product_harvest`; live `MAX_CATEGORY_URLS_PER_RUN` / `MAX_PAGES_PER_CATEGORY` / `CATEGORY_CONVERGENCE_STREAK` |
+| `budget_governor.py` | **DONE + G-B** | **equipped** | Pure `allocate()`; D-orch redundancy в `orchestrator._resolve_category_backlog` |
+| `sitemap_harvester.py` | **DONE** | **equipped** | Phase 0 sitemap harvest |
+| `orchestrator.py` | **DONE** | **equipped** | `DiscoveryOrchestrator` — thin coordinator: `discover()`, status assembly, callback injection |
+| `constants.py` | **DONE** | — | Dependency-light tuning (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS`, sitemap budgets, …) — единый источник; импорт из `tasks.py` / `tick_orchestrator` **без** pull orchestrator |
+| `alerting.py` | **DONE** | shared | `emit_discovery_service_alert` — async fail-open ops emitter |
 
 **Граф зависимостей:** submodules **не** импортируют orchestrator (acyclic). Shared helpers `_filter_urls_by_role`, `_save_product_urls`, `_emit_activity` — методы `DiscoveryOrchestrator`, передаются в submodules как callbacks (`filter_urls_by_role`, `save_product_urls`, `on_activity`).
 
 **Импортеры перепривязаны:** `scraper/tasks.py` (4 instantiation sites → `DiscoveryOrchestrator`), `scraper/pipeline/tick_orchestrator.py` (`discovery.constants`), 8 test modules → `discovery.orchestrator` / `discovery.constants`.
 
-**Удалённый мёртвый код при переносе:** `_seed_candidates` (no callers), `SITEMAP_TRUST_THRESHOLD` (unused), дубликаты `MAX_CATEGORY_URLS_PER_RUN` / `MAX_PAGES_PER_CATEGORY` / `CATEGORY_CONVERGENCE_STREAK` в orchestrator (live — в `category_processor`).
+**Удалённый мёртвый код при переносе:** `_seed_candidates` (no callers), `SITEMAP_TRUST_THRESHOLD` (unused), дубликаты tuning-констант в orchestrator (live — в `category_processor` / `discovery/constants.py`).
+
+##### Finalization cleanup — COMPLETE
+
+| Область | Что сделано |
+|---------|-------------|
+| Stale comments | `scraper_pool` (`fetch_html`), `classifier/__init__.py`, `sitemap_harvester` (`on_activity`) — приведены к актуальным путям `discovery/` |
+| Constants dedup | Дубли tuning вынесены в `discovery/constants.py` |
+| Classify URL quirk | **FIXED:** каждая страница классифицируется по **своему** `current_url`; `extract_internal_links_all` по-прежнему использует `base_url` как site root (`bfs_walker.py`, `category_processor.py`) |
+
+##### LAYER 4 test run — NEXT
+
+1. Recon discovery beat schedule — manual-trigger vs scheduled (`scraper/tasks.py`, Celery beat).
+2. Manual trigger discovery на `pandashop_md`.
+3. Prod-verify: 33 categories harvest + pool fill (`fact_listing` / `dim_product`).
+4. Confirm остальные **12 marketplaces** run.
+
+**REGISTRY (test run + backlog):** pre-existing test failures — `test_scrape_prunes_nonproduct`, `test_api_scrape_diagnostics_async` (`ImportError`); `discover()` integration tests требуют Postgres; **resolve write-path** slice (manual/auto resolve для `service_alerts`) — **LATER** после panel workflow; fix-seam `fetch_adapter` (`requires_js`) — **OPEN**.
 
 ---
 
@@ -591,7 +626,7 @@ Re-route **не** планируется на этом шаге — контра
 
 > **LAYER-3 REGISTRY (correctness backlog — не routing):** **(a) `listing_denorm_no_change` / `last_currency_code`** — **RESOLVED**; **(b) forex/crypto ingest `source` / `provider_source`** — **RESOLVED**; **(c)** **`product_name`** на `ExtractedProduct` — неиспользуемое DTO-поле, **оставлено**; **(d) `price_change_pct` always-NULL** — **RESOLVED:** `compute_price_change_pct` в ingestion → signed `fact_price.price_change_pct` (§7.5); **`discount_pct`** на scrape-path остаётся `NULL`; scrape-day `date_id` vs forex snapshot date — operational concern для `price_eur_resolver`.
 
-> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py`; stale comments `scraper.discovery` в `classifier/__init__.py` + `gate_persist.py`; `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`); **`avgVolatility` KPI** = `movements.avg_abs_change` (mean-abs proxy; заменит submodule `volatility/`); **`totalPool` unification** — KPI card всё ещё на `/pool/stats`, не на `dashboard-kpi`; **`/pool/stats.last_updated` grain** vs `last_checked_at` / `dim_marketplace.last_discovery_at` — разные freshness semantics; movements KPI наполняются по мере накопления `price_change_pct` (≥2 scrape с изменением цены) — до этого честный accumulating state через `coverage_meta.data_ready`; **`_phase1_partial_urls`** в `discover()` всё ещё discard (не используется); **discovery prod-verify PENDING** — trigger discovery на `pandashop_md`, confirm 33 categories harvest + `fact_listing` populate; confirm остальные 12 marketplaces run; recon discovery beat schedule (manual-trigger vs scheduled); pre-existing test failures (`test_scrape_prunes_nonproduct`; `discover()` integration tests need Postgres) — address в test run; **`test_discover_skips_phase2_when_phase1_exhausted_no_backlog`** — skip Phase 2 только при `not has_backlog` (старый тест кодировал дефект).
+> **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py`; `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`); **`avgVolatility` KPI** = `movements.avg_abs_change` (mean-abs proxy; заменит submodule `volatility/`); **`totalPool` unification** — KPI card всё ещё на `/pool/stats`, не на `dashboard-kpi`; **`/pool/stats.last_updated` grain** vs `last_checked_at` / `dim_marketplace.last_discovery_at` — разные freshness semantics; movements KPI наполняются по мере накопления `price_change_pct` (≥2 scrape с изменением цены) — до этого честный accumulating state через `coverage_meta.data_ready`; **`_phase1_partial_urls`** в `discover()` всё ещё discard (не используется); **discovery test run PENDING** (`0a.8`) — beat schedule recon, manual trigger `pandashop_md`, 33 categories + pool fill, 12 marketplaces; pre-existing failures (`test_scrape_prunes_nonproduct`, `test_api_scrape_diagnostics_async` ImportError, `discover()` integration → Postgres); **resolve write-path** для `service_alerts` — LATER slice; **`test_discover_skips_phase2_when_phase1_exhausted_no_backlog`** — skip Phase 2 только при `not has_backlog` (старый тест кодировал дефект).
 
 > **Cat-5 USER/AUTH:** **DEFERRED → Phase 7/8** — cluster `users-auth` (planned `user_data` door).
 
