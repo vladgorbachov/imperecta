@@ -1,4 +1,4 @@
-"""Discovery crawler: DimMarketplace → listing pages → DimProduct + FactListing."""
+"""Discovery orchestrator: DimMarketplace → listing pages → DimProduct + FactListing."""
 
 import asyncio
 import logging
@@ -25,7 +25,21 @@ from app.modules.discovery import (
     classifier_adapter,
     cursor_store,
     fetch_adapter,
+    sitemap_harvester,
     url_canonicalizer,
+)
+from app.modules.discovery.constants import (
+    CATEGORY_RECON_STALE_DAYS,
+    SAVE_BUDGET_HEADROOM_FRACTION,
+    SAVE_PRODUCT_URLS_BATCH_SIZE,
+    SITEMAP_CLASSIFY_CONCURRENCY,
+    SITEMAP_FULL_CLASSIFY_LIMIT,
+    SITEMAP_MIN_USEFUL_URLS,
+    SITEMAP_PHASE_BUDGET_SECONDS,
+    SITEMAP_REJECT_THRESHOLD,
+    SITEMAP_SAMPLE_SIZE,
+    SITEMAP_STALE_DAYS,
+    SITEMAP_TIMEOUT_COOLDOWN_HOURS,
 )
 from app.modules.discovery.gate_persist import (
     PoolInsertDTO,
@@ -61,90 +75,6 @@ async def _meta_update_marketplace_snapshot(marketplace: DimMarketplace) -> None
         fields=build_dim_marketplace_fields(id=marketplace.id, **columns),
         reject_source="discovery",
     )
-
-# Days before category recon is re-run for a marketplace.
-CATEGORY_RECON_STALE_DAYS = 7
-# Days before sitemap harvest is re-run.
-SITEMAP_STALE_DAYS = 3
-# Max category URLs to harvest products from per discovery run.
-MAX_CATEGORY_URLS_PER_RUN = 60
-# Max pages to paginate within a single category URL.
-MAX_PAGES_PER_CATEGORY = 50
-# Convergence detection for _phase2_product_harvest:
-# If this many consecutive category iterations yield zero NEW persisted PDP,
-# discovery for this marketplace is considered converged and exits early.
-# This is a universal mechanism, not tuned to any specific marketplace —
-# small/exhausted shops converge quickly, large shops continue iterating.
-CATEGORY_CONVERGENCE_STREAK = 3
-# Phase 1 publishes discovered categories in batches of this size instead of
-# waiting for the full BFS to complete. Large marketplaces whose BFS never
-# converges within one budget would otherwise never reach Phase 2. Sized to
-# MAX_CATEGORY_URLS_PER_RUN so a published batch fits exactly one Phase 2
-# window. Universal — small shops still complete in one (sub-threshold) batch.
-from app.modules.discovery.bfs_walker import CATEGORY_PUBLISH_BATCH  # re-export for tests
-# Persist batch size for _save_product_urls. Large sitemaps (e.g., 20k+ URLs)
-# cannot be saved in a single transaction within DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS —
-# the monolithic flush takes >14 minutes and gets cancelled by the circuit breaker,
-# losing all work. Batched commits ensure progress survives cancel: each committed
-# batch is durable, and the next run sees its URLs via existing_hashes lookup.
-#
-# 500 is a balance between round-trip overhead (smaller batches = more flushes)
-# and lost-work-on-cancel (larger batches = bigger loss when cancel hits mid-batch).
-SAVE_PRODUCT_URLS_BATCH_SIZE = 500
-# Fraction of the per-marketplace discovery budget that
-# _save_product_urls is allowed to consume before voluntarily
-# exiting with a resumable offset. The remaining 15% is
-# headroom for finalization (final commit of marketplace row,
-# status updates, return path) so the caller never has to
-# hard-cancel us mid-commit.
-SAVE_BUDGET_HEADROOM_FRACTION = 0.85
-# Max BFS depth when exploring hub pages for category links (see bfs_walker).
-# Min URLs found via sitemap to consider sitemap harvest successful.
-SITEMAP_MIN_USEFUL_URLS = 10
-# Sampling strategy for content-aware sitemap classification.
-# If sitemap returns <= SITEMAP_FULL_CLASSIFY_LIMIT URLs, classify all of them.
-# Otherwise classify only a random sample to decide whether to trust the sitemap.
-SITEMAP_FULL_CLASSIFY_LIMIT = 100
-# Size of random sample taken from large sitemaps for trust assessment.
-SITEMAP_SAMPLE_SIZE = 50
-# If at least this fraction of the sample classifies as 'product',
-# accept the entire sitemap without further per-URL classification.
-SITEMAP_TRUST_THRESHOLD = 0.80
-# If less than this fraction of the sample classifies as 'product',
-# reject the entire sitemap and fall back to category recon.
-SITEMAP_REJECT_THRESHOLD = 0.20
-# Max concurrent classification fetches (HTTP throttle).
-SITEMAP_CLASSIFY_CONCURRENCY = 8
-# After a sitemap harvest that produced too few useful product URLs,
-# treat the result as unsuccessful and retry shortly instead of caching
-# for SITEMAP_STALE_DAYS.
-SITEMAP_BAD_HARVEST_RETRY_HOURS = 1
-
-# ---------------------------------------------------------------------------
-# Universal timeout policy: three-level defence against slow/broken marketplaces.
-# ---------------------------------------------------------------------------
-# These budgets bound how long discovery can spend per marketplace, ensuring
-# one slow or unreachable site cannot stall the entire pipeline. Values are
-# intentionally permissive to keep correctness as the priority — fast retries
-# would risk losing slow-but-valid marketplaces. Tuning happens via these
-# constants only; no per-marketplace overrides.
-
-# Per sitemap-phase budget. If _phase0_sitemap_harvest does not produce URLs
-# within this window, the sitemap path is abandoned and discovery falls back
-# to category-recon path for this marketplace.
-SITEMAP_PHASE_BUDGET_SECONDS = 300  # 5 minutes
-
-# Per-marketplace total discovery budget (sitemap + category recon together).
-# If the full discover() call exceeds this, the marketplace is marked as
-# timeout_skipped with 24-hour cooldown and the pipeline continues with the
-# next marketplace.
-DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS = 900  # 15 minutes
-
-# Cooldown applied to sitemap_harvest when sitemap times out (asyncio.TimeoutError).
-# Longer than SITEMAP_BAD_HARVEST_RETRY_HOURS because a timeout signals a
-# persistent issue (very slow server, anti-bot, network partition) — retrying
-# in an hour would just burn another budget cycle.
-SITEMAP_TIMEOUT_COOLDOWN_HOURS = 24
 
 
 def _title_from_url(url: str) -> str:
@@ -190,8 +120,8 @@ class DiscoveryResult:
     discovery_method: str = "category_crawl"
 
 
-class DiscoveryCrawler:
-    """Crawl marketplace listing pages and persist discovered product URLs."""
+class DiscoveryOrchestrator:
+    """Orchestrate marketplace discovery: sitemap harvest, category BFS, product harvest."""
 
     def __init__(
         self,
@@ -208,40 +138,6 @@ class DiscoveryCrawler:
         if self._on_activity is None:
             return
         await self._on_activity(line)
-
-    @staticmethod
-    def _seed_candidates(seed_url: str) -> list[str]:
-        """Generate alternative category/listing entry URLs for marketplaces."""
-        parsed = urlparse(seed_url)
-        if not parsed.scheme or not parsed.netloc:
-            return [seed_url]
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        raw_path = (parsed.path or "").strip("/")
-        candidates: list[str] = [seed_url]
-        if raw_path:
-            candidates.append(f"{origin}/{raw_path}")
-        fallbacks = (
-            "catalog",
-            "products",
-            "shop",
-            "categories",
-            "collections",
-            "ru/catalog",
-            "ua/catalog",
-            "bg/catalog",
-            "en/catalog",
-        )
-        for fallback in fallbacks:
-            candidates.append(f"{origin}/{fallback}")
-        # Preserve order, remove duplicates.
-        seen: set[str] = set()
-        out: list[str] = []
-        for url in candidates:
-            if url in seen:
-                continue
-            seen.add(url)
-            out.append(url)
-        return out
 
     @staticmethod
     def _headroom_deadline(
@@ -508,74 +404,6 @@ class DiscoveryCrawler:
         _log_gate(all_results, accepted)
         return accepted, stats
 
-    async def _phase0_sitemap_harvest(self, marketplace: DimMarketplace) -> list[str]:
-        """Phase 0: collect product URLs from XML sitemaps with content-aware filtering.
-
-        Pipeline:
-        1. Fetch raw URLs from sitemap (delegated to ScraperPool.fetch_sitemap_candidates).
-        2. Classify each URL (or a sample) via classify_page_role to keep only PDPs.
-        3. Decide cooldown adaptively:
-           - useful harvest → mark fresh, full SITEMAP_STALE_DAYS cooldown.
-           - bad harvest    → shift last_sitemap_harvest_at so the marketplace
-                              becomes stale again after SITEMAP_BAD_HARVEST_RETRY_HOURS.
-
-        Returns only the URLs classified as 'product'.
-        """
-        logger.info(
-            "sitemap_harvest_start marketplace_id=%s url=%s",
-            marketplace.id,
-            marketplace.base_url,
-        )
-        raw_urls = await self.pool.fetch_sitemap_candidates(
-            marketplace.base_url,
-            marketplace_locale=marketplace.locale,
-        )
-
-        requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
-        filtered_urls, classify_stats = await self._filter_urls_by_role(
-            raw_urls,
-            requires_js=requires_js,
-            scrape_tier=scrape_tier,
-            marketplace_locale=marketplace.locale,
-        )
-        rejected_count = len(raw_urls) - len(filtered_urls)
-        useful = len(filtered_urls) >= SITEMAP_MIN_USEFUL_URLS
-
-        now = datetime.now(tz=timezone.utc)
-        if useful:
-            cursor_store.set_last_sitemap_harvest_at(marketplace, now)
-            # Approximation — actual sitemap location is resolved by
-            # fetch_sitemap_candidates via robots.txt + common paths.
-            cursor_store.set_sitemap_url(
-                marketplace,
-                f"{marketplace.base_url.rstrip('/')}/sitemap.xml",
-            )
-        else:
-            # Treat as bad harvest: pretend it happened just before the stale
-            # threshold so the next discovery cycle retries after
-            # SITEMAP_BAD_HARVEST_RETRY_HOURS instead of SITEMAP_STALE_DAYS.
-            # sitemap_url is NOT updated on bad harvest — keep prior value.
-            retry_offset = timedelta(
-                days=SITEMAP_STALE_DAYS,
-                hours=-SITEMAP_BAD_HARVEST_RETRY_HOURS,
-            )
-            cursor_store.set_last_sitemap_harvest_at(marketplace, now - retry_offset)
-
-        await self.db.flush()
-        logger.info(
-            "sitemap_harvest_done marketplace_id=%s raw=%d filtered=%d rejected=%d "
-            "useful=%s classify_mode=%s sampled=%s sample_product_ratio=%s",
-            marketplace.id,
-            len(raw_urls),
-            len(filtered_urls),
-            rejected_count,
-            useful,
-            classify_stats.get("mode"),
-            classify_stats.get("sampled"),
-            classify_stats.get("sample_product_ratio"),
-        )
-        return filtered_urls
-
     def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:
         """Return True if category recon should run."""
         if cursor_store.get_category_resume_index(marketplace) > 0:
@@ -718,7 +546,13 @@ class DiscoveryCrawler:
                 )
                 try:
                     sitemap_product_urls = await asyncio.wait_for(
-                        self._phase0_sitemap_harvest(marketplace),
+                        sitemap_harvester.harvest_sitemap(
+                            marketplace,
+                            self.pool,
+                            self.db,
+                            filter_urls_by_role=self._filter_urls_by_role,
+                            on_activity=self._emit_activity,
+                        ),
                         timeout=SITEMAP_PHASE_BUDGET_SECONDS,
                     )
                     await self._emit_activity(
@@ -741,7 +575,7 @@ class DiscoveryCrawler:
                     # Apply 24h cooldown by shifting last_sitemap_harvest_at into
                     # the past such that age < SITEMAP_STALE_DAYS but next retry
                     # waits SITEMAP_TIMEOUT_COOLDOWN_HOURS, not the normal
-                    # SITEMAP_BAD_HARVEST_RETRY_HOURS.
+                    # sitemap_harvester bad-harvest retry window.
                     retry_offset = timedelta(
                         days=SITEMAP_STALE_DAYS,
                         hours=-SITEMAP_TIMEOUT_COOLDOWN_HOURS,

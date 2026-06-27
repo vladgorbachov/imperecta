@@ -16,6 +16,16 @@ const getMoversCoverageMock = vi.fn();
 const getMoversMock = vi.fn();
 const getDashboardKpiMock = vi.fn();
 const getGeoCoverageMock = vi.fn();
+const getNewsMock = vi.fn();
+
+vi.mock("@/api/news", () => ({
+  newsApi: {
+    getNews: (...args: unknown[]) => getNewsMock(...args),
+  },
+  newsQueryKeys: {
+    news: (params?: unknown) => ["news", params],
+  },
+}));
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
@@ -176,6 +186,12 @@ describe("MarketsOverviewSection", () => {
         mode: "countries",
         total: 0,
         rows: [],
+      },
+    });
+    getNewsMock.mockResolvedValue({
+      data: {
+        items: [],
+        source_provider: "none",
       },
     });
   });

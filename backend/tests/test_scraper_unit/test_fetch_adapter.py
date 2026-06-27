@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from app.models.dimensions import DimMarketplace
 from app.modules.discovery import fetch_adapter
-from app.modules.scraper.discovery import DiscoveryCrawler
+from app.modules.discovery.orchestrator import DiscoveryOrchestrator
 
 
 def _marketplace(*, requires_js: bool = False, scrape_tier: int | None = 1) -> DimMarketplace:
@@ -89,9 +89,9 @@ async def test_classify_and_resolve_url_threads_requires_js_into_fetch_adapter()
     )
     pool = MagicMock()
     pool.scrape_page_for_analysis = AsyncMock(return_value=("<html></html>", soup))
-    crawler = DiscoveryCrawler(db=MagicMock(), scraper_pool=pool)
+    orchestrator = DiscoveryOrchestrator(db=MagicMock(), scraper_pool=pool)
 
-    role, pool_url = await crawler._classify_and_resolve_url(
+    role, pool_url = await orchestrator._classify_and_resolve_url(
         "https://shop.example/p/1",
         requires_js=True,
         scrape_tier=1,

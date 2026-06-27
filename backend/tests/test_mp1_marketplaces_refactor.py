@@ -54,6 +54,7 @@ KEPT_RESPONSE_FIELDS: tuple[str, ...] = (
     "marketplace_id",
     "name",
     "domain",
+    "country_code",
     "country",
     "region",
     "source",
@@ -81,6 +82,7 @@ EXPECTED_UPDATE_KEYS: frozenset[str] = frozenset(
         "base_url",
         "rate_limit_delay",
         "locale",
+        "country_code",
     }
 )
 
@@ -98,6 +100,7 @@ DEAD_METHODS_BY_CLASS: dict[type, tuple[str, ...]] = {
 
 EXPECTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/admin/marketplaces"),
+    ("GET", "/api/admin/marketplaces/countries"),
     ("POST", "/api/admin/marketplaces"),
     ("PATCH", "/api/admin/marketplaces/{marketplace_id}"),
     ("DELETE", "/api/admin/marketplaces/{marketplace_id}"),

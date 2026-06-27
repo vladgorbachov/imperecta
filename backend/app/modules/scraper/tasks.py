@@ -25,10 +25,8 @@ from app.modules.persist.meta_write import (
     build_scrape_job_fields,
     write_meta_async,
 )
-from app.modules.scraper.discovery import (
-    DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
-    DiscoveryCrawler,
-)
+from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+from app.modules.discovery.orchestrator import DiscoveryOrchestrator
 
 # ~85% of scrape_one_marketplace soft_time_limit=900 — cooperative exit before
 # Celery soft(900)/hard(960) kill so finalization writes counters + partial status.
@@ -224,7 +222,7 @@ def discover_all_marketplaces():
                 marketplaces = list(result.scalars().all())
                 seen = len(marketplaces)
                 slog.info("discover_all_marketplaces", active_count=seen)
-                crawler = DiscoveryCrawler(db, scraper_pool)
+                crawler = DiscoveryOrchestrator(db, scraper_pool)
                 for mp in marketplaces:
                     try:
                         res = await crawler.discover(mp)
@@ -340,7 +338,7 @@ def discover_one_marketplace(self, child_job_id: str):
                     await discovery_activity_callback(db, parent_id, line)
 
                 with pipeline_worker_log_relay(parent_id):
-                    crawler = DiscoveryCrawler(
+                    crawler = DiscoveryOrchestrator(
                         db, ScraperPool(), on_activity=_on_activity,
                     )
                     deadline = (
@@ -383,7 +381,7 @@ def discover_single_marketplace(self, marketplace_id: str):
                 marketplace = await db.get(DimMarketplace, mp_uuid)
                 if not marketplace:
                     return {"status": "not_found", "marketplace_id": marketplace_id}
-                crawler = DiscoveryCrawler(db, scraper_pool)
+                crawler = DiscoveryOrchestrator(db, scraper_pool)
                 res = await crawler.discover(marketplace)
                 return {
                     "status": res.status,
@@ -854,7 +852,7 @@ async def _discover_for_full_pipeline(
         .order_by(DimMarketplace.marketplace_code.asc())
     )
     marketplaces = list(result.scalars().all())
-    crawler = DiscoveryCrawler(db, ScraperPool())
+    crawler = DiscoveryOrchestrator(db, ScraperPool())
     errors: list[str] = []
     per_marketplace: dict[UUID, dict[str, Any]] = {}
     for marketplace in marketplaces:

@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from bs4 import BeautifulSoup
 
-import app.modules.scraper.discovery as disc
+import app.modules.discovery.orchestrator as disc
 from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
@@ -153,7 +153,7 @@ async def test_fetch_sends_accept_language() -> None:
 
 @pytest.mark.asyncio
 async def test_discovery_gate_rejects_nonproduct() -> None:
-    crawler = disc.DiscoveryCrawler(MagicMock(), MagicMock())
+    crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
     urls = [
         "https://shop.example/p/1",
         "https://shop.example/collections/all",
@@ -176,7 +176,7 @@ async def test_discovery_gate_rejects_nonproduct() -> None:
 
 @pytest.mark.asyncio
 async def test_discovery_no_trust_sample_blind_accept(monkeypatch) -> None:
-    crawler = disc.DiscoveryCrawler(MagicMock(), MagicMock())
+    crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
     urls = [f"https://shop.example/p/{index}" for index in range(150)]
     calls: list[str] = []
 
@@ -207,7 +207,7 @@ async def test_save_product_urls_sets_page_role(monkeypatch) -> None:
     db.commit = AsyncMock()
     pool_state = _patch_pool_write(monkeypatch)
 
-    crawler = disc.DiscoveryCrawler(db, MagicMock())
+    crawler = disc.DiscoveryOrchestrator(db, MagicMock())
     await crawler._save_product_urls(mp_id, ["https://shop.example/p/abc-12345"])
 
     assert pool_state["calls"] == 1

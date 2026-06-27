@@ -1,5 +1,5 @@
 """OBSERVABILITY-FIX: child tasks open the relay CM under PARENT id and wire
-``on_activity`` into DiscoveryCrawler; discovery emits at Phase 0 / Phase 1
+``on_activity`` into DiscoveryOrchestrator; discovery emits at Phase 0 / Phase 1
 stage-points.
 
 The relay CM is mocked at the module-symbol seen by ``tasks.py`` so the test
@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.modules.scraper import discovery as disc
+from app.modules.discovery import orchestrator as disc
 from app.modules.scraper import tasks as scraper_tasks
 
 
@@ -60,7 +60,7 @@ async def test_discover_one_marketplace_opens_cm_under_parent_id(monkeypatch):
     where parent_id == ``job.parent_job_id`` (NOT the child_job_id), so the
     admin live monitor — which polls the parent — sees the lines.
     """
-    from app.modules.scraper.discovery import DiscoveryResult
+    from app.modules.discovery.orchestrator import DiscoveryResult
 
     child_id = uuid4()
     parent_id = uuid4()
@@ -103,7 +103,7 @@ async def test_discover_one_marketplace_opens_cm_under_parent_id(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         fake_discover,
     )
 
@@ -233,7 +233,7 @@ async def test_emit_activity_noop_without_callback() -> None:
     (existing contract; pinning so the heartbeat additions don't regress
     callers that don't care about progress).
     """
-    from app.modules.scraper.discovery import DiscoveryCrawler
+    from app.modules.discovery.orchestrator import DiscoveryOrchestrator
 
-    crawler = DiscoveryCrawler(MagicMock(), MagicMock())
+    crawler = DiscoveryOrchestrator(MagicMock(), MagicMock())
     await crawler._emit_activity("anything")  # must not raise

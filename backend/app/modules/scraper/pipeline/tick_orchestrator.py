@@ -27,7 +27,7 @@ from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
-from app.modules.scraper.discovery import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
 slog = structlog.get_logger(__name__)

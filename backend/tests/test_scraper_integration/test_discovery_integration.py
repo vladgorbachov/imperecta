@@ -1,4 +1,4 @@
-"""Integration: DiscoveryCrawler.discover with real DimMarketplace + stubbed pool I/O."""
+"""Integration: DiscoveryOrchestrator.discover with real DimMarketplace + stubbed pool I/O."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.database import async_session_maker
 from app.models.dimensions import DimMarketplace
-from app.modules.scraper.discovery import DiscoveryCrawler
+from app.modules.discovery.orchestrator import DiscoveryOrchestrator
 from app.modules.scraper.scraper_pool import ListingScrapeResult, ScraperPool
 from fixtures.scraper_fixtures import _pg_available
 
@@ -30,7 +30,7 @@ async def test_discover_fails_fast_when_listing_fetch_fails():
 
         pool.scrape_listing = fail_listing  # type: ignore[method-assign]
 
-        crawler = DiscoveryCrawler(db, pool)
+        crawler = DiscoveryOrchestrator(db, pool)
         out = await crawler.discover(mp)
         assert out.status in {"error", "partial"}
         assert out.errors
@@ -53,6 +53,6 @@ async def test_discover_exception_path_rollback(monkeypatch):
             raise RuntimeError("forced discovery failure")
 
         pool.scrape_listing = boom  # type: ignore[method-assign]
-        crawler = DiscoveryCrawler(db, pool)
+        crawler = DiscoveryOrchestrator(db, pool)
         out = await crawler.discover(mp)
         assert out.status == "error"

@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from app.modules.scraper import tasks as scraper_tasks
-from app.modules.scraper.discovery import DiscoveryResult
+from app.modules.discovery.orchestrator import DiscoveryResult
 from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult
 
@@ -58,7 +58,7 @@ def test_discover_all_marketplaces_mocked_engine(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         fake_discover,
     )
 
@@ -99,7 +99,7 @@ def test_discover_all_marketplace_loop_exception(monkeypatch):
         raise RuntimeError("discover boom")
 
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         boom,
     )
 
@@ -160,7 +160,7 @@ def test_discover_single_success_mocked(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         ok_discover,
     )
 

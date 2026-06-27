@@ -131,7 +131,7 @@ def test_discover_all_marketplaces_smoke(monkeypatch):
     async def fake_discover(self, marketplace):
         from datetime import datetime, timezone
 
-        from app.modules.scraper.discovery import DiscoveryResult
+        from app.modules.discovery.orchestrator import DiscoveryResult
 
         return DiscoveryResult(
             marketplace_id=marketplace.id,
@@ -141,6 +141,6 @@ def test_discover_all_marketplaces_smoke(monkeypatch):
             persisted_listings=0,
         )
 
-    monkeypatch.setattr("app.modules.scraper.discovery.DiscoveryCrawler.discover", fake_discover)
+    monkeypatch.setattr("app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover", fake_discover)
     out = scraper_tasks.discover_all_marketplaces.run()
     assert "marketplaces_seen" in out and "errors" in out

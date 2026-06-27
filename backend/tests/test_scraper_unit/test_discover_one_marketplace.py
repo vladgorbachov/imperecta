@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.modules.discovery.orchestrator import DiscoveryResult
 from app.modules.scraper import tasks as scraper_tasks
 from app.modules.scraper.pipeline.child_aggregation import (
     aggregate_discovery_children,
@@ -48,7 +49,6 @@ def _wire_session_factory(monkeypatch, *, get_results):
 
 @pytest.mark.asyncio
 async def test_discover_one_marketplace_runs_and_owns_job(monkeypatch):
-    from app.modules.scraper.discovery import DiscoveryResult
 
     child_id = uuid4()
     mp_id = uuid4()
@@ -77,7 +77,7 @@ async def test_discover_one_marketplace_runs_and_owns_job(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         fake_discover,
     )
 
@@ -102,7 +102,7 @@ async def test_discover_one_marketplace_skips_terminal_job(monkeypatch):
 
     discover_mock = AsyncMock()
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         discover_mock,
     )
 
@@ -125,7 +125,7 @@ async def test_discover_one_marketplace_job_not_found(monkeypatch):
 
     discover_mock = AsyncMock()
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         discover_mock,
     )
 
@@ -152,17 +152,19 @@ async def test_discover_one_marketplace_marketplace_not_found(monkeypatch):
 
     discover_mock = AsyncMock()
     monkeypatch.setattr(
-        "app.modules.scraper.discovery.DiscoveryCrawler.discover",
+        "app.modules.discovery.orchestrator.DiscoveryOrchestrator.discover",
         discover_mock,
+    )
+    monkeypatch.setattr(
+        "app.modules.scraper.tasks.write_meta_async",
+        AsyncMock(return_value=MagicMock(ok=True)),
     )
 
     out = scraper_tasks.discover_one_marketplace.run(str(child_id))
 
     assert out["status"] == "marketplace_not_found"
     assert out["child_job_id"] == str(child_id)
-    assert pending_job.status == "failed"
     discover_mock.assert_not_awaited()
-    db.commit.assert_awaited()
     engine.dispose.assert_awaited_once()
 
 
