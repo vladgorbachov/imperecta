@@ -17,10 +17,10 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO dim_country (
-            country_code, name, name_local, region, currency_code, vat_rate_std
+            country_code, name, name_local, region, currency_code, vat_rate_std, is_active
         )
         VALUES (
-            'ZZ', 'World', 'World', 'Other', 'EUR', NULL
+            'ZZ', 'World', 'World', 'Other', 'EUR', NULL, true
         )
         ON CONFLICT (country_code) DO NOTHING
         """
