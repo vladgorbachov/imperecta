@@ -1,10 +1,9 @@
 /**
- * Markets page. Ticker bar, Market Overview, and analytics section.
+ * Markets page. Ticker bar and Market Overview (KPI, movers, coverage, news, catalog).
  */
 
 import { PlanLimitBanner } from "@/components/ui-custom/PlanLimitBanner";
 import { MarketsOverviewSection } from "@/components/dashboard/MarketsOverviewSection";
-import { MarketsAnalyticsSection } from "@/components/dashboard/MarketsAnalyticsSection";
 
 export function DashboardPage() {
   return (
@@ -15,8 +14,6 @@ export function DashboardPage() {
       <PlanLimitBanner className="mb-2" />
 
       <MarketsOverviewSection />
-
-      <MarketsAnalyticsSection />
     </div>
   );
 }

@@ -777,19 +777,22 @@ export function MarketsOverviewSection() {
         />
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <MarketMoversWidget
-          movementsDataReady={movementsDataReady}
-          displayCurrency={displayCurrency}
-          countryCode={selectedCountry}
-        />
-        <MarketCoverageWidget
-          countryCode={selectedCountry}
-          marketplaceId={scopedMarketplaceId}
-        />
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.18fr)] lg:items-stretch">
+        <div className="flex min-w-0 flex-col gap-3">
+          <MarketMoversWidget
+            movementsDataReady={movementsDataReady}
+            displayCurrency={displayCurrency}
+            countryCode={selectedCountry}
+          />
+          <MarketCoverageWidget
+            countryCode={selectedCountry}
+            marketplaceId={scopedMarketplaceId}
+          />
+        </div>
+        <div className="min-h-0 min-w-0 lg:flex lg:flex-col">
+          <MarketNewsWidget countryCode={selectedCountry} />
+        </div>
       </div>
-
-      <MarketNewsWidget countryCode={selectedCountry} />
 
       <div className="grid items-start gap-3 lg:grid-cols-[260px_1fr]">
         <aside className="hidden lg:block">

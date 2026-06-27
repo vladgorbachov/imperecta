@@ -5,9 +5,10 @@ import { newsApi, newsQueryKeys } from "@/api/news";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/formatters";
+import { formatNewsSource } from "@/lib/formatNewsSource";
 import { cn } from "@/lib/utils";
 
-const MAX_ITEMS = 6;
+const MAX_ITEMS = 8;
 
 export interface MarketNewsWidgetProps {
   countryCode: string | null;
@@ -16,7 +17,7 @@ export interface MarketNewsWidgetProps {
 function NewsSkeleton() {
   return (
     <div className="space-y-4" data-testid="news-skeleton">
-      {Array.from({ length: 3 }, (_, index) => (
+      {Array.from({ length: 4 }, (_, index) => (
         <div key={index} className="flex gap-4 rounded-lg border border-border/50 p-4">
           <Skeleton className="hidden size-20 shrink-0 rounded-md sm:block" />
           <div className="min-w-0 flex-1 space-y-2">
@@ -46,6 +47,7 @@ function NewsItemCard({
   locale: string;
 }) {
   const [imageHidden, setImageHidden] = useState(false);
+  const sourceLabel = useMemo(() => formatNewsSource(item.source), [item.source]);
   const publishedLabel = useMemo(() => {
     const parsed = new Date(item.published_at);
     if (Number.isNaN(parsed.getTime())) {
@@ -71,25 +73,29 @@ function NewsItemCard({
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
-            "line-clamp-2 text-sm font-medium leading-snug text-foreground",
+            "line-clamp-2 break-words text-sm font-medium leading-snug text-foreground",
             "underline-offset-2 hover:underline",
           )}
         >
           {item.title}
         </a>
-        <p className="text-xs text-muted-foreground">
-          <span className="font-medium text-foreground/80">{item.source}</span>
-          {publishedLabel ? (
-            <>
+        {sourceLabel || publishedLabel ? (
+          <p className="truncate text-xs text-muted-foreground">
+            {sourceLabel ? (
+              <span className="font-medium text-foreground/80">{sourceLabel}</span>
+            ) : null}
+            {sourceLabel && publishedLabel ? (
               <span aria-hidden className="mx-1.5">
                 ·
               </span>
+            ) : null}
+            {publishedLabel ? (
               <time dateTime={item.published_at}>{publishedLabel}</time>
-            </>
-          ) : null}
-        </p>
+            ) : null}
+          </p>
+        ) : null}
         {item.snippet ? (
-          <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+          <p className="line-clamp-3 break-words text-sm leading-relaxed text-muted-foreground">
             {item.snippet}
           </p>
         ) : null}
@@ -118,38 +124,42 @@ export function MarketNewsWidget({ countryCode }: MarketNewsWidgetProps) {
 
   return (
     <section
-      className="surface-base surface-liquid rounded-xl p-4 sm:p-5"
+      className={cn(
+        "surface-base surface-liquid flex h-full min-h-0 flex-col rounded-xl p-4 sm:p-5",
+      )}
       aria-labelledby="market-news-heading"
       data-testid="market-news-widget"
     >
-      <header className="mb-4 space-y-1">
+      <header className="mb-4 shrink-0 space-y-1">
         <h2 id="market-news-heading" className="text-base font-semibold sm:text-lg">
           {t("market.news.title")}
         </h2>
         <p className="text-xs text-muted-foreground sm:text-sm">{t("market.news.subtitle")}</p>
       </header>
 
-      {isLoading ? (
-        <NewsSkeleton />
-      ) : isError ? (
-        <p className="text-sm text-muted-foreground" role="status">
-          {t("market.news.loadError")}
-        </p>
-      ) : items.length === 0 ? (
-        <EmptyState
-          title="market.news.unavailable"
-          description="market.news.unavailableHint"
-          className="py-8"
-        />
-      ) : (
-        <ul className="space-y-3">
-          {items.map((item) => (
-            <li key={`${item.url}-${item.published_at}`}>
-              <NewsItemCard item={item} locale={i18n.language} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="min-h-0 flex-1">
+        {isLoading ? (
+          <NewsSkeleton />
+        ) : isError ? (
+          <p className="text-sm text-muted-foreground" role="status">
+            {t("market.news.loadError")}
+          </p>
+        ) : items.length === 0 ? (
+          <EmptyState
+            title="market.news.unavailable"
+            description="market.news.unavailableHint"
+            className="py-8"
+          />
+        ) : (
+          <ul className="max-h-[min(70vh,48rem)] space-y-3 overflow-y-auto pr-0.5 lg:max-h-none lg:overflow-visible">
+            {items.map((item) => (
+              <li key={`${item.url}-${item.published_at}`}>
+                <NewsItemCard item={item} locale={i18n.language} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

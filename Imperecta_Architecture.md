@@ -155,7 +155,7 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 
 ### 7.3 Discovery (content-aware sitemap + cooperative budget)
 
-`DiscoveryCrawler` (`discovery.py`) — три фазы + **cooperative deadline** (`4bad080`, `4d42623`):
+`DiscoveryCrawler` (`discovery/orchestrator.py` — `DiscoveryOrchestrator`) — три фазы + **cooperative deadline** (`4bad080`, `4d42623`):
 
 | Фаза | Метод | Суть |
 |------|-------|------|
@@ -165,7 +165,7 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 
 Если sitemap дал ≥10 product URLs — **sitemap path** (resumable offset, `016`); иначе category crawl с Phase 2 budget (`017`/`018` resume).  
 При нехватке 15 min budget — `partial_budget` / inner job `partial` (`019`); следующий run продолжает.  
-Sitemap: per-URL structural classify (sample только для early `reject_sample` при <20% product); **trust_sample blind-accept удалён** (`4f961a9`); concurrency 8; bad harvest retry через 1h. Locale/canonical: `locale_selection.build_accept_language_header` + `extract_canonical_url` (`discovery.py:35`, `:497–499`, `:530`); **`select_locale_url` в `discovery.py` не вызывается**. Fetch classify: **только static** (`static_fetch=True`, `discovery.py:489` и др.) — `DimMarketplace.requires_js` / `scrape_tier` **не читаются** (дефект → `fetch_adapter`, `0a.8`). Подробный контракт: `0a.8`.
+Sitemap: per-URL structural classify (sample только для early `reject_sample` при <20% product); **trust_sample blind-accept удалён** (`4f961a9`); concurrency 8; bad harvest retry через 1h. Locale/canonical: `locale_selection.build_accept_language_header` + `extract_canonical_url` (`url_canonicalizer`); Fetch classify: **только static** (`fetch_adapter`) — `DimMarketplace.requires_js` / `scrape_tier` **не читаются** (дефект → `fetch_adapter`, `0a.8`). Подробный контракт: `0a.8`.
 
 Подробно: `Imperecta_Backend.md`.
 
@@ -1368,13 +1368,30 @@ FastAPI + SQLAlchemy 2.0 (async) + Celery + asyncpg + Playwright.
 | `backend/app/modules/product_pool/schemas.py` | Pydantic-схемы. |
 | `backend/app/modules/product_pool/service.py` | Бизнес-логика глобального пула товаров. |
 
+#### 2.7.11a Discovery (`discovery/`) — Tier-1 (decomposition complete)
+
+| Файл | Назначение |
+|---|---|
+| `backend/app/modules/discovery/orchestrator.py` | `DiscoveryOrchestrator` + `DiscoveryResult` — thin coordinator (`discover()`); §16 D-orch `_resolve_category_backlog`; callbacks `_filter_urls_by_role`, `_save_product_urls`, `_emit_activity`. |
+| `backend/app/modules/discovery/constants.py` | Dependency-light tuning (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS`, sitemap budgets, …). |
+| `backend/app/modules/discovery/gate_persist.py` | Gated pool batch write. |
+| `backend/app/modules/discovery/cursor_store.py` | `dim_marketplace` cursors + `DISCOVERY_MP_WRITE_KEYS`. |
+| `backend/app/modules/discovery/url_canonicalizer.py` | Canonical URL normalization. |
+| `backend/app/modules/discovery/fetch_adapter.py` | Discovery fetch seam (`requires_js` fix — OPEN). |
+| `backend/app/modules/discovery/classifier_adapter.py` | Structural page-role gate. |
+| `backend/app/modules/discovery/bfs_walker.py` | Phase 1 category BFS. |
+| `backend/app/modules/discovery/category_processor.py` | Phase 2 product harvest + harvest limits. |
+| `backend/app/modules/discovery/budget_governor.py` | Pure per-phase deadline `allocate()`. |
+| `backend/app/modules/discovery/sitemap_harvester.py` | Phase 0 sitemap harvest. |
+
+> **`backend/app/modules/scraper/discovery.py` REMOVED** — монолит заменён модулем `discovery/`.
+
 #### 2.7.12 Scraper (`scraper/`)
 
 | Файл | Назначение |
 |---|---|
 | `backend/app/modules/scraper/api.py` | **REMOVED** (ранее admin/diagnostics router, не смонтирован в `main.py`) |
 | `backend/app/modules/scraper/db_diagnostics.py` | Диагностика БД (constraint repair, проверки целостности). |
-| `backend/app/modules/scraper/discovery.py` | `DiscoveryCrawler` — Phase 0 sitemap, Phase 1 BFS (`recon_frontier_state`), Phase 2 harvest (`category_resume_index`); cooperative deadline; `partial_budget` / `partial` inner job status. |
 | `backend/app/modules/scraper/errors.py` | Кастомные ошибки скрапера. |
 | `backend/app/modules/scraper/extractors.py` | Извлечение данных из HTML: JSON-LD → Microdata (`a52499e`) → OpenGraph/meta → custom selectors → auto + `merge_and_finalize` + `classify_page_role_for_discovery` (Layer 1–3 в `modules/classifier/`). |
 | `backend/app/modules/scraper/models.py` | Доменные модели/типы скрапера. |
@@ -1955,7 +1972,7 @@ Skill-документы для специализированных AI-аген
 | Область | Точки входа |
 |---|---|
 | API | `backend/app/main.py` (11 объединённых роутеров под `/api`) |
-| Discovery | `scraper/discovery.py` (`DiscoveryCrawler`), `scraper/tasks.py:discover_one_marketplace` |
+| Discovery | `discovery/orchestrator.py` (`DiscoveryOrchestrator`), `scraper/tasks.py:discover_one_marketplace` |
 | Scrape (pipeline) | `scraper/service.py:_run_scrape_all_pool` (per-MP), `scraper/tasks.py:scrape_one_marketplace` |
 | Pipeline dispatch | `scraper/pipeline/tick_orchestrator.py:run_tick` (advisory-locked, single dispatch после O4c), `admin/api_parsing.py:_enqueue_pipeline_run` |
 | Persistence gate + sign + write | `modules/data_firewall/` + `modules/ingestion/service.py` + `modules/persist/writer.py` (sole owner of `fact_listing` / `fact_price` writes) |
@@ -2093,10 +2110,23 @@ backend/app/
 │   │   ├── schemas.py
 │   │   └── service.py
 │   │
+│   ├── discovery/                           Tier-1 — marketplace URL discovery (decomposition complete)
+│   │   ├── __init__.py                      Re-exports DiscoveryOrchestrator, gate_persist
+│   │   ├── orchestrator.py                  DiscoveryOrchestrator (thin coordinator)
+│   │   ├── constants.py                     Dependency-light tuning constants
+│   │   ├── gate_persist.py                  Gated pool batch write
+│   │   ├── cursor_store.py                  dim_marketplace cursors / META snapshot keys
+│   │   ├── url_canonicalizer.py
+│   │   ├── fetch_adapter.py
+│   │   ├── classifier_adapter.py
+│   │   ├── bfs_walker.py                    Phase 1 BFS
+│   │   ├── category_processor.py            Phase 2 harvest
+│   │   ├── budget_governor.py               Per-phase deadline allocate()
+│   │   └── sitemap_harvester.py             Phase 0 sitemap
+│   │
 │   ├── scraper/                             ── ЯДРО СКРЕЙПЕРА (implicit namespace) ──
 │   │   ├── api.py                           /api/scraper/* (admin/diagnostics)
 │   │   ├── db_diagnostics.py                Диагностика constraint'ов
-│   │   ├── discovery.py                     DiscoveryCrawler: phase0 sitemap / phase1 BFS / phase2 harvest
 │   │   ├── errors.py
 │   │   ├── extractors.py                    JSON-LD → Microdata → OG-meta → custom → auto + classify
 │   │   ├── models.py                        Доменные типы скрапера
