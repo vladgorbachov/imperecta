@@ -194,6 +194,9 @@ class DimMarketplace(Base):
     sitemap_bad_harvest_streak: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0",
     )
+    phase1_exhausted_streak: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -22,6 +22,7 @@ def _stub_marketplace(**overrides: object) -> SimpleNamespace:
       "category_resume_index": 0,
       "sitemap_resume_offset": 0,
       "sitemap_bad_harvest_streak": 0,
+      "phase1_exhausted_streak": 0,
       "last_discovery_at": None,
       "last_discovery_status": None,
       "last_discovery_products_found": 0,

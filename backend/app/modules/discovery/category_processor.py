@@ -8,10 +8,12 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 from uuid import UUID
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
 from app.modules.discovery import fetch_adapter
+from app.modules.discovery.alerting import emit_discovery_service_alert
 from app.modules.scraper.extractors import (
     detect_next_page,
     extract_links_from_repeated_structure,
@@ -20,6 +22,7 @@ from app.modules.scraper.extractors import (
 from app.modules.scraper.scraper_pool import ScraperPool
 
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 MAX_CATEGORY_URLS_PER_RUN = 60
 MAX_PAGES_PER_CATEGORY = 50
@@ -95,6 +98,9 @@ async def run_product_harvest(
 
     total_saved = 0
     empty_streak = 0
+    categories_processed = 0
+    candidate_urls_extracted = 0
+    gated_urls_accepted = 0
     total_categories = len(category_urls)
     harvest_targets = category_urls[
         start_index : start_index + MAX_CATEGORY_URLS_PER_RUN
@@ -123,6 +129,7 @@ async def run_product_harvest(
             next_index = absolute_idx
             break
 
+        categories_processed += 1
         saved_for_this_category = 0
         current_url: str | None = category_url
         page_num = 0
@@ -157,11 +164,13 @@ async def run_product_harvest(
             if not product_urls:
                 product_urls = extract_product_links(soup, marketplace.base_url)
             if product_urls:
+                candidate_urls_extracted += len(product_urls)
                 gated_urls = await _gate_urls_for_pool(
                     product_urls,
                     marketplace,
                     filter_urls_by_role=filter_urls_by_role,
                 )
+                gated_urls_accepted += len(gated_urls)
                 saved_this_call = 0
                 save_exhausted = False
                 if gated_urls:
@@ -216,5 +225,58 @@ async def run_product_harvest(
         else:
             next_index = 0
             more_remaining = False
+
+    if (
+        total_saved == 0
+        and categories_processed >= CATEGORY_CONVERGENCE_STREAK
+        and candidate_urls_extracted > 0
+    ):
+        await emit_discovery_service_alert(
+            "category_processor",
+            "warning",
+            "phase2_zero_yield",
+            (
+                f"Phase 2 zero yield marketplace_id={marketplace.id} "
+                f"candidate_urls_extracted={candidate_urls_extracted}"
+            ),
+            marketplace_id=marketplace.id,
+            context={
+                "categories_processed": categories_processed,
+                "total_saved": total_saved,
+                "candidate_urls_extracted": candidate_urls_extracted,
+                "gated_urls_accepted": gated_urls_accepted,
+            },
+        )
+        slog.warning(
+            "discovery_phase2_zero_yield",
+            marketplace_id=str(marketplace.id),
+            categories_processed=categories_processed,
+            total_saved=total_saved,
+            candidate_urls_extracted=candidate_urls_extracted,
+            gated_urls_accepted=gated_urls_accepted,
+        )
+    elif converged and total_saved == 0:
+        await emit_discovery_service_alert(
+            "category_processor",
+            "info",
+            "phase2_converged_empty",
+            (
+                f"Phase 2 converged empty marketplace_id={marketplace.id} "
+                f"categories_processed={categories_processed}"
+            ),
+            marketplace_id=marketplace.id,
+            context={
+                "categories_processed": categories_processed,
+                "empty_streak": empty_streak,
+                "total_saved": total_saved,
+            },
+        )
+        slog.info(
+            "discovery_phase2_converged_empty",
+            marketplace_id=str(marketplace.id),
+            categories_processed=categories_processed,
+            empty_streak=empty_streak,
+            total_saved=total_saved,
+        )
 
     return total_saved, next_index, more_remaining

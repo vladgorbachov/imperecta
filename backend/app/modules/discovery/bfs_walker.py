@@ -23,6 +23,7 @@ slog = structlog.get_logger(__name__)
 
 CATEGORY_PUBLISH_BATCH = 60
 RECON_BFS_MAX_DEPTH = 3
+PHASE1_EXHAUSTED_STREAK_THRESHOLD = 3
 
 
 def _publish_category_batch(
@@ -51,6 +52,8 @@ def _publish_category_batch(
         marketplace,
         datetime.now(tz=timezone.utc),
     )
+    if unique:
+        cursor_store.set_phase1_exhausted_streak(marketplace, 0)
     if queue:
         cursor_store.apply_frontier(marketplace, queue, visited, [])
     else:
@@ -156,6 +159,56 @@ async def run_category_bfs(
                 return unique, False
             cursor_store.apply_frontier(marketplace, queue, visited, [])
             await db.flush()
+            streak = cursor_store.get_phase1_exhausted_streak(marketplace) + 1
+            cursor_store.set_phase1_exhausted_streak(marketplace, streak)
+            if len(queue) > 0 and len(listing_urls) == 0:
+                await emit_discovery_service_alert(
+                    "bfs_walker",
+                    "warning",
+                    "phase1_budget_exhausted_no_publish",
+                    (
+                        f"Phase 1 budget exhausted no publish "
+                        f"marketplace_id={marketplace.id}"
+                    ),
+                    marketplace_id=marketplace.id,
+                    context={
+                        "queue_len": len(queue),
+                        "visited_len": len(visited),
+                        "listing_len": 0,
+                        "depth_max": RECON_BFS_MAX_DEPTH,
+                    },
+                )
+                slog.warning(
+                    "discovery_phase1_budget_exhausted_no_publish",
+                    marketplace_id=str(marketplace.id),
+                    queue_len=len(queue),
+                    visited_len=len(visited),
+                    listing_len=0,
+                    depth_max=RECON_BFS_MAX_DEPTH,
+                )
+            if streak >= PHASE1_EXHAUSTED_STREAK_THRESHOLD:
+                await emit_discovery_service_alert(
+                    "bfs_walker",
+                    "info",
+                    "phase1_repeated_exhausted",
+                    (
+                        f"Phase 1 repeated exhausted marketplace_id={marketplace.id} "
+                        f"streak={streak}"
+                    ),
+                    marketplace_id=marketplace.id,
+                    context={
+                        "streak": streak,
+                        "queue_len": len(queue),
+                        "visited_len": len(visited),
+                    },
+                )
+                slog.info(
+                    "discovery_phase1_repeated_exhausted",
+                    marketplace_id=str(marketplace.id),
+                    streak=streak,
+                    queue_len=len(queue),
+                    visited_len=len(visited),
+                )
             logger.info(
                 "category_recon_budget_exhausted marketplace_id=%s "
                 "queue=%d visited=%d listing=%d",

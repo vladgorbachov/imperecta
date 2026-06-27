@@ -18,6 +18,7 @@ DISCOVERY_MP_WRITE_KEYS: tuple[str, ...] = (
     "category_resume_index",
     "sitemap_resume_offset",
     "sitemap_bad_harvest_streak",
+    "phase1_exhausted_streak",
     "last_discovery_at",
     "last_discovery_status",
     "last_discovery_products_found",
@@ -151,6 +152,16 @@ def get_sitemap_bad_harvest_streak(marketplace: DimMarketplace) -> int:
 def set_sitemap_bad_harvest_streak(marketplace: DimMarketplace, streak: int) -> None:
     """Write sitemap_bad_harvest_streak on the marketplace ORM instance."""
     marketplace.sitemap_bad_harvest_streak = streak
+
+
+def get_phase1_exhausted_streak(marketplace: DimMarketplace) -> int:
+    """Read phase1_exhausted_streak with legacy getattr/or coercion."""
+    return int(getattr(marketplace, "phase1_exhausted_streak", 0) or 0)
+
+
+def set_phase1_exhausted_streak(marketplace: DimMarketplace, streak: int) -> None:
+    """Write phase1_exhausted_streak on the marketplace ORM instance."""
+    marketplace.phase1_exhausted_streak = streak
 
 
 def get_category_resume_index(marketplace: DimMarketplace) -> int:
