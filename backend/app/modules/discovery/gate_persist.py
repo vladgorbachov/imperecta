@@ -29,7 +29,7 @@ class PoolWriteResult:
 def write_pool_dtos_sync(dtos: list[PoolInsertDTO]) -> PoolWriteResult:
     """Persist discovery pool rows via evaluate_market -> write_sync on a sync Session.
 
-    Runs inside asyncio.to_thread — never on DiscoveryCrawler's AsyncSession.
+    Runs inside asyncio.to_thread — never on the orchestrator's AsyncSession.
     One commit per batch; each DTO pair uses a nested savepoint so a failed
     listing gate/write does not leave an orphan dim_product in the batch.
     """

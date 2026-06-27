@@ -451,31 +451,31 @@ Caller задаёт monotonic deadline: `tasks.py` (`time.monotonic() + DISCOVER
 
 ##### Фазы crawl lifecycle
 
-Константы фаз/бюджетов: `discovery.py:69–141` (`MAX_CATEGORY_URLS_PER_RUN=60`, `MAX_PAGES_PER_CATEGORY=50`, `CATEGORY_CONVERGENCE_STREAK=3`, `CATEGORY_PUBLISH_BATCH=60`, `RECON_BFS_MAX_DEPTH=3`, `SITEMAP_MIN_USEFUL_URLS=10`, `SITEMAP_PHASE_BUDGET_SECONDS=300`, `DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`, `SAVE_BUDGET_HEADROOM_FRACTION=0.85`).
+Константы: `discovery/constants.py` (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS`, sitemap tuning, `SAVE_BUDGET_HEADROOM_FRACTION`, …); harvest limits — `category_processor.py` (`MAX_CATEGORY_URLS_PER_RUN=60`, `MAX_PAGES_PER_CATEGORY=50`, `CATEGORY_CONVERGENCE_STREAK=3`); `bfs_walker.CATEGORY_PUBLISH_BATCH=60`; `budget_governor.PHASE1_BACKLOG_CAP_FRACTION=0.30`.
 
 | Фаза | Условие / метод | Поведение |
 |------|-----------------|-----------|
-| **0 — sitemap harvest** | `_should_run_sitemap_harvest` → `_phase0_sitemap_harvest` (`:469+`, `:617+`); в `discover()` `:1139–1218` | robots/sitemap pipeline через `ScraperPool.fetch_sitemap_candidates`; если ≥ `SITEMAP_MIN_USEFUL_URLS` (10) product URL → **sitemap path**, прямой save в пул; sub-budget `asyncio.wait_for(..., SITEMAP_PHASE_BUDGET_SECONDS)` |
-| **1 — category BFS recon** | `_phase1_category_recon` (`:726+`); только если sitemap path не сработал | BFS hub/listing, `RECON_BFS_MAX_DEPTH=3`; publish batch ≥ `CATEGORY_PUBLISH_BATCH=60` в `discovered_category_urls` |
-| **2 — product harvest** | `category_processor.run_product_harvest` (бывш. `_phase2_product_harvest`); **G-B:** Phase 2 идёт при `has_backlog` даже если Phase 1 исчерпала budget; skip только при `phase1_exhausted and not has_backlog` (`discovery.py:815-829`); deadline = `phase2_deadline` из `budget_governor.allocate` | Окно категорий `MAX_CATEGORY_URLS_PER_RUN=60`, pagination ≤ `MAX_PAGES_PER_CATEGORY=50`, convergence `CATEGORY_CONVERGENCE_STREAK=3` |
+| **0 — sitemap harvest** | `sitemap_harvester` (вызов из `orchestrator.discover`) | robots/sitemap pipeline; если ≥ `SITEMAP_MIN_USEFUL_URLS` (10) product URL → **sitemap path**, прямой save в пул; sub-budget `SITEMAP_PHASE_BUDGET_SECONDS` |
+| **1 — category BFS recon** | `bfs_walker.run_category_bfs`; только если sitemap path не сработал | BFS hub/listing; publish batch ≥ `CATEGORY_PUBLISH_BATCH=60` в `discovered_category_urls` |
+| **2 — product harvest** | `category_processor.run_product_harvest`; **G-B:** Phase 2 при `has_backlog` даже если Phase 1 исчерпала budget; skip только при `phase1_exhausted and not has_backlog` (`orchestrator.py`); deadline = `phase2_deadline` из `budget_governor.allocate` | Окно категорий `MAX_CATEGORY_URLS_PER_RUN=60`, pagination ≤ `MAX_PAGES_PER_CATEGORY=50`, convergence `CATEGORY_CONVERGENCE_STREAK=3` |
 
-**Общий бюджет:** один monotonic deadline на marketplace (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900`); headroom `_headroom_deadline` × `SAVE_BUDGET_HEADROOM_FRACTION=0.85` (`:350–364`, `:1191`, `:1220`).
+**Общий бюджет:** monotonic deadline на marketplace (`DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS=900` из `constants.py`); headroom `_headroom_deadline` × `SAVE_BUDGET_HEADROOM_FRACTION=0.85` (`orchestrator.py`).
 
-**Статусы `DiscoveryResult.status`:** `completed`, `partial_budget`, `partial`, `error`, `no_categories` (`:277–278`, присвоение `:1290–1299`). Inner `scrape_jobs.status`: `failed` при `error`, `partial` при `partial_budget`, иначе `completed` (`:1302–1307`).
+**Статусы `DiscoveryResult.status`:** `completed`, `partial_budget`, `partial`, `error`, `no_categories` (`orchestrator.py`). Inner `scrape_jobs.status`: `failed` при `error`, `partial` при `partial_budget`, иначе `completed`.
 
 ##### Классификация (универсальность)
 
-URL → **product** vs category/hub через **структурные** сигналы `classify_page_role_for_discovery` (import `:22`; вызовы `:499`, `:829`, `:876`) — цепочка OG → JSON-LD → Microdata → structural fallback в `modules/classifier/`. **Без** per-shop URL regex. Canonical: `extract_canonical_url` (`locale_selection.py`, `discovery.py:35`, `:497–498`). Pool gate: `_filter_urls_by_role` / `_gate_urls_for_pool` (`:504+`, `:603–615`).
+URL → **product** vs category/hub через **структурные** сигналы `classify_page_role_for_discovery` — `classifier_adapter` / `modules/classifier/`. **Без** per-shop URL regex. Canonical: `url_canonicalizer`. Pool gate: `classifier_adapter` + `_filter_urls_by_role` на orchestrator.
 
 ##### Gate handoff (уже gated — as-is, не re-route)
 
 Pool-write closure (Layer 2, discovery pool-write):
 
-1. `PoolInsertDTO` `{ marketplace_id; dim_product[id, name, name_normalized, is_active]; fact_listing[product_id, marketplace_id, external_url, url_hash, is_active, page_role] }` — dataclass `:162–168`, сборка `:412–429`.
-2. Sync bridge `asyncio.to_thread(_write_pool_dtos_sync, …)` — `:435–437`, `:462–464`.
-3. `_write_pool_dtos_sync` (`:179–262`): per-DTO nested savepoint → `evaluate_market` (`dim_product`, `:200–208`) → `write_sync` (`:214–221`) → `evaluate_market` (`fact_listing`, `:227–235`) → `write_sync` (`:241–248`) → batch `commit`.
-4. Dedup read перед emit: `existing_hashes` по `url_hash` (`:396–399`, `:405–407`).
-5. META door: `scrape_jobs` + `dim_marketplace` snapshot (cursors/categories) через `write_meta_async` (`:57–62`, `:1085–1094`, `:1329+`).
+1. `PoolInsertDTO` — `gate_persist.py`; сборка DTO в `orchestrator._save_product_urls`.
+2. Sync bridge `asyncio.to_thread(write_pool_dtos_sync, …)` — `gate_persist.py`.
+3. `write_pool_dtos_sync`: per-DTO nested savepoint → `evaluate_market` → `write_sync` (dim_product, fact_listing).
+4. Dedup read перед emit: `existing_hashes` по `url_hash` (orchestrator).
+5. META door: `scrape_jobs` + `dim_marketplace` snapshot через `write_meta_async` (`orchestrator._meta_update_marketplace_snapshot` → `cursor_store.snapshot_meta_columns`).
 
 Re-route **не** планируется на этом шаге — контракт фиксирует текущий путь.
 

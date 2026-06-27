@@ -43,6 +43,7 @@ from app.modules.discovery.constants import (
 )
 from app.modules.discovery.gate_persist import (
     PoolInsertDTO,
+    PoolWriteResult,
     write_pool_dtos_sync,
 )
 from app.modules.persist.meta_write import (
@@ -233,6 +234,65 @@ class DiscoveryOrchestrator:
             remaining_budget * SAVE_BUDGET_HEADROOM_FRACTION
         )
 
+    async def _write_pool_batch(
+        self,
+        marketplace_id: UUID,
+        batch_dtos: list[PoolInsertDTO],
+    ) -> PoolWriteResult:
+        """Run gated pool write; alert on total reject or commit failure."""
+        batch_size = len(batch_dtos)
+        try:
+            result = await asyncio.to_thread(write_pool_dtos_sync, batch_dtos)
+        except Exception as exc:
+            await emit_discovery_service_alert(
+                "gate_persist",
+                "error",
+                "pool_batch_commit_failed",
+                f"Pool batch commit failed marketplace_id={marketplace_id}",
+                marketplace_id=marketplace_id,
+                context={
+                    "batch_size": batch_size,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+            slog.error(
+                "discovery_pool_batch_commit_failed",
+                marketplace_id=str(marketplace_id),
+                batch_size=batch_size,
+                exc_type=type(exc).__name__,
+            )
+            raise
+
+        if (
+            batch_size > 0
+            and result.inserted == 0
+            and result.rejected == batch_size
+        ):
+            await emit_discovery_service_alert(
+                "gate_persist",
+                "warning",
+                "pool_batch_total_reject",
+                (
+                    f"Pool batch total reject marketplace_id={marketplace_id} "
+                    f"batch_size={batch_size}"
+                ),
+                marketplace_id=marketplace_id,
+                context={
+                    "batch_size": batch_size,
+                    "inserted": result.inserted,
+                    "rejected": result.rejected,
+                },
+            )
+            slog.warning(
+                "discovery_pool_batch_total_reject",
+                marketplace_id=str(marketplace_id),
+                batch_size=batch_size,
+                inserted=result.inserted,
+                rejected=result.rejected,
+            )
+
+        return result
+
     async def _save_product_urls(
         self,
         marketplace_id: UUID,
@@ -299,8 +359,8 @@ class DiscoveryOrchestrator:
             pending_in_batch += 1
 
             if pending_in_batch >= SAVE_PRODUCT_URLS_BATCH_SIZE:
-                write_result = await asyncio.to_thread(
-                    write_pool_dtos_sync,
+                write_result = await self._write_pool_batch(
+                    marketplace_id,
                     batch_dtos,
                 )
                 new_count += write_result.inserted
@@ -326,8 +386,8 @@ class DiscoveryOrchestrator:
                     return new_count, absolute_index, True
 
         if batch_dtos:
-            write_result = await asyncio.to_thread(
-                write_pool_dtos_sync,
+            write_result = await self._write_pool_batch(
+                marketplace_id,
                 batch_dtos,
             )
             new_count += write_result.inserted

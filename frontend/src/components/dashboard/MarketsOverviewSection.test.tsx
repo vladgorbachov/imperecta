@@ -16,6 +16,7 @@ const getMoversCoverageMock = vi.fn();
 const getMoversMock = vi.fn();
 const getDashboardKpiMock = vi.fn();
 const getGeoCoverageMock = vi.fn();
+const getTrendMock = vi.fn();
 const getNewsMock = vi.fn();
 
 vi.mock("@/api/news", () => ({
@@ -34,6 +35,7 @@ vi.mock("@/api/markets", () => ({
     getPoolStats: (...args: unknown[]) => getPoolStatsMock(...args),
     getDashboardKpi: (...args: unknown[]) => getDashboardKpiMock(...args),
     getGeoCoverage: (...args: unknown[]) => getGeoCoverageMock(...args),
+    getTrend: (...args: unknown[]) => getTrendMock(...args),
     getMovers: (...args: unknown[]) => getMoversMock(...args),
     getMoversKpi: (...args: unknown[]) => getMoversKpiMock(...args),
     getMoversSummary: (...args: unknown[]) => getMoversSummaryMock(...args),
@@ -45,6 +47,7 @@ vi.mock("@/api/markets", () => ({
     poolStats: () => ["markets", "pool-stats"],
     dashboardKpi: (params?: unknown) => ["markets", "dashboard-kpi", params],
     geoCoverage: (params?: unknown) => ["markets", "geo-coverage", params],
+    trend: (params?: unknown) => ["markets", "trend", params],
     movements: (params?: unknown) => ["markets", "movements", params],
     movementsKpi: (params?: unknown) => ["markets", "movements", params, "kpi"],
     movementsSummary: (params?: unknown) => ["markets", "movements", params, "summary"],
@@ -186,6 +189,15 @@ describe("MarketsOverviewSection", () => {
         mode: "countries",
         total: 0,
         rows: [],
+      },
+    });
+    getTrendMock.mockResolvedValue({
+      data: {
+        points: [],
+        currency: "EUR",
+        bucket: "day",
+        period: "30d",
+        data_ready: false,
       },
     });
     getNewsMock.mockResolvedValue({

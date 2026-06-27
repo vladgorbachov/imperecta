@@ -728,19 +728,20 @@ class TestPhase1FrontierResume:
         crawler = disc.DiscoveryOrchestrator(AsyncMock(), MagicMock())
 
         with patch(
-            "app.modules.discovery.orchestrator.write_service_alert_async",
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
             new_callable=AsyncMock,
         ) as alert_mock:
             effective = await crawler._resolve_category_backlog(mp)
 
         assert effective is True
         alert_mock.assert_awaited_once()
-        fields = alert_mock.await_args.kwargs["fields"]
-        assert fields["module"] == "discovery"
-        assert fields["submodule"] == "budget_governor"
-        assert fields["anomaly_type"] == "resume_index_desync"
-        assert fields["context"]["resume_index"] == 1
-        assert fields["context"]["categories_len"] == 1
+        args, kwargs = alert_mock.await_args
+        assert args[0] == "budget_governor"
+        assert args[1] == "warning"
+        assert args[2] == "resume_index_desync"
+        assert kwargs["context"]["resume_index"] == 1
+        assert kwargs["context"]["categories_len"] == 1
+        assert kwargs["marketplace_id"] == mp.id
 
     @pytest.mark.asyncio
     async def test_resolve_category_backlog_agreement_no_alert(self):
@@ -751,7 +752,7 @@ class TestPhase1FrontierResume:
         crawler = disc.DiscoveryOrchestrator(AsyncMock(), MagicMock())
 
         with patch(
-            "app.modules.discovery.orchestrator.write_service_alert_async",
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
             new_callable=AsyncMock,
         ) as alert_mock:
             effective = await crawler._resolve_category_backlog(mp)
@@ -1340,3 +1341,364 @@ class TestDiscoverInnerJobOwnership:
             and call.kwargs.get("table") == "scrape_jobs"
         ]
         assert len(insert_calls) == 1
+
+
+class TestOrchestratorDefenceInDepth:
+    """NODE 1: success META retry, discover_exception, status inconsistency alerts."""
+
+    @staticmethod
+    def _make_discover_db() -> AsyncMock:
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.flush = AsyncMock()
+        db.rollback = AsyncMock()
+        db.scalar = AsyncMock(return_value=0)
+        db.get = AsyncMock(return_value=MagicMock(id=uuid4()))
+        return db
+
+    @pytest.mark.asyncio
+    async def test_success_meta_snapshot_retries_once_then_succeeds(self):
+        mp = _make_marketplace()
+        job_id = uuid4()
+        snapshot_mock = AsyncMock(side_effect=[RuntimeError("transient"), None])
+
+        with (
+            patch(
+                "app.modules.discovery.orchestrator._meta_update_marketplace_snapshot",
+                snapshot_mock,
+            ),
+            patch(
+                "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+        ):
+            await disc._success_meta_snapshot_with_retry(
+                mp,
+                job_id=job_id,
+                status="completed",
+                persisted_listings=5,
+            )
+
+        assert snapshot_mock.await_count == 2
+        alert_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_success_meta_snapshot_double_fail_emits_critical_alert(self):
+        mp = _make_marketplace()
+        job_id = uuid4()
+
+        with (
+            patch(
+                "app.modules.discovery.orchestrator._meta_update_marketplace_snapshot",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("persistent"),
+            ),
+            patch(
+                "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+        ):
+            await disc._success_meta_snapshot_with_retry(
+                mp,
+                job_id=job_id,
+                status="completed",
+                persisted_listings=3,
+            )
+
+        alert_mock.assert_awaited_once()
+        args = alert_mock.await_args.args
+        assert args[0] == "orchestrator"
+        assert args[1] == "critical"
+        assert args[2] == "meta_snapshot_write_failed"
+        assert alert_mock.await_args.kwargs["context"]["write_target"] == "dim_marketplace"
+        assert alert_mock.await_args.kwargs["context"]["job_id"] == str(job_id)
+
+    @pytest.mark.asyncio
+    async def test_discover_meta_snapshot_double_fail_still_returns_success(self):
+        mp = _make_marketplace()
+        urls = [f"https://shop.example/p/item-{i}" for i in range(200)]
+        db = self._make_discover_db()
+
+        crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+        ok = MagicMock(ok=True)
+
+        with (
+            patch(
+                "app.modules.discovery.orchestrator.write_meta_async",
+                new_callable=AsyncMock,
+                return_value=ok,
+            ),
+            patch(
+                "app.modules.discovery.orchestrator._meta_update_marketplace_snapshot",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("persistent"),
+            ),
+            patch(
+                "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+            patch(
+                "app.modules.discovery.sitemap_harvester.harvest_sitemap",
+                new_callable=AsyncMock,
+                return_value=urls,
+            ),
+            patch.object(
+                disc.DiscoveryOrchestrator,
+                "_save_product_urls",
+                new_callable=AsyncMock,
+                return_value=(200, 200, False),
+            ),
+        ):
+            result = await crawler.discover(mp)
+
+        assert result.status == "completed"
+        assert result.persisted_listings == 200
+        critical_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "meta_snapshot_write_failed"
+        ]
+        assert len(critical_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_discover_exception_emits_alert_and_preserves_error_flow(self):
+        mp = _make_marketplace()
+        db = self._make_discover_db()
+        crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+        ok = MagicMock(ok=True)
+        meta_write = AsyncMock(return_value=ok)
+
+        with (
+            patch(
+                "app.modules.discovery.orchestrator.write_meta_async",
+                meta_write,
+            ),
+            patch(
+                "app.modules.discovery.orchestrator._meta_update_marketplace_snapshot",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+            patch.object(
+                disc.DiscoveryOrchestrator,
+                "_should_run_sitemap_harvest",
+                return_value=True,
+            ),
+            patch(
+                "app.modules.discovery.sitemap_harvester.harvest_sitemap",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("phase boom"),
+            ),
+        ):
+            result = await crawler.discover(mp)
+
+        assert result.status == "error"
+        assert any("phase boom" in e for e in result.errors)
+        exception_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "discover_exception"
+        ]
+        assert len(exception_calls) == 1
+        ctx = exception_calls[0].kwargs["context"]
+        assert ctx["status"] == "error"
+        assert ctx["exc_type"] == "RuntimeError"
+        assert ctx["phase"] == "sitemap_harvest"
+        job_updates = [
+            c
+            for c in meta_write.await_args_list
+            if c.kwargs.get("operation") == "update"
+            and c.kwargs.get("table") == "scrape_jobs"
+        ]
+        assert any(
+            c.kwargs["fields"].get("status") == "failed" for c in job_updates
+        )
+
+    @pytest.mark.asyncio
+    async def test_discover_status_inconsistent_emits_warning(self):
+        mp_id = uuid4()
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await disc._emit_discover_status_inconsistent_if_needed(
+                marketplace_id=mp_id,
+                status="no_categories",
+                persisted_listings=5,
+                candidate_urls_found=0,
+                accepted_urls=0,
+            )
+
+        alert_mock.assert_awaited_once()
+        args = alert_mock.await_args.args
+        assert args[0] == "orchestrator"
+        assert args[1] == "warning"
+        assert args[2] == "discover_status_inconsistent"
+        assert alert_mock.await_args.kwargs["context"]["persisted_listings"] == 5
+
+    @pytest.mark.asyncio
+    async def test_discover_status_inconsistent_no_false_positive(self):
+        mp_id = uuid4()
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await disc._emit_discover_status_inconsistent_if_needed(
+                marketplace_id=mp_id,
+                status="no_categories",
+                persisted_listings=0,
+                candidate_urls_found=0,
+                accepted_urls=0,
+            )
+
+        alert_mock.assert_not_awaited()
+
+
+class TestGatePersistDefenceInDepth:
+    """NODE 2: gate_persist anomalies detected in _save_product_urls."""
+
+    @pytest.mark.asyncio
+    async def test_pool_batch_total_reject_emits_warning(self, monkeypatch):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+
+        async def fake_to_thread(func, dtos):
+            assert func is write_pool_dtos_sync
+            return PoolWriteResult(inserted=0, rejected=len(dtos))
+
+        monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            new_count, next_offset, exhausted = await crawler._save_product_urls(
+                mp_id,
+                [
+                    "https://shop.example/p/a",
+                    "https://shop.example/p/b",
+                ],
+            )
+
+        assert new_count == 0
+        assert next_offset == 2
+        assert exhausted is False
+        alert_mock.assert_awaited_once()
+        args = alert_mock.await_args.args
+        assert args[0] == "gate_persist"
+        assert args[1] == "warning"
+        assert args[2] == "pool_batch_total_reject"
+        assert alert_mock.await_args.kwargs["context"]["batch_size"] == 2
+        assert alert_mock.await_args.kwargs["context"]["inserted"] == 0
+        assert alert_mock.await_args.kwargs["context"]["rejected"] == 2
+
+    @pytest.mark.asyncio
+    async def test_pool_batch_partial_reject_no_alert(self, monkeypatch):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+
+        async def fake_to_thread(func, dtos):
+            return PoolWriteResult(inserted=1, rejected=1)
+
+        monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            new_count, next_offset, exhausted = await crawler._save_product_urls(
+                mp_id,
+                [
+                    "https://shop.example/p/a",
+                    "https://shop.example/p/b",
+                ],
+            )
+
+        assert new_count == 1
+        assert next_offset == 2
+        assert exhausted is False
+        alert_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_pool_batch_empty_batch_no_alert(self, monkeypatch):
+        mp_id = uuid4()
+        url = "https://shop.example/p/exists"
+        url_hash = disc.FactListing.compute_url_hash(url)
+        db = _make_mock_db_for_save(existing_hashes=[url_hash])
+        pool_state = _patch_pool_write(monkeypatch)
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            new_count, next_offset, exhausted = await crawler._save_product_urls(
+                mp_id, [url],
+            )
+
+        assert new_count == 0
+        assert pool_state["calls"] == 0
+        alert_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_pool_batch_commit_failed_emits_alert_and_reraises(
+        self, monkeypatch,
+    ):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+
+        async def fake_to_thread(func, dtos):
+            raise RuntimeError("commit failed")
+
+        monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+        with (
+            patch(
+                "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+            pytest.raises(RuntimeError, match="commit failed"),
+        ):
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            await crawler._save_product_urls(
+                mp_id,
+                ["https://shop.example/p/a"],
+            )
+
+        alert_mock.assert_awaited_once()
+        args = alert_mock.await_args.args
+        assert args[0] == "gate_persist"
+        assert args[1] == "error"
+        assert args[2] == "pool_batch_commit_failed"
+        assert alert_mock.await_args.kwargs["context"]["exc_type"] == "RuntimeError"
+
+    @pytest.mark.asyncio
+    async def test_pool_batch_success_no_alert(self, monkeypatch):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+        pool_state = _patch_pool_write(monkeypatch)
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            new_count, next_offset, exhausted = await crawler._save_product_urls(
+                mp_id,
+                [
+                    "https://unique-shop.example/p/one",
+                    "https://unique-shop.example/p/two",
+                ],
+            )
+
+        assert new_count == 2
+        assert next_offset == 2
+        assert exhausted is False
+        assert pool_state["calls"] == 1
+        alert_mock.assert_not_awaited()

@@ -45,4 +45,20 @@ describe("CountrySelector", () => {
     );
     expect(screen.getByTestId("country-selector-skeleton")).toBeInTheDocument();
   });
+
+  it("renders compact trigger with glowing ring", () => {
+    render(
+      <CountrySelector
+        compact
+        value={null}
+        onChange={vi.fn()}
+        options={[]}
+        loading={false}
+      />,
+    );
+    const trigger = screen.getByLabelText("markets.countrySelector.placeholder");
+    expect(trigger).toBeInTheDocument();
+    expect(trigger.className).toMatch(/ring-\[var\(--accent\)\]/);
+    expect(trigger.className).toMatch(/w-9/);
+  });
 });

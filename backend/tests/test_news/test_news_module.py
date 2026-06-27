@@ -9,6 +9,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.modules.news import cache as news_cache
+from app.modules.news.normalize import (
+    clean_snippet,
+    dedup_key,
+    is_junk,
+    is_retail_relevant,
+    normalize_feed,
+)
 from app.modules.news.provider_queue import fetch_news_chain
 from app.modules.news.providers.base import (
     PROVIDER_CURRENTS,
@@ -108,6 +115,149 @@ def test_map_gdelt_articles_fixture() -> None:
     assert len(items) == 1
     assert items[0].source == "retail.example"
     assert items[0].snippet == "Marketplace retail trends"
+
+
+def test_clean_snippet_removes_duplicate_read_more_tail() -> None:
+    raw = (
+        "Retail prices shift across EU marketplaces. "
+        "Read more at straitstimes.com. Read more at straitstimes.com."
+    )
+    once = clean_snippet(raw)
+    twice = clean_snippet(once)
+    assert once == twice
+    assert once.count("Read more at straitstimes.com") == 1
+
+
+def test_clean_snippet_is_idempotent_on_whitespace() -> None:
+    raw = "E-commerce   retail   update."
+    once = clean_snippet(raw)
+    twice = clean_snippet(once)
+    assert once == twice
+    assert once == "E-commerce retail update."
+
+
+def test_is_junk_company_announcements_title() -> None:
+    item = NewsItem(
+        title="Company Announcements",
+        source="Reuters",
+        published_at=_ts(),
+        snippet="Board meeting notes.",
+        url="https://example.com/a",
+    )
+    assert is_junk(item) is True
+
+
+def test_is_junk_feedloader_source() -> None:
+    item = NewsItem(
+        title="Retail update",
+        source="Feedloaderapi",
+        published_at=_ts(),
+        snippet="Marketplace prices in EU retail.",
+        url="https://example.com/b",
+    )
+    assert is_junk(item) is True
+
+
+def test_is_junk_feed_stub_snippet() -> None:
+    item = NewsItem(
+        title="Fund facts",
+        source="Example",
+        published_at=_ts(),
+        snippet=(
+            "The latest company information, including net asset values "
+            "and dividend dates."
+        ),
+        url="https://example.com/c",
+    )
+    assert is_junk(item) is True
+
+
+def test_is_retail_relevant_positive() -> None:
+    item = NewsItem(
+        title="EU retail outlook",
+        source="Wire",
+        published_at=_ts(),
+        snippet="Shoppers face higher basket prices.",
+        url="https://example.com/d",
+    )
+    assert is_retail_relevant(item) is True
+
+
+def test_is_retail_relevant_negative() -> None:
+    item = NewsItem(
+        title="SpaceX lifts Nasdaq 100",
+        source="Wire",
+        published_at=_ts(),
+        snippet="Dividend payouts and protests in the capital.",
+        url="https://example.com/e",
+    )
+    assert is_retail_relevant(item) is False
+
+
+def test_dedup_key_url_and_title() -> None:
+    left = NewsItem(
+        title="Retail prices rise",
+        source="Wire",
+        published_at=_ts(),
+        snippet="E-commerce marketplace update.",
+        url="https://Example.com/a?utm_source=x",
+    )
+    right = NewsItem(
+        title="Retail prices rise!",
+        source="Wire",
+        published_at=_ts(),
+        snippet="Another snippet.",
+        url="https://example.com/a/",
+    )
+    assert dedup_key(left)[0] == dedup_key(right)[0]
+    assert dedup_key(left)[1] == dedup_key(right)[1]
+
+
+def test_normalize_feed_end_to_end() -> None:
+    retail = NewsItem(
+        title="Retail prices rise in EU",
+        source="Retail Wire",
+        published_at=_ts(),
+        snippet="Online store checkout prices shift for consumer goods.",
+        url="https://example.com/retail",
+    )
+    duplicate = NewsItem(
+        title="Retail prices rise in EU",
+        source="Retail Wire",
+        published_at=_ts(),
+        snippet="Duplicate headline only.",
+        url="https://example.com/other",
+    )
+    junk = NewsItem(
+        title="Company Announcements",
+        source="Nbuffie",
+        published_at=_ts(),
+        snippet="The latest company information, including net asset values.",
+        url="https://example.com/junk",
+    )
+    off_topic = NewsItem(
+        title="SpaceX lifts Nasdaq 100",
+        source="Markets",
+        published_at=_ts(),
+        snippet="Dividend payouts rise after protests.",
+        url="https://example.com/spacex",
+    )
+    snippet_dup = NewsItem(
+        title="Marketplace discount sales",
+        source="Shop News",
+        published_at=_ts(),
+        snippet=(
+            "Retail basket update. Read more at straitstimes.com. "
+            "Read more at straitstimes.com."
+        ),
+        url="https://example.com/sales",
+    )
+
+    result = normalize_feed([retail, duplicate, junk, off_topic, snippet_dup])
+    assert len(result) == 2
+    assert result[0].title == "Retail prices rise in EU"
+    assert result[1].title == "Marketplace discount sales"
+    assert result[1].snippet.count("Read more at straitstimes.com") == 1
 
 
 @pytest.mark.asyncio
