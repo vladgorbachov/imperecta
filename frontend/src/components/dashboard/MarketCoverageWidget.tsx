@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Globe } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   marketsApi,
@@ -146,6 +147,7 @@ export function MarketCoverageWidget({
         <EmptyState
           title="market.overview.coverage.empty"
           description="market.overview.coverage.emptyHint"
+          icon={Globe}
           className="py-8"
         />
       ) : (

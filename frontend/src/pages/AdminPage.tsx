@@ -45,10 +45,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuthStore } from "@/stores/authStore";
-import type { ParsingDetailedMarketplace, ParsingDetailedUser, ParsingPipelineJobStatus } from "@/api/admin";
+import type { AdminCountryRef, ParsingDetailedMarketplace, ParsingDetailedUser, ParsingPipelineJobStatus } from "@/api/admin";
 import {
   useAddMarketplace,
   useAdminStats,
+  useCountries,
   useCreateAdminUser,
   useDeleteAdminUser,
   useDeleteMarketplace,
@@ -61,9 +62,25 @@ import {
   useUpdateAdminUser,
   useUpdateMarketplace,
 } from "@/hooks/useAdmin";
+import {
+  buildEditMarketplaceForm,
+  formatAdminCountryLabel,
+} from "@/lib/adminMarketplaceForm";
+
 const MARKET_OVERVIEW_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const USER_PLAN_OPTIONS = ["trial", "starter", "business", "pro", "enterprise"] as const;
 const USER_LANGUAGE_OPTIONS = ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"] as const;
+
+function renderAdminCountryOptions(
+  countries: AdminCountryRef[],
+  translate: (key: string) => string,
+) {
+  return countries.map((row) => (
+    <SelectItem key={row.code} value={row.code}>
+      {formatAdminCountryLabel(row.code, row.name, translate)}
+    </SelectItem>
+  ));
+}
 
 type UserPlan = (typeof USER_PLAN_OPTIONS)[number];
 type UserLanguage = (typeof USER_LANGUAGE_OPTIONS)[number];
@@ -172,8 +189,14 @@ export function AdminPage() {
   const [isDeleteMarketplaceOpen, setIsDeleteMarketplaceOpen] = useState(false);
   const [selectedMarketplace, setSelectedMarketplace] = useState<ParsingDetailedMarketplace | null>(null);
   const [newMarketplaceUrl, setNewMarketplaceUrl] = useState("");
-  const [editMarketplaceForm, setEditMarketplaceForm] = useState({ name: "", url: "" });
+  const [newMarketplaceCountryCode, setNewMarketplaceCountryCode] = useState("");
+  const [editMarketplaceForm, setEditMarketplaceForm] = useState({
+    name: "",
+    url: "",
+    country_code: "",
+  });
   const { data: stats } = useAdminStats();
+  const countriesQuery = useCountries();
   const usersDetailedQuery = useParsingUsersDetailed(1000);
   const marketplacesDetailedQuery = useParsingMarketplacesDetailed(marketplacePage, marketplacePageSize);
   const addMarketplaceMutation = useAddMarketplace();
@@ -365,7 +388,14 @@ export function AdminPage() {
                 <CardTitle>{t("admin.pool.marketplaces")}</CardTitle>
                 <CardDescription>{t("admin.marketplaces.successRate")}</CardDescription>
               </div>
-              <Button onClick={() => setIsAddMarketplaceOpen(true)}>
+              <Button
+                data-testid="add-marketplace-open"
+                onClick={() => {
+                  setNewMarketplaceUrl("");
+                  setNewMarketplaceCountryCode("");
+                  setIsAddMarketplaceOpen(true);
+                }}
+              >
                 <Plus className="mr-2 size-4" />
                 {t("admin.marketOverview.addMarketplace")}
               </Button>
@@ -467,7 +497,7 @@ export function AdminPage() {
                               aria-label={t("common.edit")}
                               onClick={() => {
                                 setSelectedMarketplace(item);
-                                setEditMarketplaceForm({ name: item.name, url: item.base_url });
+                                setEditMarketplaceForm(buildEditMarketplaceForm(item));
                                 setIsEditMarketplaceOpen(true);
                               }}
                             >
@@ -1166,29 +1196,73 @@ export function AdminPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isAddMarketplaceOpen} onOpenChange={setIsAddMarketplaceOpen}>
+      <Dialog
+        open={isAddMarketplaceOpen}
+        onOpenChange={(open) => {
+          setIsAddMarketplaceOpen(open);
+          if (!open) {
+            setNewMarketplaceUrl("");
+            setNewMarketplaceCountryCode("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("admin.marketOverview.addMarketplace")}</DialogTitle>
             <DialogDescription>{t("admin.marketOverview.addMarketplaceHint")}</DialogDescription>
           </DialogHeader>
-          <Input
-            value={newMarketplaceUrl}
-            onChange={(event) => setNewMarketplaceUrl(event.target.value)}
-            placeholder="https://example.com"
-          />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">
+                {t("admin.marketOverview.countryLabel")}
+              </label>
+              {countriesQuery.isLoading ? (
+                <Skeleton className="h-9 w-full" data-testid="add-marketplace-country-loading" />
+              ) : (
+                <Select
+                  value={newMarketplaceCountryCode}
+                  onValueChange={setNewMarketplaceCountryCode}
+                >
+                  <SelectTrigger data-testid="add-marketplace-country-select">
+                    <SelectValue placeholder={t("admin.marketOverview.countryPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {renderAdminCountryOptions(countriesQuery.data ?? [], t)}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">
+                {t("admin.marketOverview.urlColumn")}
+              </label>
+              <Input
+                value={newMarketplaceUrl}
+                onChange={(event) => setNewMarketplaceUrl(event.target.value)}
+                placeholder="https://example.com"
+              />
+            </div>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddMarketplaceOpen(false)}>
               {t("common.cancel")}
             </Button>
             <Button
-              disabled={addMarketplaceMutation.isPending || !newMarketplaceUrl.trim()}
+              disabled={
+                addMarketplaceMutation.isPending ||
+                !newMarketplaceUrl.trim() ||
+                !newMarketplaceCountryCode
+              }
               onClick={() => {
                 void (async () => {
                   try {
-                    await addMarketplaceMutation.mutateAsync(newMarketplaceUrl.trim());
+                    await addMarketplaceMutation.mutateAsync({
+                      url: newMarketplaceUrl.trim(),
+                      country_code: newMarketplaceCountryCode,
+                    });
                     toast.success(t("admin.marketOverview.added"));
                     setNewMarketplaceUrl("");
+                    setNewMarketplaceCountryCode("");
                     setIsAddMarketplaceOpen(false);
                     await queryClient.invalidateQueries({
                       queryKey: ["admin", "parsing", "marketplaces-detailed"],
@@ -1233,6 +1307,28 @@ export function AdminPage() {
                 }
               />
             </div>
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">
+                {t("admin.marketOverview.countryLabel")}
+              </label>
+              {countriesQuery.isLoading ? (
+                <Skeleton className="h-9 w-full" data-testid="edit-marketplace-country-loading" />
+              ) : (
+                <Select
+                  value={editMarketplaceForm.country_code}
+                  onValueChange={(value) =>
+                    setEditMarketplaceForm((prev) => ({ ...prev, country_code: value }))
+                  }
+                >
+                  <SelectTrigger data-testid="edit-marketplace-country-select">
+                    <SelectValue placeholder={t("admin.marketOverview.countryPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {renderAdminCountryOptions(countriesQuery.data ?? [], t)}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditMarketplaceOpen(false)}>
@@ -1249,6 +1345,7 @@ export function AdminPage() {
                       payload: {
                         name: editMarketplaceForm.name.trim(),
                         url: editMarketplaceForm.url.trim(),
+                        country_code: editMarketplaceForm.country_code || undefined,
                       },
                     });
                     toast.success(t("admin.marketOverview.updated"));

@@ -21,8 +21,8 @@ import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { MarketMoversWidget } from "@/components/dashboard/MarketMoversWidget";
 import { MarketCoverageWidget } from "@/components/dashboard/MarketCoverageWidget";
+import { MarketTrendWidget } from "@/components/dashboard/MarketTrendWidget";
 import { MarketNewsWidget } from "@/components/dashboard/MarketNewsWidget";
-import { CountrySelector } from "@/components/dashboard/CountrySelector";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -40,6 +40,7 @@ import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { useDashboardCountryStore } from "@/stores/dashboardCountryStore";
 
 type SortKey = "random" | "recent" | "gainers" | "losers" | "volatile" | "trending";
 
@@ -250,7 +251,9 @@ export function MarketsOverviewSection() {
 
   const [searchRaw, setSearchRaw] = useState("");
   const [marketplaceSearch, setMarketplaceSearch] = useState("");
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const selectedCountry = useDashboardCountryStore((state) => state.selectedCountry);
+  const setCountryOptions = useDashboardCountryStore((state) => state.setCountryOptions);
+  const setOptionsLoading = useDashboardCountryStore((state) => state.setOptionsLoading);
   const [selectedMarketplaces, setSelectedMarketplaces] = useState<string[]>([]);
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
@@ -283,6 +286,7 @@ export function MarketsOverviewSection() {
   });
   const {
     data: marketplaceStats,
+    isLoading: mpStatsLoading,
     isError: mpStatsError,
     refetch: refetchMpStats,
   } = useQuery({
@@ -339,6 +343,14 @@ export function MarketsOverviewSection() {
         label: row.label,
       }));
   }, [countryRollup]);
+
+  useEffect(() => {
+    setCountryOptions(countryOptions);
+  }, [countryOptions, setCountryOptions]);
+
+  useEffect(() => {
+    setOptionsLoading(countryRollupLoading);
+  }, [countryRollupLoading, setOptionsLoading]);
 
   const kpiScopeParams = useMemo((): Pick<MovementsQueryParams, "country_code" | "marketplace_id"> => {
     const params: Pick<MovementsQueryParams, "country_code" | "marketplace_id"> = {};
@@ -614,6 +626,18 @@ export function MarketsOverviewSection() {
               <AlertTriangle className="size-3.5" />
               {t("common.error")} · {t("common.refresh")}
             </button>
+          ) : mpStatsLoading ? (
+            <div className="space-y-2 px-1 py-1" aria-hidden data-testid="marketplace-filters-loading">
+              {Array.from({ length: 3 }, (_, index) => (
+                <Skeleton key={index} className="h-6 w-full" />
+              ))}
+            </div>
+          ) : visibleMarketplaces.length === 0 ? (
+            <p className="px-1 py-2 text-center text-2xs text-muted-foreground">
+              {(marketplaceStats ?? []).length === 0
+                ? t("market.filters.noMarketplaces")
+                : t("products.noResults")}
+            </p>
           ) : (
             visibleMarketplaces.map((item) => {
               const checked = selectedMarketplaces.includes(item.marketplace_domain);
@@ -692,16 +716,6 @@ export function MarketsOverviewSection() {
 
   return (
     <section className="space-y-3">
-      <div className="flex justify-start sm:justify-end">
-        <CountrySelector
-          value={selectedCountry}
-          onChange={setSelectedCountry}
-          options={countryOptions}
-          loading={countryRollupLoading}
-          className="w-full max-w-none sm:max-w-[220px]"
-        />
-      </div>
-
       <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           label={t("market.overview.kpi.totalPool")}
@@ -785,6 +799,10 @@ export function MarketsOverviewSection() {
             countryCode={selectedCountry}
           />
           <MarketCoverageWidget
+            countryCode={selectedCountry}
+            marketplaceId={scopedMarketplaceId}
+          />
+          <MarketTrendWidget
             countryCode={selectedCountry}
             marketplaceId={scopedMarketplaceId}
           />

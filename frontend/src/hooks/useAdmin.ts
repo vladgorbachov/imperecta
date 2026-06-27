@@ -15,10 +15,18 @@ export const useClaudeStatus = () =>
     refetchInterval: 60_000,
   });
 
+export const useCountries = () =>
+  useQuery({
+    queryKey: ["admin", "countries"],
+    queryFn: () => adminApi.getCountries().then((r) => r.data),
+    staleTime: 60 * 60 * 1000,
+  });
+
 export const useAddMarketplace = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (url: string) => adminApi.addMarketplace(url).then((r) => r.data),
+    mutationFn: (payload: { url: string; country_code: string }) =>
+      adminApi.addMarketplace(payload).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
   });
 };
@@ -31,7 +39,12 @@ export const useUpdateMarketplace = () => {
       payload,
     }: {
       id: string;
-      payload: { name?: string; url?: string; is_active?: boolean };
+      payload: {
+        name?: string;
+        url?: string;
+        is_active?: boolean;
+        country_code?: string;
+      };
     }) => adminApi.updateMarketplace(id, payload).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
   });

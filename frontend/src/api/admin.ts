@@ -25,6 +25,7 @@ export interface AdminMarketplace {
   marketplace_id: string;
   name: string;
   domain: string;
+  country_code: string;
   country: string;
   region: string;
   source: "registry" | "admin";
@@ -34,12 +35,25 @@ export interface AdminMarketplace {
   products_count: number;
 }
 
+export interface AdminCountryRef {
+  code: string;
+  name: string;
+  name_local: string | null;
+  region: string;
+  currency_code: string;
+}
+
 export const getAdminStats = () => apiClient.get<AdminStats>("/admin/stats");
-export const addMarketplace = (url: string) =>
-  apiClient.post<AdminMarketplace>("/admin/marketplaces", { url });
+
+export const getCountries = () =>
+  apiClient.get<AdminCountryRef[]>("/admin/marketplaces/countries");
+
+export const addMarketplace = (payload: { url: string; country_code: string }) =>
+  apiClient.post<AdminMarketplace>("/admin/marketplaces", payload);
+
 export const updateMarketplace = (
   id: string,
-  payload: { name?: string; url?: string; is_active?: boolean },
+  payload: { name?: string; url?: string; is_active?: boolean; country_code?: string },
 ) => apiClient.patch<AdminMarketplace>(`/admin/marketplaces/${id}`, payload);
 export const deleteMarketplace = (id: string) =>
   apiClient.delete(`/admin/marketplaces/${id}`);

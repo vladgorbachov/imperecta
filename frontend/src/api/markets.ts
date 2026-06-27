@@ -167,6 +167,28 @@ export interface CoverageParams {
   marketplace_id?: string;
 }
 
+export interface TrendPoint {
+  bucket_label: string;
+  bucket_start: string;
+  avg_price_eur: number | string | null;
+  sample_size: number;
+}
+
+export interface TrendSeries {
+  points: TrendPoint[];
+  currency: "EUR";
+  bucket: "day" | "week" | "month";
+  period: "7d" | "30d" | "90d";
+  data_ready: boolean;
+}
+
+export interface TrendParams {
+  period?: "7d" | "30d" | "90d";
+  bucket?: "day" | "week" | "month";
+  country_code?: string;
+  marketplace_id?: string;
+}
+
 // --- Movements (server-side price_change_pct aggregates) ---
 
 export interface MovementsQueryParams {
@@ -287,6 +309,9 @@ export const marketsApi = {
   getGeoCoverage: (params?: CoverageParams) =>
     apiClient.get<CoverageBreakdown>("/markets/geo-coverage", { params }),
 
+  getTrend: (params?: TrendParams) =>
+    apiClient.get<TrendSeries>("/markets/trend", { params }),
+
   getMovers: (params?: MovementsQueryParams) =>
     apiClient.get<MoversPage>("/markets/movements", { params }),
 
@@ -344,6 +369,15 @@ export const marketsQueryKeys = {
     [
       ...marketsQueryKeys.all,
       "geo-coverage",
+      params?.country_code ?? null,
+      params?.marketplace_id ?? null,
+    ] as const,
+  trend: (params?: TrendParams) =>
+    [
+      ...marketsQueryKeys.all,
+      "trend",
+      params?.period ?? "30d",
+      params?.bucket ?? "day",
       params?.country_code ?? null,
       params?.marketplace_id ?? null,
     ] as const,

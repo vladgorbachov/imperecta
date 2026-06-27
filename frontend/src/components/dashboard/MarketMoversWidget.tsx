@@ -8,7 +8,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
+import { Activity, ArrowRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   marketsApi,
@@ -222,6 +222,7 @@ export function MarketMoversWidget({
         <EmptyState
           title="market.overview.kpi.accumulatingData"
           description="market.overview.kpi.accumulatingDataHint"
+          icon={Activity}
           className="py-8"
         />
       ) : (

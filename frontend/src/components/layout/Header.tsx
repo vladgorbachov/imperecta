@@ -5,9 +5,10 @@
 
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Menu, LogOut, Bell, Sun, Moon, Settings } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { DashboardHeaderCountrySelector } from "@/components/dashboard/DashboardHeaderCountrySelector";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,6 +31,9 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isDashboardRoute =
+    location.pathname === "/dashboard" || location.pathname.endsWith("/dashboard");
 
   const handleLogout = () => {
     logout();
@@ -63,9 +67,17 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
             <Menu className="size-4" />
           </Button>
         )}
-        <HeaderTicker className="flex-1 pe-4 sm:pe-6" />
+        <HeaderTicker
+          className={cn(
+            "min-w-0 flex-1",
+            isDashboardRoute
+              ? "pe-2 sm:pe-3 md:max-w-[min(100%,42rem)] lg:max-w-[min(100%,48rem)]"
+              : "pe-4 sm:pe-6",
+          )}
+        />
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        {isDashboardRoute ? <DashboardHeaderCountrySelector /> : null}
         <Button
           variant="ghost"
           size="icon"

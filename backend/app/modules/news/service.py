@@ -6,6 +6,7 @@ import structlog
 
 from app.config import Settings
 from app.modules.news import cache as news_cache
+from app.modules.news.normalize import normalize_feed_with_counts
 from app.modules.news.provider_queue import fetch_news_chain
 from app.modules.news.providers.base import NewsProvider
 from app.modules.news.providers.currents import build_currents_provider
@@ -55,6 +56,16 @@ async def get_news(
         providers,
         country_code=country_code,
         language=language,
+    )
+    items, normalize_counts = normalize_feed_with_counts(items)
+    slog.info(
+        "news_normalized",
+        cache_key=cache_key,
+        source_provider=source_provider,
+        fetched=normalize_counts.fetched,
+        after_junk=normalize_counts.after_junk,
+        after_relevance=normalize_counts.after_relevance,
+        after_dedup=normalize_counts.after_dedup,
     )
     response = NewsResponse(items=items, source_provider=source_provider)
 

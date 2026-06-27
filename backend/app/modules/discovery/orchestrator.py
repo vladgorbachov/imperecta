@@ -50,10 +50,7 @@ from app.modules.persist.meta_write import (
     build_scrape_job_fields,
     write_meta_async,
 )
-from app.modules.persist.service_alerts_write import (
-    build_service_alert_fields,
-    write_service_alert_async,
-)
+from app.modules.discovery.alerting import emit_discovery_service_alert
 from app.modules.persist.writer import (
     build_dim_product_fields,
     build_fact_listing_fields,
@@ -75,6 +72,83 @@ async def _meta_update_marketplace_snapshot(marketplace: DimMarketplace) -> None
         fields=build_dim_marketplace_fields(id=marketplace.id, **columns),
         reject_source="discovery",
     )
+
+
+async def _success_meta_snapshot_with_retry(
+    marketplace: DimMarketplace,
+    *,
+    job_id: UUID,
+    status: str,
+    persisted_listings: int,
+) -> None:
+    """Success-path snapshot write with one retry; alert and swallow on double failure."""
+    last_exc: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            await _meta_update_marketplace_snapshot(marketplace)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 1:
+                slog.warning(
+                    "discovery_meta_snapshot_write_retry",
+                    marketplace_id=str(marketplace.id),
+                    job_id=str(job_id),
+                    attempt=attempt,
+                    exc_type=type(exc).__name__,
+                )
+    await emit_discovery_service_alert(
+        "orchestrator",
+        "critical",
+        "meta_snapshot_write_failed",
+        (
+            f"Marketplace snapshot write failed after retry "
+            f"marketplace_id={marketplace.id}"
+        ),
+        marketplace_id=marketplace.id,
+        context={
+            "job_id": str(job_id),
+            "status": status,
+            "persisted_listings": persisted_listings,
+            "write_target": "dim_marketplace",
+        },
+    )
+    slog.error(
+        "discovery_meta_snapshot_write_failed",
+        marketplace_id=str(marketplace.id),
+        job_id=str(job_id),
+        status=status,
+        persisted_listings=persisted_listings,
+        exc_type=type(last_exc).__name__ if last_exc else "Exception",
+    )
+
+
+async def _emit_discover_status_inconsistent_if_needed(
+    *,
+    marketplace_id: UUID,
+    status: str,
+    persisted_listings: int,
+    candidate_urls_found: int,
+    accepted_urls: int,
+) -> None:
+    """Defensive alert when assembled status contradicts persisted counters."""
+    if persisted_listings > 0 and status == "no_categories":
+        await emit_discovery_service_alert(
+            "orchestrator",
+            "warning",
+            "discover_status_inconsistent",
+            (
+                f"Discovery status inconsistent marketplace_id={marketplace_id} "
+                f"status={status} persisted_listings={persisted_listings}"
+            ),
+            marketplace_id=marketplace_id,
+            context={
+                "status": status,
+                "persisted_listings": persisted_listings,
+                "candidate_urls_found": candidate_urls_found,
+                "accepted_urls": accepted_urls,
+            },
+        )
 
 
 def _title_from_url(url: str) -> str:
@@ -450,17 +524,13 @@ class DiscoveryOrchestrator:
                 primary=primary,
                 binary=binary,
             )
-            fields = build_service_alert_fields(
-                module="discovery",
-                submodule="budget_governor",
-                severity="warning",
-                anomaly_type="resume_index_desync",
-                message=message,
+            await emit_discovery_service_alert(
+                "budget_governor",
+                "warning",
+                "resume_index_desync",
+                message,
+                marketplace_id=marketplace.id,
                 context=context,
-            )
-            await write_service_alert_async(
-                fields=fields,
-                reject_source="discovery",
             )
             return binary
         return primary
@@ -520,6 +590,7 @@ class DiscoveryOrchestrator:
         persisted_listings = 0
         status = "completed"
         completed_at: datetime | None = None
+        discovery_phase = "init"
 
         try:
             settings = Settings()
@@ -540,6 +611,7 @@ class DiscoveryOrchestrator:
 
             sitemap_product_urls: list[str] = []
             if self._should_run_sitemap_harvest(marketplace):
+                discovery_phase = "sitemap_harvest"
                 await self._emit_activity(
                     f"discovery sitemap harvest start "
                     f"domain={marketplace.domain or marketplace.base_url}"
@@ -637,6 +709,7 @@ class DiscoveryOrchestrator:
                 )
                 phase1_exhausted = False
                 if self._should_run_category_recon(marketplace):
+                    discovery_phase = "category_bfs"
                     _phase1_partial_urls, phase1_exhausted = (
                         await bfs_walker.run_category_bfs(
                             marketplace,
@@ -662,6 +735,7 @@ class DiscoveryOrchestrator:
                     duplicate_urls = 0
                     partial_budget = True
                 else:
+                    discovery_phase = "category_harvest"
                     harvest_urls = [marketplace.base_url] + (
                         cursor_store.get_discovered_category_urls(marketplace)
                     )
@@ -711,6 +785,15 @@ class DiscoveryOrchestrator:
             else:
                 status = "completed"
 
+            await _emit_discover_status_inconsistent_if_needed(
+                marketplace_id=mp_id,
+                status=status,
+                persisted_listings=persisted_listings,
+                candidate_urls_found=candidate_urls_found,
+                accepted_urls=accepted_urls,
+            )
+
+            discovery_phase = "finalize"
             completed_at = datetime.now(timezone.utc)
             if status == "error":
                 job_status = "failed"
@@ -754,9 +837,27 @@ class DiscoveryOrchestrator:
                 ),
                 reject_source="discovery",
             )
-            await _meta_update_marketplace_snapshot(marketplace)
+            await _success_meta_snapshot_with_retry(
+                marketplace,
+                job_id=job.id,
+                status=status,
+                persisted_listings=persisted_listings,
+            )
         except Exception as exc:
             logger.exception("Discovery failed for %s", mp_id)
+            await emit_discovery_service_alert(
+                "orchestrator",
+                "error",
+                "discover_exception",
+                f"Discovery failed marketplace_id={mp_id}",
+                marketplace_id=mp_id,
+                context={
+                    "job_id": str(job.id),
+                    "phase": discovery_phase,
+                    "exc_type": type(exc).__name__,
+                    "status": "error",
+                },
+            )
             errors.append(str(exc))
             status = "error"
             completed_at = datetime.now(timezone.utc)
