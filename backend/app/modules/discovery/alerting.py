@@ -123,3 +123,113 @@ async def emit_discovery_service_alert(
             anomaly_type=anomaly_type,
             exc_type=type(exc).__name__,
         )
+
+
+FETCH_EMPTY_SOUP_MIN_SAMPLES = 5
+FETCH_EMPTY_SOUP_RATE_THRESHOLD = 0.8
+
+
+async def emit_fetch_empty_soup_spike_if_needed(
+    *,
+    marketplace_id: UUID,
+    phase: str,
+    total_fetches: int,
+    empty_fetches: int,
+    requires_js: bool,
+    scrape_tier: int,
+) -> None:
+    """Emit when a phase sees a high empty-soup fetch rate (local counters)."""
+    if total_fetches < FETCH_EMPTY_SOUP_MIN_SAMPLES:
+        return
+    empty_rate = empty_fetches / total_fetches
+    if empty_rate < FETCH_EMPTY_SOUP_RATE_THRESHOLD:
+        return
+    await emit_discovery_service_alert(
+        "fetch_adapter",
+        "warning",
+        "fetch_empty_soup_spike",
+        (
+            f"Fetch empty soup spike marketplace_id={marketplace_id} "
+            f"phase={phase}"
+        ),
+        marketplace_id=marketplace_id,
+        context={
+            "phase": phase,
+            "total_fetches": total_fetches,
+            "empty_fetches": empty_fetches,
+            "empty_rate": empty_rate,
+            "requires_js": requires_js,
+            "scrape_tier": scrape_tier,
+        },
+    )
+
+
+CANONICAL_MISSING_MIN_CLASSIFIED = 10
+CANONICAL_MISSING_RATE_THRESHOLD = 0.9
+
+
+async def emit_canonical_missing_rate_high_if_needed(
+    *,
+    marketplace_id: UUID,
+    classified: int,
+    canonical_missing: int,
+) -> None:
+    """Emit when most soup-classified pages lack a canonical link."""
+    if classified < CANONICAL_MISSING_MIN_CLASSIFIED:
+        return
+    rate = canonical_missing / classified
+    if rate < CANONICAL_MISSING_RATE_THRESHOLD:
+        return
+    await emit_discovery_service_alert(
+        "url_canonicalizer",
+        "info",
+        "canonical_missing_rate_high",
+        (
+            f"Canonical missing rate high marketplace_id={marketplace_id} "
+            f"rate={rate:.2f}"
+        ),
+        marketplace_id=marketplace_id,
+        context={
+            "classified": classified,
+            "canonical_missing": canonical_missing,
+            "rate": rate,
+        },
+    )
+
+
+CLASSIFY_UNKNOWN_MIN_CLASSIFIED = 10
+CLASSIFY_UNKNOWN_RATE_THRESHOLD = 0.7
+CLASSIFY_UNKNOWN_ALERT_MODES = frozenset({"full", "full_large"})
+
+
+async def emit_classify_unknown_rate_high_if_needed(
+    *,
+    marketplace_id: UUID,
+    classified: int,
+    unknown_count: int,
+    mode: str,
+) -> None:
+    """Emit when most soup-classified pages return structural role unknown."""
+    if mode not in CLASSIFY_UNKNOWN_ALERT_MODES:
+        return
+    if classified < CLASSIFY_UNKNOWN_MIN_CLASSIFIED:
+        return
+    rate = unknown_count / classified
+    if rate < CLASSIFY_UNKNOWN_RATE_THRESHOLD:
+        return
+    await emit_discovery_service_alert(
+        "classifier_adapter",
+        "warning",
+        "classify_unknown_rate_high",
+        (
+            f"Classify unknown rate high marketplace_id={marketplace_id} "
+            f"mode={mode} rate={rate:.2f}"
+        ),
+        marketplace_id=marketplace_id,
+        context={
+            "classified": classified,
+            "unknown_count": unknown_count,
+            "rate": rate,
+            "mode": mode,
+        },
+    )

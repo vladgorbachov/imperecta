@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
 from app.modules.discovery import classifier_adapter, cursor_store, fetch_adapter
-from app.modules.discovery.alerting import emit_discovery_service_alert
+from app.modules.discovery.alerting import (
+    emit_discovery_service_alert,
+    emit_fetch_empty_soup_spike_if_needed,
+)
 from app.modules.scraper.extractors import extract_internal_links_all
 from app.modules.scraper.scraper_pool import ScraperPool
 
@@ -81,6 +84,24 @@ async def run_category_bfs(
     by discover() — do not shrink again.
     """
     requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
+    total_fetches = 0
+    empty_fetches = 0
+
+    def _record_fetch_result(soup: object | None) -> None:
+        nonlocal total_fetches, empty_fetches
+        total_fetches += 1
+        if soup is None:
+            empty_fetches += 1
+
+    async def _emit_fetch_spike_if_needed() -> None:
+        await emit_fetch_empty_soup_spike_if_needed(
+            marketplace_id=marketplace.id,
+            phase="category_bfs",
+            total_fetches=total_fetches,
+            empty_fetches=empty_fetches,
+            requires_js=requires_js,
+            scrape_tier=scrape_tier,
+        )
 
     saved = cursor_store.load_frontier_state(marketplace)
     if saved:
@@ -156,6 +177,7 @@ async def run_category_bfs(
                     len(queue),
                     len(visited),
                 )
+                await _emit_fetch_spike_if_needed()
                 return unique, False
             cursor_store.apply_frontier(marketplace, queue, visited, [])
             await db.flush()
@@ -217,6 +239,7 @@ async def run_category_bfs(
                 len(visited),
                 len(listing_urls),
             )
+            await _emit_fetch_spike_if_needed()
             return listing_urls, True
         current_url, depth = queue.popleft()
         if depth > RECON_BFS_MAX_DEPTH:
@@ -233,6 +256,7 @@ async def run_category_bfs(
             requires_js=requires_js,
             scrape_tier=scrape_tier,
         )
+        _record_fetch_result(soup)
         if soup is None:
             continue
         role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
@@ -264,6 +288,7 @@ async def run_category_bfs(
                     len(queue),
                     len(visited),
                 )
+                await _emit_fetch_spike_if_needed()
                 return unique, False
         elif role in ("hub", "unknown"):
             for link in extract_internal_links_all(soup, marketplace.base_url):
@@ -282,6 +307,7 @@ async def run_category_bfs(
                 requires_js=requires_js,
                 scrape_tier=scrape_tier,
             )
+            _record_fetch_result(soup)
             if soup is None:
                 continue
             role = classifier_adapter.classify_page_role(soup, marketplace.base_url)
@@ -297,4 +323,5 @@ async def run_category_bfs(
         marketplace.id,
         len(unique),
     )
+    await _emit_fetch_spike_if_needed()
     return unique, False

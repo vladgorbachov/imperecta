@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
 from app.modules.discovery import fetch_adapter
-from app.modules.discovery.alerting import emit_discovery_service_alert
+from app.modules.discovery.alerting import (
+    emit_discovery_service_alert,
+    emit_fetch_empty_soup_spike_if_needed,
+)
 from app.modules.scraper.extractors import (
     detect_next_page,
     extract_links_from_repeated_structure,
@@ -39,6 +42,7 @@ class FilterUrlsByRoleFn(Protocol):
         requires_js: bool,
         scrape_tier: int,
         marketplace_locale: str | None = None,
+        marketplace_id: UUID | None = None,
     ) -> tuple[list[str], dict[str, int | float | str | None]]: ...
 
 
@@ -70,6 +74,7 @@ async def _gate_urls_for_pool(
         requires_js=requires_js,
         scrape_tier=scrape_tier,
         marketplace_locale=marketplace.locale,
+        marketplace_id=marketplace.id,
     )
     return accepted
 
@@ -95,6 +100,14 @@ async def run_product_harvest(
     _ = db
 
     requires_js, scrape_tier = fetch_adapter.fetch_params_from_marketplace(marketplace)
+    total_fetches = 0
+    empty_fetches = 0
+
+    def _record_fetch_result(soup: object | None) -> None:
+        nonlocal total_fetches, empty_fetches
+        total_fetches += 1
+        if soup is None:
+            empty_fetches += 1
 
     total_saved = 0
     empty_streak = 0
@@ -148,6 +161,7 @@ async def run_product_harvest(
                 requires_js=requires_js,
                 scrape_tier=scrape_tier,
             )
+            _record_fetch_result(soup)
             if soup is None:
                 break
 
@@ -278,5 +292,14 @@ async def run_product_harvest(
             empty_streak=empty_streak,
             total_saved=total_saved,
         )
+
+    await emit_fetch_empty_soup_spike_if_needed(
+        marketplace_id=marketplace.id,
+        phase="category_harvest",
+        total_fetches=total_fetches,
+        empty_fetches=empty_fetches,
+        requires_js=requires_js,
+        scrape_tier=scrape_tier,
+    )
 
     return total_saved, next_index, more_remaining

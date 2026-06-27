@@ -162,8 +162,8 @@ async def test_discovery_gate_rejects_nonproduct() -> None:
 
     async def classify_side_effect(url: str, **kwargs):
         if "/collections/" in url:
-            return "listing", url
-        return "product", url
+            return "listing", url, False
+        return "product", url, False
 
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
     accepted, stats = await crawler._filter_urls_by_role(
@@ -183,8 +183,8 @@ async def test_discovery_no_trust_sample_blind_accept(monkeypatch) -> None:
     async def classify_side_effect(url: str, **kwargs):
         calls.append(url)
         if url.endswith("/p/0"):
-            return "listing", url
-        return "product", url
+            return "listing", url, False
+        return "product", url, False
 
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])

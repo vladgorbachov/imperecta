@@ -91,7 +91,7 @@ async def test_classify_and_resolve_url_threads_requires_js_into_fetch_adapter()
     pool.scrape_page_for_analysis = AsyncMock(return_value=("<html></html>", soup))
     orchestrator = DiscoveryOrchestrator(db=MagicMock(), scraper_pool=pool)
 
-    role, pool_url = await orchestrator._classify_and_resolve_url(
+    role, pool_url, _canonical_flag = await orchestrator._classify_and_resolve_url(
         "https://shop.example/p/1",
         requires_js=True,
         scrape_tier=1,

@@ -309,3 +309,147 @@ class TestBfsWalkerDefenceInDepth:
             if len(c.args) >= 3 and c.args[2] == "phase1_budget_exhausted_no_publish"
         ]
         assert len(warning_calls) == 0
+
+
+class TestFetchEmptySoupSpike:
+    """NODE 7: post-loop fetch empty soup rate alerts."""
+
+    @pytest.mark.asyncio
+    async def test_bfs_spike_emits_warning_at_high_empty_rate(self) -> None:
+        from uuid import uuid4
+
+        mp = MagicMock()
+        mp.id = uuid4()
+        mp.base_url = "https://shop.example"
+        mp.requires_js = False
+        mp.scrape_tier = 1
+        mp.recon_frontier_state = {
+            "queue": [
+                [f"https://shop.example/p{i}", 0] for i in range(6)
+            ],
+            "visited": [],
+            "listing_urls": [],
+        }
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock(return_value=(None, None))
+        db = AsyncMock()
+        db.flush = AsyncMock()
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await bfs_walker.run_category_bfs(mp, pool, db, deadline_monotonic=None)
+
+        spike_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "fetch_empty_soup_spike"
+        ]
+        assert len(spike_calls) == 1
+        assert spike_calls[0].args[0] == "fetch_adapter"
+        ctx = spike_calls[0].kwargs["context"]
+        assert ctx["phase"] == "category_bfs"
+        assert ctx["total_fetches"] >= 5
+        assert ctx["empty_rate"] >= 0.8
+        assert ctx["requires_js"] is False
+
+    @pytest.mark.asyncio
+    async def test_bfs_no_spike_below_min_samples(self) -> None:
+        mp = MagicMock()
+        mp.id = "mp-id"
+        mp.base_url = "https://shop.example/"
+        mp.requires_js = False
+        mp.scrape_tier = 1
+        mp.recon_frontier_state = {
+            "queue": [
+                [f"https://shop.example/p{i}", 0] for i in range(3)
+            ],
+            "visited": [],
+            "listing_urls": [],
+        }
+        soup_ok = MagicMock()
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock(
+            side_effect=[
+                (None, None),
+                (None, None),
+                ("<html></html>", soup_ok),
+            ],
+        )
+        db = AsyncMock()
+        db.flush = AsyncMock()
+
+        with (
+            patch(
+                "app.modules.discovery.alerting.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+            patch(
+                "app.modules.discovery.bfs_walker.classifier_adapter.classify_page_role",
+                return_value="listing",
+            ),
+            patch(
+                "app.modules.discovery.bfs_walker.extract_internal_links_all",
+                return_value=[],
+            ),
+        ):
+            await bfs_walker.run_category_bfs(mp, pool, db, deadline_monotonic=None)
+
+        spike_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "fetch_empty_soup_spike"
+        ]
+        assert len(spike_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_bfs_no_spike_when_empty_rate_below_threshold(self) -> None:
+        mp = MagicMock()
+        mp.id = "mp-id"
+        mp.base_url = "https://shop.example/"
+        mp.requires_js = True
+        mp.scrape_tier = 2
+        mp.recon_frontier_state = {
+            "queue": [
+                [f"https://shop.example/p{i}", 0] for i in range(5)
+            ],
+            "visited": [],
+            "listing_urls": [],
+        }
+        soup_ok = MagicMock()
+        pool = MagicMock()
+        pool.scrape_page_for_analysis = AsyncMock(
+            side_effect=[
+                (None, None),
+                (None, None),
+                ("<html></html>", soup_ok),
+                ("<html></html>", soup_ok),
+                (None, None),
+            ],
+        )
+        db = AsyncMock()
+        db.flush = AsyncMock()
+
+        with (
+            patch(
+                "app.modules.discovery.alerting.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+            patch(
+                "app.modules.discovery.bfs_walker.classifier_adapter.classify_page_role",
+                return_value="listing",
+            ),
+            patch(
+                "app.modules.discovery.bfs_walker.extract_internal_links_all",
+                return_value=[],
+            ),
+        ):
+            await bfs_walker.run_category_bfs(mp, pool, db, deadline_monotonic=None)
+
+        spike_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "fetch_empty_soup_spike"
+        ]
+        assert len(spike_calls) == 0

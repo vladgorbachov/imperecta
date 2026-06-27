@@ -51,7 +51,11 @@ from app.modules.persist.meta_write import (
     build_scrape_job_fields,
     write_meta_async,
 )
-from app.modules.discovery.alerting import emit_discovery_service_alert
+from app.modules.discovery.alerting import (
+    emit_canonical_missing_rate_high_if_needed,
+    emit_classify_unknown_rate_high_if_needed,
+    emit_discovery_service_alert,
+)
 from app.modules.persist.writer import (
     build_dim_product_fields,
     build_fact_listing_fields,
@@ -320,10 +324,31 @@ class DiscoveryOrchestrator:
         work_urls = urls[start_offset:] if start_offset > 0 else urls
         normalized_urls = [u for u in work_urls if u]
         hash_by_url = {url: url_canonicalizer.url_hash(url) for url in normalized_urls}
-        existing_hashes = await url_canonicalizer.load_existing_url_hashes(
-            self.db,
-            list(hash_by_url.values()),
-        )
+        hash_count = len(hash_by_url)
+        try:
+            existing_hashes = await url_canonicalizer.load_existing_url_hashes(
+                self.db,
+                list(hash_by_url.values()),
+            )
+        except Exception as exc:
+            await emit_discovery_service_alert(
+                "url_canonicalizer",
+                "error",
+                "dedup_lookup_failed",
+                f"Dedup lookup failed marketplace_id={marketplace_id}",
+                marketplace_id=marketplace_id,
+                context={
+                    "hash_count": hash_count,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+            slog.error(
+                "discovery_dedup_lookup_failed",
+                marketplace_id=str(marketplace_id),
+                hash_count=hash_count,
+                exc_type=type(exc).__name__,
+            )
+            existing_hashes = set()
 
         new_count = 0
         pending_in_batch = 0
@@ -413,8 +438,12 @@ class DiscoveryOrchestrator:
         scrape_tier: int,
         marketplace_locale: str | None,
         accept_language: str | None,
-    ) -> tuple[str, str]:
-        """Fetch, resolve canonical URL, and return (page_role, pool_url)."""
+    ) -> tuple[str, str, bool | None]:
+        """Fetch, resolve canonical URL, and return (page_role, pool_url, canonical_flag).
+
+        canonical_flag is None when fetch/soup failed; True when soup lacked canonical;
+        False when a canonical link was resolved.
+        """
         try:
             _html, soup = await fetch_adapter.fetch_page(
                 self.pool,
@@ -424,16 +453,16 @@ class DiscoveryOrchestrator:
                 accept_language=accept_language,
             )
         except Exception:
-            return "unknown", url
+            return "unknown", url, None
         if soup is None:
-            return "unknown", url
+            return "unknown", url, None
         try:
             canonical = url_canonicalizer.canonical_from_soup(soup, url)
             pool_url = url_canonicalizer.pool_url(canonical, url)
             role = classifier_adapter.classify_page_role(soup, pool_url)
-            return role, pool_url
+            return role, pool_url, canonical is None
         except Exception:
-            return "unknown", url
+            return "unknown", url, None
 
     async def _filter_urls_by_role(
         self,
@@ -442,6 +471,7 @@ class DiscoveryOrchestrator:
         requires_js: bool,
         scrape_tier: int,
         marketplace_locale: str | None = None,
+        marketplace_id: UUID | None = None,
     ) -> tuple[list[str], dict[str, int | float | str | None]]:
         """Classify every candidate URL structurally; admit only page_role=product.
 
@@ -466,23 +496,54 @@ class DiscoveryOrchestrator:
         accept_language = build_accept_language_header(marketplace_locale)
         semaphore = asyncio.Semaphore(SITEMAP_CLASSIFY_CONCURRENCY)
 
-        async def classify_one(target_url: str) -> tuple[str, str, str]:
+        async def classify_one(
+            target_url: str,
+        ) -> tuple[str, str, str, bool | None]:
             async with semaphore:
-                role, pool_url = await self._classify_and_resolve_url(
+                role, pool_url, canonical_flag = await self._classify_and_resolve_url(
                     target_url,
                     requires_js=requires_js,
                     scrape_tier=scrape_tier,
                     marketplace_locale=marketplace_locale,
                     accept_language=accept_language,
                 )
-                return target_url, role, pool_url
+                return target_url, role, pool_url, canonical_flag
+
+        async def _emit_classifier_gate_defence_alerts_if_needed(
+            results: list[tuple[str, str, str, bool | None]],
+            mode: str,
+        ) -> None:
+            if marketplace_id is None:
+                return
+            soup_classified = sum(
+                1 for _source, _role, _pool, flag in results if flag is not None
+            )
+            canonical_missing = sum(
+                1 for _source, _role, _pool, flag in results if flag is True
+            )
+            await emit_canonical_missing_rate_high_if_needed(
+                marketplace_id=marketplace_id,
+                classified=soup_classified,
+                canonical_missing=canonical_missing,
+            )
+            classified = len(results)
+            unknown_count = sum(
+                1 for _source, role, _pool, flag in results
+                if flag is not None and role == "unknown"
+            )
+            await emit_classify_unknown_rate_high_if_needed(
+                marketplace_id=marketplace_id,
+                classified=classified,
+                unknown_count=unknown_count,
+                mode=mode,
+            )
 
         def _products_from_results(
-            results: list[tuple[str, str, str]],
+            results: list[tuple[str, str, str, bool | None]],
         ) -> list[str]:
             seen_hashes: set[str] = set()
             accepted: list[str] = []
-            for _source_url, role, pool_url in results:
+            for _source_url, role, pool_url, _canonical_flag in results:
                 if role != "product":
                     continue
                 url_hash = url_canonicalizer.url_hash(pool_url)
@@ -492,9 +553,12 @@ class DiscoveryOrchestrator:
                 accepted.append(pool_url)
             return accepted
 
-        def _log_gate(results: list[tuple[str, str, str]], accepted: list[str]) -> None:
+        def _log_gate(
+            results: list[tuple[str, str, str, bool | None]],
+            accepted: list[str],
+        ) -> None:
             kept = len(accepted)
-            rejected = sum(1 for _s, role, _p in results if role != "product")
+            rejected = sum(1 for _s, role, _p, _f in results if role != "product")
             logger.info(
                 "discovery_gate_classified total=%d kept_product=%d rejected_nonproduct=%d",
                 len(results),
@@ -509,13 +573,16 @@ class DiscoveryOrchestrator:
             accepted = _products_from_results(results)
             stats["accepted"] = len(accepted)
             _log_gate(results, accepted)
+            await _emit_classifier_gate_defence_alerts_if_needed(results, "full")
             return accepted, stats
 
         sample_size = min(SITEMAP_SAMPLE_SIZE, len(urls))
         sample = random.sample(urls, sample_size)
         sample_results = await asyncio.gather(*(classify_one(u) for u in sample))
         stats["sampled"] = len(sample_results)
-        product_in_sample = sum(1 for _u, role, _p in sample_results if role == "product")
+        product_in_sample = sum(
+            1 for _u, role, _p, _f in sample_results if role == "product"
+        )
         ratio = product_in_sample / len(sample_results) if sample_results else 0.0
         stats["sample_product_ratio"] = round(ratio, 3)
 
@@ -525,9 +592,13 @@ class DiscoveryOrchestrator:
             stats["classified"] = len(sample_results)
             stats["accepted"] = len(accepted)
             _log_gate(sample_results, accepted)
+            await _emit_classifier_gate_defence_alerts_if_needed(
+                sample_results,
+                "reject_sample",
+            )
             return accepted, stats
 
-        sample_urls_set = {source for source, _role, _pool in sample_results}
+        sample_urls_set = {source for source, _role, _pool, _f in sample_results}
         remaining = [u for u in urls if u not in sample_urls_set]
         remaining_results = await asyncio.gather(*(classify_one(u) for u in remaining))
         all_results = list(sample_results) + list(remaining_results)
@@ -536,6 +607,7 @@ class DiscoveryOrchestrator:
         accepted = _products_from_results(all_results)
         stats["accepted"] = len(accepted)
         _log_gate(all_results, accepted)
+        await _emit_classifier_gate_defence_alerts_if_needed(all_results, "full_large")
         return accepted, stats
 
     def _should_run_category_recon(self, marketplace: DimMarketplace) -> bool:

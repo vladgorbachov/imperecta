@@ -87,6 +87,7 @@ async def harvest_sitemap(
         requires_js=requires_js,
         scrape_tier=scrape_tier,
         marketplace_locale=marketplace.locale,
+        marketplace_id=marketplace.id,
     )
     rejected_count = len(raw_urls) - len(filtered_urls)
     classify_mode = classify_stats.get("mode")

@@ -329,3 +329,126 @@ class TestCategoryProcessorDefenceInDepth:
             if len(c.args) >= 3 and c.args[2] == "phase2_zero_yield"
         ]
         assert len(zero_yield_calls) == 0
+
+
+class TestFetchEmptySoupSpike:
+    """NODE 7: post-loop fetch empty soup rate alerts."""
+
+    @pytest.mark.asyncio
+    async def test_harvest_spike_emits_warning_at_high_empty_rate(self) -> None:
+        mp, pool, db = _harvest_fixtures()
+        pool.scrape_page_for_analysis = AsyncMock(return_value=(None, None))
+        urls = [f"https://shop.example/c/{i}" for i in range(5)]
+
+        async def filter_urls_by_role(gated, **kwargs):
+            return gated, {"mode": "full"}
+
+        async def save_product_urls(*args, **kwargs):
+            return (0, 0, False)
+
+        with (
+            patch(
+                "app.modules.discovery.alerting.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+            pytest.MonkeyPatch.context() as monkeypatch,
+        ):
+            monkeypatch.setattr(
+                category_processor,
+                "CATEGORY_CONVERGENCE_STREAK",
+                10,
+            )
+            await category_processor.run_product_harvest(
+                mp,
+                pool,
+                db,
+                urls,
+                filter_urls_by_role=filter_urls_by_role,
+                save_product_urls=save_product_urls,
+            )
+
+        spike_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "fetch_empty_soup_spike"
+        ]
+        assert len(spike_calls) == 1
+        ctx = spike_calls[0].kwargs["context"]
+        assert ctx["phase"] == "category_harvest"
+        assert ctx["total_fetches"] == 5
+        assert ctx["empty_rate"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_harvest_no_spike_below_min_samples(self) -> None:
+        mp, pool, db = _harvest_fixtures()
+        pool.scrape_page_for_analysis = AsyncMock(return_value=(None, None))
+        urls = [f"https://shop.example/c/{i}" for i in range(3)]
+
+        async def filter_urls_by_role(gated, **kwargs):
+            return gated, {"mode": "full"}
+
+        async def save_product_urls(*args, **kwargs):
+            return (0, 0, False)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await category_processor.run_product_harvest(
+                mp,
+                pool,
+                db,
+                urls,
+                filter_urls_by_role=filter_urls_by_role,
+                save_product_urls=save_product_urls,
+            )
+
+        spike_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "fetch_empty_soup_spike"
+        ]
+        assert len(spike_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_harvest_no_spike_on_normal_run(self) -> None:
+        mp, pool, db = _harvest_fixtures()
+        urls = [f"https://shop.example/c/{i}" for i in range(3)]
+
+        async def filter_urls_by_role(gated, **kwargs):
+            return gated, {"mode": "full"}
+
+        async def save_product_urls(*args, **kwargs):
+            return (len(args[1]), len(args[1]), False)
+
+        with (
+            pytest.MonkeyPatch.context() as monkeypatch,
+            patch(
+                "app.modules.discovery.alerting.emit_discovery_service_alert",
+                new_callable=AsyncMock,
+            ) as alert_mock,
+        ):
+            monkeypatch.setattr(
+                "app.modules.discovery.category_processor.extract_links_from_repeated_structure",
+                lambda soup, base, current: ["https://shop.example/p/1"],
+            )
+            monkeypatch.setattr(
+                "app.modules.discovery.category_processor.detect_next_page",
+                lambda soup, current: None,
+            )
+            total, _, _ = await category_processor.run_product_harvest(
+                mp,
+                pool,
+                db,
+                urls,
+                filter_urls_by_role=filter_urls_by_role,
+                save_product_urls=save_product_urls,
+            )
+
+        assert total > 0
+        spike_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "fetch_empty_soup_spike"
+        ]
+        assert len(spike_calls) == 0

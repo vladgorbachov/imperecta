@@ -136,9 +136,9 @@ async def test_filter_urls_by_role_full_mode():
 
     crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
     roles = {
-        "https://shop.example/p/1": ("product", "https://shop.example/p/1"),
-        "https://shop.example/p/2": ("listing", "https://shop.example/p/2"),
-        "https://shop.example/p/3": ("product", "https://shop.example/p/3"),
+        "https://shop.example/p/1": ("product", "https://shop.example/p/1", False),
+        "https://shop.example/p/2": ("listing", "https://shop.example/p/2", False),
+        "https://shop.example/p/3": ("product", "https://shop.example/p/3", False),
     }
 
     async def classify_side_effect(url: str, **kwargs):
@@ -161,7 +161,7 @@ async def test_filter_urls_by_role_large_list_classifies_all(monkeypatch):
     crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
     urls = [f"https://shop.example/p/{index}" for index in range(150)]
     crawler._classify_and_resolve_url = AsyncMock(
-        return_value=("product", "https://shop.example/p/x"),
+        return_value=("product", "https://shop.example/p/x", False),
     )
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
 
@@ -185,7 +185,7 @@ async def test_filter_urls_by_role_reject_sample(monkeypatch):
         nonlocal call_count
         call_count += 1
         role = "product" if call_count == 3 else "hub"
-        return role, url
+        return role, url, False
 
     crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
     monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
@@ -1749,3 +1749,421 @@ class TestGatePersistDefenceInDepth:
         assert exhausted is False
         assert pool_state["calls"] == 1
         alert_mock.assert_not_awaited()
+
+
+class TestUrlCanonicalizerDefenceInDepth:
+    """NODE 8: dedup lookup degrade + canonical missing rate alerts."""
+
+    @pytest.mark.asyncio
+    async def test_dedup_lookup_failed_emits_alert_and_continues(self, monkeypatch):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+        db.execute = AsyncMock(side_effect=RuntimeError("db down"))
+        pool_state = _patch_pool_write(monkeypatch)
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            new_count, next_offset, exhausted = await crawler._save_product_urls(
+                mp_id,
+                [
+                    "https://shop.example/p/a",
+                    "https://shop.example/p/b",
+                ],
+            )
+
+        assert new_count == 2
+        assert next_offset == 2
+        assert exhausted is False
+        assert pool_state["calls"] == 1
+        alert_mock.assert_awaited_once()
+        args = alert_mock.await_args.args
+        assert args[0] == "url_canonicalizer"
+        assert args[1] == "error"
+        assert args[2] == "dedup_lookup_failed"
+        assert alert_mock.await_args.kwargs["context"]["hash_count"] == 2
+        assert alert_mock.await_args.kwargs["context"]["exc_type"] == "RuntimeError"
+
+    @pytest.mark.asyncio
+    async def test_dedup_lookup_success_no_alert(self, monkeypatch):
+        mp_id = uuid4()
+        db = _make_mock_db_for_save()
+        pool_state = _patch_pool_write(monkeypatch)
+
+        with patch(
+            "app.modules.discovery.orchestrator.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            crawler = disc.DiscoveryOrchestrator(db, MagicMock())
+            new_count, next_offset, exhausted = await crawler._save_product_urls(
+                mp_id,
+                ["https://shop.example/p/new"],
+            )
+
+        assert new_count == 1
+        assert pool_state["calls"] == 1
+        alert_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_canonical_missing_rate_high_emits_info(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        async def classify_side_effect(url: str, **kwargs):
+            return "product", url, True
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        rate_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "canonical_missing_rate_high"
+        ]
+        assert len(rate_calls) == 1
+        assert rate_calls[0].args[0] == "url_canonicalizer"
+        assert rate_calls[0].args[1] == "info"
+        ctx = rate_calls[0].kwargs["context"]
+        assert ctx["classified"] == 10
+        assert ctx["canonical_missing"] == 10
+        assert ctx["rate"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_canonical_missing_rate_at_threshold_emits_info(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        async def classify_side_effect(url: str, **kwargs):
+            if url.endswith("/p/0"):
+                return "product", url, False
+            return "product", url, True
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        rate_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "canonical_missing_rate_high"
+        ]
+        assert len(rate_calls) == 1
+        assert rate_calls[0].kwargs["context"]["rate"] == 0.9
+
+    @pytest.mark.asyncio
+    async def test_canonical_missing_rate_below_threshold_no_alert(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        async def classify_side_effect(url: str, **kwargs):
+            if url.endswith("/p/0") or url.endswith("/p/1"):
+                return "product", url, False
+            return "product", url, True
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        rate_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "canonical_missing_rate_high"
+        ]
+        assert len(rate_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_canonical_missing_below_min_classified_no_alert(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(9)]
+
+        crawler._classify_and_resolve_url = AsyncMock(
+            return_value=("product", "https://shop.example/p/x", True),
+        )
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        rate_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "canonical_missing_rate_high"
+        ]
+        assert len(rate_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_canonical_present_on_most_pages_no_rate_alert(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        crawler._classify_and_resolve_url = AsyncMock(
+            return_value=("product", "https://shop.example/p/x", False),
+        )
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        canonical_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "canonical_missing_rate_high"
+        ]
+        assert len(canonical_calls) == 0
+
+
+class TestClassifierAdapterDefenceInDepth:
+    """NODE 9: classify unknown rate spike alerts in gate aggregate."""
+
+    @pytest.mark.asyncio
+    async def test_classify_unknown_rate_high_emits_warning(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        async def classify_side_effect(url: str, **kwargs):
+            if url.endswith("/p/0") or url.endswith("/p/1") or url.endswith("/p/2"):
+                return "product", url, False
+            return "unknown", url, False
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            accepted, stats = await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        assert stats["mode"] == "full"
+        assert len(accepted) == 3
+        unknown_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "classify_unknown_rate_high"
+        ]
+        assert len(unknown_calls) == 1
+        assert unknown_calls[0].args[0] == "classifier_adapter"
+        assert unknown_calls[0].args[1] == "warning"
+        ctx = unknown_calls[0].kwargs["context"]
+        assert ctx["classified"] == 10
+        assert ctx["unknown_count"] == 7
+        assert ctx["rate"] == 0.7
+        assert ctx["mode"] == "full"
+
+    @pytest.mark.asyncio
+    async def test_reject_sample_mode_skips_unknown_alert(self, monkeypatch) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/page/{index}" for index in range(150)]
+        call_count = 0
+
+        async def classify_side_effect(url: str, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return "unknown", url, False
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+        monkeypatch.setattr(disc.random, "sample", lambda population, k: population[:k])
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            _accepted, stats = await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        assert stats["mode"] == "reject_sample"
+        unknown_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "classify_unknown_rate_high"
+        ]
+        assert len(unknown_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_classify_unknown_rate_below_threshold_no_alert(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        async def classify_side_effect(url: str, **kwargs):
+            if url.endswith("/p/0") or url.endswith("/p/1") or url.endswith("/p/2"):
+                return "product", url, False
+            if url.endswith("/p/3"):
+                return "unknown", url, False
+            return "listing", url, False
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        unknown_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "classify_unknown_rate_high"
+        ]
+        assert len(unknown_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_fetch_failure_unknown_not_counted(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(10)]
+
+        async def classify_side_effect(url: str, **kwargs):
+            if url.endswith("/p/0") or url.endswith("/p/1") or url.endswith("/p/2"):
+                return "unknown", url, None
+            if url.endswith("/p/3"):
+                return "product", url, False
+            return "unknown", url, False
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        unknown_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "classify_unknown_rate_high"
+        ]
+        assert len(unknown_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_classify_unknown_below_min_classified_no_alert(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [f"https://shop.example/p/{index}" for index in range(9)]
+
+        crawler._classify_and_resolve_url = AsyncMock(
+            return_value=("unknown", "https://shop.example/p/x", False),
+        )
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        unknown_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "classify_unknown_rate_high"
+        ]
+        assert len(unknown_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_normal_classify_no_unknown_alert(self) -> None:
+        mp_id = uuid4()
+        crawler = disc.DiscoveryOrchestrator(MagicMock(), MagicMock())
+        urls = [
+            "https://shop.example/p/1",
+            "https://shop.example/p/2",
+            "https://shop.example/collections/all",
+        ]
+
+        async def classify_side_effect(url: str, **kwargs):
+            if "/collections/" in url:
+                return "listing", url, False
+            return "product", url, False
+
+        crawler._classify_and_resolve_url = AsyncMock(side_effect=classify_side_effect)
+
+        with patch(
+            "app.modules.discovery.alerting.emit_discovery_service_alert",
+            new_callable=AsyncMock,
+        ) as alert_mock:
+            accepted, stats = await crawler._filter_urls_by_role(
+                urls,
+                requires_js=False,
+                scrape_tier=1,
+                marketplace_id=mp_id,
+            )
+
+        assert stats["accepted"] == 2
+        unknown_calls = [
+            c
+            for c in alert_mock.await_args_list
+            if len(c.args) >= 3 and c.args[2] == "classify_unknown_rate_high"
+        ]
+        assert len(unknown_calls) == 0
