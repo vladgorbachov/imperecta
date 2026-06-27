@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class MarketplaceCreateByUrl(BaseModel):
     url: str
+    country_code: str = Field(..., min_length=2, max_length=2)
 
 
 class MarketplaceUpdate(BaseModel):
@@ -16,6 +17,17 @@ class MarketplaceUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     url: str | None = Field(None, min_length=1, max_length=2048)
     is_active: bool | None = None
+    country_code: str | None = Field(None, min_length=2, max_length=2)
+
+
+class CountryRef(BaseModel):
+    """Active dim_country row for admin marketplace country picker."""
+
+    code: str
+    name: str
+    name_local: str | None = None
+    region: str
+    currency_code: str
 
 
 class AdminMarketplaceListItem(BaseModel):
@@ -31,6 +43,7 @@ class AdminMarketplaceListItem(BaseModel):
     marketplace_id: str
     name: str
     domain: str
+    country_code: str
     country: str
     region: str = ""
     source: Literal["registry", "admin"] = "admin"

@@ -12,6 +12,7 @@ from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
 from app.models.dimensions import DimCountry, DimMarketplace
 from app.modules.marketplaces.schemas import (
     AdminMarketplaceListItem,
+    CountryRef,
     MarketplaceCreateByUrl,
     MarketplaceUpdate,
 )
@@ -46,6 +47,7 @@ def _to_admin_row(mp: DimMarketplace, region: str) -> AdminMarketplaceListItem:
         marketplace_id=str(mp.id),
         name=mp.name,
         domain=mp.domain,
+        country_code=mp.country_code,
         country=mp.country_code,
         region=region,
         source="admin",
@@ -66,6 +68,35 @@ async def _regions_for_marketplaces(db, rows: list[DimMarketplace]) -> dict[str,
         ),
     )
     return {c: r for c, r in result.all()}
+
+
+@router.get("/countries", response_model=list[CountryRef])
+async def list_marketplace_countries(
+    db: DbSession,
+    _current_user: CurrentSuperuser,
+) -> list[CountryRef]:
+    """Active dim_country rows for admin marketplace create/edit picker."""
+    result = await db.execute(
+        select(
+            DimCountry.country_code,
+            DimCountry.name,
+            DimCountry.name_local,
+            DimCountry.region,
+            DimCountry.currency_code,
+        )
+        .where(DimCountry.is_active.is_(True))
+        .order_by((DimCountry.country_code == "ZZ"), DimCountry.name),
+    )
+    return [
+        CountryRef(
+            code=row.country_code,
+            name=row.name,
+            name_local=row.name_local,
+            region=row.region,
+            currency_code=row.currency_code,
+        )
+        for row in result.all()
+    ]
 
 
 @router.get("", response_model=list[AdminMarketplaceListItem])
@@ -90,7 +121,7 @@ async def add_marketplace_root(
         raise HTTPException(status_code=400, detail="URL is required")
     svc = MarketplaceService(db)
     try:
-        mp, _is_new = await svc.add_by_url(url)
+        mp, _is_new = await svc.add_by_url(url, country_code=body.country_code)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     regions = await _regions_for_marketplaces(db, [mp])
@@ -104,7 +135,7 @@ async def update_marketplace(
     db: DbSession,
     _current_user: CurrentSuperuser,
 ) -> AdminMarketplaceListItem:
-    """Update marketplace name, URL, or active flag."""
+    """Update marketplace name, URL, country, or active flag."""
     svc = MarketplaceService(db)
     payload = body.model_dump(exclude_unset=True)
     url = payload.pop("url", None)

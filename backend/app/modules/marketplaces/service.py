@@ -87,6 +87,7 @@ class MarketplaceService:
             "base_url",
             "rate_limit_delay",
             "locale",
+            "country_code",
         }
     )
 
@@ -97,10 +98,6 @@ class MarketplaceService:
         """All marketplaces ordered by name."""
         result = await self.db.execute(select(DimMarketplace).order_by(DimMarketplace.name))
         return list(result.scalars().all())
-
-    @staticmethod
-    def _tld_to_country(tld: str) -> str:
-        return tld.upper()
 
     @staticmethod
     def _make_marketplace_code(domain: str) -> str:
@@ -118,31 +115,11 @@ class MarketplaceService:
         )
         return bool(q)
 
-    async def _fallback_country_code(self) -> str:
-        any_code = await self.db.scalar(select(DimCountry.country_code).limit(1))
-        if not any_code:
-            raise ValueError("No active countries configured in dim_country")
-        return any_code
-
-    async def _resolve_country_and_currency(self, domain: str) -> tuple[str, str]:
-        parts = domain.lower().split(".")
-        tld = parts[-1] if len(parts) >= 2 else ""
-        candidate = self._tld_to_country(tld)
-        if await self._country_exists(candidate):
-            cc_row = await self.db.execute(
-                select(DimCountry.currency_code).where(DimCountry.country_code == candidate)
-            )
-            cur = cc_row.scalar_one()
-            if await self._currency_exists(cur):
-                return candidate, cur
-        fb = await self._fallback_country_code()
-        cc_row = await self.db.execute(
-            select(DimCountry.currency_code).where(DimCountry.country_code == fb),
+    async def _lookup_country_currency(self, country_code: str) -> str | None:
+        currency = await self.db.scalar(
+            select(DimCountry.currency_code).where(DimCountry.country_code == country_code),
         )
-        cur = cc_row.scalar_one()
-        if not await self._currency_exists(cur):
-            raise ValueError(f"Currency {cur} is not configured in dim_currency")
-        return fb, cur
+        return str(currency) if currency else None
 
     async def _currency_exists(self, code: str) -> bool:
         q = await self.db.scalar(
@@ -150,8 +127,20 @@ class MarketplaceService:
         )
         return bool(q)
 
-    async def add_by_url(self, url: str) -> tuple[DimMarketplace, bool]:
-        """Add marketplace from URL: extract domain, infer country/currency from TLD + dim_country.
+    async def _resolve_explicit_country(self, country_code: str) -> tuple[str, str]:
+        """Validate admin-chosen country and return (code, currency_code)."""
+        normalized = country_code.strip().upper()
+        if not await self._country_exists(normalized):
+            raise ValueError(f"Unknown country code: {normalized}")
+        currency_code = await self._lookup_country_currency(normalized)
+        if not currency_code:
+            raise ValueError(f"Unknown country code: {normalized}")
+        if not await self._currency_exists(currency_code):
+            raise ValueError(f"Currency {currency_code} is not configured in dim_currency")
+        return normalized, currency_code
+
+    async def add_by_url(self, url: str, *, country_code: str) -> tuple[DimMarketplace, bool]:
+        """Add marketplace from URL with an explicit country (no TLD inference).
 
         Returns (row, is_new). Duplicate domain returns existing row with is_new=False.
         """
@@ -167,7 +156,7 @@ class MarketplaceService:
         if existing:
             return existing, False
 
-        country_code, currency_code = await self._resolve_country_and_currency(domain)
+        resolved_country, currency_code = await self._resolve_explicit_country(country_code)
         marketplace_code = self._make_marketplace_code(domain)
         code_taken = await self.db.scalar(
             select(DimMarketplace.id).where(DimMarketplace.marketplace_code == marketplace_code)
@@ -185,8 +174,8 @@ class MarketplaceService:
             marketplace_code=marketplace_code,
             name=name[:200],
             source_type="marketplace",
-            country_code=country_code,
-            operates_in=[country_code],
+            country_code=resolved_country,
+            operates_in=[resolved_country],
             domain=domain[:255],
             base_url=base,
             api_available=False,
@@ -253,6 +242,12 @@ class MarketplaceService:
                 applied[key] = bool(value)
                 continue
             if value is None:
+                continue
+            if key == "country_code":
+                resolved_country, currency_code = await self._resolve_explicit_country(str(value))
+                applied["country_code"] = resolved_country
+                applied["operates_in"] = [resolved_country]
+                applied["currency_code"] = currency_code
                 continue
             applied[key] = value
         if not applied:
