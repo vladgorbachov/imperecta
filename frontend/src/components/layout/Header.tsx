@@ -53,7 +53,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
 
   return (
     <header
-      className="flex h-[84px] min-h-[44px] min-w-0 shrink-0 items-center justify-between overflow-hidden px-3 backdrop-blur-xl safe-area-top sm:px-4 md:px-5"
+      className="flex h-[84px] min-h-[44px] min-w-0 shrink-0 items-center gap-1.5 overflow-hidden px-3 backdrop-blur-xl safe-area-top sm:gap-2 sm:px-4 md:px-5"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {onMenuClick && (
@@ -67,14 +67,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
             <Menu className="size-4" />
           </Button>
         )}
-        <HeaderTicker
-          className={cn(
-            "min-w-0 flex-1",
-            isDashboardRoute
-              ? "pe-2 sm:pe-3 md:max-w-[min(100%,42rem)] lg:max-w-[min(100%,48rem)]"
-              : "pe-4 sm:pe-6",
-          )}
-        />
+        <HeaderTicker className="min-w-0 flex-1" />
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         {isDashboardRoute ? <DashboardHeaderCountrySelector /> : null}

@@ -198,3 +198,14 @@
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   box-shadow: 0 0 8px var(--accent-glow);
 }
+
+/* Scoped invisible scrollbar for dashboard catalog list (scroll still works). */
+.catalog-scroll-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.catalog-scroll-hidden::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

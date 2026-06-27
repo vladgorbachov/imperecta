@@ -45,8 +45,10 @@ import { useDashboardCountryStore } from "@/stores/dashboardCountryStore";
 type SortKey = "random" | "recent" | "gainers" | "losers" | "volatile" | "trending";
 
 const PAGE_LIMIT = 200;
-const MARKET_OVERVIEW_INITIAL_VISIBLE = 20;
-const MARKET_OVERVIEW_EXPAND_STEP = 20;
+
+/** Denser product grid — roughly 2× columns vs the prior layout. */
+const PRODUCT_GRID_CLASS =
+  "grid grid-cols-4 gap-1.5 sm:grid-cols-6 sm:gap-2 lg:grid-cols-6 xl:grid-cols-8";
 
 /** Sort keys backed by the /markets/overview endpoint. "random" maps to "recent". */
 const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string }> = [
@@ -174,34 +176,34 @@ function ProductCard({
     </div>
   );
   const titleContent = (
-    <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-foreground">
+    <p className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug text-foreground">
       {item.title ?? t("market.overview.untitled")}
     </p>
   );
 
   return (
-    <article className="surface-base is-interactive flex flex-col gap-2 rounded-xl p-3">
+    <article className="surface-base is-interactive flex flex-col gap-1.5 rounded-lg p-2">
       {externalHref ? (
         <a
           href={externalHref}
           target="_blank"
           rel="noopener noreferrer"
-          className="space-y-2"
+          className="space-y-1.5"
           aria-label={t("market.openProduct")}
         >
           {imageContent}
           {titleContent}
         </a>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {imageContent}
           {titleContent}
         </div>
       )}
 
-      <div className="mt-auto space-y-1.5">
+      <div className="mt-auto space-y-1">
         <PriceDisplay
-          className="text-lg font-bold text-foreground"
+          className="text-sm font-bold text-foreground"
           localAmount={item.price}
           localCurrency={item.currency}
           displayAmount={item.display_price}
@@ -225,8 +227,8 @@ function ProductCard({
           )}
         </div>
         {externalHref && (
-          <div className="flex items-center gap-1.5 pt-1">
-            <Button size="sm" variant="ghost" asChild>
+          <div className="flex items-center gap-1 pt-0.5">
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" asChild>
               <a
                 href={externalHref}
                 target="_blank"
@@ -259,7 +261,6 @@ export function MarketsOverviewSection() {
   const [priceMax, setPriceMax] = useState("");
   const [historyOnly, setHistoryOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("random");
-  const [visibleCount, setVisibleCount] = useState(MARKET_OVERVIEW_INITIAL_VISIBLE);
   const [filtersOpenMobile, setFiltersOpenMobile] = useState(false);
   const debouncedSearch = useDebounce(searchRaw, 400);
 
@@ -527,19 +528,6 @@ export function MarketsOverviewSection() {
   const totalPoolKpi = poolStatsError
     ? null
     : poolStats?.total_products ?? null;
-
-  useEffect(() => {
-    setVisibleCount(MARKET_OVERVIEW_INITIAL_VISIBLE);
-  }, [debouncedSearch, historyOnly, priceMin, priceMax, selectedMarketplaces, sort]);
-
-  const visibleItems = useMemo(
-    () => filteredItems.slice(0, visibleCount),
-    [filteredItems, visibleCount],
-  );
-  const hasMoreItems = visibleCount < filteredItems.length;
-  const canCollapse =
-    filteredItems.length > MARKET_OVERVIEW_INITIAL_VISIBLE &&
-    visibleCount > MARKET_OVERVIEW_INITIAL_VISIBLE;
 
   const localCurrencyUnavailable = useMemo(() => {
     if (selectedMarketplaces.length !== 1) {
@@ -812,9 +800,9 @@ export function MarketsOverviewSection() {
         </div>
       </div>
 
-      <div className="grid items-start gap-3 lg:grid-cols-[260px_1fr]">
-        <aside className="hidden lg:block">
-          <div className="surface-base surface-liquid sticky top-2.5 rounded-xl p-3.5">
+      <div className="grid gap-3 lg:grid-cols-[260px_1fr] lg:items-stretch">
+        <aside className="hidden min-h-0 lg:block">
+          <div className="surface-base surface-liquid flex h-full flex-col rounded-xl p-3.5">
             <div className="relative mb-3">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -828,101 +816,80 @@ export function MarketsOverviewSection() {
           </div>
         </aside>
 
-        <div className="min-w-0">
-          <div className="surface-base surface-liquid rounded-xl p-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">
-                {t("market.found", { count: filteredItems.length })}
-              </h3>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="lg:hidden"
-                  onClick={() => setFiltersOpenMobile((value) => !value)}
-                >
-                  <SlidersHorizontal className="size-4" />
-                  {t("market.filters.title")}
-                </Button>
-                <span className="hidden text-xs text-muted-foreground sm:inline">
-                  {t("market.sort.label")}
-                </span>
-                <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
-                  <SelectTrigger className="h-8 w-[170px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.key} value={option.key}>
-                        {t(option.labelKey)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {filtersOpenMobile && (
-              <div className="mt-3 lg:hidden">
-                <div className="relative mb-3">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={searchRaw}
-                    onChange={(event) => setSearchRaw(event.target.value)}
-                    placeholder={t("market.overview.searchPlaceholder")}
-                    className="pl-9"
-                  />
-                </div>
-                {filterPanel}
-              </div>
-            )}
-
-            {isLoading ? (
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                {Array.from({ length: 10 }).map((_, index) => (
-                  <Skeleton key={index} className="h-64 w-full rounded-xl" />
-                ))}
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="mt-4">
-                <EmptyState
-                  title="dashboard.market.noData"
-                  description="market.overview.noDataDescription"
-                  icon={AlertTriangle}
-                />
-              </div>
-            ) : (
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                {visibleItems.map((item) => (
-                  <ProductCard key={item.id} item={item} />
-                ))}
-              </div>
-            )}
-
-            {filteredItems.length > MARKET_OVERVIEW_INITIAL_VISIBLE ? (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                {hasMoreItems ? (
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="surface-base surface-liquid flex min-h-0 flex-col rounded-xl p-3.5 lg:h-full lg:overflow-hidden">
+            <div className="shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">
+                  {t("market.found", { count: filteredItems.length })}
+                </h3>
+                <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
-                    onClick={() =>
-                      setVisibleCount((prev) =>
-                        Math.min(filteredItems.length, prev + MARKET_OVERVIEW_EXPAND_STEP),
-                      )
-                    }
+                    size="sm"
+                    className="lg:hidden"
+                    onClick={() => setFiltersOpenMobile((value) => !value)}
                   >
-                    {t("market.overview.expandBy", { count: MARKET_OVERVIEW_EXPAND_STEP })}
+                    <SlidersHorizontal className="size-4" />
+                    {t("market.filters.title")}
                   </Button>
-                ) : null}
-                {canCollapse ? (
-                  <Button
-                    variant="ghost"
-                    onClick={() => setVisibleCount(MARKET_OVERVIEW_INITIAL_VISIBLE)}
-                  >
-                    {t("market.overview.collapse")}
-                  </Button>
-                ) : null}
+                  <span className="hidden text-xs text-muted-foreground sm:inline">
+                    {t("market.sort.label")}
+                  </span>
+                  <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
+                    <SelectTrigger className="h-8 w-[170px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {SORT_OPTIONS.map((option) => (
+                        <SelectItem key={option.key} value={option.key}>
+                          {t(option.labelKey)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            ) : null}
+
+              {filtersOpenMobile && (
+                <div className="mt-3 lg:hidden">
+                  <div className="relative mb-3">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={searchRaw}
+                      onChange={(event) => setSearchRaw(event.target.value)}
+                      placeholder={t("market.overview.searchPlaceholder")}
+                      className="pl-9"
+                    />
+                  </div>
+                  {filterPanel}
+                </div>
+              )}
+            </div>
+
+            <div className="catalog-scroll-hidden mt-3 min-h-0 flex-1 overflow-y-auto lg:mt-3">
+              {isLoading ? (
+                <div className={PRODUCT_GRID_CLASS}>
+                  {Array.from({ length: 16 }).map((_, index) => (
+                    <Skeleton key={index} className="aspect-[3/4] w-full rounded-lg" />
+                  ))}
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="flex min-h-[14rem] items-center justify-center py-6 lg:min-h-full">
+                  <EmptyState
+                    title="dashboard.market.noData"
+                    description="market.overview.noDataDescription"
+                    icon={AlertTriangle}
+                  />
+                </div>
+              ) : (
+                <div className={PRODUCT_GRID_CLASS}>
+                  {filteredItems.map((item) => (
+                    <ProductCard key={item.id} item={item} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
