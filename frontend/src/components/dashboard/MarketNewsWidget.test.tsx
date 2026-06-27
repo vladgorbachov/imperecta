@@ -108,4 +108,48 @@ describe("MarketNewsWidget", () => {
     renderWidget();
     expect(await screen.findByText("market.news.loadError")).toBeInTheDocument();
   });
+
+  it("cleans noisy source strings for display", async () => {
+    getNewsMock.mockResolvedValue({
+      data: {
+        items: [
+          {
+            title: "Retail headline",
+            source: "Retail Week; Feedloaderapi; Retail Week",
+            published_at: "2026-06-20T10:00:00Z",
+            snippet: "Snippet text.",
+            url: "https://example.com/article-2",
+            image_url: null,
+          },
+        ],
+        source_provider: "currents",
+      },
+    });
+
+    renderWidget();
+    expect(await screen.findByText("Retail Week")).toBeInTheDocument();
+    expect(screen.queryByText(/Feedloaderapi/i)).not.toBeInTheDocument();
+  });
+
+  it("omits unknown source and keeps relative time", async () => {
+    getNewsMock.mockResolvedValue({
+      data: {
+        items: [
+          {
+            title: "Headline only source",
+            source: "unknown",
+            published_at: "2026-06-20T10:00:00Z",
+            snippet: "Snippet.",
+            url: "https://example.com/article-3",
+            image_url: null,
+          },
+        ],
+        source_provider: "currents",
+      },
+    });
+
+    renderWidget();
+    expect(await screen.findByText("Headline only source")).toBeInTheDocument();
+    expect(screen.queryByText("unknown")).not.toBeInTheDocument();
+  });
 });

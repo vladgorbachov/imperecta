@@ -137,7 +137,7 @@ export function MarketNewsWidget({ countryCode }: MarketNewsWidgetProps) {
         <p className="text-xs text-muted-foreground sm:text-sm">{t("market.news.subtitle")}</p>
       </header>
 
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         {isLoading ? (
           <NewsSkeleton />
         ) : isError ? (
@@ -151,7 +151,7 @@ export function MarketNewsWidget({ countryCode }: MarketNewsWidgetProps) {
             className="py-8"
           />
         ) : (
-          <ul className="max-h-[min(70vh,48rem)] space-y-3 overflow-y-auto pr-0.5 lg:max-h-none lg:overflow-visible">
+          <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
             {items.map((item) => (
               <li key={`${item.url}-${item.published_at}`}>
                 <NewsItemCard item={item} locale={i18n.language} />

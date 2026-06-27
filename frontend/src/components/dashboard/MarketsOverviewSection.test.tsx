@@ -209,6 +209,8 @@ describe("MarketsOverviewSection", () => {
     expect(getMoversCoverageMock).toHaveBeenCalled();
     expect(getDashboardKpiMock).toHaveBeenCalled();
     expect(getGeoCoverageMock).toHaveBeenCalled();
+    expect(screen.getByTestId("market-news-widget")).toBeInTheDocument();
+    expect(screen.queryByText("markets.analytics.categoryOverview")).not.toBeInTheDocument();
   });
 
   it("renders dashboard KPI empty state from server", async () => {
