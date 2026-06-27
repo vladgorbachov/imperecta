@@ -155,7 +155,7 @@ Login → JWT → React Query → `/api/products`, `/api/dashboard`, …
 
 ### 7.3 Discovery (content-aware sitemap + cooperative budget)
 
-`DiscoveryCrawler` (`discovery/orchestrator.py` — `DiscoveryOrchestrator`) — три фазы + **cooperative deadline** (`4bad080`, `4d42623`):
+`DiscoveryOrchestrator` (`discovery/orchestrator.py`) — три фазы + **cooperative deadline** (`4bad080`, `4d42623`):
 
 | Фаза | Метод | Суть |
 |------|-------|------|
@@ -552,10 +552,10 @@ Re-route **не** планируется на этом шаге — контра
 
 | module | file:line | table | column(s) + ORM type | gate door | persist primitive | session |
 |--------|-----------|-------|----------------------|-----------|-------------------|---------|
-| discovery | `scraper/discovery.py:200–208` | `dim_product` | `id` UUID; `name` String(500); `name_normalized` String(500); `is_active` Boolean | `evaluate_market` | — | sync |
-| discovery | `scraper/discovery.py:214–221` | `dim_product` | те же (signed fields) | — | `write_sync` | sync |
-| discovery | `scraper/discovery.py:227–235` | `fact_listing` | `product_id` UUID; `marketplace_id` UUID; `external_url` Text; `url_hash` String(64); `is_active` Boolean; `page_role` String(16) | `evaluate_market` | — | sync |
-| discovery | `scraper/discovery.py:241–248` | `fact_listing` | те же | — | `write_sync` | sync |
+| discovery | `discovery/gate_persist.py` (`write_pool_dtos_sync`) | `dim_product` | `id` UUID; `name` String(500); `name_normalized` String(500); `is_active` Boolean | `evaluate_market` | — | sync |
+| discovery | `discovery/gate_persist.py` | `dim_product` | те же (signed fields) | — | `write_sync` | sync |
+| discovery | `discovery/gate_persist.py` | `fact_listing` | `product_id` UUID; `marketplace_id` UUID; `external_url` Text; `url_hash` String(64); `is_active` Boolean; `page_role` String(16) | `evaluate_market` | — | sync |
+| discovery | `discovery/gate_persist.py` | `fact_listing` | те же | — | `write_sync` | sync |
 | ingestion | `ingestion/service.py:252–292` | `fact_price` | …; **`price_change_pct` Numeric(8,4)** (via `compute_price_change_pct` + `build_fact_price_fields`) | `evaluate_ecommerce` (+ `resolve_price_eur` operational read) | — | sync |
 | ingestion | `ingestion/service.py:325–353` | `fact_price` | те же (signed payload) | — | `write_sync` | sync |
 | market_data | `market_data/ingestion.py:147–159` | `fact_currency_rate` | `date_id` Integer; `currency_code` String(3); `rate_to_eur` Numeric(18,8); `rate_to_usd` Numeric(18,8); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
@@ -563,7 +563,7 @@ Re-route **не** планируется на этом шаге — контра
 | market_data | `market_data/ingestion.py:228–240` | `fact_commodity_price` | `date_id` Integer; `symbol` String(20); `name` String(100); `commodity_type` String(20); `price_usd` Numeric(12,4); `price_eur` Numeric(12,4); `change_24h_pct` Numeric(8,4); `unit` String(20); `source` String(30); `fetched_at` DateTime(tz) | `evaluate_market` | `write_sync` | sync |
 | persist | `persist/writer.py:271+` | `fact_price`, `dim_product`, `fact_listing`, `fact_currency_rate`, `fact_crypto_price`, `fact_commodity_price` | verbatim signed payload → ORM insert/update/delete | (verify HMAC upstream) | `write_sync` → `PersistResult` | sync |
 | META bridge | `persist/meta_write.py:56+` / `94+` | `scrape_jobs`, `dim_marketplace` | signed columns per `build_scrape_job_fields` / `build_dim_marketplace_fields` | `evaluate_market` (`operation`) | `write_sync` → `PersistResult` + commit | sync (`to_thread` из async) |
-| discovery | `scraper/discovery.py:57+` | `dim_marketplace` | cursor/discovery snapshot cols | META (`write_meta_async`) | — | async→sync bridge |
+| discovery | `discovery/orchestrator.py` (`_meta_update_marketplace_snapshot`) | `dim_marketplace` | cursor/discovery snapshot cols | META (`write_meta_async`) | — | async→sync bridge |
 | discovery / tasks / orchestrator / admin / marketplaces / job_completion / metadata_store / activity_pulse | `meta_write` call-sites | `scrape_jobs`, `dim_marketplace` | lifecycle + cursor fields | META | `write_meta_async` / `write_meta_sync` | per call-site |
 | LOGS bridge | `persist/logs_write.py:120+` / `160+` / `183+` | `scrape_logs`, `api_logs` | field dicts per `build_scrape_log_fields` / `build_api_log_fields` | `evaluate_logs` | `write_batch_sync` → `PersistResult` + commit | sync (`to_thread` из async) |
 | scraper | `scraper/service.py:328–343` | `scrape_logs` | per-listing batch (`flush_scrape_logs`) | LOGS (`persist_logs_batch`) | — | sync |
