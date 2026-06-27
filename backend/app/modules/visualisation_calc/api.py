@@ -36,6 +36,9 @@ from app.modules.visualisation_calc.movements.schemas import (
     MoversSummary,
 )
 from app.modules.visualisation_calc.movements.service import MovementsCalc, apply_display_currency
+from app.modules.visualisation_calc.trend.read import read_price_trend
+from app.modules.visualisation_calc.trend.schemas import TrendSeries
+from app.modules.visualisation_calc.trend.service import build_trend_series
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 
@@ -135,6 +138,26 @@ async def get_geo_coverage(
         marketplace_id=marketplace_id,
     )
     return build_marketplace_breakdown(rows)
+
+
+@router.get("/trend", response_model=TrendSeries)
+async def get_price_trend(
+    _current_user: CurrentUser,
+    db: DbSession,
+    period: Literal["7d", "30d", "90d"] = Query(default="30d"),
+    bucket: Literal["day", "week", "month"] = Query(default="day"),
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+    marketplace_id: UUID | None = Query(default=None),
+) -> TrendSeries:
+    """Pool-wide average price in EUR over time (deduped daily listing prices)."""
+    rows = await read_price_trend(
+        db,
+        period=period,
+        bucket=bucket,
+        country_code=country_code,
+        marketplace_id=marketplace_id,
+    )
+    return build_trend_series(rows, period=period, bucket=bucket)
 
 
 @router.get("/movements", response_model=MoversPage)
