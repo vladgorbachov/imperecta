@@ -1,4 +1,4 @@
-"""Migration 040 — imperecta_app least-privilege grants (asyncpg-safe DDL)."""
+"""Migration 041 — rls_app_read on partitioned parents (asyncpg-safe DDL)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import re
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-MIGRATION_040 = BACKEND_ROOT / "alembic/versions/040_grant_imperecta_app.py"
+MIGRATION_041 = (
+    BACKEND_ROOT / "alembic/versions/041_grant_imperecta_app_partition_parents.py"
+)
 
 _EXECUTE_STRING_RE = re.compile(
     r'op\.execute\(\s*(?:r?"""(.*?)"""|r?\'\'\'(.*?)\'\'\'|"([^"]*)"|\'([^\']*)\')',
@@ -31,35 +33,31 @@ def _count_sql_statements(sql: str) -> int:
     return len([part for part in sql.split(";") if part.strip()])
 
 
-def test_migration_040_py_compile() -> None:
-    ast.parse(MIGRATION_040.read_text(encoding="utf-8"))
+def test_migration_041_py_compile() -> None:
+    ast.parse(MIGRATION_041.read_text(encoding="utf-8"))
 
 
-def test_migration_040_revision_chain() -> None:
-    source = MIGRATION_040.read_text(encoding="utf-8")
-    assert 'revision = "040_grant_imperecta_app"' in source
-    assert 'down_revision = "039_gate_security_definer_functions"' in source
+def test_migration_041_revision_chain() -> None:
+    source = MIGRATION_041.read_text(encoding="utf-8")
+    assert 'revision = "041_grant_imperecta_app_partition_parents"' in source
+    assert 'down_revision = "040_grant_imperecta_app"' in source
 
 
-def test_migration_040_has_no_multi_statement_op_execute_literals() -> None:
+def test_migration_041_covers_partition_parents() -> None:
+    source = MIGRATION_041.read_text(encoding="utf-8")
+    assert "relkind IN ('r', 'p')" in source
+    assert "fact_price" in source or "relkind='p'" in source or "relkind = 'p'" in source
+
+
+def test_migration_041_has_single_statement_per_op_execute() -> None:
     offenders: list[str] = []
-    for sql in _migration_execute_strings(MIGRATION_040):
+    for sql in _migration_execute_strings(MIGRATION_041):
         if _count_sql_statements(sql) > 1:
             offenders.append(sql.strip()[:120])
     assert offenders == [], f"multi-statement op.execute literals: {offenders}"
 
 
-def test_migration_040_documents_seam_and_carve_out() -> None:
-    source = MIGRATION_040.read_text(encoding="utf-8")
-    assert "9.3" in source or "seam 9.3" in source
-    assert "reject_data" in source
-    assert "rls_app_read" in source
-    assert "rls_app_reject_insert" in source
-    assert "gate.exec_write" in source
-    assert "imperecta_app" in source
-
-
-def test_migration_040_chain_link() -> None:
+def test_alembic_single_head_includes_041() -> None:
     versions_dir = BACKEND_ROOT / "alembic" / "versions"
     revisions: dict[str, str | None] = {}
     for path in versions_dir.glob("*.py"):
@@ -72,5 +70,7 @@ def test_migration_040_chain_link() -> None:
             continue
         revisions[rev_match.group(1)] = down_match.group(1) if down_match else None
 
-    assert "040_grant_imperecta_app" in revisions
-    assert revisions["040_grant_imperecta_app"] == "039_gate_security_definer_functions"
+    referenced = {down for down in revisions.values() if down}
+    heads = [rev for rev in revisions if rev not in referenced]
+    assert heads == ["041_grant_imperecta_app_partition_parents"], f"unexpected heads: {heads}"
+    assert revisions["041_grant_imperecta_app_partition_parents"] == "040_grant_imperecta_app"

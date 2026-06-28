@@ -91,7 +91,7 @@ BEGIN
 END
 $$;
 
--- (5) rls_app_read on every public RLS table
+-- (5) rls_app_read on every public RLS table (ordinary + partitioned parents)
 DO $$
 DECLARE
     missing_count integer;
@@ -101,14 +101,14 @@ BEGIN
     FROM pg_class AS c
     JOIN pg_namespace AS n ON n.oid = c.relnamespace
     WHERE n.nspname = 'public'
-      AND c.relkind = 'r'
+      AND c.relkind IN ('r', 'p')
       AND c.relrowsecurity = true;
 
     SELECT count(*) INTO missing_count
     FROM pg_class AS c
     JOIN pg_namespace AS n ON n.oid = c.relnamespace
     WHERE n.nspname = 'public'
-      AND c.relkind = 'r'
+      AND c.relkind IN ('r', 'p')
       AND c.relrowsecurity = true
       AND NOT EXISTS (
           SELECT 1
@@ -120,11 +120,11 @@ BEGIN
 
     IF missing_count > 0 THEN
         RAISE EXCEPTION
-            'rls_app_read missing on % of % RLS tables',
+            'rls_app_read missing on % of % RLS tables (relkind r+p)',
             missing_count, rls_count;
     END IF;
 
-    RAISE NOTICE 'rls_app_read present on all % RLS-enabled public tables', rls_count;
+    RAISE NOTICE 'rls_app_read present on all % RLS-enabled public tables (r+p)', rls_count;
 END
 $$;
 
