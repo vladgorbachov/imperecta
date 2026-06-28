@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, TypedDict
 
 from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
-from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
+from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
+from app.models.core import User
 from app.models.dimensions import DimProduct, DimMarketplace, DimDate
+from app.models.reject_data import RejectData
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -59,21 +62,32 @@ def _sql_type_name(column: Column[Any]) -> str:
     return type(col_type).__name__
 
 
+_IN_CHECK_COLUMN_PATTERN = re.compile(
+    r"^\s*(?P<column>\w+)\s+IN\s*\(",
+    re.IGNORECASE,
+)
+
+
 def _check_values_for_table(model: type, column_name: str) -> list[str] | None:
+    """Return enum values from a column's own `column IN (...)` CHECK, if any."""
     for constraint in getattr(model, "__table_args__", ()) or ():
         if not hasattr(constraint, "sqltext"):
             continue
         sqltext = str(constraint.sqltext)
-        if column_name not in sqltext.lower():
+        if " IN (" not in sqltext.upper():
             continue
-        if " IN (" in sqltext.upper():
-            inner = sqltext.split(" IN (", 1)[1].rsplit(")", 1)[0]
-            values = [
-                part.strip().strip("'").strip('"')
-                for part in inner.split(",")
-                if part.strip()
-            ]
-            return values or None
+        match = _IN_CHECK_COLUMN_PATTERN.match(sqltext)
+        if match is None:
+            continue
+        if match.group("column").lower() != column_name.lower():
+            continue
+        inner = sqltext.split(" IN (", 1)[1].rsplit(")", 1)[0]
+        values = [
+            part.strip().strip("'").strip('"')
+            for part in inner.split(",")
+            if part.strip()
+        ]
+        return values or None
     return None
 
 
@@ -121,6 +135,10 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "scrape_logs": build_table_contract(ScrapeLog),
     "api_logs": build_table_contract(ApiLog),
     "service_alerts": build_table_contract(ServiceAlert),
+    "reject_data": build_table_contract(RejectData),
+    "users": build_table_contract(User),
+    "ai_chat_sessions": build_table_contract(AIChatSession),
+    "ai_chat_messages": build_table_contract(AIChatMessage),
 }
 
 # Per-table natural keys included in the HMAC locator sub-dict (subset of signed fields).
@@ -137,6 +155,10 @@ TABLE_LOCATORS: dict[str, tuple[str, ...]] = {
     "scrape_logs": (),
     "api_logs": (),
     "service_alerts": ("id",),
+    "reject_data": (),
+    "users": ("id",),
+    "ai_chat_sessions": ("id",),
+    "ai_chat_messages": ("id",),
 }
 
 

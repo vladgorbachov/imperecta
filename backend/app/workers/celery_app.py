@@ -46,7 +46,6 @@ celery_app.conf.update(
 celery_app.conf.include = [
     "app.modules.scraper.tasks",
     "app.workers.market_data_tasks",
-    "app.workers.cleanup_tasks",
     "app.workers.maintenance_tasks",
     "app.workers.reaper_tasks",
 ]

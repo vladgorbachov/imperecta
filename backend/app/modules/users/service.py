@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from app.entitlements import get_entitlements_for_frontend, get_limit, get_servi
 from app.entitlements.plan import ServiceTier, UserPlan
 from app.models.core import User, UserProduct
 from app.modules.auth.service import hash_password
+from app.modules.persist.user_write import build_user_fields, write_user_async
 from app.modules.users.schemas import UserResponse
 
 # /me whitelist: fields the self-profile PUT route is allowed to mutate.
@@ -107,13 +108,23 @@ class UsersService:
     async def update_me(self, current_user: User, patch: dict[str, Any]) -> UserResponse:
         """Apply ALLOWED_USER_UPDATE_FIELDS only; treat avatar_url='' as
         explicit clear (preserves the pre-CORE-USERS1 behavior)."""
+        update_columns: dict[str, Any] = {}
         for key, value in patch.items():
             if key not in ALLOWED_USER_UPDATE_FIELDS:
                 continue
             if key == "avatar_url" and value == "":
                 value = None
-            setattr(current_user, key, value)
-        await self.db.flush()
+            update_columns[key] = value
+        if update_columns:
+            result = await write_user_async(
+                operation="update",
+                kind="self_update",
+                fields=build_user_fields(id=current_user.id, **update_columns),
+                reject_source="users_self_update",
+            )
+            if not result.ok:
+                raise ValueError("Profile update failed")
+            await self.db.refresh(current_user)
         return self.build_user_response(current_user)
 
 
@@ -201,21 +212,35 @@ class UsersAdminService:
         validated_plan = self._validate_plan(plan)
         validated_language = self._validate_language(language)
         validated_timezone = self._normalize_timezone(timezone)
-        user = User(
-            email=normalized_email,
-            password_hash=hash_password(password),
-            name=self._normalize_optional_text(name),
-            company_name=self._normalize_optional_text(company_name),
-            plan=validated_plan,
-            language=validated_language,
-            timezone=validated_timezone,
-            is_active=is_active,
-            is_superuser=is_superuser,
+        user_id = uuid4()
+        result = await write_user_async(
+            operation="insert",
+            kind="admin_create",
+            fields=build_user_fields(
+                id=user_id,
+                email=normalized_email,
+                password_hash=hash_password(password),
+                name=self._normalize_optional_text(name),
+                company_name=self._normalize_optional_text(company_name),
+                plan=validated_plan,
+                language=validated_language,
+                timezone=validated_timezone,
+                is_superuser=is_superuser,
+            ),
+            reject_source="admin_user_create",
         )
-        self.db.add(user)
-        await self.db.commit()
-        await self.db.refresh(user)
-        return await self.get_user_detailed(user.id)
+        if not result.ok:
+            raise ValueError("User creation failed")
+        if not is_active:
+            deactivate = await write_user_async(
+                operation="update",
+                kind="admin_update",
+                fields=build_user_fields(id=user_id, is_active=False),
+                reject_source="admin_user_create_deactivate",
+            )
+            if not deactivate.ok:
+                raise ValueError("User deactivation after create failed")
+        return await self.get_user_detailed(user_id)
 
     async def get_user_detailed(self, user_id: UUID) -> dict[str, Any]:
         """Return single user in Users Management contract."""
@@ -277,6 +302,7 @@ class UsersAdminService:
         user = await self.db.get(User, user_id)
         if user is None:
             raise ValueError(f"User not found: {user_id}")
+        update_columns: dict[str, Any] = {}
         if email is not None:
             normalized_email = email.strip().lower()
             if not normalized_email:
@@ -286,22 +312,30 @@ class UsersAdminService:
             )
             if existing is not None:
                 raise ValueError("Email already registered")
-            user.email = normalized_email
+            update_columns["email"] = normalized_email
         if name is not None:
-            user.name = self._normalize_optional_text(name)
+            update_columns["name"] = self._normalize_optional_text(name)
         if company_name is not None:
-            user.company_name = self._normalize_optional_text(company_name)
+            update_columns["company_name"] = self._normalize_optional_text(company_name)
         if plan is not None:
-            user.plan = self._validate_plan(plan)
+            update_columns["plan"] = self._validate_plan(plan)
         if language is not None:
-            user.language = self._validate_language(language)
+            update_columns["language"] = self._validate_language(language)
         if timezone is not None:
-            user.timezone = self._normalize_timezone(timezone)
+            update_columns["timezone"] = self._normalize_timezone(timezone)
         if is_active is not None:
-            user.is_active = bool(is_active)
+            update_columns["is_active"] = bool(is_active)
         if is_superuser is not None:
-            user.is_superuser = bool(is_superuser)
-        await self.db.commit()
+            update_columns["is_superuser"] = bool(is_superuser)
+        if update_columns:
+            result = await write_user_async(
+                operation="update",
+                kind="admin_update",
+                fields=build_user_fields(id=user_id, **update_columns),
+                reject_source="admin_user_update",
+            )
+            if not result.ok:
+                raise ValueError("User update failed")
         return await self.get_user_detailed(user_id)
 
     async def set_user_active(
@@ -330,8 +364,14 @@ class UsersAdminService:
             )
             if int(superusers_count or 0) <= 1:
                 raise ValueError("Cannot deactivate the last active superuser")
-        user.is_active = is_active
-        await self.db.commit()
+        result = await write_user_async(
+            operation="update",
+            kind="admin_update",
+            fields=build_user_fields(id=user_id, is_active=is_active),
+            reject_source="admin_user_active",
+        )
+        if not result.ok:
+            raise ValueError("User status update failed")
         return await self.get_user_detailed(user_id)
 
     async def set_user_superuser(
@@ -358,8 +398,14 @@ class UsersAdminService:
             )
             if int(superusers_count or 0) <= 1:
                 raise ValueError("Cannot remove role from the last superuser")
-        user.is_superuser = is_superuser
-        await self.db.commit()
+        result = await write_user_async(
+            operation="update",
+            kind="admin_update",
+            fields=build_user_fields(id=user_id, is_superuser=is_superuser),
+            reject_source="admin_user_superuser",
+        )
+        if not result.ok:
+            raise ValueError("User role update failed")
         return await self.get_user_detailed(user_id)
 
     async def reset_user_password(
@@ -373,9 +419,18 @@ class UsersAdminService:
         user = await self.db.get(User, user_id)
         if user is None:
             raise ValueError(f"User not found: {user_id}")
-        user.password_hash = hash_password(new_password)
-        user.force_password_change = force_password_change
-        await self.db.commit()
+        result = await write_user_async(
+            operation="update",
+            kind="admin_password_reset",
+            fields=build_user_fields(
+                id=user_id,
+                password_hash=hash_password(new_password),
+                force_password_change=force_password_change,
+            ),
+            reject_source="admin_user_password_reset",
+        )
+        if not result.ok:
+            raise ValueError("Password reset failed")
         return await self.get_user_detailed(user_id)
 
     async def delete_user(self, user_id: UUID, *, actor_user_id: UUID) -> None:
@@ -396,8 +451,14 @@ class UsersAdminService:
             )
             if int(superusers_count or 0) <= 1:
                 raise ValueError("Cannot delete the last superuser")
-        await self.db.delete(user)
-        await self.db.commit()
+        result = await write_user_async(
+            operation="delete",
+            kind="admin_delete",
+            fields=build_user_fields(id=user_id),
+            reject_source="admin_user_delete",
+        )
+        if not result.ok:
+            raise ValueError("User deletion failed")
 
     # ---- validators (local; language reuses common/validation) -----------
 

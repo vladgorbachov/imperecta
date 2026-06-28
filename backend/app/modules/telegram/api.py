@@ -25,6 +25,7 @@ from app.config import Settings
 from app.database import get_db
 from app.models.core import User
 from app.modules.alerts.notifications import NotificationMessage, TelegramChannel
+from app.modules.persist.user_write import build_user_fields, write_user_async
 from app.modules.telegram.schemas import (
     TelegramLinkCodeResponse,
     TelegramUnlinkResponse,
@@ -130,9 +131,19 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
             await db.execute(select(User).where(User.telegram_link_code == code))
         ).scalar_one_or_none()
         if user:
-            user.telegram_chat_id = chat_id
-            user.telegram_link_code = None
-            await db.flush()
+            result = await write_user_async(
+                operation="update",
+                kind="telegram_link",
+                fields=build_user_fields(
+                    id=user.id,
+                    telegram_chat_id=chat_id,
+                    telegram_link_code=None,
+                ),
+                reject_source="telegram_webhook_link",
+            )
+            if not result.ok:
+                await _send_html(chat_id, TG_BAD_CODE)
+                return {"ok": True}
             await _send_html(
                 chat_id,
                 TG_LINK_SUCCESS_FMT.format(email=user.email),
@@ -152,8 +163,14 @@ async def generate_link_code(
     db: AsyncSession = Depends(get_db),
 ) -> TelegramLinkCodeResponse:
     code = "".join(random.choices(LINK_CODE_ALPHABET, k=LINK_CODE_LENGTH))
-    current_user.telegram_link_code = code
-    await db.flush()
+    result = await write_user_async(
+        operation="update",
+        kind="telegram_link",
+        fields=build_user_fields(id=current_user.id, telegram_link_code=code),
+        reject_source="telegram_generate_link_code",
+    )
+    if not result.ok:
+        raise HTTPException(status_code=500, detail="Failed to generate link code")
     return TelegramLinkCodeResponse(
         code=code,
         bot_url=settings.telegram_bot_url or "",
@@ -167,8 +184,17 @@ async def unlink_telegram(
 ) -> TelegramUnlinkResponse:
     if not current_user.telegram_chat_id:
         raise HTTPException(status_code=400, detail="Telegram not linked")
-    current_user.telegram_chat_id = None
-    current_user.telegram_link_code = None
-    await db.flush()
+    result = await write_user_async(
+        operation="update",
+        kind="telegram_link",
+        fields=build_user_fields(
+            id=current_user.id,
+            telegram_chat_id=None,
+            telegram_link_code=None,
+        ),
+        reject_source="telegram_unlink",
+    )
+    if not result.ok:
+        raise HTTPException(status_code=500, detail="Failed to unlink Telegram")
     return TelegramUnlinkResponse(unlinked=True)
 

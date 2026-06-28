@@ -171,7 +171,6 @@ async def harvest_sitemap(
         )
         cursor_store.set_last_sitemap_harvest_at(marketplace, now - retry_offset)
 
-    await db.flush()
     logger.info(
         "sitemap_harvest_done marketplace_id=%s raw=%d filtered=%d rejected=%d "
         "useful=%s classify_mode=%s sampled=%s sample_product_ratio=%s",

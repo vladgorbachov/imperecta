@@ -15,8 +15,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.app_tables import ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
+from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
+from app.models.core import User
 from app.models.dimensions import DimDate, DimMarketplace, DimProduct
+from app.models.reject_data import RejectData
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -27,6 +29,7 @@ from app.models.facts import (
 from app.modules.data_firewall.contracts import TABLE_LOCATORS, extract_locator
 from app.modules.data_firewall.reject_store import write_reject_data
 from app.modules.data_firewall.signing import SignedBatch, SignedRecord, verify, verify_batch
+from app.modules.persist.retention_config import RETENTION_TABLES
 from app.observability.sentry_init import capture_exception_if_initialized
 
 logger = logging.getLogger(__name__)
@@ -42,9 +45,13 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
     "fact_currency_rate": frozenset({"insert", "delete"}),
     "fact_crypto_price": frozenset({"insert", "delete"}),
     "fact_commodity_price": frozenset({"insert", "delete"}),
-    "scrape_logs": frozenset({"insert"}),
-    "api_logs": frozenset({"insert"}),
-    "service_alerts": frozenset({"insert"}),
+    "scrape_logs": frozenset({"insert", "retention_delete"}),
+    "api_logs": frozenset({"insert", "retention_delete"}),
+    "service_alerts": frozenset({"insert", "retention_delete"}),
+    "reject_data": frozenset({"retention_delete"}),
+    "users": frozenset({"insert", "update", "delete"}),
+    "ai_chat_sessions": frozenset({"insert"}),
+    "ai_chat_messages": frozenset({"insert"}),
 }
 
 _TABLE_MODELS: dict[str, type] = {
@@ -60,6 +67,10 @@ _TABLE_MODELS: dict[str, type] = {
     "scrape_logs": ScrapeLog,
     "api_logs": ApiLog,
     "service_alerts": ServiceAlert,
+    "reject_data": RejectData,
+    "users": User,
+    "ai_chat_sessions": AIChatSession,
+    "ai_chat_messages": AIChatMessage,
 }
 
 
@@ -74,6 +85,8 @@ def _locator_matches_fields(table: str, fields: dict[str, Any], locator: dict[st
 
 def _verify_signed_record(signed: SignedRecord) -> str | None:
     """Return reject_reason when verification fails; None when the record is valid."""
+    if signed.operation == "retention_delete":
+        return _verify_retention_delete_record(signed)
     if not verify(
         table=signed.table,
         operation=signed.operation,
@@ -86,6 +99,31 @@ def _verify_signed_record(signed: SignedRecord) -> str | None:
         return "locator_mismatch"
     supported = SUPPORTED_WRITE_OPERATIONS.get(signed.table)
     if supported is None or signed.operation not in supported:
+        return "unsupported_operation"
+    return None
+
+
+def _verify_retention_delete_record(signed: SignedRecord) -> str | None:
+    """Verify a gate-signed retention bulk DELETE (cutoff predicate only)."""
+    if not verify(
+        table=signed.table,
+        operation=signed.operation,
+        fields=signed.fields,
+        locator=signed.locator,
+        signature=signed.signature,
+    ):
+        return "invalid_signature"
+    if signed.locator != {}:
+        return "locator_mismatch"
+    config = RETENTION_TABLES.get(signed.table)
+    if config is None:
+        return "unsupported_table"
+    if set(signed.fields.keys()) != {"cutoff_column", "cutoff"}:
+        return "invalid_retention_fields"
+    if signed.fields["cutoff_column"] != config.cutoff_column:
+        return "cutoff_column_mismatch"
+    supported = SUPPORTED_WRITE_OPERATIONS.get(signed.table)
+    if supported is None or "retention_delete" not in supported:
         return "unsupported_operation"
     return None
 
@@ -165,8 +203,15 @@ def _orm_fields_for_table(table: str, fields: dict[str, Any]) -> dict[str, Any]:
         out["triggered_by"] = _parse_uuid(out["triggered_by"])
     if "user_id" in out:
         out["user_id"] = _parse_uuid(out["user_id"])
+    if "session_id" in out:
+        out["session_id"] = _parse_uuid(out["session_id"])
+    if "context_id" in out and out["context_id"] is not None:
+        out["context_id"] = _parse_uuid(out["context_id"])
     if "id" in out:
-        out["id"] = _parse_uuid(out["id"])
+        if table == "ai_chat_messages":
+            out["id"] = int(out["id"])
+        else:
+            out["id"] = _parse_uuid(out["id"])
     if "scraped_at" in out:
         out["scraped_at"] = _parse_datetime(out["scraped_at"])
     if "fetched_at" in out:
@@ -179,6 +224,10 @@ def _orm_fields_for_table(table: str, fields: dict[str, Any]) -> dict[str, Any]:
         out["triggered_at"] = _parse_datetime(out["triggered_at"])
     if "resolved_at" in out and out["resolved_at"] is not None:
         out["resolved_at"] = _parse_datetime(out["resolved_at"])
+    if "trial_ends_at" in out and out["trial_ends_at"] is not None:
+        out["trial_ends_at"] = _parse_datetime(out["trial_ends_at"])
+    if "last_login_at" in out and out["last_login_at"] is not None:
+        out["last_login_at"] = _parse_datetime(out["last_login_at"])
     return out
 
 
@@ -302,6 +351,36 @@ def _write_sync_delete(
     return _persist_result_from_rowcount(result.rowcount)
 
 
+def _parse_retention_cutoff(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        cutoff = value
+    elif isinstance(value, str):
+        try:
+            cutoff = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if cutoff.tzinfo is None:
+        return cutoff.replace(tzinfo=timezone.utc)
+    return cutoff
+
+
+def _write_sync_retention_delete(db: Session, signed: SignedRecord) -> PersistResult:
+    """Execute a whitelisted bulk DELETE WHERE cutoff_column < cutoff."""
+    table = signed.table
+    model = _model_for_table(table)
+    cutoff_column = str(signed.fields["cutoff_column"])
+    cutoff = _parse_retention_cutoff(signed.fields["cutoff"])
+    if cutoff is None:
+        return PersistResult(ok=False)
+    column = getattr(model, cutoff_column, None)
+    if column is None:
+        return PersistResult(ok=False)
+    result = db.execute(delete(model).where(column < cutoff))
+    return _persist_result_from_rowcount(result.rowcount)
+
+
 async def _write_async_delete(
     db: AsyncSession,
     signed: SignedRecord,
@@ -348,6 +427,8 @@ def write_sync(
         return _write_sync_update(db, signed, ctx=ctx)
     if operation == "delete":
         return _write_sync_delete(db, signed)
+    if operation == "retention_delete":
+        return _write_sync_retention_delete(db, signed)
 
     orm_fields = _orm_fields_for_table(signed.table, signed.fields)
     table = signed.table
@@ -382,6 +463,18 @@ def write_sync(
 
     if table == "dim_marketplace":
         db.add(DimMarketplace(**orm_fields))
+        return PersistResult(ok=True, rows_affected=1)
+
+    if table == "users":
+        db.add(User(**orm_fields))
+        return PersistResult(ok=True, rows_affected=1)
+
+    if table == "ai_chat_sessions":
+        db.add(AIChatSession(**orm_fields))
+        return PersistResult(ok=True, rows_affected=1)
+
+    if table == "ai_chat_messages":
+        db.add(AIChatMessage(**orm_fields))
         return PersistResult(ok=True, rows_affected=1)
 
     if table == "dim_date":

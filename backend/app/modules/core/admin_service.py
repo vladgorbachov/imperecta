@@ -1,5 +1,6 @@
 """Admin service: superuser creation and utilities."""
 
+import asyncio
 import logging
 
 from sqlalchemy import select
@@ -9,6 +10,7 @@ from app.config import Settings
 from app.entitlements.plan import UserPlan
 from app.models.core import User
 from app.modules.auth.service import hash_password
+from app.modules.persist.user_write import build_user_fields, write_user_sync
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,11 @@ async def ensure_superuser(db: AsyncSession) -> None:
         logger.error("Invalid BOOTSTRAP_ADMIN_PLAN: %s", raw_plan)
         return
 
-    superuser = User(
+    from uuid import uuid4
+
+    user_id = uuid4()
+    fields = build_user_fields(
+        id=user_id,
         email=admin_email,
         password_hash=hash_password(admin_password),
         name=admin_name,
@@ -52,6 +58,14 @@ async def ensure_superuser(db: AsyncSession) -> None:
         plan=admin_plan,
         language=admin_language,
     )
-    db.add(superuser)
-    await db.commit()
+    result = await asyncio.to_thread(
+        write_user_sync,
+        operation="insert",
+        kind="admin_create",
+        fields=fields,
+        reject_source="bootstrap_superuser",
+    )
+    if not result.ok:
+        logger.error("Bootstrap superuser gate write failed for %s", admin_email)
+        return
     logger.info("Bootstrap superuser created: %s", admin_email)

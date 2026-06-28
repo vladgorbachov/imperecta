@@ -18,11 +18,12 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
 from app.models.app_tables import ScrapeJob
+from app.modules.persist.meta_write import build_scrape_job_failed_fields, write_meta_async
 from app.workers.celery_app import celery_app
 
 slog = structlog.get_logger(__name__)
@@ -260,7 +261,7 @@ async def _reap_orphan_jobs_async() -> dict[str, int]:
             )
             rows = result.all()
 
-            reap_ids: list = []
+            reap_targets: list[tuple[UUID, datetime | None]] = []
             for row in rows:
                 cfg = row.config if isinstance(row.config, dict) else {}
                 metadata = cfg.get("metadata", {}) if isinstance(cfg, dict) else {}
@@ -299,7 +300,7 @@ async def _reap_orphan_jobs_async() -> dict[str, int]:
                             age_s=age,
                         )
                         continue
-                    reap_ids.append(row.id)
+                    reap_targets.append((row.id, row.started_at))
                     slog.warning(
                         "reaper_marking_orphan",
                         job_id=str(row.id),
@@ -307,32 +308,30 @@ async def _reap_orphan_jobs_async() -> dict[str, int]:
                         age_s=age,
                     )
 
-            if reap_ids:
+            reaped_count = 0
+            if reap_targets:
                 try:
-                    await db.execute(
-                        text(
-                            """
-                            UPDATE scrape_jobs
-                            SET status = 'failed',
-                                completed_at = :now,
-                                duration_ms = EXTRACT(
-                                    EPOCH FROM (:now - COALESCE(started_at, :now))
-                                )::int * 1000
-                            WHERE id = ANY(:ids) AND status = 'running'
-                            """
-                        ),
-                        {"now": now, "ids": reap_ids},
-                    )
-                    await db.commit()
+                    for job_id, started_at in reap_targets:
+                        meta_result = await write_meta_async(
+                            table="scrape_jobs",
+                            operation="update",
+                            fields=build_scrape_job_failed_fields(
+                                id=job_id,
+                                started_at=started_at,
+                                completed_at=now,
+                            ),
+                            reject_source="reaper_orphan",
+                        )
+                        if meta_result.ok and not meta_result.no_target:
+                            reaped_count += 1
                 except Exception:
-                    await db.rollback()
                     slog.exception(
-                        "reaper_update_failed", attempted=len(reap_ids)
+                        "reaper_update_failed", attempted=len(reap_targets)
                     )
                     raise
 
-            slog.info("reaper_done", scanned=len(rows), reaped=len(reap_ids))
-            return {"scanned": len(rows), "reaped": len(reap_ids)}
+            slog.info("reaper_done", scanned=len(rows), reaped=reaped_count)
+            return {"scanned": len(rows), "reaped": reaped_count}
     finally:
         await engine.dispose()
 

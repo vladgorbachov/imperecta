@@ -20,6 +20,7 @@ from app.models.facts import (
 )
 from app.config import Settings
 from app.modules.market_data.forex_pairs import derive_forex_pairs
+from app.modules.persist.user_write import build_user_fields, write_user_async
 
 
 class MarketDataService:
@@ -145,8 +146,14 @@ class MarketDataService:
         for k, v in updates.items():
             if v is not None:
                 prefs[k] = v
-        user.preferences = prefs
-        await self.db.commit()
+        result = await write_user_async(
+            operation="update",
+            kind="self_update",
+            fields=build_user_fields(id=user.id, preferences=prefs),
+            reject_source="market_data_preferences",
+        )
+        if not result.ok:
+            raise ValueError("Preferences update failed")
         await self.db.refresh(user)
         return await self.get_preferences(user)
 

@@ -5,7 +5,7 @@ behavior are preserved verbatim (the frontend depends on them).
 """
 
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from jose import JWTError
@@ -28,6 +28,7 @@ from app.modules.auth.service import (
     hash_password,
     verify_password,
 )
+from app.modules.persist.user_write import build_user_fields, write_user_async
 
 # Trial-plan grace period applied at registration (mirrors the entitlements roadmap).
 TRIAL_DURATION_DAYS: int = 14
@@ -57,7 +58,9 @@ async def register(data: UserRegister, db: DbSession) -> TokenResponse:
     existing = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-    user = User(
+    user_id = uuid4()
+    fields = build_user_fields(
+        id=user_id,
         email=data.email,
         password_hash=hash_password(data.password),
         name=data.name,
@@ -66,9 +69,15 @@ async def register(data: UserRegister, db: DbSession) -> TokenResponse:
         trial_ends_at=datetime.now(timezone.utc) + timedelta(days=TRIAL_DURATION_DAYS),
         language=data.language,
     )
-    db.add(user)
-    await db.flush()
-    return _create_tokens(user.id)
+    result = await write_user_async(
+        operation="insert",
+        kind="register",
+        fields=fields,
+        reject_source="auth_register",
+    )
+    if not result.ok:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registration failed")
+    return _create_tokens(user_id)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -76,8 +85,17 @@ async def login(data: UserLogin, db: DbSession) -> TokenResponse:
     user = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
     if user is None or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    user.last_login_at = datetime.now(timezone.utc)
-    await db.flush()
+    result = await write_user_async(
+        operation="update",
+        kind="login_touch",
+        fields=build_user_fields(
+            id=user.id,
+            last_login_at=datetime.now(timezone.utc),
+        ),
+        reject_source="auth_login",
+    )
+    if not result.ok:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login update failed")
     force_change = user.force_password_change if user.force_password_change else None
     return _create_tokens(user.id, force_password_change=force_change, persistent=data.remember_me)
 
@@ -93,10 +111,20 @@ async def change_initial_password(
     existing = (await db.execute(select(User).where(User.email == data.new_email))).scalar_one_or_none()
     if existing is not None and existing.id != current_user.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
-    current_user.email = data.new_email
-    current_user.password_hash = hash_password(data.new_password)
-    current_user.force_password_change = False
-    await db.flush()
+    result = await write_user_async(
+        operation="update",
+        kind="password_change",
+        fields=build_user_fields(
+            id=current_user.id,
+            email=data.new_email,
+            password_hash=hash_password(data.new_password),
+            force_password_change=False,
+        ),
+        reject_source="auth_password_change",
+    )
+    if not result.ok:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Password change failed")
+    await db.refresh(current_user)
     return _create_tokens(current_user.id)
 
 

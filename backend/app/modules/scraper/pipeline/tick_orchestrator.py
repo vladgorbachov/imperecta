@@ -26,7 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
+from app.modules.persist.meta_write import (
+    build_scrape_job_failed_fields,
+    build_scrape_job_fields,
+    write_meta_async,
+)
 from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
@@ -168,33 +172,34 @@ async def _create_pending_child(
 async def _reap_stale_children(db: AsyncSession, parent_id: UUID) -> int:
     """Mark this parent's overrun running discovery children failed.
 
-    Single statement (asyncpg requirement). Commits to free MAX_PARALLEL slots
-    for the same tick's dispatch loop. Defense-in-depth: the global Beat
-    reaper still catches orphans whose tick is also dead.
+    Per-id META door updates (bulk predicate UPDATE is not supported by persist).
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=CHILD_RUNNING_REAP_SECONDS)
     result = await db.execute(
-        text(
-            """
-            UPDATE scrape_jobs
-            SET status = 'failed',
-                completed_at = :now,
-                duration_ms = (EXTRACT(
-                    EPOCH FROM (:now - COALESCE(started_at, :now))
-                )::int) * 1000
-            WHERE parent_job_id = :pid
-              AND job_type = 'discovery'
-              AND status = 'running'
-              AND started_at < :cutoff
-            RETURNING id
-            """
+        select(ScrapeJob.id, ScrapeJob.started_at).where(
+            ScrapeJob.parent_job_id == parent_id,
+            ScrapeJob.job_type == "discovery",
+            ScrapeJob.status == "running",
+            ScrapeJob.started_at < cutoff,
         ),
-        {"now": now, "pid": parent_id, "cutoff": cutoff},
     )
-    reaped_ids = [row[0] for row in result.all()]
+    stale_rows = result.all()
+    reaped_ids: list[UUID] = []
+    for job_id, started_at in stale_rows:
+        meta_result = await write_meta_async(
+            table="scrape_jobs",
+            operation="update",
+            fields=build_scrape_job_failed_fields(
+                id=job_id,
+                started_at=started_at,
+                completed_at=now,
+            ),
+            reject_source="orchestrator_reap_discovery",
+        )
+        if meta_result.ok and not meta_result.no_target:
+            reaped_ids.append(job_id)
     if reaped_ids:
-        await db.commit()
         slog.warning(
             "tick_reaped_stale_children",
             parent_id=str(parent_id),
@@ -302,34 +307,34 @@ async def _reap_stale_scrape_children(
 ) -> int:
     """Mark this parent's overrun running scrape children failed.
 
-    Single statement (asyncpg requirement). Commits to free MAX_PARALLEL_SCRAPE
-    slots for the same tick's dispatch loop. Cutoff is sized to the scrape
-    child time_limit (SCRAPE_CHILD_RUNNING_REAP_SECONDS), not the discovery
-    budget.
+    Per-id META door updates (bulk predicate UPDATE is not supported by persist).
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=SCRAPE_CHILD_RUNNING_REAP_SECONDS)
     result = await db.execute(
-        text(
-            """
-            UPDATE scrape_jobs
-            SET status = 'failed',
-                completed_at = :now,
-                duration_ms = (EXTRACT(
-                    EPOCH FROM (:now - COALESCE(started_at, :now))
-                )::int) * 1000
-            WHERE parent_job_id = :pid
-              AND job_type = 'scrape'
-              AND status = 'running'
-              AND started_at < :cutoff
-            RETURNING id
-            """
+        select(ScrapeJob.id, ScrapeJob.started_at).where(
+            ScrapeJob.parent_job_id == parent_id,
+            ScrapeJob.job_type == "scrape",
+            ScrapeJob.status == "running",
+            ScrapeJob.started_at < cutoff,
         ),
-        {"now": now, "pid": parent_id, "cutoff": cutoff},
     )
-    reaped_ids = [row[0] for row in result.all()]
+    stale_rows = result.all()
+    reaped_ids: list[UUID] = []
+    for job_id, started_at in stale_rows:
+        meta_result = await write_meta_async(
+            table="scrape_jobs",
+            operation="update",
+            fields=build_scrape_job_failed_fields(
+                id=job_id,
+                started_at=started_at,
+                completed_at=now,
+            ),
+            reject_source="orchestrator_reap_scrape",
+        )
+        if meta_result.ok and not meta_result.no_target:
+            reaped_ids.append(job_id)
     if reaped_ids:
-        await db.commit()
         slog.warning(
             "tick_reaped_stale_scrape_children",
             parent_id=str(parent_id),

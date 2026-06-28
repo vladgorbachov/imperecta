@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
 
-import calendar
 import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -14,6 +13,7 @@ from app.config import Settings
 from app.models.dimensions import DimDate
 from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.persist.logs_write import build_api_log_fields, persist_logs_batch
+from app.modules.persist.scrape_gate_fields import build_dim_date_fields_from_day
 from app.modules.persist.writer import PersistContext, write_sync
 
 logger = logging.getLogger(__name__)
@@ -33,23 +33,28 @@ def _ensure_dim_date(db: Session, d: date) -> int:
     exists = db.scalar(select(DimDate.date_id).where(DimDate.date_id == date_id))
     if exists is not None:
         return date_id
-    iso_year, iso_week, iso_weekday = d.isocalendar()
-    row = DimDate(
-        date_id=date_id,
-        full_date=d,
-        year=d.year,
-        quarter=(d.month - 1) // 3 + 1,
-        month=d.month,
-        month_name=d.strftime("%B"),
-        week_iso=iso_week,
-        day_of_month=d.day,
-        day_of_week=iso_weekday,
-        day_name=d.strftime("%A"),
-        is_weekend=iso_weekday >= 6,
-        is_last_day_of_month=d.day == calendar.monthrange(d.year, d.month)[1],
+
+    fields_row = build_dim_date_fields_from_day(d)
+    outcome = evaluate_market(
+        fields_row,
+        table="dim_date",
+        operation="insert",
+        db=db,
+        reject_source="market_data_dim_date",
     )
-    db.add(row)
+    if outcome.passed and outcome.signed_record is not None:
+        write_sync(
+            db,
+            outcome.signed_record,
+            ctx=PersistContext(source="market_data_dim_date", date_id=date_id),
+        )
     db.flush()
+
+    row_id = db.execute(
+        select(DimDate.date_id).where(DimDate.date_id == date_id),
+    ).scalar_one_or_none()
+    if row_id is None:
+        raise RuntimeError(f"dim_date row missing after upsert for date_id={date_id}")
     return date_id
 
 

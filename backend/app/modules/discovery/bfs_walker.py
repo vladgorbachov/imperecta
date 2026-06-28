@@ -173,7 +173,6 @@ async def run_category_bfs(
                 unique = _publish_category_batch(
                     marketplace, listing_urls, queue, visited,
                 )
-                await db.flush()
                 logger.info(
                     "category_recon_deadline_published marketplace_id=%s "
                     "published=%d queue=%d visited=%d",
@@ -185,7 +184,6 @@ async def run_category_bfs(
                 await _emit_fetch_spike_if_needed()
                 return unique, False
             cursor_store.apply_frontier(marketplace, queue, visited, [])
-            await db.flush()
             streak = cursor_store.get_phase1_exhausted_streak(marketplace) + 1
             cursor_store.set_phase1_exhausted_streak(marketplace, streak)
             if len(queue) > 0 and len(listing_urls) == 0:
@@ -284,7 +282,6 @@ async def run_category_bfs(
                 unique = _publish_category_batch(
                     marketplace, listing_urls, queue, visited,
                 )
-                await db.flush()
                 logger.info(
                     "category_recon_batch_published marketplace_id=%s "
                     "published=%d queue_remaining=%d visited=%d",
@@ -322,7 +319,6 @@ async def run_category_bfs(
     unique = _publish_category_batch(
         marketplace, listing_urls, queue, visited,
     )
-    await db.flush()
     logger.info(
         "category_recon_done marketplace_id=%s listing_urls_found=%d",
         marketplace.id,

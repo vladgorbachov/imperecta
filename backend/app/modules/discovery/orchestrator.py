@@ -809,7 +809,6 @@ class DiscoveryOrchestrator:
                         marketplace,
                         now - retry_offset,
                     )
-                    await self.db.flush()
                     sitemap_product_urls = []
 
             products_found = 0
@@ -973,7 +972,7 @@ class DiscoveryOrchestrator:
             )
             marketplace.products_in_pool = int(pool_count or 0)
 
-            await write_meta_async(
+            finalize_result = await write_meta_async(
                 table="scrape_jobs",
                 operation="update",
                 fields=build_scrape_job_fields(
@@ -988,6 +987,31 @@ class DiscoveryOrchestrator:
                 ),
                 reject_source="discovery",
             )
+            if not finalize_result.ok:
+                await emit_discovery_service_alert(
+                    "orchestrator",
+                    "error",
+                    "finalize_write_rejected",
+                    (
+                        f"Discovery finalize scrape_jobs update rejected "
+                        f"marketplace_id={mp_id}"
+                    ),
+                    marketplace_id=mp_id,
+                    context={
+                        "job_id": str(job.id),
+                        "status": status,
+                        "job_status": job_status,
+                        "failed_count": len(errors),
+                    },
+                )
+                slog.error(
+                    "discovery_finalize_write_rejected",
+                    marketplace_id=str(mp_id),
+                    job_id=str(job.id),
+                    status=status,
+                    job_status=job_status,
+                    failed_count=len(errors),
+                )
             await _success_meta_snapshot_with_retry(
                 marketplace,
                 job_id=job.id,

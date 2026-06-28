@@ -8,7 +8,7 @@ import re
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimCountry, DimCurrency, DimMarketplace
@@ -40,12 +40,20 @@ class MarketplacePoolService:
         result = await self.db.execute(stmt)
         rows = result.all()
         for marketplace_id, cnt in rows:
-            await self.db.execute(
-                update(DimMarketplace)
-                .where(DimMarketplace.id == marketplace_id)
-                .values(products_in_pool=int(cnt)),
+            result = await write_meta_async(
+                table="dim_marketplace",
+                operation="update",
+                fields=build_dim_marketplace_fields(
+                    id=marketplace_id,
+                    products_in_pool=int(cnt),
+                ),
+                reject_source="marketplace_pool_quota",
             )
-        await self.db.commit()
+            if not result.ok:
+                logger.warning(
+                    "recalculate_all_quotas gate write failed for %s",
+                    marketplace_id,
+                )
         logger.info("recalculate_all_quotas updated %d marketplaces", len(rows))
 
     @staticmethod

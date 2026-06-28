@@ -41,6 +41,23 @@ def build_dim_marketplace_fields(*, id: UUID | None = None, **columns: Any) -> d
     return fields
 
 
+def build_scrape_job_failed_fields(
+    *,
+    id: UUID,
+    started_at: datetime | None,
+    completed_at: datetime,
+) -> dict[str, Any]:
+    """Assemble scrape_jobs failed-terminal columns for the META gate."""
+    reference = started_at if started_at is not None else completed_at
+    duration_ms = int((completed_at - reference).total_seconds() * 1000)
+    return build_scrape_job_fields(
+        id=id,
+        status="failed",
+        completed_at=completed_at,
+        duration_ms=duration_ms,
+    )
+
+
 @dataclass(frozen=True)
 class MetaWriteResult:
     """Outcome of one META door write (one commit per call)."""

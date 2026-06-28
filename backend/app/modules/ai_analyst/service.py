@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from anthropic import AsyncAnthropic
 from sqlalchemy import select
@@ -13,6 +13,11 @@ from app.config import Settings
 from app.models.app_tables import AIChatMessage, AIChatSession
 from app.models.core import User
 from app.modules.ai_analyst.claude_client import resolve_claude_model
+from app.modules.persist.chat_write import (
+    build_chat_message_fields,
+    build_chat_session_fields,
+    write_chat_async,
+)
 from app.modules.persist.logs_write import build_api_log_fields, write_logs_async
 
 settings = Settings()
@@ -60,35 +65,55 @@ async def chat(
         raise ValueError("Claude API key not configured")
 
     if session_id is not None:
-        session = (
+        existing = (
             await db.execute(
-                select(AIChatSession).where(
+                select(AIChatSession.id).where(
                     AIChatSession.id == session_id,
                     AIChatSession.user_id == user.id,
                 ),
             )
         ).scalar_one_or_none()
-        if session is None:
+        if existing is None:
             raise ValueError("Session not found")
+        active_session_id = session_id
     else:
-        session = AIChatSession(
-            user_id=user.id,
-            context_type=context_type,
-            context_id=context_id,
-            title=message[:SESSION_TITLE_MAX_LEN],
+        active_session_id = uuid4()
+        session_result = await write_chat_async(
+            table="ai_chat_sessions",
+            operation="insert",
+            kind="session_create",
+            fields=build_chat_session_fields(
+                id=active_session_id,
+                user_id=user.id,
+                context_type=context_type,
+                context_id=context_id,
+                title=message[:SESSION_TITLE_MAX_LEN],
+            ),
+            reject_source="ai_analyst_session_create",
         )
-        db.add(session)
-        await db.flush()
+        if not session_result.ok:
+            raise ValueError("Failed to create chat session")
 
-    db.add(AIChatMessage(session_id=session.id, role="user", content=message))
-    await db.flush()
+    user_msg_result = await write_chat_async(
+        table="ai_chat_messages",
+        operation="insert",
+        kind="message_append",
+        fields=build_chat_message_fields(
+            session_id=active_session_id,
+            role="user",
+            content=message,
+        ),
+        reject_source="ai_analyst_message_user",
+    )
+    if not user_msg_result.ok:
+        raise ValueError("Failed to persist user message")
 
     history = list(
         reversed(
             (
                 await db.execute(
                     select(AIChatMessage)
-                    .where(AIChatMessage.session_id == session.id)
+                    .where(AIChatMessage.session_id == active_session_id)
                     .order_by(AIChatMessage.created_at.desc())
                     .limit(CHAT_HISTORY_DEPTH)
                 )
@@ -127,11 +152,25 @@ async def chat(
         ],
         reject_source="ai_analyst",
     )
-    db.add(AIChatMessage(session_id=session.id, role="assistant", content=assistant_content))
-    await db.flush()
+    assistant_result = await write_chat_async(
+        table="ai_chat_messages",
+        operation="insert",
+        kind="message_append",
+        fields=build_chat_message_fields(
+            session_id=active_session_id,
+            role="assistant",
+            content=assistant_content,
+            tokens_used=tokens_used,
+            model_used=model_id,
+            duration_ms=duration_ms,
+        ),
+        reject_source="ai_analyst_message_assistant",
+    )
+    if not assistant_result.ok:
+        raise ValueError("Failed to persist assistant message")
 
     return {
-        "session_id": session.id,
+        "session_id": active_session_id,
         "response": assistant_content,
         "tokens_used": tokens_used,
         "duration_ms": duration_ms,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -37,6 +38,26 @@ def build_dim_date_fields(
         "is_weekend": is_weekend,
         "is_last_day_of_month": is_last_day_of_month,
     }
+
+
+def build_dim_date_fields_from_day(d: date) -> dict[str, Any]:
+    """Compute full dim_date insert payload for a calendar day."""
+    date_id = int(d.strftime("%Y%m%d"))
+    _, iso_week, iso_weekday = d.isocalendar()
+    return build_dim_date_fields(
+        date_id=date_id,
+        full_date=d,
+        year=d.year,
+        quarter=(d.month - 1) // 3 + 1,
+        month=d.month,
+        month_name=d.strftime("%B"),
+        week_iso=iso_week,
+        day_of_month=d.day,
+        day_of_week=iso_weekday,
+        day_name=d.strftime("%A"),
+        is_weekend=iso_weekday >= 6,
+        is_last_day_of_month=d.day == calendar.monthrange(d.year, d.month)[1],
+    )
 
 
 def build_listing_update_fields(*, url_hash: str, **delta: Any) -> dict[str, Any]:
