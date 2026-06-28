@@ -1,4 +1,36 @@
-"""Content-bound HMAC signing for firewall-approved persist payloads."""
+"""Content-bound HMAC signing for firewall-approved persist payloads.
+
+Byte canonical format (B2) — reference for the future plpgsql SECURITY DEFINER verifier.
+
+Reproduction rules (Python and plpgsql must match byte-for-byte):
+
+1. Operate on UTF-8 bytes. All ``:``-prefixed length prefixes count UTF-8 **byte**
+   lengths (plpgsql: ``octet_length``).
+2. ``lp(s)`` = ASCII decimal of ``len(s.encode("utf-8"))`` + ``b":"`` + UTF-8 bytes of ``s``.
+3. ``canonical_str(v)`` stringifies one value (``None`` → SQL NULL slot, no string).
+4. ``val_enc(x)`` = ``b"N"`` when ``canonical_str(x)`` is ``None``; else ``b"S"`` + ``lp(s)``.
+5. ``dict_enc(d)`` = ``b"D"`` + ASCII decimal ``len(d)`` + for each key sorted by Unicode
+   code point (plpgsql: ``ORDER BY key COLLATE "C"``): ``lp(key)`` + ``val_enc(d[key])``.
+6. Record canonical::
+
+       b"T" + lp(table) + b"O" + lp(operation)
+       + b"L" + dict_enc(locator) + b"F" + dict_enc(fields)
+
+7. Batch canonical::
+
+       b"T" + lp(table) + b"O" + lp(operation)
+       + b"L" + dict_enc(locator)
+       + b"R" + ASCII decimal len(rows)
+       + for each row in list order: dict_enc(row)
+
+8. Dict/list values: ``json.dumps(v, sort_keys=True, ensure_ascii=False,
+   separators=(",", ":"))`` — opaque string for HMAC; cast ``::jsonb`` only after
+   signature verification.
+9. No whitespace outside JSON strings. No escaping except inside JSON strings.
+10. HMAC: ``hmac.new(secret.encode("utf-8"), canonical_bytes, sha256).hexdigest()``
+    (lowercase hex). Secret unset → ``sign``/``sign_batch`` return ``None``;
+    ``verify``/``verify_batch`` return ``False`` (fail-closed).
+"""
 
 from __future__ import annotations
 
@@ -28,41 +60,52 @@ def reset_signing_settings_cache() -> None:
     _settings = None
 
 
-def _canonical_value(value: Any) -> Any:
-    """Stable JSON-serializable representation for one field value."""
+def canonical_str(value: Any) -> str | None:
+    """Map one signed payload value to its canonical string (None = SQL NULL slot)."""
     if value is None:
         return None
     if isinstance(value, bool):
-        return value
+        return "true" if value else "false"
     if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    if isinstance(value, float):
-        return format(value, ".15g")
+        return str(value)
     if isinstance(value, Decimal):
         return str(value)
+    if isinstance(value, float):
+        return format(value, ".15g")
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
     if isinstance(value, str):
         return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(
+            value,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     return str(value)
 
 
-def _canonical_field_dict(record_fields: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: _canonical_value(record_fields[key])
-        for key in sorted(record_fields.keys())
-    }
+def _lp_string(value: str) -> bytes:
+    encoded = value.encode("utf-8")
+    return str(len(encoded)).encode("ascii") + b":" + encoded
 
 
-def canonical_serialize(record_fields: dict[str, Any]) -> bytes:
-    """Deterministic serialization over a field dict (legacy helper for tests)."""
-    return json.dumps(
-        _canonical_field_dict(record_fields),
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
+def _val_enc(value: Any) -> bytes:
+    string_value = canonical_str(value)
+    if string_value is None:
+        return b"N"
+    return b"S" + _lp_string(string_value)
+
+
+def _dict_enc(mapping: dict[str, Any]) -> bytes:
+    parts = [b"D" + str(len(mapping)).encode("ascii")]
+    for key in sorted(mapping.keys()):
+        parts.append(_lp_string(key))
+        parts.append(_val_enc(mapping[key]))
+    return b"".join(parts)
 
 
 def canonical_serialize_signed_payload(
@@ -72,14 +115,17 @@ def canonical_serialize_signed_payload(
     fields: dict[str, Any],
     locator: dict[str, Any],
 ) -> bytes:
-    """Deterministic serialization for table + operation + locator + fields."""
-    canonical = {
-        "__table__": table,
-        "__operation__": operation,
-        "__locator__": _canonical_field_dict(locator),
-        "fields": _canonical_field_dict(fields),
-    }
-    return json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """Deterministic length-prefixed serialization for table + operation + locator + fields."""
+    return (
+        b"T"
+        + _lp_string(table)
+        + b"O"
+        + _lp_string(operation)
+        + b"L"
+        + _dict_enc(locator)
+        + b"F"
+        + _dict_enc(fields)
+    )
 
 
 def signing_secret() -> str | None:
@@ -143,14 +189,20 @@ def canonical_serialize_signed_batch_payload(
     rows: list[dict[str, Any]],
     locator: dict[str, Any],
 ) -> bytes:
-    """Deterministic serialization for table + operation + locator + row batch."""
-    canonical = {
-        "__table__": table,
-        "__operation__": operation,
-        "__locator__": _canonical_field_dict(locator),
-        "rows": [_canonical_field_dict(row) for row in rows],
-    }
-    return json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """Deterministic length-prefixed serialization for table + operation + locator + row batch."""
+    parts = [
+        b"T",
+        _lp_string(table),
+        b"O",
+        _lp_string(operation),
+        b"L",
+        _dict_enc(locator),
+        b"R",
+        str(len(rows)).encode("ascii"),
+    ]
+    for row in rows:
+        parts.append(_dict_enc(row))
+    return b"".join(parts)
 
 
 def sign_batch(
