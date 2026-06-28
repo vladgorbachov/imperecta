@@ -28,3 +28,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Not reversible: deleted rows were a static preseed (2024–2030).
     # Calendar rows beyond the trim boundary are rebuilt by gate inserts on ingest.
+    pass
