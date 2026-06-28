@@ -112,6 +112,7 @@ emitter.
 | `meta_snapshot_write_failed` | critical | Success-path `dim_marketplace` snapshot write failed after retry |
 | `discover_status_inconsistent` | warning | `persisted_listings > 0` but terminal status is `no_categories` |
 | `discover_exception` | error | Unhandled exception in `discover()` outer handler |
+| `finalize_write_rejected` | error | Child finalize `scrape_jobs` UPDATE rejected by META gate |
 
 ### gate_persist
 
@@ -182,6 +183,7 @@ budget_governor     | resume_index_desync              | warning
 orchestrator        | meta_snapshot_write_failed       | critical
 orchestrator        | discover_status_inconsistent     | warning
 orchestrator        | discover_exception               | error
+orchestrator        | finalize_write_rejected          | error
 gate_persist        | pool_batch_commit_failed         | error
 gate_persist        | pool_batch_total_reject          | warning
 url_canonicalizer   | dedup_lookup_failed              | error

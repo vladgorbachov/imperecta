@@ -43,6 +43,7 @@ import asyncio
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -359,31 +360,42 @@ def test_build_user_response_shape_matches_legacy() -> None:
 
 
 def test_update_me_honors_whitelist_and_clears_avatar() -> None:
+    from unittest.mock import AsyncMock, patch
+
     from app.modules.users.service import UsersService
 
-    class _FlushDb:
-        def __init__(self) -> None:
-            self.flushes = 0
-
-        async def flush(self) -> None:
-            self.flushes += 1
+    class _RefreshDb:
+        async def refresh(self, user: object) -> None:
+            pass
 
     fake = _build_fake_user_for_response()
     fake.avatar_url = "https://cdn/old.png"
     fake.is_superuser = False
-    svc = UsersService(_FlushDb())  # type: ignore[arg-type]
+    svc = UsersService(_RefreshDb())  # type: ignore[arg-type]
 
-    _run(
-        svc.update_me(
-            fake,
-            {
-                "name": "B",
-                "avatar_url": "",
-                "is_superuser": True,
-                "email": "evil@b.io",
-            },
+    with patch(
+        "app.modules.users.service.write_user_async",
+        new_callable=AsyncMock,
+        return_value=MagicMock(ok=True),
+    ):
+
+        async def _apply_refresh(user: object) -> None:
+            user.name = "B"  # type: ignore[attr-defined]
+            user.avatar_url = None  # type: ignore[attr-defined]
+
+        svc.db.refresh = _apply_refresh  # type: ignore[method-assign]
+
+        _run(
+            svc.update_me(
+                fake,
+                {
+                    "name": "B",
+                    "avatar_url": "",
+                    "is_superuser": True,
+                    "email": "evil@b.io",
+                },
+            )
         )
-    )
 
     assert fake.name == "B"
     assert fake.avatar_url is None

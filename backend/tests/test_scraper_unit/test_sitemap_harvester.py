@@ -62,7 +62,7 @@ async def test_harvest_sitemap_useful_sets_fresh_cooldown_and_returns_products()
         mp.base_url,
         marketplace_locale=mp.locale,
     )
-    db.flush.assert_awaited_once()
+    db.flush.assert_not_awaited()
 
 
 @pytest.mark.asyncio

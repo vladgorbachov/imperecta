@@ -156,3 +156,51 @@ def test_write_meta_sync_dispatches_insert_with_commit() -> None:
     db.close.assert_called_once()
     mock_write.assert_called_once()
     assert mock_write.call_args.args[1].operation == "insert"
+
+
+def test_scrape_jobs_finalize_update_accepts_failed_counter() -> None:
+    """Regression: integer failed must not inherit status enum check_values."""
+    job_id = uuid4()
+    completed_at = datetime.now(timezone.utc)
+    for failed_count in (0, 1):
+        fields = build_scrape_job_fields(
+            id=job_id,
+            status="completed",
+            completed_at=completed_at,
+            duration_ms=1200,
+            total_listings=10,
+            successful=8,
+            failed=failed_count,
+            config={"domain": "shop.example"},
+        )
+        outcome = evaluate_market(
+            fields,
+            table="scrape_jobs",
+            operation="update",
+            db=MagicMock(),
+            reject_source="test",
+        )
+        assert outcome.passed is True, f"failed={failed_count} should pass gate"
+
+
+def test_scrape_jobs_finalize_update_rejects_invalid_status() -> None:
+    job_id = uuid4()
+    fields = build_scrape_job_fields(
+        id=job_id,
+        status="not_a_valid_status",
+        completed_at=datetime.now(timezone.utc),
+        duration_ms=100,
+        total_listings=0,
+        successful=0,
+        failed=0,
+        config={},
+    )
+    outcome = evaluate_market(
+        fields,
+        table="scrape_jobs",
+        operation="update",
+        db=MagicMock(),
+        reject_source="test",
+    )
+    assert outcome.passed is False
+    assert "check:status" in outcome.failed_rules

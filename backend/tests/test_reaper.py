@@ -139,12 +139,11 @@ class _FakeRow:
 
 
 def _build_factory_mock(rows: list[_FakeRow], *, child_rows: list[tuple] | None = None):
-    """Return (engine, factory, db, update_calls) wired to yield `rows`.
+    """Return (engine, factory, db) wired to yield `rows` from SELECT.
 
     ``child_rows`` supplies (started_at, config) tuples for the live-child query.
     Defaults to empty (no live children).
     """
-    update_calls: list[dict] = []
     select_calls = {"count": 0}
 
     select_result = MagicMock()
@@ -157,8 +156,7 @@ def _build_factory_mock(rows: list[_FakeRow], *, child_rows: list[tuple] | None 
 
     async def fake_execute(stmt, params=None):
         if params is not None:
-            update_calls.append(dict(params))
-            return MagicMock()
+            raise AssertionError("raw SQL UPDATE must not run in reaper")
         select_calls["count"] += 1
         if select_calls["count"] == 1:
             return select_result
@@ -181,7 +179,7 @@ def _build_factory_mock(rows: list[_FakeRow], *, child_rows: list[tuple] | None 
     engine = MagicMock()
     engine.dispose = AsyncMock()
 
-    return engine, factory, db, update_calls
+    return engine, factory, db
 
 
 @pytest.mark.asyncio
@@ -191,6 +189,13 @@ async def test_reap_orphan_jobs_async_marks_stale_rows(monkeypatch):
     fresh_discovery_id = uuid4()
     stale_pipeline_id = uuid4()
     completed_id = uuid4()
+    meta_calls: list[dict] = []
+
+    async def fake_meta(**kwargs):
+        meta_calls.append(kwargs)
+        return MagicMock(ok=True, no_target=False)
+
+    monkeypatch.setattr(reaper_tasks, "write_meta_async", fake_meta)
 
     rows = [
         _FakeRow(
@@ -229,7 +234,7 @@ async def test_reap_orphan_jobs_async_marks_stale_rows(monkeypatch):
         ),
     ]
 
-    engine, factory, db, update_calls = _build_factory_mock(rows)
+    engine, factory, db = _build_factory_mock(rows)
     monkeypatch.setattr(
         reaper_tasks, "_make_session_factory", lambda: (engine, factory)
     )
@@ -237,9 +242,11 @@ async def test_reap_orphan_jobs_async_marks_stale_rows(monkeypatch):
     result = await reaper_tasks._reap_orphan_jobs_async()
 
     assert result == {"scanned": 4, "reaped": 2}
-    assert len(update_calls) == 1
-    assert set(update_calls[0]["ids"]) == {stale_discovery_id, stale_pipeline_id}
-    db.commit.assert_awaited_once()
+    assert len(meta_calls) == 2
+    reaped_ids = {call["fields"]["id"] for call in meta_calls}
+    assert reaped_ids == {str(stale_discovery_id), str(stale_pipeline_id)}
+    assert all(call["fields"]["status"] == "failed" for call in meta_calls)
+    db.commit.assert_not_called()
     db.rollback.assert_not_called()
     engine.dispose.assert_awaited_once()
 
@@ -324,10 +331,11 @@ async def test_reaper_spares_parent_with_live_child(monkeypatch):
         ),
     ]
 
-    engine, factory, db, update_calls = _build_factory_mock(
+    engine, factory, db = _build_factory_mock(
         rows,
         child_rows=[(fresh_child_started, fresh_child_config)],
     )
+    monkeypatch.setattr(reaper_tasks, "write_meta_async", AsyncMock())
     monkeypatch.setattr(
         reaper_tasks, "_make_session_factory", lambda: (engine, factory)
     )
@@ -335,7 +343,6 @@ async def test_reaper_spares_parent_with_live_child(monkeypatch):
     result = await reaper_tasks._reap_orphan_jobs_async()
 
     assert result == {"scanned": 1, "reaped": 0}
-    assert update_calls == []
     db.commit.assert_not_called()
 
 
@@ -349,6 +356,14 @@ async def test_reaper_reaps_parent_with_no_live_child(monkeypatch):
             "last_activity_at": (now - timedelta(seconds=900)).isoformat()
         }
     }
+
+    meta_calls: list[dict] = []
+
+    async def fake_meta(**kwargs):
+        meta_calls.append(kwargs)
+        return MagicMock(ok=True, no_target=False)
+
+    monkeypatch.setattr(reaper_tasks, "write_meta_async", fake_meta)
 
     rows = [
         _FakeRow(
@@ -364,7 +379,7 @@ async def test_reaper_reaps_parent_with_no_live_child(monkeypatch):
         ),
     ]
 
-    engine, factory, db, update_calls = _build_factory_mock(
+    engine, factory, db = _build_factory_mock(
         rows,
         child_rows=[(stale_child_started, stale_child_config)],
     )
@@ -375,7 +390,7 @@ async def test_reaper_reaps_parent_with_no_live_child(monkeypatch):
     result = await reaper_tasks._reap_orphan_jobs_async()
 
     assert result == {"scanned": 1, "reaped": 1}
-    assert set(update_calls[0]["ids"]) == {stale_pipeline_id}
+    assert meta_calls[0]["fields"]["id"] == str(stale_pipeline_id)
 
 
 @pytest.mark.asyncio
@@ -383,6 +398,14 @@ async def test_reaper_untouched_for_non_pipeline(monkeypatch):
     """Standalone discovery overrun reaping is unchanged by child-awareness."""
     now = datetime.now(tz=timezone.utc)
     stale_discovery_id = uuid4()
+
+    meta_calls: list[dict] = []
+
+    async def fake_meta(**kwargs):
+        meta_calls.append(kwargs)
+        return MagicMock(ok=True, no_target=False)
+
+    monkeypatch.setattr(reaper_tasks, "write_meta_async", fake_meta)
 
     rows = [
         _FakeRow(
@@ -394,7 +417,7 @@ async def test_reaper_untouched_for_non_pipeline(monkeypatch):
         ),
     ]
 
-    engine, factory, db, update_calls = _build_factory_mock(rows)
+    engine, factory, db = _build_factory_mock(rows)
     monkeypatch.setattr(
         reaper_tasks, "_make_session_factory", lambda: (engine, factory)
     )
@@ -402,12 +425,13 @@ async def test_reaper_untouched_for_non_pipeline(monkeypatch):
     result = await reaper_tasks._reap_orphan_jobs_async()
 
     assert result == {"scanned": 1, "reaped": 1}
-    assert set(update_calls[0]["ids"]) == {stale_discovery_id}
+    assert meta_calls[0]["fields"]["id"] == str(stale_discovery_id)
 
 
 @pytest.mark.asyncio
 async def test_reap_orphan_jobs_async_noop_when_nothing_running(monkeypatch):
-    engine, factory, db, update_calls = _build_factory_mock([])
+    monkeypatch.setattr(reaper_tasks, "write_meta_async", AsyncMock())
+    engine, factory, db = _build_factory_mock([])
     monkeypatch.setattr(
         reaper_tasks, "_make_session_factory", lambda: (engine, factory)
     )
@@ -415,7 +439,6 @@ async def test_reap_orphan_jobs_async_noop_when_nothing_running(monkeypatch):
     result = await reaper_tasks._reap_orphan_jobs_async()
 
     assert result == {"scanned": 0, "reaped": 0}
-    assert update_calls == []
     db.commit.assert_not_called()
     engine.dispose.assert_awaited_once()
 
@@ -446,7 +469,7 @@ async def test_watchdog_revives_stalled_parent(monkeypatch):
             },
         )
     ]
-    engine, factory, _db, _ = _build_factory_mock(rows)
+    engine, factory, _db = _build_factory_mock(rows)
     monkeypatch.setattr(
         reaper_tasks, "_make_session_factory", lambda: (engine, factory)
     )
@@ -494,7 +517,7 @@ async def test_watchdog_skips_healthy_and_reaper_owned(monkeypatch):
             },
         ),
     ]
-    engine, factory, _db, _ = _build_factory_mock(rows)
+    engine, factory, _db = _build_factory_mock(rows)
     monkeypatch.setattr(
         reaper_tasks, "_make_session_factory", lambda: (engine, factory)
     )

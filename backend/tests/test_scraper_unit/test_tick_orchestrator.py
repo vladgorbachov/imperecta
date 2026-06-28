@@ -574,37 +574,45 @@ async def test_tick_unknown_phase_stops(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reap_stale_children_issues_update(monkeypatch):
+async def test_reap_stale_children_routes_through_meta(monkeypatch):
     parent_id = uuid4()
     reaped_id = uuid4()
+    now = datetime.now(tz=timezone.utc)
     db = _mock_db()
     exec_result = MagicMock()
-    exec_result.all.return_value = [(reaped_id,)]
+    exec_result.all.return_value = [(reaped_id, now)]
     db.execute = AsyncMock(return_value=exec_result)
+    meta_calls: list[dict] = []
+
+    async def fake_meta(**kwargs):
+        meta_calls.append(kwargs)
+        return MagicMock(ok=True, no_target=False)
+
+    monkeypatch.setattr(tick_mod, "write_meta_async", fake_meta)
 
     n = await tick_mod._reap_stale_children(db, parent_id)
 
     assert n == 1
     db.execute.assert_awaited_once()
-    sql_arg = db.execute.await_args.args[0]
-    # bound TextClause — stringify and look for the UPDATE we expect
-    rendered = str(sql_arg).lower()
-    assert "update scrape_jobs" in rendered
-    assert "status = 'failed'" in rendered
-    db.commit.assert_awaited()
+    assert len(meta_calls) == 1
+    assert meta_calls[0]["fields"]["status"] == "failed"
+    db.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_reap_stale_children_zero_skips_commit(monkeypatch):
+async def test_reap_stale_children_zero_skips_meta(monkeypatch):
     db = _mock_db()
     exec_result = MagicMock()
     exec_result.all.return_value = []
     db.execute = AsyncMock(return_value=exec_result)
+    mock_meta = AsyncMock()
+    monkeypatch.setattr(tick_mod, "write_meta_async", mock_meta)
 
     n = await tick_mod._reap_stale_children(db, uuid4())
 
     assert n == 0
-    db.commit.assert_not_awaited()
+    mock_meta.assert_not_called()
+    db.commit.assert_not_called()
 
 
 @pytest.mark.asyncio

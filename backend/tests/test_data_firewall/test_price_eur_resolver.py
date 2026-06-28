@@ -11,7 +11,10 @@ import pytest
 
 from app.modules.currency.price_eur_resolver import resolve_price_eur
 from app.modules.data_firewall.signing import reset_signing_settings_cache
-from app.modules.data_firewall.update_validator import authorize_scrape_update
+from app.modules.data_firewall.update_validator import (
+    SCRAPE_UPDATE_ALLOWLIST,
+    authorize_scrape_update,
+)
 from app.modules.persist.scrape_gate_fields import build_listing_update_fields
 from app.modules.persist.writer import build_fact_price_fields
 
@@ -161,12 +164,16 @@ def test_denorm_allowlist_accepts_last_price_eur() -> None:
     assert no_change_outcome.passed is True
 
 
-def test_sync_listing_denorm_cache_updates_last_price_eur() -> None:
-    from app.modules.ingestion.service import _sync_listing_denorm_cache
-
-    listing = MagicMock()
-    _sync_listing_denorm_cache(listing, {"last_price_eur": Decimal("9.20")})
-    assert listing.last_price_eur == 9.2
+def test_denorm_no_change_allowlist_includes_last_price_eur() -> None:
+    no_change_fields = build_listing_update_fields(
+        url_hash="hash",
+        last_checked_at=datetime.now(tz=timezone.utc),
+        last_price=10.0,
+        last_currency_code="EUR",
+        last_price_eur=Decimal("9.20"),
+    )
+    allowed = SCRAPE_UPDATE_ALLOWLIST["fact_listing"]["listing_denorm_no_change"]
+    assert set(no_change_fields.keys()) - {"url_hash"} <= allowed
 
 
 def test_currency_module_has_no_scraper_ingestion_imports() -> None:

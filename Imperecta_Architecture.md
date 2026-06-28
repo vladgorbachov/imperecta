@@ -1,6 +1,6 @@
 # Imperecta — общее описание проекта и архитектура
 
-**Актуально на:** 2026-06-25 (ветка `main`, head `0223000`)  
+**Актуально на:** 2026-06-27 (ветка `main`, head `c40a2b6`; §0b.2a–b GATE BYPASS TOTAL ELIMINATION)  
 **Назначение:** единый контекст для разработки, онбординга и Cursor.
 
 > Архитектурные принципы — см. `ARCHITECTURE_PRINCIPLES.md` (immutable, не редактировать). Этот документ описывает реализацию; принципы не дублирует. Правило immutable: `.cursor/rules/architecture-principles-immutable.mdc` + `AGENTS.md`.
@@ -231,7 +231,18 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 **LAYER 0** перестройки «от БД наружу»: единый живой реестр **дверей** гейта и **контактов** backend ↔ PostgreSQL.
 
-Метафора «дома»: **data_firewall** — единственный шлюз; **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (запись в fact/dim) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
+Метафора «дома»: **data_firewall** — **маршрутизатор** (не executor); **PRODUCER-SIDE doors** — публичные входы (`evaluate_*`), через которые продюсеры (scrape, discovery, market_data, admin) подают записи; **DB-SIDE doors** — ветки `persist` (тупой CUD-примитив: `INSERT`/`UPDATE`/`DELETE` по `signed.table`+`operation`) и путь **reject** (`write_reject_data_isolated` на gate-fail, `write_reject_data` / `_reject_persist` in-txn). **persist** — WRITE-ONLY: read-дверей в `persist/writer.py` **нет** (0 подтверждено, NOT FOUND); чтение для замков (например `CurrencyResolver`) выполняет сам гейт. У каждой двери фиксируются имя, назначение, from→to и **замок** (валидация / контракт / подпись) с честной оценкой силы (**FULL** / **PARTIAL** / **WEAK**) и известными **GAP**. Контакты **BYPASS** (0b.2) — записи, миновавшие дверь; backlog **LAYER 2**. Реестр обновляется по мере усиления замков (**LAYER 1**) и закрытия bypass (**LAYER 2**).
+
+**Инварианты gate/persist/discovery (foundational, `ARCHITECTURE_PRINCIPLES.md` §15.5 — не подлежат повторной верификации):**
+
+| # | Инвариант | Суть |
+|---|-----------|------|
+| **(1)** | Универсальность гейта включает **DELETE** | Любая рантайм-мутация (`INSERT`/`UPDATE`/`DELETE`) → **data_firewall** → dumb **persist**; carve-out maintenance/service tables **отсутствует**; retention/TTL (`reject_data`, `service_alerts`; перспектива `api_logs`/`scrape_logs`) → **COMMANDS/DDL**-дверь + audit-mark; вне рантайма — только **Alembic** |
+| **(2)** | **persist** = тупой **CUD**-примитив | `INSERT`/`UPDATE`/`DELETE` строго по `signed.table` + `signed.operation`; без чтений, бизнес-логики и ветвления; `DELETE` — часть CUD, не отдельная фича |
+| **(3)** | **data_firewall** = **маршрутизатор** | Producer-side + DB-side двери (META, LOGS, ANALYTICAL, DDL/COMMANDS, USER_DATA, DATA_EXPORT); валидирует + HMAC + решает → persist исполняет; DDL сам не исполняет; **update_validator** — rail для scrape-дельт `fact_listing`/`dim_product`; reactivation **ABOLISHED** |
+| **(4)** | **Discovery** operational model | Producer: ops `SELECT` на producer-сессии; **persist не читает**; pool + курсоры только через гейт (`write_pool_dtos_sync` → `evaluate_market` → `write_sync`; `write_meta` для `dim_marketplace`); finalize `scrape_jobs` → **META door** (не `update_validator`); без raw SQL/ORM UPDATE `dim_marketplace` |
+
+**persist** маршрутизирует `DELETE` по `signed.table` + `signed.operation` наравне с `INSERT` / `UPDATE`; политику не решает.
 
 **LAYER 1 progress (sub-seams):** sub-seam 1 (`reject_data.operation`, миграция `029`) — **DONE**; sub-seam 1b (`fact_listing.url_hash` NOT NULL locator, миграция `030`) — **DONE**; sub-seam 2 (master-lock: HMAC bind `table` + `operation` + `locator` + `fields`) — **DONE**; sub-seam 3 (reject вне nested savepoint, `write_reject_data_isolated`) — **DONE**; sub-seam 4 (CUD UPDATE/DELETE primitives, `PersistResult`) — **DONE** → **LAYER 1 COMPLETE**. **LAYER 2 — COMPLETE**. **LAYER 3 — COMPLETE:** cat-1 routing + `price_eur_resolver` + `price_change_pct` compute-site + market-data triad (`0a.6`) + **`visualisation_calc/movements` wired** (`0a.7`, slice A `display_currency`) + **`visualisation_calc/kpi` dashboard-kpi** (`0a.7b`, slice B) — §2.7.6. **LAYER 4 — discovery COMPLETE** (`0a.8`): монолит `scraper/discovery.py` **удалён**; top-level `discovery/` — 10 submodules + `DiscoveryOrchestrator` + `constants.py`; **все 10 узлов** оснащены defence-in-depth по `ARCHITECTURE_PRINCIPLES.md` §16 (19 `anomaly_type`, shared emitter `discovery/alerting.py`); finalization cleanup (stale comments, dedup constants, `current_url` classify fix). **NEXT:** discovery **test run** — recon beat schedule (manual-trigger vs scheduled), manual trigger на `pandashop_md`, prod-verify 33 categories harvest + pool fill + остальные 12 marketplaces; fix-seam `fetch_adapter` (`requires_js`) остаётся **OPEN**. **DEFERRED:** cat-5 USER/AUTH → Phase 7/8.
 
@@ -249,14 +260,14 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 
 **Модуль `currency` (LAYER 3 — fiat):** `backend/app/modules/currency/` — **`price_eur_resolver`** (`resolve_price_eur`, sync scrape-path EUR); **`display_converter`** (`CurrencyConverter`, UI display FX — перенесён из удалённого `common/currency.py`); **`forex_fetch`** (thin delegate → `market_data.fetching.fetch_forex_rates`; `TODO(boundary)` полная Tier-0→Tier-1 изоляция — backlog). `price_eur_resolver` читает `rate_to_eur` из `fact_currency_rate` через **операционный SELECT** на producer sync `Session` по **scrape-day `date_id`**; read-двери persist **нет**. EUR-base: `price_eur = price`; non-EUR: `price × rate_to_eur`, квантование **Numeric(12,2), ROUND_HALF_UP**; отсутствующий курс на scrape-day → честный `NULL`. Приоритет источника: `ecb` → `openexchangerates` → … → `custom` (`_RATE_SOURCE_PRIORITY`). Результат → `build_fact_price_fields` → **`fact_price.price_eur`** и denorm → **`fact_listing.last_price_eur`** (kinds `listing_denorm_success` / `listing_denorm_no_change`; `last_currency_code` в no_change — из нормализованного `currency_code`).
 
-**DDL/COMMANDS (подход D-A):** гейт здесь — **ROUTER**, не executor. Каждая maintenance-операция (MV refresh, partition create, retention DELETE, CHECK repair) выполняется **как есть** на своём connection (`raw conn` / caller `Session`); параллельно best-effort пишется durable audit-mark через `record_maintenance_audit` / `record_maintenance_audit_async` (`persist/maintenance_audit.py:35+`): `service='maintenance'`, `endpoint='{op}:{target}'`, `method` — короткий глагол (`REFRESH`, `DDL`, `DELETE`, `ALTER`), `status` `success`/`error`, `user_id` где доступен иначе `NULL`, `detail`/counts в `error_message`. Хелпер **проглатывает** собственные сбои — никогда не блокирует maintenance op.
+**DDL/COMMANDS (подход D-A):** гейт здесь — **ROUTER** для рантайм-мутаций, в т.ч. **`DELETE`**. Операции maintenance (MV refresh, partition create, retention `DELETE`, CHECK repair) проходят через **COMMANDS/DDL**-дверь: signed `operation=delete` (или иной подписанный CUD) → **persist** (`_write_sync_delete` / dispatch по `signed.operation`), параллельно durable audit-mark через `record_maintenance_audit` / `record_maintenance_audit_async` (`persist/maintenance_audit.py:35+`): `service='maintenance'`, `endpoint='{op}:{target}'`, `method` — короткий глагол (`REFRESH`, `DDL`, `DELETE`, `ALTER`), `status` `success`/`error`, `user_id` где доступен иначе `NULL`, `detail`/counts в `error_message`. Хелпер **проглатывает** собственные сбои audit-mark — никогда не блокирует саму maintenance op. **Инвариант (§15.5 principles):** прямой `DELETE` на отдельной сессии в обход гейта для служебных таблиц **не допускается**; единственный вне-гейтовый слой данных — **Alembic** (DDL до рантайма).
 
 | door (function) | file:line | purpose | FROM (who may call) | TO (produces) | lock steps (ordered) | lock strength | known lock-gap |
 |-----------------|-----------|---------|---------------------|---------------|----------------------|---------------|----------------|
 | `evaluate_ecommerce` | `data_firewall/firewall.py:204+` | E-commerce extract → signed row (default `fact_price`) | Scrape/ingestion: `marketplace_id` + `CurrencyResolver` + optional `persist_fields` (`ingestion/service.py:194–201`) | On pass + `persist_fields`: `SignedRecord`; on fail + `db`: `reject_data` | 1) `evaluate_ecommerce_rules` — 5 checks (`rules.py:108–159`, DB read whitelist `rules.py:65–75`) 2) `page_role in (listing,hub)` → reject (`firewall.py:210–220`) 3) `page_role=unknown` → log only (`221–227`) 4) If `passed and persist_fields`: `_validate_against_contract` (`239–244`) 5) `_sign_fields` (`251`, `165–189`) 6) sign fail → `signing_unavailable` (`252–256`) 7) If `not passed and db`: `write_reject_data_isolated` (`278–291`) | **PARTIAL** | `unknown` page_role not blocked; contract only on keys present (`firewall.py:116–119`); `passed=True` без `signed_record` если `persist_fields is None` (`237–238`) |
 | **META door** (`evaluate_market` + `meta_write`) | `firewall.py:411+`; `meta_write.py:56+` | Reentrant multiplex: operational metadata `scrape_jobs` + `dim_marketplace` → signed row по `operation` (`insert` / `update` / `delete`) | Async producers: `write_meta_async` → `asyncio.to_thread` + `sync_session_factory` + `write_meta_sync` (precedent `discovery.py` pool bridge); sync: `write_meta_sync` / `activity_pulse.py` | On pass: `SignedRecord` + `write_sync` + commit; on fail: `write_reject_data_isolated` | 1) `unknown_table` if no contract 2) `_validate_against_contract` (types + nullable + enum CHECK; **без** semantic rules) 3) `_sign_fields` с `operation` + locator `("id",)` (`contracts.py:130`) 4) reject isolated on fail | **LIGHT** | JSONB cols signed but content-blind (inert-data); нет thread pool внутри гейта — один sync session на вызов моста |
 | **LOGS door** (`evaluate_logs`) | `firewall.py:218–303` | Append-only audit: `scrape_logs` + `api_logs`, **INSERT-ONLY** | `persist/logs_write.py` (`persist_logs_batch`, `write_logs_sync`, `write_logs_async`); producers: `scraper/service.py` batch flush, `tasks.py`, `market_data/ingestion.py`, `ai_analyst/service.py`; **D-A:** `persist/maintenance_audit.py` (`record_maintenance_audit` / `_async`) | On pass: `SignedBatch` + `write_batch_sync`; partial batch OK | 1) per-row `_validate_against_contract` (LIGHT) 2) invalid rows → `write_reject_data_isolated` **по одной** (`254–264`) 3) valid rows → `sign_batch` + `SignedBatch` (`269–298`) 4) signing fail → isolated reject per valid row (`276–290`) | **LIGHT** | locator `()` (`contracts.py:134–135`); content-blind на `Text` (`url`, `error_message`, `endpoint`); **bad-row-in-batch:** valid → один `SignedBatch`, invalid → isolated reject; честные `inserted_count` / `rejected_count`; batch не отбрасывается целиком |
-| **DDL/COMMANDS (D-A audit-mark)** | `persist/maintenance_audit.py:35+` | Audit trail maintenance ops в `api_logs` — **не** исполняет DDL | `maintenance_tasks.py`, `cleanup_tasks.py`, `scraper/service.py` (CHECK repair), `admin/parsing_admin.py` (job_type CHECK) | `write_logs_sync` → `evaluate_logs` → `sign_batch` → `write_batch_sync` → `api_logs` | 1) caller выполняет DDL/DELETE на своём connection 2) `record_maintenance_audit` / `_async` пишет mark рядом 3) swallow failure — op не блокируется | **LIGHT** (audit only) | DDL statements остаются direct; exempt-by-design от routing, но оставляют durable `api_logs` trail |
+| **DDL/COMMANDS (D-A audit-mark + signed DELETE)** | `persist/maintenance_audit.py:35+`; `update_validator.authorize_scrape_delete` / META `evaluate_market` | Рантайм `DELETE` (retention TTL, prune) и audit trail maintenance → **через гейт** | `maintenance_tasks.py`, `cleanup_tasks.py`, `scraper/service.py` (CHECK repair), `admin/parsing_admin.py` (job_type CHECK) | signed `DELETE` → `write_sync` (`_write_sync_delete`); audit → `write_logs_sync` → `evaluate_logs` → `api_logs` | 1) producer формирует signed op (`operation=delete`, locator) 2) `evaluate_market` / `update_validator` / COMMANDS door 3) `persist` dispatch по `signed.table`+`operation` 4) `record_maintenance_audit` пишет mark рядом 5) swallow audit failure — op не блокируется | **LIGHT** (audit) + **SEMANTIC** (DELETE allowlist где применимо) | **Инвариант §15.5:** bypass DELETE для service tables запрещён; Alembic — вне рантайма |
 | **`update_validator` door** (`authorize_scrape_update` / `authorize_scrape_delete`) | `data_firewall/update_validator.py:87+` / `238+` | Scrape-owned UPDATE/DELETE: per-kind **COLUMN ALLOWLIST** + semantic invariant | `scraper/service.py` (housekeeping/deactivate/prune); `ingestion/service.py` (enrich/denorm) | On pass: `SignedRecord` (`operation` `update`/`delete`) + `write_sync` | 1) `SCRAPE_UPDATE_ALLOWLIST` kind lookup (`24–43`) 2) locator keys present (`TABLE_LOCATORS`) 3) changed ⊆ allowed 4) **`is_active` may be False or absent, never True** (`reactivation_forbidden`, `192–207`) 5) `_sign_fields` 6) isolated reject on fail (`_isolated_reject`, `65–84`) | **SEMANTIC** | Locators: `fact_listing` → `url_hash`; `dim_product` → `id`. Reject reasons: `unknown_update_kind`, `column_not_allowed`, `missing_locator`, `reactivation_forbidden`, `nothing_to_update`, `signing_unavailable`, `unknown_delete_table`, `unexpected_delete_field` |
 | `evaluate_market` (аналитический рельс) | `data_firewall/firewall.py:411+` | Market/discovery dict → signed dim/fact row | Caller supplies `table` + field dict (`discovery.py:200+`, `market_data/ingestion.py:147+`) | On pass: `SignedRecord`; on fail + `db`: `reject_data` | 1) `unknown_table` if no contract 2) `_validate_against_contract` 3) `_sign_fields` (`operation` default `insert`) 4) If `not passed and db`: `write_reject_data_isolated` | **PARTIAL** | No e-commerce rules; sparse contract; 15 contracted tables (`contracts.py:106–121`) vs 8 `write_sync` + 2 `write_batch_sync` branches; 5 analytical tables still `raise` at persist |
 | `evaluate_ecommerce_rules` | `data_firewall/rules.py:108–113` | Rules-only rail (5 checks); **not** package export | Internal from `evaluate_ecommerce` (`firewall.py:197–201`); legacy alias `evaluate_gate` | `GateOutcome` only — no `SignedRecord` | 1) `product_name_ok` 2) `currency_ok` 3) `price_ok` 4) `currency_raw_sane_ok` 5) `currency_country_match_ok` (`115–128`) | **WEAK** | No contract, no signing, no persist ticket |
@@ -269,7 +280,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 **Диспетчеризация `write_sync` / `write_async`:** после `_verify_signed_record` — по `signed.operation`:
 - **`insert`** — прежние ветки (ORM INSERT; для `fact_price` и трёх market facts — DELETE по replace-key + INSERT, daily replace);
 - **`update`** (sync only, U-1) — `_write_sync_update`: локатор `signed.locator` → `update(model).where(locator).values(...)` только по **non-locator** полям из `signed.fields` (partial update);
-- **`delete`** — `_write_sync_delete` / `_write_async_delete`: только `signed.locator`, value fields не требуются.
+- **`delete`** — `_write_sync_delete` / `_write_async_delete`: только `signed.locator`, value fields не требуются; **persist не решает политику** — маршрутизация по `signed.table` + `signed.operation` идентична `insert` / `update` (инвариант §15.5).
 
 **Возврат:** `PersistResult(ok, rows_affected, no_target)` (`writer.py:78–87`); `__bool__` → `ok` — insert callers без изменений; `rowcount == 0` → `no_target=True` (честное уведомление об отсутствии цели, не ошибка).
 
@@ -301,7 +312,7 @@ Sitemap: per-URL structural classify (sample только для early `reject_s
 | `write_batch_sync` | `persist/writer.py:411–458` | `scrape_logs`, `api_logs` | `insert` (batch) | **Yes** — `_verify_signed_batch` (`87–104`) | caller `Session` | `db.add_all`; identity PK server-gen — **без** locator addressing |
 | `write_batch_sync` (null `signed`) | `persist/writer.py:418–427` | `unknown` | reject insert | N/A | caller `Session` | `_reject_persist` → `missing_signed_batch` |
 | `write_batch_sync` (bad signature) | `persist/writer.py:429–439` | `signed.table` | reject insert | **Yes** `_verify_signed_batch` | caller `Session` | `invalid_signature` / `unsupported_operation` |
-| **D-A maintenance audit** | `persist/maintenance_audit.py:35+` → `logs_write.write_logs_sync` | `api_logs` | `insert` (batch of 1) | **Yes** — через LOGS (`evaluate_logs` → `sign_batch`) | отдельная sync-сессия внутри `write_logs_sync` | DDL/COMMANDS trail: `service='maintenance'`, `endpoint='{op}:{target}'`; **DDL statements сами не проходят persist** — остаются direct на raw conn / caller session |
+| **D-A maintenance audit** | `persist/maintenance_audit.py:35+` → `logs_write.write_logs_sync` | `api_logs` | `insert` (batch of 1) | **Yes** — через LOGS (`evaluate_logs` → `sign_batch`) | отдельная sync-сессия внутри `write_logs_sync` | DDL/COMMANDS trail: `service='maintenance'`, `endpoint='{op}:{target}'`; audit-mark; **рантайм `DELETE`** — через signed op + `persist` (инвариант §15.5), не direct bypass |
 | `write_reject_data` | `data_firewall/reject_store.py:108–150` | `reject_data` | insert + flush | No HMAC | caller `Session` | flush-only; in-txn callers (`writer._reject_persist`, прямой reject в `write_async`) — **не** через `write_sync` |
 | `write_reject_data_isolated` | `data_firewall/reject_store.py:153+` | `reject_data` | insert + commit | No HMAC | независимая sync-сессия (`sync_session_factory`) | durable reject-канал гейта (`evaluate_ecommerce`, `evaluate_market`); коммит вне business savepoint продюсера; зеркало `_persist_technical_error_log` |
 | `_reject_persist` | `persist/writer.py:140+` | `reject_data` | insert via `write_reject_data` | No (already failed verify) | caller `Session` | Sentry escalate; persist reject in-txn (flush-only) |
@@ -477,6 +488,8 @@ Pool-write closure (Layer 2, discovery pool-write):
 4. Dedup read перед emit: `existing_hashes` по `url_hash` (orchestrator).
 5. META door: `scrape_jobs` + `dim_marketplace` snapshot через `write_meta_async` (`orchestrator._meta_update_marketplace_snapshot` → `cursor_store.snapshot_meta_columns`).
 
+**Operational model (инвариант §15.5 (4)):** discovery — producer; ops `SELECT` на producer-сессии; **persist не читает**. Запись пула и курсоров — **только** через гейт (п. 3–5 выше). Finalize child `scrape_jobs` `UPDATE` — **META door** (`evaluate_market` + `meta_write`), **не** `update_validator` (тот — для cat-1 дельт `fact_listing`/`dim_product`). Raw SQL / ORM `UPDATE` `dim_marketplace` — **запрещены**, в т.ч. в коррекционных скриптах.
+
 Re-route **не** планируется на этом шаге — контракт фиксирует текущий путь.
 
 ##### Известные дефекты (contract notes)
@@ -620,7 +633,7 @@ Re-route **не** планируется на этом шаге — контра
 
 > **Cat-3 log/audit (~8 write-sites, `scrape_logs` + `api_logs` INSERT):** **CLOSED** — маршрутизированы через дверь **LOGS** (`evaluate_logs` + batch signing). Исключения **cat-4**, **не** LOGS: retention DELETE (`cleanup_tasks.py:23–27`) — **AUDITED (D-A)**; DDL CHECK repair (`scraper/service.py:171–199`) — **AUDITED (D-A)**. Деструктивный admin whole-pool wipe (ранее TRUNCATE `scrape_logs` и др.) — **REMOVED**, не в активном backlog.
 
-> **Cat-4 maintenance (benign DDL/retention):** **AUDITED (D-A)** — op остаётся direct на своём connection (`workers/maintenance_tasks.py`: `_has_active_scrape_job`, `_refresh_mv`, `ensure_fact_price_partitions`; `core/supabase_security.py`: `harden_table_statements`; CHECK repairs `scraper/service.py`, `admin/parsing_admin.py`; retention DELETE `cleanup_tasks.py`); параллельно `record_maintenance_audit` / `record_maintenance_audit_async` пишет durable след в `api_logs` через LOGS door. Exempt-by-design от routing, но с audit trail. Деструктивный сброс всего пула — **REMOVED**.
+> **Cat-4 maintenance (benign DDL/retention):** **AUDITED (D-A)** — MV/partition/CHECK repair; retention `DELETE` (`cleanup_tasks.py`) — **миграционная цель:** signed `DELETE` через COMMANDS/DDL-дверь (инвариант §15.5), не exempt bypass; параллельно `record_maintenance_audit` / `record_maintenance_audit_async` → `api_logs` через LOGS door. Деструктивный сброс всего пула — **REMOVED**.
 
 > **Cat-1 analytical (scrape-path denorm/enrich/prune + `dim_date`):** **CLOSED → `update_validator` / `evaluate_market` / `evaluate_ecommerce`** — cluster `scrape-fact_listing-denorm` + `dim_date-upsert` маршрутизированы: UPDATE через `authorize_scrape_update` (per-kind allowlist + `reactivation_forbidden`); prune DELETE через `authorize_scrape_delete` + **durable commit** (`_prune_confirmed_nonproduct`, `scraper/service.py:713–715`); `dim_date` INSERT через `evaluate_market` + `write_sync` (`ON CONFLICT DO NOTHING`); `fact_price` несёт **`price_eur`** и **`price_change_pct`** (compute-site §7.5); listing denorm несёт **`last_price_eur`**. **In-memory ORM sync** после gate-writes: `sync_listing_gate_cache` (`persist/scrape_gate_fields.py:76+`), `_sync_listing_denorm_cache` / `_sync_product_enrich_cache` (`ingestion/service.py:135–154`) — same-session ORM readers остаются согласованными.
 
@@ -628,7 +641,131 @@ Re-route **не** планируется на этом шаге — контра
 
 > **REGISTRY backlog (документировать, не чинить в этом проходе):** мёртвый env `market_data_fuel_url`; orphan i18n `widgets.fuel.*`; CHECK enum cleanup (`coinmarketcap`/`custom`); stale docstring `telegram/__init__.py`; `forex_fetch` thin-delegate → полная Tier-0→Tier-1 изоляция; DB-dependent integration tests (`test_markets_contract`, `test_parsing_admin_*`); **`avgVolatility` KPI** = `movements.avg_abs_change` (mean-abs proxy; заменит submodule `volatility/`); **`totalPool` unification** — KPI card всё ещё на `/pool/stats`, не на `dashboard-kpi`; **`/pool/stats.last_updated` grain** vs `last_checked_at` / `dim_marketplace.last_discovery_at` — разные freshness semantics; movements KPI наполняются по мере накопления `price_change_pct` (≥2 scrape с изменением цены) — до этого честный accumulating state через `coverage_meta.data_ready`; **`_phase1_partial_urls`** в `discover()` всё ещё discard (не используется); **discovery test run PENDING** (`0a.8`) — beat schedule recon, manual trigger `pandashop_md`, 33 categories + pool fill, 12 marketplaces; pre-existing failures (`test_scrape_prunes_nonproduct`, `test_api_scrape_diagnostics_async` ImportError, `discover()` integration → Postgres); **resolve write-path** для `service_alerts` — LATER slice; **`test_discover_skips_phase2_when_phase1_exhausted_no_backlog`** — skip Phase 2 только при `not has_backlog` (старый тест кодировал дефект).
 
-> **Cat-5 USER/AUTH:** **DEFERRED → Phase 7/8** — cluster `users-auth` (planned `user_data` door).
+> **Cat-5 USER/AUTH:** **OPEN → GATE BYPASS TOTAL ELIMINATION seam 1** — cluster `users-auth` (planned `user_data` door); см. **0b.2a–b** ниже.
+
+#### 0b.2a Triple-audit result — authoritative bypass inventory (GATE BYPASS TOTAL ELIMINATION)
+
+Три независимых recon (static-grep ×2 + runtime/schema/privilege через Supabase MCP) свели ±0 к **37 runtime code-site bypasses**. Прежняя формулировка «всё через гейт» была **корректна для data-plane parser scope** (fact/dim/scrape ingest), но **недоохватывала** app-plane, operational leaks и DB-level классы.
+
+| Плоскость | Sites | Таблицы | Gate-path сегодня |
+|-----------|-------|---------|-------------------|
+| **APP-plane** | **14** | `users`, `ai_chat_*` — gate-path **нет** (#1–14: users/auth/telegram/core; #16–18: chat — см. seam 1–2) |
+| **DATA-plane** | **23** | `dim_date`, `dim_marketplace`, `scrape_jobs`, `scrape_logs`, `api_logs`, `reject_data` + ORM-echo; gate-path **есть**, но leaks (#15, #19–37) |
+
+**DB-level классы (вне счёта 37 code-sites):** `ON DELETE CASCADE` FK (см. CASCADE catalog + `ARCHITECTURE_PRINCIPLES.md` §15.5 sanctioned exception); column `DEFAULT` / `onupdate` (`now()`, `gen_random_uuid()`, `users.updated_at`); DDL/MV refresh (maintenance axis). **Привилегии:** приложение подключается privileged role (`rolbypassrls` / owner) → **DB-level enforcement gate-only сегодня отсутствует**; гейт держится на **code discipline** только. Level 2 (seam 9) переводит enforcement на restricted role + `SECURITY DEFINER` gate functions.
+
+**Полная таблица 37 code-sites (site / module / table / op / plane):**
+
+| # | Site | Module | Table | Op | Plane |
+|---|------|--------|-------|-----|-------|
+| 1 | `auth/api.py:69-70` | auth | users | INSERT | APP |
+| 2 | `auth/api.py:79-80` | auth | users | UPDATE | APP |
+| 3 | `auth/api.py:96-99` | auth | users | UPDATE | APP |
+| 4 | `users/service.py:115-116` | users | users | UPDATE | APP |
+| 5 | `users/service.py:215-216` | users | users | INSERT | APP |
+| 6 | `users/service.py:289-304` | users | users | UPDATE | APP |
+| 7 | `users/service.py:333-334` | users | users | UPDATE | APP |
+| 8 | `users/service.py:361-362` | users | users | UPDATE | APP |
+| 9 | `users/service.py:376-378` | users | users | UPDATE | APP |
+| 10 | `users/service.py:399-400` | users | users | DELETE | APP |
+| 11 | `core/admin_service.py:55-56` | core | users | INSERT | APP |
+| 12 | `telegram/api.py:133-135` | telegram | users | UPDATE | APP |
+| 13 | `telegram/api.py:155-156` | telegram | users | UPDATE | APP |
+| 14 | `telegram/api.py:170-172` | telegram | users | UPDATE | APP |
+| 15 | `market_data/reader.py:148-149` | market_data | users | UPDATE | DATA |
+| 16 | `ai_analyst/service.py:80-81` | ai_analyst | ai_chat_sessions | INSERT | APP |
+| 17 | `ai_analyst/service.py:83-84` | ai_analyst | ai_chat_messages | INSERT | APP |
+| 18 | `ai_analyst/service.py:130-131` | ai_analyst | ai_chat_messages | INSERT | APP |
+| 19 | `workers/cleanup_tasks.py:25` | workers | scrape_logs | DELETE | DATA |
+| 20 | `workers/cleanup_tasks.py:28` | workers | api_logs | DELETE | DATA |
+| 21 | `workers/cleanup_tasks.py:31` | workers | ai_chat_messages | DELETE | DATA |
+| 22 | `workers/cleanup_tasks.py:34` | workers | alert_events | DELETE | DATA |
+| 23 | `workers/reaper_tasks.py:312-325` | workers | scrape_jobs | UPDATE | DATA |
+| 24 | `scraper/pipeline/tick_orchestrator.py:177-197` | scraper | scrape_jobs | UPDATE | DATA |
+| 25 | `scraper/pipeline/tick_orchestrator.py:312-332` | scraper | scrape_jobs | UPDATE | DATA |
+| 26 | `marketplaces/service.py:43-48` | marketplaces | dim_marketplace | UPDATE | DATA |
+| 27 | `discovery/bfs_walker.py:176` | discovery | dim_marketplace | UPDATE (ORM flush) | DATA |
+| 28 | `discovery/bfs_walker.py:188` | discovery | dim_marketplace | UPDATE (ORM flush) | DATA |
+| 29 | `discovery/bfs_walker.py:287` | discovery | dim_marketplace | UPDATE (ORM flush) | DATA |
+| 30 | `discovery/bfs_walker.py:325` | discovery | dim_marketplace | UPDATE (ORM flush) | DATA |
+| 31 | `discovery/sitemap_harvester.py:172-174` | discovery | dim_marketplace | UPDATE (ORM flush) | DATA |
+| 32 | `discovery/orchestrator.py:808-812` | discovery | dim_marketplace | UPDATE (ORM flush) | DATA |
+| 33 | `market_data/ingestion.py:51-52` | market_data | dim_date | INSERT | DATA |
+| 34 | `data_firewall/reject_store.py:129-143` | data_firewall | reject_data | INSERT | DATA |
+| 35 | `data_firewall/reject_store.py:176-190` | data_firewall | reject_data | INSERT | DATA |
+| 36 | `ingestion/service.py:429-430` | ingestion | dim_product, fact_listing | UPDATE (ORM-echo) | DATA |
+| 37 | `scraper/service.py:426-427` | scraper | fact_listing | UPDATE (ORM-echo) | DATA |
+
+**CASCADE catalog (MCP `pg_constraint`, reference):** `users` → `ai_chat_sessions` (→ `ai_chat_messages`) / `alerts` (→ `alert_events`) / `data_exports` / `digests` / `user_products` / `user_subscriptions`; `fact_listing` → `fact_price` (+11 monthly partitions) / `fact_review` / `scrape_logs`; `dim_product` → `fact_listing` / `user_products`; `dim_marketplace` → `dim_seller` / `fact_listing` / `fact_promo`; `ai_chat_sessions` → `ai_chat_messages`; `alerts` → `alert_events`. Sanctioned exception — см. `ARCHITECTURE_PRINCIPLES.md` §15.5; Level 2 seam 8 — documented legitimate, не re-route.
+
+#### 0b.2b Elimination work-plan — GATE BYPASS TOTAL ELIMINATION (tracked checklist)
+
+**Порядок:** LEVEL 1 (7 seams) → LEVEL 2 (seams 8–9) → **re-audit** → pipeline re-run (pandashop G-B) → **§16 defence-in-depth full rollout** (см. **0b.2c**). Re-run **BLOCKED** до bypass elimination + re-audit.
+
+**Hard gate:** pipeline re-run (pandashop G-B) **BLOCKED** до закрытия всех пунктов ниже + re-audit.
+
+**LEVEL 1 — закрыть все 37 code-sites (dependency order):**
+
+| Seam | Scope | Closes # | Status |
+|------|-------|----------|--------|
+| **1 — USER door** | `user_data` CRUD: auth / users / telegram / core bootstrap / preferences; **full-lock** + privilege semantics | #1–15 | **IN PROGRESS** |
+| **2 — CHAT door** | `ai_chat_sessions`, `ai_chat_messages` | #16–18 | OPEN |
+| **3 — META-door closures** | reaper/tick raw `UPDATE scrape_jobs`; marketplaces `products_in_pool` quota; discovery cursor ORM-flush | #23–32 | OPEN |
+| **4 — dim_date via evaluate_market** | `market_data/ingestion.py` `_ensure_dim_date` → `evaluate_market` + `write_sync` | #33 | OPEN |
+| **5 — RETENTION extension** | cleanup raw deletes → gate; fix `AlertEvent.created_at` → `triggered_at`; consolidate dual-retention windows (**30/60/180/365d** `cleanup_old_data` vs **3d** `run_service_data_retention`) | #19–22 | OPEN |
+| **6 — reject_data INSERT door** | gated signed insert vs explicit exempt diagnostic channel | #34–35 | OPEN |
+| **7 — ORM-echo elimination** | redundant ungated ORM `UPDATE` после gate Core write: `ingestion:429-430`, `scraper:426-427` | #36–37 | OPEN |
+
+**Seam 1 — USER door: privilege invariant + `may_set_superuser` predicate**
+
+**`is_superuser` escalation — 2FA-gated (future door extension, решение Waldemar):** повышение `is_superuser` `False` → `True` проходит через единый **extensible predicate** `may_set_superuser(kind, target_fields)`. **Сейчас:** `True` только для explicit **admin-kind**. **Позже:** predicate расширяется — требует **все** 2FA verification flags = `True` (email-verification **AND** authenticator-app; новые колонки в отдельном future feature seam, напр. `email_2fa_verified`, `authenticator_2fa_verified`). Superuser access — **только** когда каждый 2FA-флаг на target row = `True`. Predicate — **единственная точка решения**; 2FA-расширение = изменение одной функции, не rewrite двери.
+
+**Design consequence для seam 1 сейчас:** privilege-invariant USER door для `is_superuser` — **`may_set_superuser(kind, target_fields)`**, **не** hardcoded inline check. Seam 1 вводит **predicate seam** с full-lock; 2FA-колонки и расширенное условие — **LATER seam** (после появления 2FA-полей). Seam 1 **не** hardcode'ит правило целиком.
+
+**2FA-поля (`email_2fa_verified`, `authenticator_2fa_verified`, связанные verification-token columns)** — **отдельная future feature** (не часть bypass elimination); отмечены здесь только чтобы predicate был сформирован с учётом их появления.
+
+**LEVEL 2 — DB-enforcement (physical impossibility bypass):**
+
+| Seam | Scope | Status |
+|------|-------|--------|
+| **8 — CASCADE = documented legitimate** | gate deletes parent; Postgres cascades children by design — sanctioned exception, **NOT** re-routed (см. principles §15.5) | OPEN |
+| **9 — restricted app DB-role** | restricted DB-role + `SECURITY DEFINER` gate functions + `REVOKE` direct DML + connection string switch; write execution moves from Python persist into privilege-guarded DB functions | OPEN |
+
+**RE-AUDIT:** повторный triple-audit (static-grep ×2 + MCP runtime/schema/privilege); подтвердить **zero bypass** на code **и** DB level. Только после этого — разблокировка pandashop G-B pipeline re-run.
+
+#### 0b.2c Defence-in-depth full rollout — post bypass elimination (tracked stage)
+
+**Напоминание Waldemar:** после устранения всех bypass (gate-only на code **и** DB level, Level 1 + Level 2 + re-audits) — **DEFENCE-IN-DEPTH FULL ROLLOUT**: оснастить **каждый узел** §16-триадой (`ARCHITECTURE_PRINCIPLES.md` §16):
+
+| # | Механизм | Суть |
+|---|----------|------|
+| **(1)** | Backup / redundancy | резервный или избыточный path там, где практически применимо (§16.1) |
+| **(2)** | Operational alerts | неаналитические алерты в admin panel при отклонении (§16.2; `service_alerts`, `alert_class='service'`) |
+| **(3)** | structlog logging | структурированное логирование на узле (§16.3) |
+
+**Scope:** **ALL modules** + **GATE** (`data_firewall` doors: `user_door`, `chat_door`, `evaluate_*`, `update_validator`, `retention_gate`, …) + **PERSIST** (`writer`, primitives, bridges) + **DATABASE layer** (Level-2 restricted app role + `SECURITY DEFINER` gate functions — backup, alerting, logging **и на DB-spine**). Расширяет §16 rollout, уже выполненный для **10 discovery submodules** (§0a.8, 19 `anomaly_type`), на остальную систему — включая gate/persist/DB spine, который bypass-elimination укрепил.
+
+**Sequencing (единый continuing effort):**
+
+```
+discovery §16 COMPLETE (10 nodes)
+        ↓
+bypass elimination Level 1 + Level 2 + re-audits (0b.2b)
+        ↓
+gate / persist / DB — §16 full rollout (THIS stage, 0b.2c)
+        ↓
+remaining modules — §16 rollout (horizon item, ARCHITECTURE_PRINCIPLES.md §16.5 п.4)
+```
+
+Rollout **0b.2c** идёт **после** bypass-clean + DB-enforced gate/persist (обёртка backup+alert+log имеет смысл только на чистом spine). **Сливается** с существующим horizon «defence-in-depth rollout across the rest of the project» — одна непрерывная линия: discovery done → **gate/persist/DB next** (этот reminder) → остальные модули.
+
+**Принцип остаётся LENS, не license to rework** (`ARCHITECTURE_PRINCIPLES.md` §16): оснащать **внутри зоны ответственности узла**; structural rework вне concern → **REGISTRY**, не scope creep rollout.
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| Discovery submodules | 10/10 nodes, `discovery/alerting.py` | **DONE** |
+| Gate / persist / DB spine | doors, `writer`, Level-2 `SECURITY DEFINER` functions | **OPEN** (blocked on 0b.2b completion) |
+| Remaining modules | scraper, ingestion, market_data, workers, auth/users, … | **OPEN** (continuing §16.5 horizon) |
 
 #### discovery — `dim_marketplace` cursors / `scrape_jobs` metadata — **CLOSED → META**
 
