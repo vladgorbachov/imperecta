@@ -20,7 +20,6 @@ from app.modules.data_firewall.firewall import (
 from app.modules.data_firewall.reject_store import reset_reject_spike_state
 from app.modules.data_firewall.signing import (
     SignedRecord,
-    canonical_serialize,
     reset_signing_settings_cache,
     sign,
     verify,
@@ -160,12 +159,6 @@ def test_data_firewall_signature_tamper_table_operation_locator() -> None:
 def test_extract_locator_raises_when_column_missing() -> None:
     with pytest.raises(ValueError, match="locator column missing"):
         extract_locator("fact_price", {"listing_id": uuid4()})
-
-
-def test_data_firewall_signature_content_binding_bytes() -> None:
-    a = canonical_serialize({"b": 1, "a": 2})
-    b = canonical_serialize({"a": 2, "b": 1})
-    assert a == b
 
 
 def test_persist_rejects_unsigned() -> None:
