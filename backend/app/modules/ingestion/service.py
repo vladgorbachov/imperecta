@@ -138,34 +138,6 @@ def _payload_has_product_name_field(payload: object) -> bool:
     return any(f.name == "product_name" for f in fields(payload))
 
 
-def _sync_product_enrich_cache(product: Any, delta: dict[str, Any]) -> None:
-    """Mirror gate-written enrich columns on the in-session product instance."""
-    if "name" in delta:
-        product.name = delta["name"]
-    if "name_normalized" in delta:
-        product.name_normalized = delta["name_normalized"]
-    if "image_url" in delta:
-        product.image_url = delta["image_url"]
-
-
-def _sync_listing_denorm_cache(listing: FactListing, delta: dict[str, Any]) -> None:
-    """Mirror gate-written denorm columns on the in-session listing instance."""
-    if "last_checked_at" in delta:
-        listing.last_checked_at = delta["last_checked_at"]
-    if "last_price" in delta:
-        listing.last_price = delta["last_price"]
-    if "last_currency_code" in delta:
-        listing.last_currency_code = delta["last_currency_code"]
-    if "last_price_changed_at" in delta:
-        listing.last_price_changed_at = delta["last_price_changed_at"]
-    if "last_price_eur" in delta:
-        listing.last_price_eur = (
-            float(delta["last_price_eur"])
-            if delta["last_price_eur"] is not None
-            else None
-        )
-
-
 # --- IngestionService --------------------------------------------------------
 
 
@@ -340,14 +312,13 @@ class IngestionService:
                     url_hash=listing.url_hash,
                     **denorm_delta,
                 )
-                if self._persist_scrape_update(
+                self._persist_scrape_update(
                     table="fact_listing",
                     kind="listing_denorm_no_change",
                     fields=denorm_fields,
                     listing=listing,
                     source="ingestion_denorm_no_change",
-                ):
-                    _sync_listing_denorm_cache(listing, denorm_delta)
+                )
                 forced_log_status = "no_change"
                 logger.info(
                     "PRICE_UNCHANGED listing_id=%s price=%s %s",
@@ -377,15 +348,14 @@ class IngestionService:
                         url_hash=listing.url_hash,
                         **denorm_delta,
                     )
-                    if self._persist_scrape_update(
+                    self._persist_scrape_update(
                         table="fact_listing",
                         kind="listing_denorm_success",
                         fields=denorm_fields,
                         listing=listing,
                         source="ingestion_denorm_success",
                         date_id=persist_fields["date_id"],
-                    ):
-                        _sync_listing_denorm_cache(listing, denorm_delta)
+                    )
                     forced_log_status = "success"
                     persisted = True
                     logger.info(
@@ -491,14 +461,13 @@ class IngestionService:
             product_id=listing.product_id,
             **delta,
         )
-        if self._persist_scrape_update(
+        self._persist_scrape_update(
             table="dim_product",
             kind="product_enrich",
             fields=enrich_fields,
             listing=listing,
             source="ingestion_product_enrich",
-        ):
-            _sync_product_enrich_cache(product, delta)
+        )
 
     @staticmethod
     def _log_gate_rejection(

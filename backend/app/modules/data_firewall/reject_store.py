@@ -1,4 +1,29 @@
-"""Resilient reject_data writes and spike alerting."""
+"""Sanctioned diagnostic carve-out for reject_data INSERT (sites #34-35).
+
+WHAT
+----
+reject_data is the diagnostic store for payloads the data_firewall gate rejected.
+Rows capture source, table_target, reject_reason, failed_rules, raw_payload, and
+metadata about the *rejected payload* (not the reject row itself).
+
+WHY THIS BYPASSES THE GATE
+--------------------------
+reject_data INSERT intentionally does NOT go through evaluate_*/write_sync/signing.
+A record about a rejected or unsigned payload cannot meaningfully pass the same
+contract/HMAC that rejected it (recursion). The diagnostic path must keep working
+when the gate or contract itself is broken — that is its purpose.
+
+GUARANTEE BOUNDARY
+------------------
+- INSERT: unsigned by design; append-only diagnostic; never read back into the
+  data plane; never exported.
+- DELETE: retention_delete IS gated (authorize_retention_delete → write_sync).
+- SINGLE SANCTIONED INSERT PATH: write_reject_data / write_reject_data_isolated
+  only. Any reject_data INSERT outside reject_store is a bug.
+
+signature_present on each row documents whether the *rejected payload* carried an
+HMAC, not whether the reject_data row itself is signed.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +42,12 @@ from app.observability.sentry_init import capture_exception_if_initialized
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
+
+# Named boundary marker: the only sanctioned reject_data INSERT entry points.
+SANCTIONED_REJECT_DATA_INSERT_FUNCTIONS = (
+    "write_reject_data",
+    "write_reject_data_isolated",
+)
 
 _lock = threading.Lock()
 _recent_reject_timestamps: list[float] = []
@@ -119,7 +150,7 @@ def write_reject_data(
     signature_present: bool = False,
     operation: str = "insert",
 ) -> None:
-    """Insert reject_data row on caller session (flush only); failures are logged."""
+    """Sanctioned carve-out INSERT on caller session (flush only); failures are logged."""
     record_reject_spike_signal(
         source=source,
         reject_reason=reject_reason,
@@ -163,7 +194,7 @@ def write_reject_data_isolated(
     signature_present: bool = False,
     operation: str = "insert",
 ) -> None:
-    """Insert reject_data on an independent session that commits regardless of caller txn."""
+    """Sanctioned carve-out INSERT on an independent session (commits outside caller txn)."""
     from app.database import sync_session_factory
 
     record_reject_spike_signal(

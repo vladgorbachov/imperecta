@@ -44,7 +44,6 @@ from app.modules.persist.scrape_gate_fields import (
     build_listing_delete_fields,
     build_listing_update_fields,
     build_product_delete_fields,
-    sync_listing_gate_cache,
 )
 from app.modules.persist.writer import PersistContext, write_sync
 from app.modules.scraper.fetch_backends import backend_id_persisted
@@ -325,29 +324,23 @@ class GlobalScrapeService:
         """Reset consecutive_errors / last_error at scrape start (pre-branch)."""
         delta = {"consecutive_errors": 0, "last_error": None}
         fields = build_listing_update_fields(url_hash=listing.url_hash, **delta)
-        ok = self._persist_listing_gate_update(
+        return self._persist_listing_gate_update(
             kind="listing_scrape_start_reset",
             fields=fields,
             listing=listing,
             source="scraper_listing_scrape_start_reset",
         )
-        if ok:
-            sync_listing_gate_cache(listing, delta)
-        return ok
 
     def _route_listing_success_streak_reset(self, listing: FactListing) -> bool:
         """Clear failure_streak after a successful scrape."""
         delta = {"failure_streak": 0}
         fields = build_listing_update_fields(url_hash=listing.url_hash, **delta)
-        ok = self._persist_listing_gate_update(
+        return self._persist_listing_gate_update(
             kind="listing_success_streak_reset",
             fields=fields,
             listing=listing,
             source="scraper_listing_success_streak_reset",
         )
-        if ok:
-            sync_listing_gate_cache(listing, delta)
-        return ok
 
     def _route_listing_checked(
         self,
@@ -358,15 +351,12 @@ class GlobalScrapeService:
         """Record last_checked_at for honest absent or success paths."""
         delta = {"last_checked_at": checked_at}
         fields = build_listing_update_fields(url_hash=listing.url_hash, **delta)
-        ok = self._persist_listing_gate_update(
+        return self._persist_listing_gate_update(
             kind="listing_checked",
             fields=fields,
             listing=listing,
             source="scraper_listing_checked",
         )
-        if ok:
-            sync_listing_gate_cache(listing, delta)
-        return ok
 
     def _route_failure_housekeeping_updates(
         self,
@@ -386,13 +376,12 @@ class GlobalScrapeService:
                 url_hash=listing.url_hash,
                 **hk_delta,
             )
-            if self._persist_listing_gate_update(
+            self._persist_listing_gate_update(
                 kind="listing_housekeeping_failure",
                 fields=hk_fields,
                 listing=listing,
                 source="scraper_listing_housekeeping_failure",
-            ):
-                sync_listing_gate_cache(listing, hk_delta)
+            )
 
             if hk_delta["failure_streak"] >= LISTING_DEACTIVATE_AFTER_ERRORS:
                 deactivate_delta = {"is_active": False}
@@ -406,7 +395,6 @@ class GlobalScrapeService:
                     listing=listing,
                     source="scraper_listing_deactivate",
                 ):
-                    sync_listing_gate_cache(listing, deactivate_delta)
                     logger.warning(
                         "LISTING_DEACTIVATED listing_id=%s failure_streak=%d url=%s",
                         listing_id,

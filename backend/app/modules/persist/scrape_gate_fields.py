@@ -80,23 +80,3 @@ def build_product_delete_fields(*, product_id: UUID | str) -> dict[str, Any]:
     """Locator-only payload for dim_product DELETE."""
     pid = product_id if isinstance(product_id, str) else str(product_id)
     return {"id": pid}
-
-
-_LISTING_GATE_CACHE_KEYS = (
-    "consecutive_errors",
-    "last_error",
-    "failure_streak",
-    "is_active",
-    "last_checked_at",
-    "last_price",
-    "last_currency_code",
-    "last_price_changed_at",
-    "last_price_eur",
-)
-
-
-def sync_listing_gate_cache(listing: Any, delta: dict[str, Any]) -> None:
-    """Mirror gate-written listing columns on the in-session ORM instance."""
-    for key in _LISTING_GATE_CACHE_KEYS:
-        if key in delta:
-            setattr(listing, key, delta[key])
