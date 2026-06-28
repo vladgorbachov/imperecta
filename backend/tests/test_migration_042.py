@@ -47,6 +47,7 @@ def test_migration_042_documents_e1_and_rls_app_read() -> None:
     source = MIGRATION_042.read_text(encoding="utf-8")
     assert "E1" in source or "DDL-eviction" in source
     assert "rls_app_read" in source
+    assert "_ensure_fact_price_partition" in source
     assert "maintenance.ensure_fact_price_partitions" in source
     assert "ensure-fact-price-partitions" in source
     assert "0 0 * * *" in source

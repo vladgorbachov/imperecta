@@ -8,12 +8,15 @@ Purpose: relocate fact_price partition CREATE + RLS hardening from the Celery ta
 (ensure_fact_price_partitions) to a postgres-owned SECURITY DEFINER routine
 scheduled via pg_cron. After seam 9.5 the app role must not run DDL.
 
-Overlap: Celery task remains until E3; both paths are idempotent (IF NOT EXISTS /
-DROP+CREATE deny policy). This routine additionally creates rls_app_read on new
-partitions — closing the gap the app harden_table_statements never covered.
+Parameterized helper maintenance._ensure_fact_price_partition(year, month) holds
+all DDL; the scheduled wrapper loops offsets +1/+2/+3 from UTC now. The helper
+is directly testable on throwaway months (e.g. 2099-01) without waiting for the
+rolling window.
 
-Prerequisite: pg_cron extension enabled (Supabase: Database → Extensions →
-pg_cron). Migration fails at schedule time if pg_cron is absent.
+Overlap: Celery task remains until E3; both paths are idempotent. Adds rls_app_read
+on new partitions (gap the app harden never covered).
+
+Prerequisite: pg_cron extension enabled. Migration fails at schedule if absent.
 
 No app code changes, no DATABASE_URL switch, no DML revoke, no persist rewire.
 """
@@ -35,6 +38,96 @@ def upgrade() -> None:
 
     op.execute(
         f"""
+        CREATE OR REPLACE FUNCTION maintenance._ensure_fact_price_partition(
+            p_year integer,
+            p_month integer
+        )
+        RETURNS void
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        {_SEARCH_PATH}
+        AS $fn$
+        DECLARE
+            start_id integer;
+            end_id integer;
+            ny integer;
+            nm integer;
+            pname text;
+        BEGIN
+            start_id := p_year * 10000 + p_month * 100 + 1;
+
+            IF p_month = 12 THEN
+                ny := p_year + 1;
+                nm := 1;
+            ELSE
+                ny := p_year;
+                nm := p_month + 1;
+            END IF;
+
+            end_id := ny * 10000 + nm * 100 + 1;
+            pname := 'fact_price_' || p_year::text || lpad(p_month::text, 2, '0');
+
+            EXECUTE format(
+                'CREATE TABLE IF NOT EXISTS public.%I PARTITION OF public.fact_price '
+                'FOR VALUES FROM (%s) TO (%s)',
+                pname,
+                start_id,
+                end_id
+            );
+
+            EXECUTE format(
+                'ALTER TABLE IF EXISTS public.%I ENABLE ROW LEVEL SECURITY',
+                pname
+            );
+
+            EXECUTE format(
+                'DROP POLICY IF EXISTS rls_deny_client_roles ON public.%I',
+                pname
+            );
+
+            EXECUTE format(
+                'CREATE POLICY rls_deny_client_roles ON public.%I '
+                'FOR ALL TO anon, authenticated '
+                'USING (false) WITH CHECK (false)',
+                pname
+            );
+
+            EXECUTE format(
+                'REVOKE ALL ON public.%I FROM anon, authenticated',
+                pname
+            );
+
+            EXECUTE format(
+                'REVOKE SELECT ON public.%I FROM anon, authenticated',
+                pname
+            );
+
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_policy AS p
+                JOIN pg_class AS c ON c.oid = p.polrelid
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public'
+                  AND c.relname = pname
+                  AND p.polname = 'rls_app_read'
+            ) THEN
+                EXECUTE format(
+                    'CREATE POLICY rls_app_read ON public.%I '
+                    'FOR SELECT TO imperecta_app USING (true)',
+                    pname
+                );
+            END IF;
+        END;
+        $fn$;
+        """
+    )
+
+    op.execute(
+        "REVOKE EXECUTE ON FUNCTION maintenance._ensure_fact_price_partition(integer, integer) FROM PUBLIC;"
+    )
+
+    op.execute(
+        f"""
         CREATE OR REPLACE FUNCTION maintenance.ensure_fact_price_partitions()
         RETURNS void
         LANGUAGE plpgsql
@@ -43,90 +136,24 @@ def upgrade() -> None:
         AS $fn$
         DECLARE
             offset_months integer;
-            cy integer;
-            cm integer;
-            ny integer;
-            nm integer;
+            ty integer;
+            tm integer;
             i integer;
-            start_id integer;
-            end_id integer;
-            pname text;
         BEGIN
             FOR offset_months IN 1..3 LOOP
-                cy := EXTRACT(YEAR FROM (timezone('UTC', now())))::integer;
-                cm := EXTRACT(MONTH FROM (timezone('UTC', now())))::integer;
+                ty := EXTRACT(YEAR FROM (timezone('UTC', now())))::integer;
+                tm := EXTRACT(MONTH FROM (timezone('UTC', now())))::integer;
 
                 FOR i IN 1..offset_months LOOP
-                    IF cm = 12 THEN
-                        cy := cy + 1;
-                        cm := 1;
+                    IF tm = 12 THEN
+                        ty := ty + 1;
+                        tm := 1;
                     ELSE
-                        cm := cm + 1;
+                        tm := tm + 1;
                     END IF;
                 END LOOP;
 
-                IF cm = 12 THEN
-                    ny := cy + 1;
-                    nm := 1;
-                ELSE
-                    ny := cy;
-                    nm := cm + 1;
-                END IF;
-
-                start_id := cy * 10000 + cm * 100 + 1;
-                end_id := ny * 10000 + nm * 100 + 1;
-                pname := 'fact_price_' || cy::text || lpad(cm::text, 2, '0');
-
-                EXECUTE format(
-                    'CREATE TABLE IF NOT EXISTS public.%I PARTITION OF public.fact_price '
-                    'FOR VALUES FROM (%s) TO (%s)',
-                    pname,
-                    start_id,
-                    end_id
-                );
-
-                EXECUTE format(
-                    'ALTER TABLE IF EXISTS public.%I ENABLE ROW LEVEL SECURITY',
-                    pname
-                );
-
-                EXECUTE format(
-                    'DROP POLICY IF EXISTS rls_deny_client_roles ON public.%I',
-                    pname
-                );
-
-                EXECUTE format(
-                    'CREATE POLICY rls_deny_client_roles ON public.%I '
-                    'FOR ALL TO anon, authenticated '
-                    'USING (false) WITH CHECK (false)',
-                    pname
-                );
-
-                EXECUTE format(
-                    'REVOKE ALL ON public.%I FROM anon, authenticated',
-                    pname
-                );
-
-                EXECUTE format(
-                    'REVOKE SELECT ON public.%I FROM anon, authenticated',
-                    pname
-                );
-
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM pg_policy AS p
-                    JOIN pg_class AS c ON c.oid = p.polrelid
-                    JOIN pg_namespace AS n ON n.oid = c.relnamespace
-                    WHERE n.nspname = 'public'
-                      AND c.relname = pname
-                      AND p.polname = 'rls_app_read'
-                ) THEN
-                    EXECUTE format(
-                        'CREATE POLICY rls_app_read ON public.%I '
-                        'FOR SELECT TO imperecta_app USING (true)',
-                        pname
-                    );
-                END IF;
+                PERFORM maintenance._ensure_fact_price_partition(ty, tm);
             END LOOP;
         END;
         $fn$;
@@ -169,6 +196,10 @@ def downgrade() -> None:
     )
 
     op.execute("DROP FUNCTION IF EXISTS maintenance.ensure_fact_price_partitions();")
+
+    op.execute(
+        "DROP FUNCTION IF EXISTS maintenance._ensure_fact_price_partition(integer, integer);"
+    )
 
     op.execute(
         """

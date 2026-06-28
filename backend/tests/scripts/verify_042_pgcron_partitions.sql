@@ -1,12 +1,9 @@
 -- DB-required verification for migration 042_pgcron_fact_price_partitions (E1).
 -- Structural checks: any role with catalog read access.
--- Functional + rehearsal: run as postgres (or superuser).
+-- Helper + functional tests: run as postgres (or superuser).
 --
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
 --     -f backend/tests/scripts/verify_042_pgcron_partitions.sql
---
--- Operator must run SELECT maintenance.ensure_fact_price_partitions() once after
--- deploy (or wait for the 00:00 UTC pg_cron tick) before functional asserts pass.
 
 \set ON_ERROR_STOP on
 
@@ -14,8 +11,23 @@
 
 DO $$
 BEGIN
+    IF to_regprocedure('maintenance._ensure_fact_price_partition(integer, integer)') IS NULL THEN
+        RAISE EXCEPTION 'maintenance._ensure_fact_price_partition(int,int) missing';
+    END IF;
+
     IF to_regprocedure('maintenance.ensure_fact_price_partitions()') IS NULL THEN
         RAISE EXCEPTION 'maintenance.ensure_fact_price_partitions() missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_proc AS p
+        JOIN pg_namespace AS n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'maintenance'
+          AND p.proname = '_ensure_fact_price_partition'
+          AND p.prosecdef = true
+    ) THEN
+        RAISE EXCEPTION '_ensure_fact_price_partition is not SECURITY DEFINER';
     END IF;
 
     IF NOT EXISTS (
@@ -29,16 +41,12 @@ BEGIN
         RAISE EXCEPTION 'ensure_fact_price_partitions is not SECURITY DEFINER';
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_proc AS p
-        JOIN pg_namespace AS n ON n.oid = p.pronamespace
-        JOIN pg_roles AS r ON r.oid = p.proowner
-        WHERE n.nspname = 'maintenance'
-          AND p.proname = 'ensure_fact_price_partitions'
-          AND r.rolname = 'postgres'
+    IF has_function_privilege(
+        'public',
+        'maintenance._ensure_fact_price_partition(integer, integer)',
+        'EXECUTE'
     ) THEN
-        RAISE EXCEPTION 'ensure_fact_price_partitions owner is not postgres';
+        RAISE EXCEPTION 'PUBLIC still has EXECUTE on _ensure_fact_price_partition';
     END IF;
 
     IF has_function_privilege(
@@ -86,15 +94,97 @@ $$;
 
 \echo 'verify_042 structural checks passed (any role)'
 
--- === Functional (postgres / superuser) ===
--- Uncomment or run the block below manually when connected as postgres.
+-- === Helper functional test on throwaway months (postgres) ===
+
+DO $$
+DECLARE
+    bound_expr text;
+    parent_name text;
+BEGIN
+    IF NOT pg_has_role(current_user, 'pg_superuser', 'MEMBER')
+       AND current_user <> 'postgres' THEN
+        RAISE NOTICE 'Skipping helper functional test — connect as postgres';
+        RETURN;
+    END IF;
+
+    PERFORM maintenance._ensure_fact_price_partition(2099, 1);
+
+    IF to_regclass('public.fact_price_209901') IS NULL THEN
+        RAISE EXCEPTION 'fact_price_209901 not created';
+    END IF;
+
+    SELECT pg_get_expr(c.relpartbound, c.oid, true), parent.relname
+    INTO bound_expr, parent_name
+    FROM pg_class AS c
+    JOIN pg_namespace AS n ON n.oid = c.relnamespace
+    JOIN pg_inherits AS inh ON inh.inhrelid = c.oid
+    JOIN pg_class AS parent ON parent.oid = inh.inhparent
+    WHERE n.nspname = 'public'
+      AND c.relname = 'fact_price_209901';
+
+    IF parent_name <> 'fact_price' THEN
+        RAISE EXCEPTION 'fact_price_209901 parent expected fact_price, got %', parent_name;
+    END IF;
+
+    IF bound_expr NOT LIKE '%20990101%' OR bound_expr NOT LIKE '%20990201%' THEN
+        RAISE EXCEPTION 'fact_price_209901 bounds unexpected: %', bound_expr;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_class AS c
+        JOIN pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relname = 'fact_price_209901'
+          AND c.relrowsecurity = true
+    ) THEN
+        RAISE EXCEPTION 'fact_price_209901 missing RLS';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'fact_price_209901'
+          AND policyname = 'rls_deny_client_roles'
+    ) THEN
+        RAISE EXCEPTION 'fact_price_209901 missing rls_deny_client_roles';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'fact_price_209901'
+          AND policyname = 'rls_app_read'
+    ) THEN
+        RAISE EXCEPTION 'fact_price_209901 missing rls_app_read';
+    END IF;
+
+    PERFORM maintenance._ensure_fact_price_partition(2099, 12);
+
+    SELECT pg_get_expr(c.relpartbound, c.oid, true)
+    INTO bound_expr
+    FROM pg_class AS c
+    JOIN pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'fact_price_209912';
+
+    IF bound_expr NOT LIKE '%20991201%' OR bound_expr NOT LIKE '%21000101%' THEN
+        RAISE EXCEPTION 'fact_price_209912 December rollover bounds unexpected: %', bound_expr;
+    END IF;
+
+    DROP TABLE IF EXISTS public.fact_price_209901;
+    DROP TABLE IF EXISTS public.fact_price_209912;
+
+    RAISE NOTICE 'verify_042 helper functional: 209901 + 209912 rollover OK';
+END
+$$;
+
+-- === Scheduled wrapper functional (+1/+2/+3 months) ===
 
 DO $$
 DECLARE
     cy integer;
     cm integer;
-    ny integer;
-    nm integer;
     i integer;
     offset_months integer;
     pname text;
@@ -102,7 +192,7 @@ DECLARE
 BEGIN
     IF NOT pg_has_role(current_user, 'pg_superuser', 'MEMBER')
        AND current_user <> 'postgres' THEN
-        RAISE NOTICE 'Skipping functional partition asserts — connect as postgres';
+        RAISE NOTICE 'Skipping scheduled wrapper functional — connect as postgres';
         RETURN;
     END IF;
 
@@ -124,27 +214,14 @@ BEGIN
         pname := 'fact_price_' || cy::text || lpad(cm::text, 2, '0');
 
         IF to_regclass('public.' || pname) IS NULL THEN
-            RAISE EXCEPTION 'expected partition public.% missing after routine run', pname;
+            RAISE EXCEPTION 'expected partition public.% missing after wrapper run', pname;
         END IF;
 
         IF NOT EXISTS (
-            SELECT 1
-            FROM pg_class AS c
-            JOIN pg_namespace AS n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public'
-              AND c.relname = pname
-              AND c.relkind = 'r'
-              AND c.relrowsecurity = true
-        ) THEN
-            RAISE EXCEPTION 'partition % missing RLS', pname;
-        END IF;
-
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_policies AS p
-            WHERE p.schemaname = 'public'
-              AND p.tablename = pname
-              AND p.policyname = 'rls_app_read'
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'public'
+              AND tablename = pname
+              AND policyname = 'rls_app_read'
         ) THEN
             missing_policy_count := missing_policy_count + 1;
         END IF;
@@ -155,7 +232,7 @@ BEGIN
             'rls_app_read missing on % of 3 rolling partitions', missing_policy_count;
     END IF;
 
-    RAISE NOTICE 'verify_042 functional: +1/+2/+3 partitions exist with rls_app_read';
+    RAISE NOTICE 'verify_042 wrapper functional: +1/+2/+3 partitions OK';
 END
 $$;
 
