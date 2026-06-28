@@ -22,7 +22,23 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("DELETE FROM dim_date WHERE date_id > 20260627")
+    # Stable trim: delete only unreferenced future preseed dates; used dates survive
+    # on any deploy day; FK-safe by construction across all dim_date FK sources.
+    # Safety over replay-determinism for this one-time preseed trim.
+    op.execute(
+        """
+        DELETE FROM dim_date d
+        WHERE d.date_id > 20260627
+          AND NOT EXISTS (SELECT 1 FROM fact_commodity_price f WHERE f.date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_crypto_price f WHERE f.date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_currency_rate f WHERE f.date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_fuel_price f WHERE f.date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_price f WHERE f.date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_promo f WHERE f.start_date_id = d.date_id OR f.end_date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_review f WHERE f.date_id = d.date_id)
+          AND NOT EXISTS (SELECT 1 FROM fact_search_trend f WHERE f.date_id = d.date_id)
+        """
+    )
 
 
 def downgrade() -> None:
