@@ -28,7 +28,7 @@ def _migration_execute_strings(path: Path) -> list[str]:
 
 def _count_sql_statements(sql: str) -> int:
     stripped = sql.strip()
-    if stripped.upper().startswith("DO $$"):
+    if stripped.upper().startswith("DO $$") or stripped.upper().startswith("DO $DO$"):
         return 1
     return len([part for part in sql.split(";") if part.strip()])
 

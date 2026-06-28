@@ -139,33 +139,18 @@ def upgrade() -> None:
 
     op.execute(
         """
-        DO $$
-        DECLARE
-            existing_job_id bigint;
+        DO $do$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_extension WHERE extname = 'pg_cron'
-            ) THEN
-                RAISE EXCEPTION
-                    'pg_cron extension not installed — enable before migration 042';
+            IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+                RAISE EXCEPTION 'pg_cron extension not installed; enable it before migration 042';
             END IF;
-
-            SELECT jobid
-            INTO existing_job_id
-            FROM cron.job
-            WHERE jobname = 'ensure-fact-price-partitions';
-
-            IF existing_job_id IS NOT NULL THEN
-                PERFORM cron.unschedule(existing_job_id);
-            END IF;
-
             PERFORM cron.schedule(
                 'ensure-fact-price-partitions',
                 '0 0 * * *',
-                $$SELECT maintenance.ensure_fact_price_partitions()$$
+                'SELECT maintenance.ensure_fact_price_partitions()'
             );
         END
-        $$;
+        $do$;
         """
     )
 
@@ -173,22 +158,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(
         """
-        DO $$
-        DECLARE
-            existing_job_id bigint;
+        DO $do$
         BEGIN
-            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
-                SELECT jobid
-                INTO existing_job_id
-                FROM cron.job
-                WHERE jobname = 'ensure-fact-price-partitions';
-
-                IF existing_job_id IS NOT NULL THEN
-                    PERFORM cron.unschedule(existing_job_id);
-                END IF;
+            IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'ensure-fact-price-partitions') THEN
+                PERFORM cron.unschedule('ensure-fact-price-partitions');
             END IF;
         END
-        $$;
+        $do$;
         """
     )
 
