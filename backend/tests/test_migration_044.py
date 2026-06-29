@@ -48,6 +48,7 @@ def test_migration_044_documents_drift_fix() -> None:
     assert "E3a" in source or "drift" in source.lower()
     assert "VARCHAR(50)" in source
     assert "scrape_logs" in source
+    assert "mv_marketplace_health" in source
 
 
 def test_migration_044_has_single_statement_per_op_execute() -> None:
