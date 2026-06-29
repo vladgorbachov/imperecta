@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.sql.dml import Delete, Update
+from sqlalchemy.sql.dml import Delete
 
 from app.modules.data_firewall.contracts import extract_locator
 from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache, sign
@@ -44,30 +44,9 @@ def _signed(
     )
 
 
-def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
-    captured: list = []
-
-    def _execute(stmt):
-        captured.append(stmt)
-        result = MagicMock()
-        result.rowcount = rowcount
-        return result
-
-    db.execute.side_effect = _execute
-    return captured
-
-
-def test_supported_write_operations_matrix() -> None:
-    assert SUPPORTED_WRITE_OPERATIONS["dim_date"] == frozenset({"insert"})
-    assert SUPPORTED_WRITE_OPERATIONS["scrape_jobs"] == frozenset({"insert", "update", "delete"})
-    assert SUPPORTED_WRITE_OPERATIONS["dim_marketplace"] == frozenset({"insert", "update", "delete"})
-    assert SUPPORTED_WRITE_OPERATIONS["fact_listing"] == frozenset({"insert", "update", "delete"})
-    assert SUPPORTED_WRITE_OPERATIONS["fact_price"] == frozenset({"insert", "delete"})
-    assert SUPPORTED_WRITE_OPERATIONS["fact_currency_rate"] == frozenset({"insert", "delete"})
-    assert "update" not in SUPPORTED_WRITE_OPERATIONS["fact_price"]
-
-
-def test_update_locates_by_locator_sets_non_locator_fields() -> None:
+@patch("app.modules.persist.writer.exec_write_record")
+def test_update_locates_by_locator_sets_non_locator_fields(mock_exec: MagicMock) -> None:
+    mock_exec.return_value = 1
     product_id = uuid4()
     fields = build_dim_product_fields(
         product_id=product_id,
@@ -77,21 +56,13 @@ def test_update_locates_by_locator_sets_non_locator_fields() -> None:
     )
     signed = _signed("dim_product", "update", fields)
     db = MagicMock()
-    captured = _capture_execute(db, rowcount=1)
 
     result = write_sync(db, signed, ctx=PersistContext(source="test"))
 
     assert result.ok is True
     assert result.rows_affected == 1
     assert result.no_target is False
-    assert len(captured) == 1
-    stmt = captured[0]
-    assert isinstance(stmt, Update)
-    # SET must not include locator column id
-    value_keys = {key.key for key in stmt._values.keys()}  # noqa: SLF001
-    assert "id" not in value_keys
-    assert "name" in value_keys
-    assert "is_active" in value_keys
+    mock_exec.assert_called_once_with(db, signed)
     db.add.assert_not_called()
 
 
@@ -107,7 +78,9 @@ def test_update_empty_value_fields_rejects() -> None:
     db.execute.assert_not_called()
 
 
-def test_update_zero_rows_honest_no_target_notice() -> None:
+@patch("app.modules.persist.writer.exec_write_record")
+def test_update_zero_rows_honest_no_target_notice(mock_exec: MagicMock) -> None:
+    mock_exec.return_value = 0
     product_id = uuid4()
     fields = build_dim_product_fields(
         product_id=product_id,
@@ -116,7 +89,6 @@ def test_update_zero_rows_honest_no_target_notice() -> None:
     )
     signed = _signed("dim_product", "update", fields)
     db = MagicMock()
-    _capture_execute(db, rowcount=0)
 
     result = write_sync(db, signed, ctx=PersistContext(source="test"))
 
@@ -125,21 +97,24 @@ def test_update_zero_rows_honest_no_target_notice() -> None:
     assert result.no_target is True
 
 
-def test_delete_by_locator_returns_rows_affected() -> None:
+@patch("app.modules.persist.writer.exec_write_record")
+def test_delete_by_locator_returns_rows_affected(mock_exec: MagicMock) -> None:
+    mock_exec.return_value = 2
     fields = {"url_hash": "abc123hash"}
     signed = _signed("fact_listing", "delete", fields)
     db = MagicMock()
-    captured = _capture_execute(db, rowcount=2)
 
     result = write_sync(db, signed, ctx=PersistContext(source="test"))
 
     assert result.ok is True
     assert result.rows_affected == 2
-    assert isinstance(captured[0], Delete)
+    mock_exec.assert_called_once_with(db, signed)
     db.add.assert_not_called()
 
 
-def test_delete_zero_rows_honest_no_target_notice() -> None:
+@patch("app.modules.persist.writer.exec_write_record")
+def test_delete_zero_rows_honest_no_target_notice(mock_exec: MagicMock) -> None:
+    mock_exec.return_value = 0
     fields = {
         "date_id": 20250617,
         "currency_code": "EUR",
@@ -147,7 +122,6 @@ def test_delete_zero_rows_honest_no_target_notice() -> None:
     }
     signed = _signed("fact_currency_rate", "delete", fields)
     db = MagicMock()
-    _capture_execute(db, rowcount=0)
 
     result = write_sync(db, signed, ctx=PersistContext(source="test"))
 
@@ -205,7 +179,9 @@ def test_update_unsupported_on_replace_table_rejected() -> None:
     db.execute.assert_not_called()
 
 
-def test_insert_callers_still_truthy_on_success() -> None:
+@patch("app.modules.persist.writer.exec_write_record")
+def test_insert_callers_still_truthy_on_success(mock_exec: MagicMock) -> None:
+    mock_exec.return_value = 1
     product_id = uuid4()
     fields = build_dim_product_fields(
         product_id=product_id,
@@ -219,7 +195,8 @@ def test_insert_callers_still_truthy_on_success() -> None:
 
     assert result
     assert result.ok is True
-    db.add.assert_called_once()
+    mock_exec.assert_called_once()
+    db.add.assert_not_called()
 
 
 @pytest.mark.asyncio

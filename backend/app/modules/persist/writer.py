@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import and_, delete, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -28,7 +27,9 @@ from app.models.facts import (
 )
 from app.modules.data_firewall.contracts import TABLE_LOCATORS, extract_locator
 from app.modules.data_firewall.reject_store import write_reject_data
+from app.modules.data_firewall.service_alert_store import write_service_alert_isolated
 from app.modules.data_firewall.signing import SignedBatch, SignedRecord, verify, verify_batch
+from app.modules.persist.gate_rpc import GateRpcError, exec_write_batch, exec_write_record
 from app.modules.persist.retention_config import RETENTION_TABLES
 from app.observability.sentry_init import capture_exception_if_initialized
 
@@ -311,74 +312,177 @@ def _persist_result_from_rowcount(rowcount: int) -> PersistResult:
     )
 
 
-def _write_sync_update(
+def _sync_update_empty_fields_check(
     db: Session,
     signed: SignedRecord,
     *,
     ctx: PersistContext,
-) -> PersistResult:
-    table = signed.table
-    model = _model_for_table(table)
-    orm_fields = _orm_fields_for_table(table, signed.fields)
-    value_fields = _value_fields_minus_locator(table, orm_fields)
+) -> PersistResult | None:
+    """Fast-fail when an update carries no non-locator columns."""
+    orm_fields = _orm_fields_for_table(signed.table, signed.fields)
+    value_fields = _value_fields_minus_locator(signed.table, orm_fields)
     if not value_fields:
         return _reject_persist(
             db,
             ctx=ctx,
-            table=table,
+            table=signed.table,
             fields=signed.fields,
             reject_reason="nothing_to_update",
             signature_present=bool(signed.signature),
             operation=signed.operation,
         )
-    orm_locator = _orm_locator(table, signed.locator)
-    result = db.execute(
-        update(model)
-        .where(_locator_where(model, table, orm_locator))
-        .values(**value_fields),
-    )
-    return _persist_result_from_rowcount(result.rowcount)
+    return None
 
 
-def _write_sync_delete(
+def _gate_alert_context(signed: SignedRecord) -> dict[str, Any]:
+    return {
+        "table": signed.table,
+        "operation": signed.operation,
+        "locator_keys": sorted(signed.locator.keys()),
+    }
+
+
+def _gate_alert_context_batch(signed: SignedBatch) -> dict[str, Any]:
+    return {
+        "table": signed.table,
+        "operation": signed.operation,
+        "locator_keys": sorted(signed.locator.keys()),
+        "row_count": len(signed.rows),
+    }
+
+
+def _handle_gate_invalid_signature(
     db: Session,
     signed: SignedRecord,
+    *,
+    ctx: PersistContext,
+    rpc_message: str,
 ) -> PersistResult:
-    table = signed.table
-    model = _model_for_table(table)
-    orm_locator = _orm_locator(table, signed.locator)
-    result = db.execute(delete(model).where(_locator_where(model, table, orm_locator)))
-    return _persist_result_from_rowcount(result.rowcount)
+    """Python verify passed but gate rejected — wire divergence or tamper."""
+    alert_message = (
+        "gate rejected signature after Python verify (wire divergence or tamper)"
+    )
+    write_reject_data(
+        db,
+        source=ctx.source,
+        table_target=signed.table,
+        reject_reason="gate_write_invalid_signature",
+        raw_payload=signed.fields,
+        rejected_by="persist",
+        marketplace_id=ctx.marketplace_id,
+        listing_id=ctx.listing_id,
+        signature_present=True,
+        operation=signed.operation,
+    )
+    write_service_alert_isolated(
+        module="data_firewall",
+        submodule="persist_rpc",
+        severity="warning",
+        anomaly_type="gate_write_invalid_signature",
+        message=alert_message,
+        context=_gate_alert_context(signed),
+    )
+    slog.warning(
+        "gate_write_invalid_signature",
+        table=signed.table,
+        operation=signed.operation,
+        source=ctx.source,
+        rpc_message=rpc_message,
+    )
+    return PersistResult(ok=False)
 
 
-def _parse_retention_cutoff(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        cutoff = value
-    elif isinstance(value, str):
-        try:
-            cutoff = datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    else:
-        return None
-    if cutoff.tzinfo is None:
-        return cutoff.replace(tzinfo=timezone.utc)
-    return cutoff
+def _handle_gate_signing_unavailable(
+    signed: SignedRecord,
+    *,
+    ctx: PersistContext,
+    rpc_message: str,
+) -> None:
+    message = "gate signing vault unavailable during persist RPC"
+    write_service_alert_isolated(
+        module="data_firewall",
+        submodule="persist_rpc",
+        severity="critical",
+        anomaly_type="gate_write_signing_unavailable",
+        message=message,
+        context=_gate_alert_context(signed),
+    )
+    slog.error(
+        "gate_write_signing_unavailable",
+        table=signed.table,
+        operation=signed.operation,
+        source=ctx.source,
+        rpc_message=rpc_message,
+    )
+    raise GateRpcError("signing_unavailable", rpc_message)
 
 
-def _write_sync_retention_delete(db: Session, signed: SignedRecord) -> PersistResult:
-    """Execute a whitelisted bulk DELETE WHERE cutoff_column < cutoff."""
-    table = signed.table
-    model = _model_for_table(table)
-    cutoff_column = str(signed.fields["cutoff_column"])
-    cutoff = _parse_retention_cutoff(signed.fields["cutoff"])
-    if cutoff is None:
-        return PersistResult(ok=False)
-    column = getattr(model, cutoff_column, None)
-    if column is None:
-        return PersistResult(ok=False)
-    result = db.execute(delete(model).where(column < cutoff))
-    return _persist_result_from_rowcount(result.rowcount)
+def _handle_gate_rpc_error(
+    signed: SignedRecord,
+    *,
+    ctx: PersistContext,
+    rpc_message: str,
+) -> None:
+    message = "gate persist RPC failed"
+    write_service_alert_isolated(
+        module="data_firewall",
+        submodule="persist_rpc",
+        severity="error",
+        anomaly_type="gate_write_rpc_error",
+        message=message,
+        context=_gate_alert_context(signed),
+    )
+    slog.error(
+        "gate_write_rpc_error",
+        table=signed.table,
+        operation=signed.operation,
+        source=ctx.source,
+        rpc_message=rpc_message,
+    )
+    raise GateRpcError("rpc_error", rpc_message)
+
+
+def _handle_gate_batch_rpc_error(
+    signed: SignedBatch,
+    *,
+    ctx: PersistContext,
+    kind: str,
+    rpc_message: str,
+) -> None:
+    if kind == "signing_unavailable":
+        write_service_alert_isolated(
+            module="data_firewall",
+            submodule="persist_rpc",
+            severity="critical",
+            anomaly_type="gate_write_signing_unavailable",
+            message="gate signing vault unavailable during persist batch RPC",
+            context=_gate_alert_context_batch(signed),
+        )
+        slog.error(
+            "gate_write_signing_unavailable",
+            table=signed.table,
+            operation=signed.operation,
+            source=ctx.source,
+            rpc_message=rpc_message,
+        )
+        raise GateRpcError("signing_unavailable", rpc_message)
+
+    write_service_alert_isolated(
+        module="data_firewall",
+        submodule="persist_rpc",
+        severity="error",
+        anomaly_type="gate_write_rpc_error",
+        message="gate persist batch RPC failed",
+        context=_gate_alert_context_batch(signed),
+    )
+    slog.error(
+        "gate_write_rpc_error",
+        table=signed.table,
+        operation=signed.operation,
+        source=ctx.source,
+        rpc_message=rpc_message,
+    )
+    raise GateRpcError(kind, rpc_message)
 
 
 async def _write_async_delete(
@@ -422,111 +526,30 @@ def write_sync(
             operation=signed.operation,
         )
 
-    operation = signed.operation
-    if operation == "update":
-        return _write_sync_update(db, signed, ctx=ctx)
-    if operation == "delete":
-        return _write_sync_delete(db, signed)
-    if operation == "retention_delete":
-        return _write_sync_retention_delete(db, signed)
+    if signed.operation == "update":
+        empty_reject = _sync_update_empty_fields_check(db, signed, ctx=ctx)
+        if empty_reject is not None:
+            return empty_reject
 
-    orm_fields = _orm_fields_for_table(signed.table, signed.fields)
-    table = signed.table
+    try:
+        rowcount = exec_write_record(db, signed)
+    except GateRpcError as exc:
+        if exc.kind == "invalid_signature":
+            return _handle_gate_invalid_signature(
+                db,
+                signed,
+                ctx=ctx,
+                rpc_message=exc.message,
+            )
+        if exc.kind == "signing_unavailable":
+            _handle_gate_signing_unavailable(
+                signed,
+                ctx=ctx,
+                rpc_message=exc.message,
+            )
+        _handle_gate_rpc_error(signed, ctx=ctx, rpc_message=exc.message)
 
-    if table == "fact_price":
-        listing_id = orm_fields["listing_id"]
-        date_id = orm_fields["date_id"]
-        db.execute(
-            delete(FactPrice).where(
-                FactPrice.listing_id == listing_id,
-                FactPrice.date_id == date_id,
-            ),
-        )
-        db.add(FactPrice(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "dim_product":
-        db.add(DimProduct(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "fact_listing":
-        db.add(FactListing(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "scrape_jobs":
-        db.add(ScrapeJob(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "service_alerts":
-        db.add(ServiceAlert(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "dim_marketplace":
-        db.add(DimMarketplace(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "users":
-        db.add(User(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "ai_chat_sessions":
-        db.add(AIChatSession(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "ai_chat_messages":
-        db.add(AIChatMessage(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "dim_date":
-        full_date = orm_fields.get("full_date")
-        if isinstance(full_date, str):
-            from datetime import date as date_type
-
-            orm_fields = {**orm_fields, "full_date": date_type.fromisoformat(full_date)}
-        stmt = (
-            pg_insert(DimDate)
-            .values(**orm_fields)
-            .on_conflict_do_nothing(index_elements=["date_id"])
-        )
-        result = db.execute(stmt)
-        return _persist_result_from_rowcount(result.rowcount)
-
-    date_id = orm_fields["date_id"]
-
-    if table == "fact_currency_rate":
-        db.execute(
-            delete(FactCurrencyRate).where(
-                FactCurrencyRate.date_id == date_id,
-                FactCurrencyRate.currency_code == orm_fields["currency_code"],
-                FactCurrencyRate.source == orm_fields["source"],
-            ),
-        )
-        db.add(FactCurrencyRate(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "fact_crypto_price":
-        db.execute(
-            delete(FactCryptoPrice).where(
-                FactCryptoPrice.date_id == date_id,
-                FactCryptoPrice.symbol == orm_fields["symbol"],
-                FactCryptoPrice.source == orm_fields["source"],
-            ),
-        )
-        db.add(FactCryptoPrice(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "fact_commodity_price":
-        db.execute(
-            delete(FactCommodityPrice).where(
-                FactCommodityPrice.date_id == date_id,
-                FactCommodityPrice.symbol == orm_fields["symbol"],
-                FactCommodityPrice.source == orm_fields["source"],
-            ),
-        )
-        db.add(FactCommodityPrice(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    raise ValueError(f"unsupported sync persist table: {table}")
+    return _persist_result_from_rowcount(rowcount)
 
 
 def write_batch_sync(
@@ -570,13 +593,49 @@ def write_batch_sync(
             operation=signed.operation,
         )
 
-    model = _model_for_table(signed.table)
-    instances = [
-        model(**_orm_fields_for_table(signed.table, row))
-        for row in signed.rows
-    ]
-    db.add_all(instances)
-    return PersistResult(ok=True, rows_affected=len(instances))
+    try:
+        rowcount = exec_write_batch(db, signed)
+    except GateRpcError as exc:
+        if exc.kind == "invalid_signature":
+            write_reject_data(
+                db,
+                source=ctx.source,
+                table_target=signed.table,
+                reject_reason="gate_write_invalid_signature",
+                raw_payload={"rows": signed.rows},
+                rejected_by="persist",
+                marketplace_id=ctx.marketplace_id,
+                listing_id=ctx.listing_id,
+                signature_present=True,
+                operation=signed.operation,
+            )
+            write_service_alert_isolated(
+                module="data_firewall",
+                submodule="persist_rpc",
+                severity="warning",
+                anomaly_type="gate_write_invalid_signature",
+                message=(
+                    "gate rejected batch signature after Python verify "
+                    "(wire divergence or tamper)"
+                ),
+                context=_gate_alert_context_batch(signed),
+            )
+            slog.warning(
+                "gate_write_invalid_signature",
+                table=signed.table,
+                operation=signed.operation,
+                source=ctx.source,
+                rpc_message=exc.message,
+            )
+            return PersistResult(ok=False)
+        _handle_gate_batch_rpc_error(
+            signed,
+            ctx=ctx,
+            kind=exc.kind,
+            rpc_message=exc.message,
+        )
+
+    return _persist_result_from_rowcount(rowcount)
 
 
 async def write_async(
