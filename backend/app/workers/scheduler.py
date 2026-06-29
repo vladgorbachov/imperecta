@@ -16,14 +16,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.reaper_tasks.revive_stalled_pipeline_ticks",
         "schedule": 60.0,
     },
-    "ensure-fact-price-partitions": {
-        "task": "ensure_fact_price_partitions",
-        "schedule": crontab(hour=0, minute=0),
-    },
-    "refresh-materialized-views": {
-        "task": "refresh_materialized_views",
-        "schedule": crontab(minute=0),
-    },
     "service-data-retention": {
         "task": "run_service_data_retention",
         "schedule": crontab(minute=15, hour="*/4"),

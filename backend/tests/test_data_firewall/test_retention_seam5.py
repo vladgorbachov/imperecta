@@ -33,6 +33,8 @@ def test_cleanup_tasks_module_removed() -> None:
 def test_scheduler_has_no_cleanup_old_data_beat() -> None:
     source = (BACKEND_ROOT / "app/workers/scheduler.py").read_text(encoding="utf-8")
     assert "cleanup_old_data" not in source
+    assert "ensure_fact_price_partitions" not in source
+    assert "refresh_materialized_views" not in source
     assert "run_service_data_retention" in source
 
 
