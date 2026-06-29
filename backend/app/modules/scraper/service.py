@@ -39,7 +39,6 @@ from app.modules.data_firewall.update_validator import (
     authorize_scrape_update,
 )
 from app.modules.persist.logs_write import build_scrape_log_fields, persist_logs_batch
-from app.modules.persist.maintenance_audit import record_maintenance_audit
 from app.modules.persist.scrape_gate_fields import (
     build_listing_delete_fields,
     build_listing_update_fields,
@@ -154,72 +153,6 @@ def _run_coro_in_worker(coro: Awaitable[_CORO_RESULT]) -> _CORO_RESULT:
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="scraper-async-bridge") as executor:
         future = executor.submit(asyncio.run, coro)
         return future.result()
-
-
-def _needs_scrape_logs_constraint_repair(exc: Exception) -> bool:
-    """Detect legacy DB constraint that does not allow technical_error status."""
-    message = str(exc).lower()
-    if "scrape_logs" not in message:
-        return False
-    if "technical_error" not in message:
-        return False
-    return (
-        "scrape_logs_status_check" in message
-        or "ck_scrape_logs_status" in message
-        or "check constraint" in message
-    )
-
-
-def _needs_scrape_logs_status_column_repair(exc: Exception) -> bool:
-    """Detect legacy scrape_logs.status VARCHAR(20) drift."""
-    message = str(exc).lower()
-    return (
-        "stringdatarighttruncation" in message
-        and "character varying(20)" in message
-    )
-
-
-def _repair_scrape_logs_status_column(db: Session) -> bool:
-    """Widen scrape_logs.status to varchar(50) for current status taxonomy."""
-    try:
-        db.execute(text("ALTER TABLE scrape_logs ALTER COLUMN status TYPE VARCHAR(50)"))
-        db.commit()
-        record_maintenance_audit(
-            op="ALTER",
-            target="scrape_logs.status",
-            status="success",
-            detail="widened to VARCHAR(50)",
-        )
-        return True
-    except Exception:
-        db.rollback()
-        return False
-
-
-def _repair_scrape_logs_status_constraint(db: Session) -> bool:
-    """Repair scrape_logs.status CHECK to allow all supported statuses."""
-    allowed = ",".join(f"'{status}'" for status in CANONICAL_SCRAPE_LOG_STATUSES)
-    try:
-        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS ck_scrape_logs_status"))
-        db.execute(text("ALTER TABLE scrape_logs DROP CONSTRAINT IF EXISTS scrape_logs_status_check"))
-        db.execute(
-            text(
-                "ALTER TABLE scrape_logs "
-                "ADD CONSTRAINT ck_scrape_logs_status "
-                f"CHECK (status IN ({allowed}))"
-            )
-        )
-        db.commit()
-        record_maintenance_audit(
-            op="CHECK REPAIR",
-            target="scrape_logs.status",
-            status="success",
-            detail="ck_scrape_logs_status recreated",
-        )
-        return True
-    except Exception:
-        db.rollback()
-        return False
 
 
 def _is_read_only_error(exc: BaseException) -> bool:
@@ -481,19 +414,6 @@ class GlobalScrapeService:
             return _try_flush(rows)
         except Exception as exc:
             self.db.rollback()
-
-            if _needs_scrape_logs_constraint_repair(exc) and _repair_scrape_logs_status_constraint(self.db):
-                try:
-                    return _try_flush(rows)
-                except Exception:
-                    self.db.rollback()
-
-            if _needs_scrape_logs_status_column_repair(exc) and _repair_scrape_logs_status_column(self.db):
-                try:
-                    return _try_flush(rows)
-                except Exception:
-                    self.db.rollback()
-
             logger.error(
                 "scrape log batch persist failed count=%s err=%s",
                 len(rows),

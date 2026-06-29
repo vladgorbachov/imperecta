@@ -35,8 +35,8 @@ async def test_get_test_marketplaces_contract_shape():
 
 
 @pytest.mark.asyncio
-async def test_trigger_full_pipeline_test_auto_repairs_constraint():
-    """Service creates job and auto-repairs stale job_type constraint when needed."""
+async def test_trigger_full_pipeline_test_creates_job():
+    """Service creates a full-pipeline parent scrape job when none is running."""
     async with async_session_maker() as session:
         service = ParsingAdminService(session)
         created = await service.trigger_full_pipeline_test()

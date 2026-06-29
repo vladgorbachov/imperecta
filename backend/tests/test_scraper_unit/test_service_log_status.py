@@ -11,7 +11,6 @@ from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
-    _needs_scrape_logs_status_column_repair,
     _payload_has_product_name_field,
 )
 
@@ -95,13 +94,6 @@ def test_categorize_error_branches():
     assert svc._categorize_error("blocked captcha") == "auth"
     assert svc._categorize_error("rate limited") == "rate_limit"
     assert svc._categorize_error("weird") == "parse"
-
-
-def test_detect_status_column_drift_error():
-    err = Exception(
-        "(psycopg2.errors.StringDataRightTruncation) value too long for type character varying(20)"
-    )
-    assert _needs_scrape_logs_status_column_repair(err) is True
 
 
 def test_recalculate_analytics_noop():

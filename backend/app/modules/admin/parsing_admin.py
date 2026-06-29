@@ -9,13 +9,12 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.persist.maintenance_audit import record_maintenance_audit_async
 from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
 
 
@@ -209,39 +208,14 @@ class ParsingAdminService:
             started_at=started_at,
             config={"metadata": metadata},
         )
-        try:
-            result = await write_meta_async(
-                table="scrape_jobs",
-                operation="insert",
-                fields=fields,
-                reject_source="parsing_admin",
-            )
-            if not result.ok:
-                raise ValueError("scrape_jobs insert rejected by data firewall")
-        except Exception as exc:
-            if await self._repair_scrape_job_type_constraint():
-                await record_maintenance_audit_async(
-                    op="CHECK REPAIR",
-                    target="scrape_jobs.job_type",
-                    status="success",
-                    detail="ck_scrape_jobs_job_type recreated",
-                )
-                result = await write_meta_async(
-                    table="scrape_jobs",
-                    operation="insert",
-                    fields=fields,
-                    reject_source="parsing_admin",
-                )
-                if not result.ok:
-                    raise ValueError(
-                        "scrape_jobs.job_type does not allow 'full_pipeline_test' "
-                        "and automatic constraint repair failed."
-                    ) from exc
-            else:
-                raise ValueError(
-                    "scrape_jobs.job_type does not allow 'full_pipeline_test' "
-                    "and automatic constraint repair failed."
-                ) from exc
+        result = await write_meta_async(
+            table="scrape_jobs",
+            operation="insert",
+            fields=fields,
+            reject_source="parsing_admin",
+        )
+        if not result.ok:
+            raise ValueError("scrape_jobs insert rejected by data firewall")
         return {
             "job_id": str(job_id),
             "started_at": self._to_iso(started_at),
@@ -948,23 +922,4 @@ class ParsingAdminService:
             changed = True
         if changed:
             pass
-
-    async def _repair_scrape_job_type_constraint(self) -> bool:
-        """Allow full_pipeline_test and scrape in scrape_jobs.job_type CHECK constraint."""
-        try:
-            await self.db.execute(
-                text("ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_job_type")
-            )
-            await self.db.execute(
-                text(
-                    "ALTER TABLE scrape_jobs "
-                    "ADD CONSTRAINT ck_scrape_jobs_job_type "
-                    "CHECK (job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test','scrape'))"
-                )
-            )
-            await self.db.commit()
-            return True
-        except Exception:
-            await self.db.rollback()
-            return False
 
