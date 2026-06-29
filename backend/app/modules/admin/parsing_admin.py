@@ -15,7 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_tables import ScrapeJob, ScrapeLog
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.persist.meta_write import build_scrape_job_fields, write_meta_async
+from app.modules.persist.meta_write import (
+    build_scrape_job_fields,
+    build_scrape_job_insert_fields,
+    write_meta_async,
+)
 
 
 class ParsingAdminService:
@@ -201,7 +205,7 @@ class ParsingAdminService:
         if marketplace_codes:
             metadata["marketplace_codes"] = [code.strip() for code in marketplace_codes if code.strip()]
         job_id = uuid4()
-        fields = build_scrape_job_fields(
+        fields = build_scrape_job_insert_fields(
             id=job_id,
             job_type=self.TEST_PIPELINE_JOB_TYPE,
             status="running",

@@ -810,6 +810,10 @@ def build_fact_listing_fields(
     url_hash: str,
     is_active: bool = True,
     page_role: str = "product",
+    scraper_type: str = "web_api",
+    scrape_interval_minutes: int = 360,
+    consecutive_errors: int = 0,
+    failure_streak: int = 0,
 ) -> dict[str, Any]:
     """Assemble the exact fact_listing columns that the firewall signs."""
     return {
@@ -819,4 +823,8 @@ def build_fact_listing_fields(
         "url_hash": url_hash,
         "is_active": is_active,
         "page_role": page_role,
+        "scraper_type": scraper_type,
+        "scrape_interval_minutes": scrape_interval_minutes,
+        "consecutive_errors": consecutive_errors,
+        "failure_streak": failure_streak,
     }

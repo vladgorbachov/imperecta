@@ -49,6 +49,7 @@ from app.modules.discovery.gate_persist import (
 from app.modules.persist.meta_write import (
     build_dim_marketplace_fields,
     build_scrape_job_fields,
+    build_scrape_job_insert_fields,
     write_meta_async,
 )
 from app.modules.discovery.alerting import (
@@ -720,7 +721,7 @@ class DiscoveryOrchestrator:
             await write_meta_async(
                 table="scrape_jobs",
                 operation="insert",
-                fields=build_scrape_job_fields(
+                fields=build_scrape_job_insert_fields(
                     id=job_id,
                     job_type="discovery",
                     marketplace_id=mp_id,

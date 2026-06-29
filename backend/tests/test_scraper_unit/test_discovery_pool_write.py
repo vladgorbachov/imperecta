@@ -58,6 +58,10 @@ def test_build_fact_listing_fields_minimal() -> None:
     assert fields["product_id"] == product_id
     assert fields["marketplace_id"] == marketplace_id
     assert fields["page_role"] == "product"
+    assert fields["consecutive_errors"] == 0
+    assert fields["scrape_interval_minutes"] == 360
+    assert fields["scraper_type"] == "web_api"
+    assert fields["failure_streak"] == 0
 
 
 def test_build_fact_price_fields_unchanged_shape() -> None:

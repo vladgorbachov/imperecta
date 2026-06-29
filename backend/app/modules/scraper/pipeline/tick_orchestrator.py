@@ -28,7 +28,7 @@ from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.persist.meta_write import (
     build_scrape_job_failed_fields,
-    build_scrape_job_fields,
+    build_scrape_job_insert_fields,
     write_meta_async,
 )
 from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
@@ -150,7 +150,7 @@ async def _create_pending_child(
     if marketplace is None:
         return None
     job_id = uuid4()
-    fields = build_scrape_job_fields(
+    fields = build_scrape_job_insert_fields(
         id=job_id,
         job_type="discovery",
         status="pending",
@@ -283,7 +283,7 @@ async def _create_pending_scrape_child(
     if marketplace is None:
         return None
     job_id = uuid4()
-    fields = build_scrape_job_fields(
+    fields = build_scrape_job_insert_fields(
         id=job_id,
         job_type="scrape",
         status="pending",

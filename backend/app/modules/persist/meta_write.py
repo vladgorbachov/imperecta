@@ -9,8 +9,27 @@ from typing import Any
 from uuid import UUID
 
 from app.database import sync_session_factory
+from app.models.app_tables import ScrapeJob
 from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.persist.writer import PersistContext, write_sync
+
+
+def _orm_column_default(model: type, column_name: str) -> Any:
+    """Return the SQLAlchemy mapped_column Python default for insert provisioning."""
+    column = model.__table__.columns[column_name]
+    default = column.default
+    if default is None:
+        raise ValueError(f"{model.__name__}.{column_name} has no Python default")
+    arg = default.arg
+    return arg() if callable(arg) else arg
+
+
+_SCRAPE_JOB_INSERT_ORM_DEFAULTS: dict[str, Any] = {
+    "total_listings": _orm_column_default(ScrapeJob, "total_listings"),
+    "successful": _orm_column_default(ScrapeJob, "successful"),
+    "failed": _orm_column_default(ScrapeJob, "failed"),
+    "skipped": _orm_column_default(ScrapeJob, "skipped"),
+}
 
 
 def _serialize_meta_value(value: Any) -> Any:
@@ -28,6 +47,15 @@ def build_scrape_job_fields(*, id: UUID | None = None, **columns: Any) -> dict[s
         fields["id"] = str(id)
     for key, value in columns.items():
         fields[key] = _serialize_meta_value(value)
+    return fields
+
+
+def build_scrape_job_insert_fields(*, id: UUID | None = None, **columns: Any) -> dict[str, Any]:
+    """Assemble scrape_jobs INSERT columns including ORM Python defaults for NOT NULL cols."""
+    fields = build_scrape_job_fields(id=id, **columns)
+    for key, default in _SCRAPE_JOB_INSERT_ORM_DEFAULTS.items():
+        if key not in fields:
+            fields[key] = default
     return fields
 
 

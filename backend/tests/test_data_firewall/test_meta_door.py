@@ -14,6 +14,7 @@ from app.modules.data_firewall.signing import reset_signing_settings_cache, sign
 from app.modules.persist.meta_write import (
     build_dim_marketplace_fields,
     build_scrape_job_fields,
+    build_scrape_job_insert_fields,
     write_meta_sync,
 )
 
@@ -35,7 +36,7 @@ def test_meta_tables_registered_in_maps() -> None:
 
 def test_evaluate_market_signs_scrape_jobs_insert() -> None:
     job_id = uuid4()
-    fields = build_scrape_job_fields(
+    fields = build_scrape_job_insert_fields(
         id=job_id,
         job_type="discovery",
         status="pending",
@@ -115,7 +116,7 @@ def test_jsonb_config_passes_structural_contract() -> None:
 
 def test_write_meta_sync_dispatches_insert_with_commit() -> None:
     job_id = uuid4()
-    fields = build_scrape_job_fields(
+    fields = build_scrape_job_insert_fields(
         id=job_id,
         job_type="discovery",
         status="pending",
