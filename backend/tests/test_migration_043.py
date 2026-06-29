@@ -1,4 +1,4 @@
-"""Migration 042 — pg_cron fact_price partitions (asyncpg-safe DDL)."""
+"""Migration 043 — pg_cron materialized view refresh (asyncpg-safe DDL)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-MIGRATION_042 = (
-    BACKEND_ROOT / "alembic/versions/042_pgcron_fact_price_partitions.py"
+MIGRATION_043 = (
+    BACKEND_ROOT / "alembic/versions/043_pgcron_refresh_mviews.py"
 )
 
 _EXECUTE_STRING_RE = re.compile(
@@ -33,35 +33,36 @@ def _count_sql_statements(sql: str) -> int:
     return len([part for part in sql.split(";") if part.strip()])
 
 
-def test_migration_042_py_compile() -> None:
-    ast.parse(MIGRATION_042.read_text(encoding="utf-8"))
+def test_migration_043_py_compile() -> None:
+    ast.parse(MIGRATION_043.read_text(encoding="utf-8"))
 
 
-def test_migration_042_revision_chain() -> None:
-    source = MIGRATION_042.read_text(encoding="utf-8")
-    assert 'revision = "042_pgcron_fact_price_partitions"' in source
-    assert 'down_revision = "041_grant_imperecta_app_partition_parents"' in source
+def test_migration_043_revision_chain() -> None:
+    source = MIGRATION_043.read_text(encoding="utf-8")
+    assert 'revision = "043_pgcron_refresh_mviews"' in source
+    assert 'down_revision = "042_pgcron_fact_price_partitions"' in source
 
 
-def test_migration_042_documents_e1_and_rls_app_read() -> None:
-    source = MIGRATION_042.read_text(encoding="utf-8")
-    assert "E1" in source or "DDL-eviction" in source
-    assert "rls_app_read" in source
-    assert "_ensure_fact_price_partition" in source
-    assert "maintenance.ensure_fact_price_partitions" in source
-    assert "ensure-fact-price-partitions" in source
-    assert "0 0 * * *" in source
+def test_migration_043_documents_e2_and_skip_predicate() -> None:
+    source = MIGRATION_043.read_text(encoding="utf-8")
+    assert "E2" in source or "DDL-eviction" in source
+    assert "full_pipeline_test" in source
+    assert "mv_daily_price_summary" in source
+    assert "mv_marketplace_health" in source
+    assert "refresh-materialized-views" in source
+    assert "0 * * * *" in source
+    assert "64MB" in source
 
 
-def test_migration_042_has_single_statement_per_op_execute() -> None:
+def test_migration_043_has_single_statement_per_op_execute() -> None:
     offenders: list[str] = []
-    for sql in _migration_execute_strings(MIGRATION_042):
+    for sql in _migration_execute_strings(MIGRATION_043):
         if _count_sql_statements(sql) > 1:
             offenders.append(sql.strip()[:120])
     assert offenders == [], f"multi-statement op.execute literals: {offenders}"
 
 
-def test_alembic_chain_includes_042() -> None:
+def test_alembic_single_head_includes_043() -> None:
     versions_dir = BACKEND_ROOT / "alembic" / "versions"
     revisions: dict[str, str | None] = {}
     for path in versions_dir.glob("*.py"):
@@ -74,8 +75,10 @@ def test_alembic_chain_includes_042() -> None:
             continue
         revisions[rev_match.group(1)] = down_match.group(1) if down_match else None
 
+    referenced = {down for down in revisions.values() if down}
+    heads = [rev for rev in revisions if rev not in referenced]
+    assert heads == ["043_pgcron_refresh_mviews"], f"unexpected heads: {heads}"
     assert (
-        revisions["042_pgcron_fact_price_partitions"]
-        == "041_grant_imperecta_app_partition_parents"
+        revisions["043_pgcron_refresh_mviews"]
+        == "042_pgcron_fact_price_partitions"
     )
-    assert "042_pgcron_fact_price_partitions" in revisions
