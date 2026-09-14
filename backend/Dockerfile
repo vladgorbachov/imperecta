@@ -26,4 +26,6 @@ ARG PORT=8000
 EXPOSE ${PORT}
 
 # Run migrations then start app. Celery worker/beat override CMD with custom commands.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Migrations need DDL rights: they run under DATABASE_URL_MIGRATIONS (postgres)
+# while the app itself runs under DATABASE_URL (imperecta_app after the 9.5 flip).
+CMD ["sh", "-c", "DATABASE_URL=${DATABASE_URL_MIGRATIONS:-$DATABASE_URL} alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
