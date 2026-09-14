@@ -55,9 +55,9 @@ function SidebarLogo({
   return (
     <div
       className={cn(
-        "relative flex h-[84px] shrink-0",
+        "relative flex h-16 shrink-0",
         showLabels
-          ? "flex-row items-center justify-between px-[17px]"
+          ? "flex-row items-center justify-between px-4"
           : "flex-col items-center justify-center gap-0.5 px-0"
       )}
     >
@@ -75,14 +75,14 @@ function SidebarLogo({
         <Button
           variant="ghost"
           size="icon"
-          className="h-[38px] w-[38px] min-w-[38px] shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+          className="size-8 min-w-8 shrink-0 text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
           onClick={onToggle}
           aria-label={collapsed ? t("common.expand") : t("common.collapse")}
         >
           {collapsed ? (
-            <ChevronRight className="size-[20px]" />
+            <ChevronRight className="size-4" />
           ) : (
-            <ChevronLeft className="size-[20px]" />
+            <ChevronLeft className="size-4" />
           )}
         </Button>
       )}
@@ -93,8 +93,7 @@ function SidebarLogo({
 function SparklesBadge({ className }: { className?: string }) {
   return (
     <Sparkles
-      className={cn("size-[23px] shrink-0 text-[var(--accent)]", className)}
-      style={{ filter: "drop-shadow(0 0 4px var(--accent-glow))" }}
+      className={cn("size-4 shrink-0 text-[var(--accent)]", className)}
       aria-hidden
     />
   );
@@ -128,32 +127,24 @@ function SidebarItem({
       to={to}
       onClick={isMobile ? onNavigate : undefined}
       className={cn(
-        "group relative flex items-center gap-[14px] rounded-md py-[10px] text-sm transition-all duration-200",
-        showLabels ? "ps-[17px] pe-[17px]" : "justify-center ps-[14px] pe-[14px]",
+        "group relative flex items-center gap-3 rounded-md py-2 text-sm transition-colors duration-150",
+        showLabels ? "ps-4 pe-4" : "justify-center ps-3 pe-3",
         isActive
-          ? "bg-gradient-to-r from-[var(--accent-bg-subtle)] to-transparent text-[var(--foreground)]"
+          ? "bg-[var(--accent-bg-subtle)] text-[var(--foreground)]"
           : "text-[var(--foreground-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
       )}
     >
       {isActive && (
         <div
-          className="absolute inset-y-[7px] start-0 w-[3px] rounded-e-full"
-          style={{
-            background: "var(--accent)",
-            boxShadow: "0 0 8px var(--accent-glow)",
-          }}
+          className="absolute inset-y-1.5 start-0 w-0.5 rounded-e-full"
+          style={{ background: "var(--accent)" }}
         />
       )}
       <Icon
         className={cn(
-          "size-[23px] shrink-0",
+          "size-5 shrink-0",
           isActive && "text-[var(--accent)]"
         )}
-        style={
-          isActive
-            ? { filter: "drop-shadow(0 0 6px var(--accent-glow))" }
-            : undefined
-        }
       />
       {showLabels && (
         <>
@@ -189,11 +180,11 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
   const showLabels = !collapsed;
 
   return (
-    <Collapsible defaultOpen className="px-[10px]">
+    <Collapsible defaultOpen className="px-2.5">
       {showLabels && (
-        <div className="flex w-full items-center justify-between gap-[9px] py-[10px]">
+        <div className="flex w-full items-center justify-between gap-2 py-2">
           <CollapsibleTrigger
-            className="flex flex-1 items-center text-left text-2xs font-medium uppercase tracking-wider text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            className="label-mono flex flex-1 items-center text-left transition-colors hover:text-[var(--foreground)]"
           >
             {label}
           </CollapsibleTrigger>
@@ -201,7 +192,7 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
         </div>
       )}
       <CollapsibleContent>
-        <div className="space-y-[5px] py-[5px]">{children}</div>
+        <div className="space-y-1 py-1">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -229,12 +220,12 @@ function SidebarFooter({
   const progress = Math.min(100, (trialDaysLeft / maxDays) * 100);
 
   return (
-    <div className="shrink-0 p-[21px]">
+    <div className="shrink-0 p-4">
       {isTrial && (
-        <div className="surface-base overflow-hidden p-[21px]">
+        <div className="surface-base overflow-hidden p-4">
           <p
             className={cn(
-              "mb-[14px] text-sm text-[var(--foreground-muted)]",
+              "mb-3 text-sm text-[var(--foreground-muted)]",
               !showLabels && "text-center"
             )}
           >
@@ -242,21 +233,19 @@ function SidebarFooter({
               ? t("layout.trialDaysLeft", { count: trialDaysLeft })
               : trialDaysLeft}
           </p>
-          <div className="surface-sunken mb-[21px] h-[10px] w-full overflow-hidden rounded-full">
+          <div className="surface-sunken mb-4 h-1.5 w-full overflow-hidden rounded-full">
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{
                 width: `${progress}%`,
-                background: "linear-gradient(90deg, var(--accent), var(--accent2))",
-                boxShadow: "0 0 8px var(--accent-glow)",
+                background: "var(--accent)",
               }}
             />
           </div>
           <Button
-            className="h-[51px] w-full font-semibold"
+            className="h-10 w-full font-semibold"
             style={{
-              background: "linear-gradient(135deg, var(--accent-dim), var(--accent))",
-              boxShadow: "0 0 16px var(--accent-glow)",
+              background: "var(--accent)",
               border: "none",
               color: "var(--primary-foreground)",
             }}
@@ -288,7 +277,7 @@ export function Sidebar({
       className={cn(
         "flex flex-col text-[var(--foreground)] transition-[width] duration-300 ease-in-out",
         "border-e border-[var(--glass-border)]",
-        isMobile ? "w-full" : collapsed ? "w-[80px]" : "w-[264px]"
+        isMobile ? "w-full" : collapsed ? "w-[72px]" : "w-[240px]"
       )}
     >
       <SidebarLogo
@@ -298,7 +287,7 @@ export function Sidebar({
         onToggle={onToggle}
       />
 
-      <nav className="flex flex-1 flex-col gap-[10px] overflow-y-auto py-[17px] text-sm">
+      <nav className="flex flex-1 flex-col gap-2 overflow-y-auto py-4 text-sm">
         <SidebarSection label={t("nav.section.core")} collapsed={collapsed}>
           <SidebarItem
             icon={LayoutDashboard}

@@ -53,7 +53,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
 
   return (
     <header
-      className="flex h-[84px] min-h-[44px] min-w-0 shrink-0 items-center gap-1.5 overflow-hidden px-3 backdrop-blur-xl safe-area-top sm:gap-2 sm:px-4 md:px-5"
+      className="flex h-16 min-h-[44px] min-w-0 shrink-0 items-center gap-1.5 overflow-hidden border-b border-[var(--glass-border)] px-3 safe-area-top sm:gap-2 sm:px-4 md:px-5"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {onMenuClick && (
@@ -77,7 +77,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           className={cn(
             "min-h-9 min-w-9 size-9 touch-manipulation",
             "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]",
-            "hover:shadow-[0_0_12px_var(--accent-glow)] transition-all duration-200"
+            "transition-colors duration-150"
           )}
           onClick={() => setTheme(isDark ? "light" : "dark")}
           aria-label={t("common.toggleTheme")}
@@ -100,13 +100,10 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
           <Bell className="size-4 text-[var(--foreground)]" />
           {notificationCount > 0 && (
             <span
-              className={cn(
-                "absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-bold text-white",
-                notificationCount > 0 && "glow-pulse"
-              )}
+              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-bold"
               style={{
                 background: "var(--accent)",
-                boxShadow: "0 0 8px var(--accent-glow)",
+                color: "var(--primary-foreground)",
               }}
             >
               {notificationCount > 99 ? "99+" : notificationCount}
@@ -120,10 +117,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
               className="relative min-h-9 min-w-9 size-9 rounded-full touch-manipulation p-0"
               aria-label={t("auth.profile")}
             >
-              <Avatar
-                className="size-8 ring-2 ring-[var(--accent)]"
-                style={{ boxShadow: "0 0 12px var(--accent-glow)" }}
-              >
+              <Avatar className="size-8 ring-1 ring-[var(--glass-border-hover)]">
                 <AvatarImage src={user?.avatar_url ?? undefined} alt={user?.name} />
                 <AvatarFallback
                   className="text-[var(--foreground)]"

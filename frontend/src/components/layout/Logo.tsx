@@ -1,8 +1,8 @@
 /**
  * Imperecta brand mark + wordmark, rendered as inline SVG.
  *
- * Mark: rounded square with a cyan→blue→indigo gradient, a soft glow,
- * and a small white spark path inside. No external image assets are used.
+ * Mark: rounded square in the accent gradient (token-based) with a small
+ * spark path inside. No external image assets are used.
  * The wordmark is hidden when `collapsed` is true (used by the rail sidebar).
  */
 
@@ -17,18 +17,17 @@ export function Logo({ collapsed = false, className }: LogoProps) {
   return (
     <span className={cn("flex items-center gap-2.5", className)}>
       <span
-        className="grid size-[30px] shrink-0 place-items-center rounded-[9px]"
+        className="grid size-7 shrink-0 place-items-center rounded-lg"
         style={{
-          background: "linear-gradient(135deg, #22d3ee, #3b82f6 55%, #6366f1)",
-          boxShadow: "0 6px 20px -8px rgba(56,130,246,0.8)",
+          background: "linear-gradient(135deg, var(--accent-dim), var(--accent))",
         }}
       >
         <svg
-          width="17"
-          height="17"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="#fff"
+          stroke="var(--primary-foreground)"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -39,7 +38,7 @@ export function Logo({ collapsed = false, className }: LogoProps) {
       </span>
       {!collapsed && (
         <span
-          className="text-[18px] font-bold tracking-[-0.01em] text-[var(--foreground)]"
+          className="text-[17px] font-semibold tracking-[-0.01em] text-[var(--foreground)]"
           style={{ fontFamily: "var(--font-display)" }}
         >
           Imperecta

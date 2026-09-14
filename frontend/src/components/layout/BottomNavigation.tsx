@@ -53,12 +53,7 @@ export function BottomNavigation() {
                 transition={{ type: "spring", stiffness: 500, damping: 30 }}
               />
             )}
-            <Icon
-              className={cn(
-                "relative z-10 size-6 shrink-0",
-                isActive && "drop-shadow-[0_0_6px_hsl(var(--primary)/0.5)]"
-              )}
-            />
+            <Icon className="relative z-10 size-6 shrink-0" />
             <span className="relative z-10 truncate text-2xs font-medium">
               {t(i18nKey)}
             </span>

@@ -4,8 +4,7 @@
  */
 
 import { useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { MobileSidebar } from "./MobileSidebar";
@@ -17,7 +16,6 @@ import { useSidebar } from "@/hooks/useSidebar";
 export function DashboardLayout() {
   const { isCollapsed, toggle } = useSidebar();
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
-  const location = useLocation();
 
   return (
     <div
@@ -37,17 +35,7 @@ export function DashboardLayout() {
           className="h-full w-full overflow-auto p-2.5 pb-16 safe-area-bottom-margin sm:pb-2.5"
         >
           <div className="relative z-[1] w-full min-w-0">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={location.pathname}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                <Outlet />
-              </motion.div>
-            </AnimatePresence>
+            <Outlet />
           </div>
         </Scrollable>
       </main>
