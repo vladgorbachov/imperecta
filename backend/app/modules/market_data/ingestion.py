@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings

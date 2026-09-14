@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.sql.dml import Delete
 
 from app.modules.data_firewall.contracts import extract_locator
 from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache, sign
@@ -14,7 +13,6 @@ from app.modules.persist.writer import (
     PersistContext,
     SUPPORTED_WRITE_OPERATIONS,
     build_dim_product_fields,
-    write_async,
     write_sync,
 )
 
@@ -198,24 +196,3 @@ def test_insert_callers_still_truthy_on_success(mock_exec: MagicMock) -> None:
     mock_exec.assert_called_once()
     db.add.assert_not_called()
 
-
-@pytest.mark.asyncio
-async def test_write_async_delete_mirror() -> None:
-    fields = {
-        "date_id": 20250617,
-        "symbol": "BTC",
-        "source": "coingecko",
-    }
-    signed = _signed("fact_crypto_price", "delete", fields)
-    db = MagicMock()
-    db.sync_session = MagicMock()
-    execute_result = MagicMock()
-    execute_result.rowcount = 1
-    db.execute = AsyncMock(return_value=execute_result)
-
-    result = await write_async(db, signed, ctx=PersistContext(source="market_crypto"))
-
-    assert result.ok is True
-    assert result.rows_affected == 1
-    stmt = db.execute.await_args.args[0]
-    assert isinstance(stmt, Delete)

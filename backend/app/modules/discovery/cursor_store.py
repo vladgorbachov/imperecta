@@ -7,7 +7,25 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.orm.attributes import set_committed_value
+
 from app.models.dimensions import DimMarketplace
+
+
+def assign_clean(marketplace: DimMarketplace, key: str, value: Any) -> None:
+    """Set a cursor/state attribute WITHOUT marking the ORM instance dirty.
+
+    Discovery cursor state persists only via the gated META snapshot
+    (write_meta_async -> gate.exec_write). A plain attribute assignment leaves
+    the instance dirty, and the session's next autoflush/commit would emit a
+    direct UPDATE dim_marketplace past the gate. The exact-type check keeps
+    test stubs/mocks (not SQLAlchemy-instrumented) on a regular setattr.
+    """
+    if type(marketplace) is DimMarketplace:
+        set_committed_value(marketplace, key, value)
+    else:
+        setattr(marketplace, key, value)
+
 
 DISCOVERY_MP_WRITE_KEYS: tuple[str, ...] = (
     "base_url",
@@ -122,16 +140,16 @@ def apply_frontier(
     listing_urls: list[str],
 ) -> None:
     """Assign serialized frontier state on the marketplace ORM instance."""
-    marketplace.recon_frontier_state = serialize_frontier(
-        queue,
-        visited,
-        listing_urls,
+    assign_clean(
+        marketplace,
+        "recon_frontier_state",
+        serialize_frontier(queue, visited, listing_urls),
     )
 
 
 def clear_frontier(marketplace: DimMarketplace) -> None:
     """Clear recon_frontier_state on the marketplace ORM instance."""
-    marketplace.recon_frontier_state = None
+    assign_clean(marketplace, "recon_frontier_state", None)
 
 
 def get_sitemap_resume_offset(marketplace: DimMarketplace) -> int:
@@ -141,7 +159,7 @@ def get_sitemap_resume_offset(marketplace: DimMarketplace) -> int:
 
 def set_sitemap_resume_offset(marketplace: DimMarketplace, offset: int) -> None:
     """Write sitemap_resume_offset on the marketplace ORM instance."""
-    marketplace.sitemap_resume_offset = offset
+    assign_clean(marketplace, "sitemap_resume_offset", offset)
 
 
 def get_sitemap_bad_harvest_streak(marketplace: DimMarketplace) -> int:
@@ -151,7 +169,7 @@ def get_sitemap_bad_harvest_streak(marketplace: DimMarketplace) -> int:
 
 def set_sitemap_bad_harvest_streak(marketplace: DimMarketplace, streak: int) -> None:
     """Write sitemap_bad_harvest_streak on the marketplace ORM instance."""
-    marketplace.sitemap_bad_harvest_streak = streak
+    assign_clean(marketplace, "sitemap_bad_harvest_streak", streak)
 
 
 def get_phase1_exhausted_streak(marketplace: DimMarketplace) -> int:
@@ -161,7 +179,7 @@ def get_phase1_exhausted_streak(marketplace: DimMarketplace) -> int:
 
 def set_phase1_exhausted_streak(marketplace: DimMarketplace, streak: int) -> None:
     """Write phase1_exhausted_streak on the marketplace ORM instance."""
-    marketplace.phase1_exhausted_streak = streak
+    assign_clean(marketplace, "phase1_exhausted_streak", streak)
 
 
 def get_category_resume_index(marketplace: DimMarketplace) -> int:
@@ -171,7 +189,7 @@ def get_category_resume_index(marketplace: DimMarketplace) -> int:
 
 def set_category_resume_index(marketplace: DimMarketplace, index: int) -> None:
     """Write category_resume_index on the marketplace ORM instance."""
-    marketplace.category_resume_index = index
+    assign_clean(marketplace, "category_resume_index", index)
 
 
 def get_discovered_category_urls(marketplace: DimMarketplace) -> list[str]:
@@ -187,7 +205,7 @@ def set_discovered_category_urls(
     urls: list[str],
 ) -> None:
     """Write discovered_category_urls on the marketplace ORM instance."""
-    marketplace.discovered_category_urls = urls
+    assign_clean(marketplace, "discovered_category_urls", urls)
 
 
 def get_last_category_recon_at(
@@ -202,7 +220,7 @@ def set_last_category_recon_at(
     value: datetime,
 ) -> None:
     """Write last_category_recon_at on the marketplace ORM instance."""
-    marketplace.last_category_recon_at = value
+    assign_clean(marketplace, "last_category_recon_at", value)
 
 
 def get_last_sitemap_harvest_at(
@@ -217,7 +235,7 @@ def set_last_sitemap_harvest_at(
     value: datetime,
 ) -> None:
     """Write last_sitemap_harvest_at on the marketplace ORM instance."""
-    marketplace.last_sitemap_harvest_at = value
+    assign_clean(marketplace, "last_sitemap_harvest_at", value)
 
 
 def get_sitemap_url(marketplace: DimMarketplace) -> str | None:
@@ -227,7 +245,7 @@ def get_sitemap_url(marketplace: DimMarketplace) -> str | None:
 
 def set_sitemap_url(marketplace: DimMarketplace, value: str) -> None:
     """Write sitemap_url on the marketplace ORM instance."""
-    marketplace.sitemap_url = value
+    assign_clean(marketplace, "sitemap_url", value)
 
 
 def snapshot_meta_columns(marketplace: DimMarketplace) -> dict[str, Any]:

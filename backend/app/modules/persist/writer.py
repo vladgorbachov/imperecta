@@ -10,8 +10,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import and_, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
@@ -485,16 +484,6 @@ def _handle_gate_batch_rpc_error(
     raise GateRpcError(kind, rpc_message)
 
 
-async def _write_async_delete(
-    db: AsyncSession,
-    signed: SignedRecord,
-) -> PersistResult:
-    table = signed.table
-    model = _model_for_table(table)
-    orm_locator = _orm_locator(table, signed.locator)
-    result = await db.execute(delete(model).where(_locator_where(model, table, orm_locator)))
-    return _persist_result_from_rowcount(result.rowcount)
-
 
 def write_sync(
     db: Session,
@@ -637,86 +626,6 @@ def write_batch_sync(
 
     return _persist_result_from_rowcount(rowcount)
 
-
-async def write_async(
-    db: AsyncSession,
-    signed: SignedRecord | None,
-    *,
-    ctx: PersistContext,
-) -> PersistResult:
-    """Verify signature and write verbatim (async Session)."""
-    if signed is None:
-        write_reject_data(
-            db.sync_session,
-            source=ctx.source,
-            table_target="unknown",
-            reject_reason="missing_signed_record",
-            raw_payload={},
-            rejected_by="persist",
-            marketplace_id=ctx.marketplace_id,
-            listing_id=ctx.listing_id,
-            signature_present=False,
-            operation="insert",
-        )
-        return PersistResult(ok=False)
-
-    reject_reason = _verify_signed_record(signed)
-    if reject_reason is not None:
-        write_reject_data(
-            db.sync_session,
-            source=ctx.source,
-            table_target=signed.table,
-            reject_reason=reject_reason,
-            raw_payload=signed.fields,
-            rejected_by="persist",
-            marketplace_id=ctx.marketplace_id,
-            listing_id=ctx.listing_id,
-            signature_present=bool(signed.signature),
-            operation=signed.operation,
-        )
-        return PersistResult(ok=False)
-
-    if signed.operation == "delete":
-        return await _write_async_delete(db, signed)
-
-    orm_fields = _orm_fields_for_table(signed.table, signed.fields)
-    table = signed.table
-    date_id = orm_fields["date_id"]
-
-    if table == "fact_currency_rate":
-        await db.execute(
-            delete(FactCurrencyRate).where(
-                FactCurrencyRate.date_id == date_id,
-                FactCurrencyRate.currency_code == orm_fields["currency_code"],
-                FactCurrencyRate.source == orm_fields["source"],
-            ),
-        )
-        db.add(FactCurrencyRate(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "fact_crypto_price":
-        await db.execute(
-            delete(FactCryptoPrice).where(
-                FactCryptoPrice.date_id == date_id,
-                FactCryptoPrice.symbol == orm_fields["symbol"],
-                FactCryptoPrice.source == orm_fields["source"],
-            ),
-        )
-        db.add(FactCryptoPrice(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    if table == "fact_commodity_price":
-        await db.execute(
-            delete(FactCommodityPrice).where(
-                FactCommodityPrice.date_id == date_id,
-                FactCommodityPrice.symbol == orm_fields["symbol"],
-                FactCommodityPrice.source == orm_fields["source"],
-            ),
-        )
-        db.add(FactCommodityPrice(**orm_fields))
-        return PersistResult(ok=True, rows_affected=1)
-
-    raise ValueError(f"unsupported async persist table: {table}")
 
 
 MAX_ABS_PRICE_CHANGE_PCT = Decimal("9999.9999")

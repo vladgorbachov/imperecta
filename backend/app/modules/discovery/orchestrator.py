@@ -752,7 +752,7 @@ class DiscoveryOrchestrator:
             if not seed_url.startswith("http"):
                 seed_url = f"https://{seed_url}"
             if marketplace.base_url != seed_url:
-                marketplace.base_url = seed_url
+                cursor_store.assign_clean(marketplace, "base_url", seed_url)
 
             current = await self.db.scalar(
                 select(func.count(FactListing.id)).where(FactListing.marketplace_id == mp_id),
@@ -961,9 +961,17 @@ class DiscoveryOrchestrator:
                 "rejected_urls": rejected_urls,
                 "discovery_method": "category_crawl",
             }
-            marketplace.last_discovery_at = completed_at
-            marketplace.last_discovery_status = "failed" if status == "error" else status
-            marketplace.last_discovery_products_found = persisted_listings
+            cursor_store.assign_clean(marketplace, "last_discovery_at", completed_at)
+            cursor_store.assign_clean(
+                marketplace,
+                "last_discovery_status",
+                "failed" if status == "error" else status,
+            )
+            cursor_store.assign_clean(
+                marketplace,
+                "last_discovery_products_found",
+                persisted_listings,
+            )
 
             pool_count = await self.db.scalar(
                 select(func.count(FactListing.id)).where(
@@ -971,7 +979,7 @@ class DiscoveryOrchestrator:
                     FactListing.is_active.is_(True),
                 ),
             )
-            marketplace.products_in_pool = int(pool_count or 0)
+            cursor_store.assign_clean(marketplace, "products_in_pool", int(pool_count or 0))
 
             finalize_result = await write_meta_async(
                 table="scrape_jobs",
@@ -1046,7 +1054,7 @@ class DiscoveryOrchestrator:
                 "rejected_urls": rejected_urls,
                 "discovery_method": "category_crawl",
             }
-            marketplace.last_discovery_status = "failed"
+            cursor_store.assign_clean(marketplace, "last_discovery_status", "failed")
             try:
                 await write_meta_async(
                     table="scrape_jobs",
