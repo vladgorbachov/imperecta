@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings
-from app.database import Base, engine
+from app.database import engine
 from app.modules.admin.api_alerts import router as admin_alerts_router
 from app.modules.admin.api_parsing import router as admin_parsing_router
 from app.modules.ai_analyst.api import router as ai_router
@@ -43,7 +43,10 @@ init_sentry(with_celery=False)
 async def _run_alembic_upgrade_head() -> None:
     """Apply DB migrations via subprocess (same as Docker CMD); failures are logged only."""
     backend_root = Path(__file__).resolve().parents[1]
-    env = {**os.environ, "DATABASE_URL": settings.database_url}
+    env = {
+        **os.environ,
+        "DATABASE_URL": settings.database_url_migrations or settings.database_url,
+    }
     try:
         proc = await asyncio.to_thread(
             subprocess.run,
@@ -65,15 +68,6 @@ async def _run_alembic_upgrade_head() -> None:
             logger.info("alembic upgrade head completed successfully")
     except Exception as exc:
         logger.warning("alembic upgrade head raised: %s", exc)
-
-
-async def _ensure_tables() -> None:
-    """ORM safety net after Alembic (no-op if migrations already created objects)."""
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    except Exception as e:
-        logger.warning("create_all failed (may run later): %s", e)
 
 
 async def _ensure_superuser() -> None:
@@ -124,10 +118,6 @@ async def lifespan(app: FastAPI):
         await _ensure_superuser()
     except Exception as exc:
         logger.warning("ensure_superuser failed: %s", exc)
-    try:
-        await _ensure_tables()
-    except Exception as exc:
-        logger.warning("ensure_tables failed: %s", exc)
     asyncio.create_task(_setup_telegram_webhook())
     yield
 

@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     """Application configuration for cloud deploy (Railway + Supabase + Upstash)."""
 
     database_url: str
+    # Privileged URL for the startup `alembic upgrade head` subprocess only:
+    # migrations need DDL, which the runtime role (imperecta_app) does not have.
+    database_url_migrations: str | None = None
     redis_url: str
     jwt_secret: str
     jwt_algorithm: str
