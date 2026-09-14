@@ -366,11 +366,15 @@ def discover_one_marketplace(self, child_job_id: str):
     name="discover_single_marketplace",
     bind=True,
     max_retries=2,
-    soft_time_limit=300,
-    time_limit=360,
+    soft_time_limit=DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS,
+    time_limit=DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS + 60,
 )
 def discover_single_marketplace(self, marketplace_id: str):
-    """Run discovery for one marketplace (UUID string)."""
+    """Run discovery for one marketplace (UUID string).
+
+    Same per-marketplace budget as the orchestrator child path
+    (discover_one_marketplace), so a standalone run is not cut short.
+    """
 
     async def _do() -> dict:
         engine, session_factory = _make_session_factory()
@@ -382,7 +386,10 @@ def discover_single_marketplace(self, marketplace_id: str):
                 if not marketplace:
                     return {"status": "not_found", "marketplace_id": marketplace_id}
                 crawler = DiscoveryOrchestrator(db, scraper_pool)
-                res = await crawler.discover(marketplace)
+                deadline = (
+                    time.monotonic() + DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+                )
+                res = await crawler.discover(marketplace, deadline_monotonic=deadline)
                 return {
                     "status": res.status,
                     "marketplace_id": str(marketplace.id),

@@ -150,7 +150,7 @@ def test_discover_single_success_mocked(monkeypatch):
 
     monkeypatch.setattr(scraper_tasks, "_make_session_factory", lambda: (Eng(), lambda: CM()))
 
-    async def ok_discover(self, marketplace):
+    async def ok_discover(self, marketplace, deadline_monotonic=None):
         return DiscoveryResult(
             marketplace_id=marketplace.id,
             status="completed",
