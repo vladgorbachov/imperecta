@@ -20,11 +20,17 @@ logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 _FX_RATE_DECIMALS = 8
+_CHANGE_PCT_DECIMALS = 4
 
 
 def _quantize_fx_rate(value: float) -> float:
     """Round FX rate to fit fact_currency_rate Numeric(18, 8) before firewall check."""
     return round(value, _FX_RATE_DECIMALS)
+
+
+def _quantize_change_pct(value: float | None) -> float | None:
+    """Round 24h change to fit change_24h_pct Numeric(8, 4) before firewall check."""
+    return None if value is None else round(float(value), _CHANGE_PCT_DECIMALS)
 
 
 def _ensure_dim_date(db: Session, d: date) -> int:
@@ -319,7 +325,7 @@ class IngestionService:
                         price_usd=float(c["price"]),
                         market_cap_usd=float(c["market_cap"]) if c.get("market_cap") else None,
                         volume_24h_usd=None,
-                        change_24h_pct=float(c["change_24h"]) if c.get("change_24h") is not None else None,
+                        change_24h_pct=_quantize_change_pct(c.get("change_24h")),
                         source=c.get("provider_source") or "binance",
                         rank=index + 1,
                     )
@@ -349,7 +355,7 @@ class IngestionService:
                             unit=unit,
                             source=c.get("source")
                             or ("goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"),
-                            change_24h_pct=float(ch) if ch is not None else None,
+                            change_24h_pct=_quantize_change_pct(ch),
                         ),
                     )
                 out["commodities"] = self.persist_commodities(comm_items)
@@ -384,7 +390,7 @@ class IngestionService:
                         price_usd=price,
                         unit=unit,
                         source=src,
-                        change_24h_pct=float(ch) if ch is not None else None,
+                        change_24h_pct=_quantize_change_pct(ch),
                     ),
                 )
             return self.persist_commodities(comm_items)
