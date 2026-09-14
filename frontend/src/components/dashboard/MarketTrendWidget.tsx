@@ -155,8 +155,8 @@ export function MarketTrendWidget({
     <div className="surface-base flex h-full min-w-0 flex-col rounded-xl p-3.5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold">{t("market.overview.trend.title")}</h3>
-          <p className="mt-0.5 text-2xs text-muted-foreground">
+          <h3 className="label-mono !text-[var(--foreground)]">{t("market.overview.trend.title")}</h3>
+          <p className="mt-1 text-2xs text-muted-foreground">
             {t("market.overview.trend.subtitle")}
           </p>
         </div>

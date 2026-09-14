@@ -151,7 +151,7 @@ function MoversSection({
   }
   return (
     <div>
-      <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <h4 className="label-mono mb-1">
         {title}
       </h4>
       <ul>
@@ -212,7 +212,7 @@ export function MarketMoversWidget({
 
   return (
     <div className="surface-base rounded-xl p-3.5">
-      <h3 className="mb-3 text-sm font-semibold">{t("market.overview.movements.title")}</h3>
+      <h3 className="label-mono mb-3 !text-[var(--foreground)]">{t("market.overview.movements.title")}</h3>
 
       {isLoading ? (
         <MoversSkeleton />

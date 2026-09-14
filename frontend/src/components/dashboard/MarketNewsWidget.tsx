@@ -57,7 +57,7 @@ function NewsItemCard({
   }, [item.published_at, locale]);
 
   return (
-    <article className="flex gap-4 rounded-lg border border-border/50 bg-muted/20 p-4 transition-colors hover:bg-muted/30">
+    <article className="-mx-2 flex gap-4 rounded-md px-2 py-3 transition-colors hover:bg-[var(--glass-bg-hover)]">
       {item.image_url && !imageHidden ? (
         <img
           src={item.image_url}
@@ -131,10 +131,10 @@ export function MarketNewsWidget({ countryCode }: MarketNewsWidgetProps) {
       data-testid="market-news-widget"
     >
       <header className="mb-4 shrink-0 space-y-1">
-        <h2 id="market-news-heading" className="text-base font-semibold sm:text-lg">
+        <h2 id="market-news-heading" className="label-mono !text-[var(--foreground)]">
           {t("market.news.title")}
         </h2>
-        <p className="text-xs text-muted-foreground sm:text-sm">{t("market.news.subtitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("market.news.subtitle")}</p>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
@@ -151,7 +151,7 @@ export function MarketNewsWidget({ countryCode }: MarketNewsWidgetProps) {
             className="py-8"
           />
         ) : (
-          <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
+          <ul className="min-h-0 flex-1 divide-y divide-[var(--glass-border)] overflow-y-auto pr-0.5">
             {items.map((item) => (
               <li key={`${item.url}-${item.published_at}`}>
                 <NewsItemCard item={item} locale={i18n.language} />

@@ -85,18 +85,26 @@ function KpiCard({
   value,
   error,
   title,
+  pending = false,
 }: {
   label: string;
   value: string;
   error?: { onRetry: () => void; title: string };
   title?: string;
+  /** Data not accumulated yet — render the honest-empty text small and muted. */
+  pending?: boolean;
 }) {
   return (
     <div className="surface-base rounded-lg p-3">
-      <p className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="label-mono">{label}</p>
       <div className="mt-1 flex items-center gap-1.5">
         <p
-          className="text-2xl font-bold tabular-nums"
+          className={cn(
+            "tabular-nums",
+            pending
+              ? "text-sm text-muted-foreground"
+              : "text-2xl font-semibold"
+          )}
           style={{ fontFamily: "var(--font-display)" }}
           title={title}
         >
@@ -128,7 +136,7 @@ function FilterSection({
 }) {
   return (
     <Collapsible defaultOpen={defaultOpen} className="border-b border-border pb-3">
-      <CollapsibleTrigger className="group flex w-full items-center justify-between py-2 text-xs font-semibold uppercase tracking-wide text-foreground">
+      <CollapsibleTrigger className="label-mono group flex w-full items-center justify-between py-2 !text-[var(--foreground)]">
         {title}
         <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
@@ -731,6 +739,7 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.changedMore5")}
           value={changedMore5Value}
+          pending={!movementsDataReady && !movementsKpisPending && !movementsKpisErrored}
           title={!movementsDataReady && !movementsKpisPending ? accumulatingHint : undefined}
           error={
             movementsKpisErrored
@@ -748,6 +757,7 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.avgVolatility")}
           value={avgVolatilityValue}
+          pending={!movementsDataReady && !movementsKpisPending && !movementsKpisErrored}
           title={!movementsDataReady && !movementsKpisPending ? accumulatingHint : undefined}
           error={
             movementsKpisErrored
@@ -820,7 +830,7 @@ export function MarketsOverviewSection() {
           <div className="surface-base surface-liquid flex min-h-0 flex-col rounded-xl p-3.5 lg:h-full lg:overflow-hidden">
             <div className="shrink-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">
+                <h3 className="label-mono !text-[var(--foreground)]">
                   {t("market.found", { count: filteredItems.length })}
                 </h3>
                 <div className="flex items-center gap-2">

@@ -135,8 +135,8 @@ export function MarketCoverageWidget({
   return (
     <div className="surface-base flex h-full flex-col rounded-xl p-3.5">
       <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("market.overview.coverage.title")}</h3>
-        <p className="mt-0.5 text-2xs text-muted-foreground">{subtitle}</p>
+        <h3 className="label-mono !text-[var(--foreground)]">{t("market.overview.coverage.title")}</h3>
+        <p className="mt-1 text-2xs text-muted-foreground">{subtitle}</p>
       </div>
 
       {isLoading ? (
