@@ -1,12 +1,11 @@
 /**
- * Main dashboard layout: sidebar + main area with ambient glow.
- * Glassmorphism design. Light theme: reduced blob opacity.
+ * Main dashboard layout: sidebar + header chrome around the routed content.
+ * Graphite design language: flat surfaces, hairline borders.
  */
 
 import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { useTheme } from "next-themes";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { MobileSidebar } from "./MobileSidebar";
@@ -19,10 +18,6 @@ export function DashboardLayout() {
   const { isCollapsed, toggle } = useSidebar();
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const location = useLocation();
-  const { resolvedTheme } = useTheme();
-  const isLight = resolvedTheme === "light";
-  const blobOpacity1 = isLight ? "0.14" : "0.10";
-  const blobOpacity2 = isLight ? "0.10" : "0.07";
 
   return (
     <div
@@ -36,18 +31,6 @@ export function DashboardLayout() {
       </aside>
       <Header onMenuClick={() => setMobileSheetOpen(true)} />
       <main className="relative z-10 col-span-1 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden md:row-auto">
-        {/* Ambient background — decorative only */}
-        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-          <div
-            className="glow-dot glow-dot-accent"
-            style={{ top: "-10%", right: "10%", opacity: blobOpacity1 }}
-          />
-          <div
-            className="glow-dot glow-dot-accent2"
-            style={{ bottom: "20%", left: "5%", opacity: blobOpacity2 }}
-          />
-        </div>
-
         <Scrollable
           axis="y"
           outerClassName="min-h-0 min-w-0 flex-1"

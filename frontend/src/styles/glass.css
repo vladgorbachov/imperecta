@@ -1,35 +1,34 @@
-/* === Surface elevation system (U4) === */
+/* === Surface elevation system (U4) — hairline "quiet precision" language ===
+ * Blur is reserved for true overlays (dialogs, popovers); resting surfaces
+ * are flat with hairline borders — cheaper to paint and calmer to read.
+ */
 
 /* Level 0 — sunken: tracks, skeletons, inset chips */
 .surface-sunken {
   background: var(--surface-sunken-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 /* Level 1 — base: default card surface */
 .surface-base {
   position: relative;
   background: var(--glass-bg);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  transition: box-shadow var(--motion-slow) var(--ease-out), border-color var(--motion-slow) var(--ease-out), transform var(--motion-base) var(--ease-out);
+  transition: box-shadow var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 /* Level 2 — raised: hover/active cards, prominent panels */
 .surface-raised {
   position: relative;
   background: var(--glass-bg-hover);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid var(--glass-border-hover);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-hover);
-  transition: box-shadow var(--motion-slow) var(--ease-out), border-color var(--motion-slow) var(--ease-out), transform var(--motion-base) var(--ease-out);
+  transition: box-shadow var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 /* base → raised affordance on hover (opt-in via .surface-base.is-interactive) */
 .surface-base.is-interactive:hover {
@@ -38,11 +37,11 @@
   transform: translateY(-1px);
 }
 
-/* Level 3 — overlay: dialogs, popovers, dropdowns, toasts */
+/* Level 3 — overlay: dialogs, popovers, dropdowns, toasts (blur allowed here) */
 .surface-overlay {
   background: var(--background-elevated);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-hover);
@@ -51,99 +50,51 @@
 /* Level 4 — chrome: structural frame (header, sidebar) */
 .surface-chrome {
   background: var(--background-mid);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-color: var(--glass-border);
 }
 
-/* Modifier — liquid: premium radial wash + specular sweep (compose with surface-base/raised) */
+/* Modifier — liquid: kept for compatibility; now a faint top-light wash only */
 .surface-liquid {
   overflow: hidden;
   background:
-    radial-gradient(120% 140% at 0% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 45%),
-    radial-gradient(120% 120% at 100% 100%, rgba(125, 211, 252, 0.08) 0%, transparent 40%),
+    radial-gradient(120% 100% at 50% 0%, rgba(255, 255, 255, 0.03) 0%, transparent 55%),
     var(--glass-bg);
-  border: 1px solid color-mix(in srgb, var(--glass-border) 80%, white 20%);
-}
-.surface-liquid::after {
-  content: "";
-  position: absolute;
-  inset: -35% -20% auto;
-  height: 60%;
-  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.2) 50%, transparent 80%);
-  opacity: 0.35;
-  pointer-events: none;
+  border: 1px solid var(--glass-border);
 }
 
-/* Default Button — glass fill + brand-gradient border (GB1) */
+/* Default Button — flat accent-tinted fill + hairline border (legacy name kept) */
 .btn-glass {
   position: relative;
   background: var(--btn-glass-bg);
   color: var(--btn-glass-text);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  border: 1px solid var(--accent-border);
   box-shadow: var(--btn-glass-glow);
-  isolation: isolate;
   transition:
     box-shadow var(--motion-base) var(--ease-out),
-    transform var(--motion-base) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
     background-color var(--motion-fast) var(--ease-out);
-}
-.btn-glass::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: var(--btn-glass-border-grad);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  pointer-events: none;
-}
-.btn-glass::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
-  opacity: 0.25;
-  pointer-events: none;
 }
 .btn-glass:hover {
   background: var(--btn-glass-bg-hover);
+  border-color: var(--glass-border-hover);
   box-shadow: var(--btn-glass-glow-hover);
-  transform: translateY(-1px);
 }
 .btn-glass:active {
-  transform: translateY(0);
   box-shadow: var(--btn-glass-glow);
 }
 .btn-glass:disabled,
 .btn-glass[aria-disabled="true"] {
   opacity: 0.5;
   box-shadow: none;
-  transform: none;
   cursor: not-allowed;
 }
-.btn-glass:disabled::after,
-.btn-glass[aria-disabled="true"]::after {
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .btn-glass:hover,
-  .btn-glass:active {
-    transform: none;
-  }
-}
 
-/* Glow dot — ambient light source */
+/* Glow dot — legacy ambient light source (no longer used by layout; kept inert) */
 .glow-dot {
   position: absolute;
   border-radius: 50%;
   filter: blur(60px);
-  opacity: 0.4;
+  opacity: 0.15;
   pointer-events: none;
 }
 .glow-dot-accent {
@@ -171,32 +122,31 @@
   background: linear-gradient(
     90deg,
     var(--glass-bg) 25%,
-    rgba(255, 255, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0.05) 50%,
     var(--glass-bg) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
 
-/* Glow pulse on active elements */
+/* Glow pulse on active elements — restrained to a hairline ring */
 @keyframes glow-pulse {
   0%,
   100% {
-    box-shadow: 0 0 12px var(--accent-glow);
+    box-shadow: 0 0 0 1px var(--accent-border);
   }
   50% {
-    box-shadow: 0 0 24px var(--accent-glow-strong), 0 0 48px var(--accent-glow);
+    box-shadow: 0 0 0 2px var(--accent-glow-strong);
   }
 }
 .glow-pulse {
   animation: glow-pulse 2.5s ease-in-out infinite;
 }
 
-/* Accent line — glowing underline */
+/* Accent line — thin underline, no glow */
 .accent-line {
-  height: 2px;
+  height: 1px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 /* Scoped invisible scrollbar for dashboard catalog list (scroll still works). */

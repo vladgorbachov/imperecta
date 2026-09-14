@@ -1,109 +1,120 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
+/*
+ * Imperecta design tokens — "Graphite" (dark) / "Porcelain" (light).
+ * Quiet-precision language: cool graphite surfaces, hairline borders,
+ * a single desaturated ice-blue accent, mono microtype for labels.
+ * Legacy variable names are preserved so existing consumers keep working.
+ */
+
 :root {
   color-scheme: dark;
-  font-size: 112.5%; /* base rem scale = 18px at 16px browser default; respects user a11y font-size */
+  font-size: 100%; /* 16px base — data-dense pro-tool density; respects user a11y font-size */
 
-  /* === Backgrounds (Ink) === */
-  --background: #050b1c;
-  --background-mid: #070f22;
-  --background-surface: #0b1530;
-  --background-elevated: #101b38;
+  /* === Backgrounds (Graphite) === */
+  --background: #0b0e13;
+  --background-mid: #0e1218;
+  --background-surface: #10151c;
+  --background-elevated: #151b23;
 
-  /* === Glass effect layers === */
-  --glass-bg: rgba(255, 255, 255, 0.04);
-  --glass-bg-hover: rgba(255, 255, 255, 0.07);
+  /* === Surface layers (hairline system; "glass" names kept for compatibility) === */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-bg-hover: rgba(255, 255, 255, 0.055);
   --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-hover: rgba(255, 255, 255, 0.15);
-  --surface-sunken-bg: rgba(255, 255, 255, 0.02); /* below base — tracks/skeletons/chips */
+  --glass-border-hover: rgba(255, 255, 255, 0.16);
+  --surface-sunken-bg: rgba(255, 255, 255, 0.015); /* below base — tracks/skeletons/chips */
 
-  /* === Brand / Accent === */
-  --accent: #38bdf8;
-  --accent-bright: #7dd3fc;
-  --accent-dim: #0ea5e9;
-  --accent-glow: rgba(56, 189, 248, 0.25);
-  --accent-glow-strong: rgba(56, 189, 248, 0.45);
+  /* === Brand / Accent — ice blue, used sparingly === */
+  --accent: #7fc3e8;
+  --accent-bright: #a8d8f2;
+  --accent-dim: #4e9dc7;
+  --accent-glow: rgba(127, 195, 232, 0.14);
+  --accent-glow-strong: rgba(127, 195, 232, 0.25);
 
-  /* === Secondary accent === */
-  --accent2: #818cf8;
-  --accent2-glow: rgba(129, 140, 248, 0.25);
-  --accent2-bg: rgba(129, 140, 248, 0.15);
-  --accent2-border: rgba(129, 140, 248, 0.3);
+  /* === Secondary accent — steel lavender (charts, gradients) === */
+  --accent2: #98a2d4;
+  --accent2-glow: rgba(152, 162, 212, 0.14);
+  --accent2-bg: rgba(152, 162, 212, 0.12);
+  --accent2-border: rgba(152, 162, 212, 0.25);
 
   /* === Text === */
-  --foreground: #f0f6ff;
-  --foreground-muted: #8899aa;
-  --foreground-subtle: #4a5568;
+  --foreground: #edf1f5;
+  --foreground-muted: #97a3ae;
+  --foreground-subtle: #5b6672;
 
-  /* === Semantic colors === */
-  --color-price-down: #34d399;
-  --color-price-up: #f87171;
-  --color-promo: #fbbf24;
-  --color-stable: #94a3b8;
-  --color-out-of-stock: #64748b;
+  /* === Semantic colors — desaturated so data reads, not shouts === */
+  --color-price-down: #6fc7a0;
+  --color-price-up: #e28d8d;
+  --color-promo: #d6bd7f;
+  --color-stable: #8b98a5;
+  --color-out-of-stock: #5f6b77;
 
-  /* Glow versions */
-  --glow-green: rgba(52, 211, 153, 0.3);
-  --glow-red: rgba(248, 113, 113, 0.3);
-  --glow-amber: rgba(251, 191, 36, 0.3);
+  /* Glow versions (kept subtle) */
+  --glow-green: rgba(111, 199, 160, 0.18);
+  --glow-red: rgba(226, 141, 141, 0.18);
+  --glow-amber: rgba(214, 189, 127, 0.18);
 
   /* Semantic badge/background variants */
-  --color-price-down-bg: rgba(52, 211, 153, 0.15);
-  --color-price-down-border: rgba(52, 211, 153, 0.3);
-  --color-price-up-bg: rgba(248, 113, 113, 0.15);
-  --color-price-up-border: rgba(248, 113, 113, 0.3);
-  --color-promo-bg: rgba(251, 191, 36, 0.15);
-  --color-promo-border: rgba(251, 191, 36, 0.3);
-  --color-muted-bg: rgba(148, 163, 184, 0.1);
-  --accent-bg: rgba(56, 189, 248, 0.15);
-  --accent-border: rgba(56, 189, 248, 0.3);
-  --accent-bg-subtle: rgba(56, 189, 248, 0.12);
-  --row-tint-green: rgba(52, 211, 153, 0.08);
-  --row-tint-red: rgba(248, 113, 113, 0.08);
-  --gradient-accent-subtle: radial-gradient(ellipse at top right, rgba(56,189,248,0.04) 0%, transparent 60%);
-  --background-elevated-subtle: rgba(255, 255, 255, 0.03);
+  --color-price-down-bg: rgba(111, 199, 160, 0.12);
+  --color-price-down-border: rgba(111, 199, 160, 0.28);
+  --color-price-up-bg: rgba(226, 141, 141, 0.12);
+  --color-price-up-border: rgba(226, 141, 141, 0.28);
+  --color-promo-bg: rgba(214, 189, 127, 0.12);
+  --color-promo-border: rgba(214, 189, 127, 0.28);
+  --color-muted-bg: rgba(139, 152, 165, 0.1);
+  --accent-bg: rgba(127, 195, 232, 0.12);
+  --accent-border: rgba(127, 195, 232, 0.28);
+  --accent-bg-subtle: rgba(127, 195, 232, 0.09);
+  --row-tint-green: rgba(111, 199, 160, 0.06);
+  --row-tint-red: rgba(226, 141, 141, 0.06);
+  --gradient-accent-subtle: radial-gradient(ellipse at top right, rgba(127,195,232,0.03) 0%, transparent 60%);
+  --background-elevated-subtle: rgba(255, 255, 255, 0.025);
 
   /* Comparison matrix cell backgrounds */
-  --cell-green-80: rgba(52, 211, 153, 0.8);
-  --cell-green-60: rgba(52, 211, 153, 0.6);
-  --cell-green-40: rgba(52, 211, 153, 0.4);
-  --cell-amber-60: rgba(251, 191, 36, 0.6);
-  --cell-amber-40: rgba(251, 191, 36, 0.4);
-  --cell-red-80: rgba(248, 113, 113, 0.8);
+  --cell-green-80: rgba(111, 199, 160, 0.75);
+  --cell-green-60: rgba(111, 199, 160, 0.55);
+  --cell-green-40: rgba(111, 199, 160, 0.38);
+  --cell-amber-60: rgba(214, 189, 127, 0.55);
+  --cell-amber-40: rgba(214, 189, 127, 0.38);
+  --cell-red-80: rgba(226, 141, 141, 0.75);
 
   /* === Borders === */
   --border: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(56, 189, 248, 0.6);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-focus: rgba(127, 195, 232, 0.55);
 
   /* === Auto-hiding overlay scrollbar (Scrollable / useAutoHideScrollbar) === */
-  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
-  --scrollbar-thumb-hover: rgba(56, 189, 248, 0.5);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(127, 195, 232, 0.45);
 
   /* === Chart line colors === */
-  --chart-1: #38bdf8;
-  --chart-2: #818cf8;
-  --chart-3: #34d399;
-  --chart-4: #fb923c;
-  --chart-5: #e879f9;
-  --chart-6: #fbbf24;
-  --chart-7: #94a3b8;
+  --chart-1: #7fc3e8;
+  --chart-2: #98a2d4;
+  --chart-3: #6fc7a0;
+  --chart-4: #d9a06e;
+  --chart-5: #c793d6;
+  --chart-6: #d6bd7f;
+  --chart-7: #8b98a5;
 
-  /* === Shadows & glows === */
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
-  --shadow-hover: 0 8px 40px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
-  --shadow-glow-sm: 0 0 12px var(--accent-glow);
+  /* === Shadows — quiet elevation, no neon === */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-glow-sm: 0 0 0 1px var(--accent-border);
 
-  /* === Border radius === */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* === Border radius — tighter, professional === */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  /* === Typography === */
-  --font-display: "Space Grotesk", sans-serif;
-  --font-body: "Inter", sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  /* === Typography — one grotesk family, mono for labels/data === */
+  --font-display: "Onest", "Inter", sans-serif;
+  --font-body: "Onest", "Inter", sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", monospace;
+
+  /* Mono microtype label (uppercase eyebrow/KPI labels) */
+  --label-tracking: 0.1em;
 
   /* === Compatibility for Tailwind / existing components === */
   --card: var(--background-surface);
@@ -116,16 +127,16 @@
   --sidebar-foreground: var(--foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--foreground);
-  --primary: 199 89% 48%;
-  --primary-foreground: #061423;
+  --primary: 202 69% 70%;
+  --primary-foreground: #0b0e13;
   --secondary: var(--background-mid);
   --secondary-foreground: var(--foreground);
-  --destructive: 0 72% 51%;
+  --destructive: 0 55% 65%;
   --destructive-foreground: #f8fafc;
   --input: var(--glass-border);
-  --ring: 199 89% 48%;
+  --ring: 202 69% 61%;
   /* Marketplace colors: generated from hash in MarketplaceBadge */
-  --color-marketplace-custom: #64748b;
+  --color-marketplace-custom: #8b98a5;
 
   /* Type scale */
   --text-2xs: 0.6875rem;            /* 11px — smallest legitimate label size */
@@ -148,112 +159,114 @@
   --text-4xl--line-height: 2.5rem;
 
   /* === Motion === */
-  --motion-fast: 150ms; /* color/background/opacity hovers, small feedback */
-  --motion-base: 200ms; /* transforms, surface hover-lift, controls */
-  --motion-slow: 300ms; /* entrances, overlays, larger transitions */
+  --motion-fast: 120ms; /* color/background/opacity hovers, small feedback */
+  --motion-base: 180ms; /* transforms, surface hover-lift, controls */
+  --motion-slow: 260ms; /* entrances, overlays, larger transitions */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* gentle deceleration */
   --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
 
-  /* Glass button (default variant) */
-  --btn-glass-bg: color-mix(in srgb, var(--accent) 10%, transparent);
-  --btn-glass-bg-hover: color-mix(in srgb, var(--accent) 16%, transparent);
-  --btn-glass-border-grad: linear-gradient(135deg, #38bdf8, #3b82f6 50%, #6366f1);
-  --btn-glass-glow: 0 0 18px rgba(56, 189, 248, 0.28), 0 2px 10px rgba(0, 0, 0, 0.35);
-  --btn-glass-glow-hover: 0 0 26px rgba(99, 102, 241, 0.4), 0 4px 16px rgba(0, 0, 0, 0.45);
-  --btn-glass-text: #f0f6ff;
+  /* Primary button (legacy "glass" names kept; flat accent fill + hairline) */
+  --btn-glass-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --btn-glass-bg-hover: color-mix(in srgb, var(--accent) 18%, transparent);
+  --btn-glass-border-grad: linear-gradient(135deg, var(--accent-border), var(--accent-border));
+  --btn-glass-glow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --btn-glass-glow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --btn-glass-text: #edf1f5;
 }
 
 .light {
   color-scheme: light;
 
-  --background: #e3edff;
-  --background-mid: #f0f5ff;
-  --background-surface: #f4f8ff;
-  --background-elevated: #fbfdff;
+  /* === Backgrounds (Porcelain — neutral, not blue) === */
+  --background: #f2f4f6;
+  --background-mid: #f6f8fa;
+  --background-surface: #fbfcfd;
+  --background-elevated: #ffffff;
 
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-bg-hover: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(148, 163, 184, 0.25);
-  --glass-border-hover: rgba(56, 189, 248, 0.4);
-  --surface-sunken-bg: rgba(15, 23, 42, 0.03); /* subtle inset on Sky */
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --glass-bg-hover: #ffffff;
+  --glass-border: rgba(20, 26, 34, 0.1);
+  --glass-border-hover: rgba(20, 26, 34, 0.2);
+  --surface-sunken-bg: rgba(20, 26, 34, 0.03);
 
-  --accent: #0284c7;
-  --accent-bright: #0ea5e9;
-  --accent-dim: #0369a1;
-  --accent-glow: rgba(2, 132, 199, 0.15);
-  --accent-glow-strong: rgba(2, 132, 199, 0.3);
+  --accent: #1878ad;
+  --accent-bright: #2196d6;
+  --accent-dim: #135f8a;
+  --accent-glow: rgba(24, 120, 173, 0.12);
+  --accent-glow-strong: rgba(24, 120, 173, 0.22);
 
-  --accent2: #6366f1;
-  --accent2-glow: rgba(99, 102, 241, 0.15);
-  --accent2-bg: rgba(99, 102, 241, 0.12);
-  --accent2-border: rgba(99, 102, 241, 0.25);
+  --accent2: #5560b8;
+  --accent2-glow: rgba(85, 96, 184, 0.12);
+  --accent2-bg: rgba(85, 96, 184, 0.1);
+  --accent2-border: rgba(85, 96, 184, 0.22);
 
-  --foreground: #0f172a;
-  --foreground-muted: #475569;
-  --foreground-subtle: #94a3b8;
+  --foreground: #161b22;
+  --foreground-muted: #4d5964;
+  --foreground-subtle: #8b96a1;
 
-  --color-price-down: #059669;
-  --color-price-up: #dc2626;
-  --color-promo: #d97706;
+  --color-price-down: #1a8f68;
+  --color-price-up: #c34747;
+  --color-promo: #a07a1e;
 
-  --glow-green: rgba(5, 150, 105, 0.15);
-  --glow-red: rgba(220, 38, 38, 0.15);
-  --glow-amber: rgba(217, 119, 6, 0.15);
+  --glow-green: rgba(26, 143, 104, 0.12);
+  --glow-red: rgba(195, 71, 71, 0.12);
+  --glow-amber: rgba(160, 122, 30, 0.12);
 
-  --color-price-down-bg: rgba(5, 150, 105, 0.12);
-  --color-price-down-border: rgba(5, 150, 105, 0.25);
-  --color-price-up-bg: rgba(220, 38, 38, 0.12);
-  --color-price-up-border: rgba(220, 38, 38, 0.25);
-  --color-promo-bg: rgba(217, 119, 6, 0.12);
-  --color-promo-border: rgba(217, 119, 6, 0.25);
-  --color-muted-bg: rgba(148, 163, 184, 0.08);
-  --accent-bg: rgba(2, 132, 199, 0.12);
-  --accent-border: rgba(2, 132, 199, 0.25);
-  --accent-bg-subtle: rgba(2, 132, 199, 0.08);
-  --row-tint-green: rgba(5, 150, 105, 0.06);
-  --row-tint-red: rgba(220, 38, 38, 0.06);
-  --gradient-accent-subtle: radial-gradient(ellipse at top right, rgba(2,132,199,0.03) 0%, transparent 60%);
-  --background-elevated-subtle: rgba(255, 255, 255, 0.5);
+  --color-price-down-bg: rgba(26, 143, 104, 0.1);
+  --color-price-down-border: rgba(26, 143, 104, 0.24);
+  --color-price-up-bg: rgba(195, 71, 71, 0.1);
+  --color-price-up-border: rgba(195, 71, 71, 0.24);
+  --color-promo-bg: rgba(160, 122, 30, 0.1);
+  --color-promo-border: rgba(160, 122, 30, 0.24);
+  --color-muted-bg: rgba(107, 118, 131, 0.08);
+  --accent-bg: rgba(24, 120, 173, 0.1);
+  --accent-border: rgba(24, 120, 173, 0.24);
+  --accent-bg-subtle: rgba(24, 120, 173, 0.07);
+  --row-tint-green: rgba(26, 143, 104, 0.05);
+  --row-tint-red: rgba(195, 71, 71, 0.05);
+  --gradient-accent-subtle: radial-gradient(ellipse at top right, rgba(24,120,173,0.03) 0%, transparent 60%);
+  --background-elevated-subtle: rgba(255, 255, 255, 0.6);
 
-  --cell-green-80: rgba(5, 150, 105, 0.7);
-  --cell-green-60: rgba(5, 150, 105, 0.5);
-  --cell-green-40: rgba(5, 150, 105, 0.35);
-  --cell-amber-60: rgba(217, 119, 6, 0.5);
-  --cell-amber-40: rgba(217, 119, 6, 0.35);
-  --cell-red-80: rgba(220, 38, 38, 0.7);
+  --cell-green-80: rgba(26, 143, 104, 0.65);
+  --cell-green-60: rgba(26, 143, 104, 0.48);
+  --cell-green-40: rgba(26, 143, 104, 0.32);
+  --cell-amber-60: rgba(160, 122, 30, 0.48);
+  --cell-amber-40: rgba(160, 122, 30, 0.32);
+  --cell-red-80: rgba(195, 71, 71, 0.65);
 
-  --border: rgba(148, 163, 184, 0.2);
-  --border-focus: rgba(2, 132, 199, 0.5);
+  --border: rgba(20, 26, 34, 0.1);
+  --border-strong: rgba(20, 26, 34, 0.18);
+  --border-focus: rgba(24, 120, 173, 0.5);
 
-  --scrollbar-thumb: rgba(15, 23, 42, 0.22);
-  --scrollbar-thumb-hover: rgba(2, 132, 199, 0.5);
+  --scrollbar-thumb: rgba(20, 26, 34, 0.2);
+  --scrollbar-thumb-hover: rgba(24, 120, 173, 0.45);
 
-  --chart-1: #0284c7;
-  --chart-2: #6366f1;
-  --chart-3: #059669;
-  --chart-4: #ea580c;
-  --chart-5: #a21caf;
-  --chart-6: #ca8a04;
-  --chart-7: #64748b;
+  --chart-1: #1878ad;
+  --chart-2: #5560b8;
+  --chart-3: #1a8f68;
+  --chart-4: #c07030;
+  --chart-5: #a355ad;
+  --chart-6: #a08520;
+  --chart-7: #6b7683;
 
-  --shadow-card: 0 2px 16px rgba(15, 23, 42, 0.08), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
-  --shadow-hover: 0 8px 32px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
-  --shadow-glow-sm: 0 0 8px var(--accent-glow);
+  --shadow-card: 0 1px 2px rgba(20, 26, 34, 0.06);
+  --shadow-hover: 0 4px 16px rgba(20, 26, 34, 0.1);
+  --shadow-glow-sm: 0 0 0 1px var(--accent-border);
 
   --card: var(--background-surface);
-  --muted: #f1f5f9;
+  --muted: #eef1f4;
   --color-accent: var(--accent);
-  --primary: 199 89% 36%;
-  --primary-foreground: #0f172a;
-  --secondary: #f1f5f9;
+  --primary: 202 76% 39%;
+  --primary-foreground: #ffffff;
+  --secondary: #eef1f4;
   --input: var(--glass-border);
-  --ring: 199 89% 42%;
+  --ring: 202 76% 39%;
 
-  --btn-glass-bg: color-mix(in srgb, var(--accent) 12%, white);
-  --btn-glass-bg-hover: color-mix(in srgb, var(--accent) 20%, white);
-  --btn-glass-glow: 0 1px 4px rgba(15, 23, 42, 0.12);
-  --btn-glass-glow-hover: 0 2px 10px rgba(59, 130, 246, 0.25);
-  --btn-glass-text: #0f172a;
+  --btn-glass-bg: color-mix(in srgb, var(--accent) 10%, white);
+  --btn-glass-bg-hover: color-mix(in srgb, var(--accent) 16%, white);
+  --btn-glass-glow: 0 1px 2px rgba(20, 26, 34, 0.08);
+  --btn-glass-glow-hover: 0 2px 8px rgba(20, 26, 34, 0.12);
+  --btn-glass-text: #161b22;
 }
 
 @theme inline {
@@ -324,34 +337,22 @@
     @apply bg-background text-foreground;
   }
 
-  /* Ink background — dark only (light keeps its solid --background) */
+  /* Graphite background — dark: near-flat, faint top luminance only */
   html:not(.light) body {
     background:
-      radial-gradient(120% 120% at 50% 0%, transparent 58%, rgba(0, 0, 0, 0.38) 100%),
-      linear-gradient(168deg, #03060f 0%, #050b1c 50%, #02040c 100%);
+      radial-gradient(100% 50% at 50% 0%, rgba(255, 255, 255, 0.02) 0%, transparent 60%),
+      #0b0e13;
     background-repeat: no-repeat;
-    background-color: #050b1c;
+    background-color: #0b0e13;
   }
 
-  /* Sky background — light only (mirrors the dark Ink rule; no grain in light) */
+  /* Porcelain background — light: flat neutral */
   html.light body {
     background:
-      radial-gradient(120% 120% at 50% 0%, transparent 55%, rgba(37, 99, 235, 0.07) 100%),
-      linear-gradient(168deg, #dce9ff 0%, #e8f1ff 50%, #eef4ff 100%);
+      radial-gradient(100% 50% at 50% 0%, rgba(255, 255, 255, 0.6) 0%, transparent 60%),
+      #f2f4f6;
     background-repeat: no-repeat;
-    background-color: #e3edff;
-  }
-
-  /* Film grain overlay — dark only, sits behind app content, blends with the gradient */
-  html:not(.light) body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    opacity: 0.07;
-    mix-blend-mode: soft-light;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-color: #f2f4f6;
   }
 
   /* Scrollbar: hidden visually, scrolling preserved */
@@ -391,9 +392,19 @@
 
   /* Selection */
   ::selection {
-    background: var(--accent-glow);
+    background: var(--accent-glow-strong);
     color: var(--foreground);
   }
+}
+
+/* Mono microtype label — uppercase eyebrows, KPI captions, section headers */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  color: var(--foreground-muted);
 }
 
 /* MOBILE-2026: Safe area for notched devices (iOS, Android) */
@@ -503,7 +514,7 @@
   will-change: transform;
 }
 
-/* Respect the user's reduced-motion preference (a11y; matches Ink "motion off") */
+/* Respect the user's reduced-motion preference (a11y) */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

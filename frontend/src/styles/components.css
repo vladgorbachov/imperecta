@@ -24,10 +24,11 @@ table {
   border-spacing: 0;
 }
 thead th {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-sunken-bg);
   color: var(--foreground-muted);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
 /* Sign-based row tint (opt-in via data-trend on the row) */
@@ -52,14 +53,9 @@ tbody tr[data-trend="down"]:hover {
   padding: 1px 6px !important;
 }
 
-/* Sidebar */
+/* Sidebar — flat chrome surface */
 [data-sidebar] {
-  background: linear-gradient(
-    to bottom,
-    var(--background-mid) 0%,
-    var(--background-mid) 80%,
-    transparent 100%
-  ) !important;
+  background: var(--background-mid) !important;
   border-right: 1px solid var(--glass-border) !important;
 }
 

@@ -1,6 +1,6 @@
 /**
  * Split layout for auth pages: brand panel (desktop) + form area.
- * Left: gradient, glow blobs, SVG grid. Right: surface-base form.
+ * Left: theme-aware chrome surface + SVG grid. Right: surface-base form.
  */
 
 import { useTranslation } from "react-i18next";
@@ -18,24 +18,17 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
 
   return (
     <div className="flex min-h-screen min-h-[100dvh] flex-col lg:flex-row safe-area-top safe-area-bottom">
-      {/* Brand panel — gradient, glow blobs, grid */}
+      {/* Brand panel — theme-aware chrome surface + grid */}
       <div
         className={cn(
-          "relative hidden overflow-hidden lg:flex lg:w-1/2 lg:flex-col lg:justify-between lg:p-12"
+          "relative hidden overflow-hidden border-e lg:flex lg:w-1/2 lg:flex-col lg:justify-between lg:p-12"
         )}
         style={{
-          background: "linear-gradient(135deg, #0a0e1a 0%, #0d1a2e 50%, #0a1628 100%)",
+          background: "var(--background-mid)",
+          borderColor: "var(--glass-border)",
         }}
       >
-        <div
-          className="absolute -top-20 -right-20 h-80 w-80 rounded-full opacity-30 blur-[80px]"
-          style={{ background: "var(--accent)" }}
-        />
-        <div
-          className="absolute -bottom-20 -left-20 h-60 w-60 rounded-full opacity-20 blur-[60px]"
-          style={{ background: "var(--accent2)" }}
-        />
-        <div className="absolute inset-0 opacity-[0.04]">
+        <div className="absolute inset-0 opacity-[0.05]">
           <GridPatternSvg />
         </div>
         <div className="relative z-10">

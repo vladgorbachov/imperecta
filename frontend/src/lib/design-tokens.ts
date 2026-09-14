@@ -3,27 +3,27 @@
  * Hex values used where CSS variables cannot be consumed (e.g. Recharts).
  */
 
-/** Primary/accent color for "my price" line (sky-400, matches --accent) */
-export const CHART_PRIMARY = "#38bdf8";
+/** Primary/accent color for "my price" line (ice blue, matches --accent) */
+export const CHART_PRIMARY = "#7fc3e8";
 
 export const CHART_COLORS = [
-  "#38bdf8",
-  "#818cf8",
-  "#34d399",
-  "#fb923c",
-  "#e879f9",
-  "#fbbf24",
-  "#94a3b8",
+  "#7fc3e8",
+  "#98a2d4",
+  "#6fc7a0",
+  "#d9a06e",
+  "#c793d6",
+  "#d6bd7f",
+  "#8b98a5",
 ] as const;
 
 export const CHART_COLORS_LIGHT = [
-  "#0284c7",
-  "#6366f1",
-  "#059669",
-  "#ea580c",
-  "#a21caf",
-  "#ca8a04",
-  "#64748b",
+  "#1878ad",
+  "#5560b8",
+  "#1a8f68",
+  "#c07030",
+  "#a355ad",
+  "#a08520",
+  "#6b7683",
 ] as const;
 
 /** Marketplace colors: use hash from marketplace string. See MarketplaceBadge. */
