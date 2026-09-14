@@ -34,6 +34,7 @@ from app.modules.data_firewall.firewall import FirewallOutcome, evaluate_ecommer
 from app.modules.data_firewall.update_validator import authorize_scrape_update
 from app.modules.ingestion.dto import IngestionResult
 from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN, CurrencyResolver
+from app.modules.ingestion.taxonomy import ensure_brand, ensure_category_chain
 from app.modules.persist.scrape_gate_fields import (
     build_dim_date_fields,
     build_listing_update_fields,
@@ -453,6 +454,26 @@ class IngestionService:
         image_url = getattr(data, "image_url", None)
         if image_url and not product.image_url:
             delta["image_url"] = image_url
+
+        brand_name = getattr(data, "brand", None)
+        if (
+            isinstance(brand_name, str)
+            and brand_name.strip()
+            and getattr(product, "brand_id", None) is None
+        ):
+            brand_id = ensure_brand(self.db, brand_name)
+            if brand_id is not None:
+                delta["brand_id"] = str(brand_id)
+
+        category_path = getattr(data, "category_path", None)
+        if (
+            isinstance(category_path, list)
+            and category_path
+            and getattr(product, "category_id", None) is None
+        ):
+            category_id = ensure_category_chain(self.db, category_path)
+            if category_id is not None:
+                delta["category_id"] = str(category_id)
 
         if not delta:
             return

@@ -49,7 +49,7 @@ def test_no_orm_cache_sync_helpers_remain() -> None:
 
 def test_denorm_columns_in_gated_allowlists() -> None:
     assert SCRAPE_UPDATE_ALLOWLIST["dim_product"]["product_enrich"] == frozenset(
-        {"name", "name_normalized", "image_url"},
+        {"name", "name_normalized", "image_url", "brand_id", "category_id"},
     )
     assert SCRAPE_UPDATE_ALLOWLIST["fact_listing"]["listing_denorm_success"] == frozenset(
         {"last_price", "last_currency_code", "last_price_changed_at", "last_price_eur"},
@@ -91,7 +91,17 @@ def test_build_fields_cover_all_denorm_columns() -> None:
 def test_ingestion_persist_extracted_leaves_listing_denorm_unmutated_in_memory() -> None:
     """Gate Core UPDATE persists denorm; no post-gate setattr ORM echo."""
     db = MagicMock()
-    product = type("Product", (), {"name": "old", "name_normalized": "old", "image_url": None})()
+    product = type(
+        "Product",
+        (),
+        {
+            "name": "old",
+            "name_normalized": "old",
+            "image_url": None,
+            "brand_id": None,
+            "category_id": None,
+        },
+    )()
     db.get.return_value = product
 
     class _Listing:
@@ -115,6 +125,8 @@ def test_ingestion_persist_extracted_leaves_listing_denorm_unmutated_in_memory()
     data.original_price = None
     data.image_url = None
     data.page_role = "product"
+    data.brand = None
+    data.category_path = None
 
     signed_price = SignedRecord(
         table="fact_price",

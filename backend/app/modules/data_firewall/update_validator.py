@@ -38,7 +38,9 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
         ),
     },
     "dim_product": {
-        "product_enrich": frozenset({"name", "name_normalized", "image_url"}),
+        "product_enrich": frozenset(
+            {"name", "name_normalized", "image_url", "brand_id", "category_id"},
+        ),
     },
 }
 

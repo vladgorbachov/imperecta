@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
 from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
 from app.models.core import User
-from app.models.dimensions import DimProduct, DimMarketplace, DimDate
+from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
 from app.models.reject_data import RejectData
 from app.models.facts import (
     FactCommodityPrice,
@@ -121,6 +121,8 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "dim_date": build_table_contract(DimDate),
     "dim_product": build_table_contract(DimProduct),
     "dim_marketplace": build_table_contract(DimMarketplace),
+    "dim_brand": build_table_contract(DimBrand),
+    "dim_category": build_table_contract(DimCategory),
     "fact_listing": build_table_contract(FactListing),
     "fact_price": build_table_contract(FactPrice),
     "fact_review": build_table_contract(FactReview),
@@ -148,6 +150,8 @@ TABLE_LOCATORS: dict[str, tuple[str, ...]] = {
     "fact_listing": ("url_hash",),
     "dim_product": ("id",),
     "dim_marketplace": ("id",),
+    "dim_brand": ("id",),
+    "dim_category": ("id",),
     "scrape_jobs": ("id",),
     "fact_currency_rate": ("date_id", "currency_code", "source"),
     "fact_crypto_price": ("date_id", "symbol", "source"),

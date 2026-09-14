@@ -156,6 +156,8 @@ class ExtractedProduct:
     currency_raw: str | None = None
     page_role: str | None = None
     product_name: str | None = None
+    brand: str | None = None
+    category_path: list[str] | None = None
 
     @property
     def completeness(self) -> float:
@@ -229,72 +231,196 @@ def _find_product_nodes(item: dict) -> list[dict]:
     return nodes
 
 
+_MAX_TAXONOMY_SEGMENT_LEN = 200
+_MAX_CATEGORY_DEPTH = 6
+
+
+def _brand_name_from_node(raw: object) -> str | None:
+    """Normalize a schema.org brand value (string | Brand object | list) to a name."""
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if isinstance(raw, dict):
+        raw = raw.get("name")
+    if isinstance(raw, str):
+        name = raw.strip()
+        if name:
+            return name[:_MAX_TAXONOMY_SEGMENT_LEN]
+    return None
+
+
+def _category_path_from_string(raw: object) -> list[str] | None:
+    """Split a schema.org Product.category string into an ordered path."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = raw.strip()
+    for sep in (">", "/", "»"):
+        if sep in text:
+            parts = [p.strip()[:_MAX_TAXONOMY_SEGMENT_LEN] for p in text.split(sep)]
+            path = [p for p in parts if p]
+            return path[:_MAX_CATEGORY_DEPTH] or None
+    return [text[:_MAX_TAXONOMY_SEGMENT_LEN]]
+
+
+def _breadcrumb_nodes(item: dict) -> list[dict]:
+    """Return BreadcrumbList nodes from a JSON-LD document (top-level or @graph)."""
+    nodes: list[dict] = []
+
+    def _is_breadcrumb(node: dict) -> bool:
+        ntype = node.get("@type")
+        if isinstance(ntype, list):
+            return any(str(t).lower() == "breadcrumblist" for t in ntype)
+        return str(ntype).lower() == "breadcrumblist"
+
+    if _is_breadcrumb(item):
+        nodes.append(item)
+    graph = item.get("@graph")
+    if isinstance(graph, list):
+        nodes.extend(n for n in graph if isinstance(n, dict) and _is_breadcrumb(n))
+    return nodes
+
+
+def _crumb_name_and_url(elem: dict) -> tuple[str | None, str | None]:
+    """Extract (name, item URL) from one ListItem, tolerating both encodings."""
+    name = elem.get("name")
+    url = None
+    item = elem.get("item")
+    if isinstance(item, dict):
+        name = name or item.get("name")
+        url = item.get("@id") or item.get("url")
+    elif isinstance(item, str):
+        url = item
+    if not isinstance(name, str) or not name.strip():
+        return None, url if isinstance(url, str) else None
+    return name.strip()[:_MAX_TAXONOMY_SEGMENT_LEN], url if isinstance(url, str) else None
+
+
+def _category_path_from_breadcrumbs(
+    breadcrumb: dict,
+    page_url: str,
+    product_title: str | None,
+) -> list[str] | None:
+    """Ordered category path from a BreadcrumbList.
+
+    Structural pruning only: a crumb whose item URL is the site root is
+    navigation chrome (Home) and a trailing crumb naming the product itself
+    (matches the product title, or links to the current page) is not a
+    category. No language- or shop-specific word lists.
+    """
+    elements = breadcrumb.get("itemListElement")
+    if not isinstance(elements, list) or not elements:
+        return None
+
+    def _position(elem: dict) -> int:
+        try:
+            return int(elem.get("position"))
+        except (TypeError, ValueError):
+            return 0
+
+    ordered = sorted((e for e in elements if isinstance(e, dict)), key=_position)
+    page_norm = page_url.rstrip("/") if page_url else None
+    title_norm = product_title.strip().lower() if product_title else None
+
+    path: list[str] = []
+    for index, elem in enumerate(ordered):
+        name, url = _crumb_name_and_url(elem)
+        if not name:
+            continue
+        if url:
+            parsed = urlparse(url)
+            if parsed.path in ("", "/") and not parsed.query:
+                continue
+            if page_norm and url.rstrip("/") == page_norm:
+                continue
+        is_last = index == len(ordered) - 1
+        if is_last and title_norm and name.strip().lower() == title_norm:
+            continue
+        path.append(name)
+    return path[:_MAX_CATEGORY_DEPTH] or None
+
+
 def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedProduct:
     """Level 1: JSON-LD."""
     scripts = soup.find_all("script", type="application/ld+json")
+    parsed_docs: list[dict] = []
     for script in scripts:
         try:
             parsed = json.loads(script.string or "{}")
         except (json.JSONDecodeError, TypeError):
             continue
-
         items = parsed if isinstance(parsed, list) else [parsed]
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            for product in _find_product_nodes(item):
-                offers = product.get("offers", {})
-                if isinstance(offers, list):
-                    offers = offers[0] if offers else {}
-                if isinstance(offers, str):
-                    offers = {}
-                if not isinstance(offers, dict):
-                    offers = {}
+        parsed_docs.extend(item for item in items if isinstance(item, dict))
 
-                price = None
-                original_price = None
-                raw_price: str | None = None
-                if "price" in offers:
-                    raw_price = str(offers.get("price"))[:500]
-                    price = parse_price_text(raw_price)
-                elif "lowPrice" in offers:
-                    raw_price = str(offers.get("lowPrice"))[:500]
-                    price = parse_price_text(raw_price)
-                    if "highPrice" in offers:
-                        original_price = parse_price_text(str(offers.get("highPrice")))
-                elif "highPrice" in offers:
-                    raw_price = str(offers.get("highPrice"))[:500]
-                    price = parse_price_text(raw_price)
+    for item in parsed_docs:
+        for product in _find_product_nodes(item):
+            offers = product.get("offers", {})
+            if isinstance(offers, list):
+                offers = offers[0] if offers else {}
+            if isinstance(offers, str):
+                offers = {}
+            if not isinstance(offers, dict):
+                offers = {}
 
-                image = product.get("image")
-                if isinstance(image, list):
-                    image = image[0] if image else None
-                elif isinstance(image, dict):
-                    image = image.get("url")
+            price = None
+            original_price = None
+            raw_price: str | None = None
+            if "price" in offers:
+                raw_price = str(offers.get("price"))[:500]
+                price = parse_price_text(raw_price)
+            elif "lowPrice" in offers:
+                raw_price = str(offers.get("lowPrice"))[:500]
+                price = parse_price_text(raw_price)
+                if "highPrice" in offers:
+                    original_price = parse_price_text(str(offers.get("highPrice")))
+            elif "highPrice" in offers:
+                raw_price = str(offers.get("highPrice"))[:500]
+                price = parse_price_text(raw_price)
 
-                description = product.get("description")
-                if isinstance(description, str) and len(description) > 2000:
-                    description = description[:2000]
+            image = product.get("image")
+            if isinstance(image, list):
+                image = image[0] if image else None
+            elif isinstance(image, dict):
+                image = image.get("url")
 
-                currency_src = offers.get("priceCurrency") if isinstance(offers, dict) else None
-                currency = None
-                currency_raw_val: str | None = None
-                if isinstance(currency_src, str) and currency_src.strip():
-                    currency_raw_val = currency_src.strip()[:20]
-                    currency = currency_src.strip().upper()[:3]
+            description = product.get("description")
+            if isinstance(description, str) and len(description) > 2000:
+                description = description[:2000]
 
-                ep = ExtractedProduct(
-                    title=product.get("name"),
-                    price=price,
-                    original_price=original_price,
-                    currency=currency,
-                    image_url=image if isinstance(image, str) else None,
-                    description=description if isinstance(description, str) else None,
-                    price_raw_text=raw_price,
-                    currency_raw=currency_raw_val,
-                )
-                _ensure_title(ep, soup, page_url)
-                return ep
+            currency_src = offers.get("priceCurrency") if isinstance(offers, dict) else None
+            currency = None
+            currency_raw_val: str | None = None
+            if isinstance(currency_src, str) and currency_src.strip():
+                currency_raw_val = currency_src.strip()[:20]
+                currency = currency_src.strip().upper()[:3]
+
+            title = product.get("name")
+            category_path = _category_path_from_string(product.get("category"))
+            if category_path is None:
+                for doc in parsed_docs:
+                    for breadcrumb in _breadcrumb_nodes(doc):
+                        category_path = _category_path_from_breadcrumbs(
+                            breadcrumb,
+                            page_url,
+                            title if isinstance(title, str) else None,
+                        )
+                        if category_path:
+                            break
+                    if category_path:
+                        break
+
+            ep = ExtractedProduct(
+                title=title,
+                price=price,
+                original_price=original_price,
+                currency=currency,
+                image_url=image if isinstance(image, str) else None,
+                description=description if isinstance(description, str) else None,
+                price_raw_text=raw_price,
+                currency_raw=currency_raw_val,
+                brand=_brand_name_from_node(product.get("brand")),
+                category_path=category_path,
+            )
+            _ensure_title(ep, soup, page_url)
+            return ep
     ep = ExtractedProduct()
     _ensure_title(ep, soup, page_url)
     return ep
@@ -465,6 +591,17 @@ def extract_from_microdata(
                 currency = detected
                 currency_raw_val = raw_price[:20]
 
+        brand = None
+        brand_tag = _find_itemprop(product, "brand")
+        if brand_tag is not None:
+            if "itemscope" in getattr(brand_tag, "attrs", {}):
+                brand_name_tag = _find_itemprop(brand_tag, "name")
+                brand = _itemprop_value(brand_name_tag) if brand_name_tag else None
+            else:
+                brand = _itemprop_value(brand_tag)
+            if brand:
+                brand = brand[:_MAX_TAXONOMY_SEGMENT_LEN]
+
         if any([title, price, image_url, currency]):
             ep = ExtractedProduct(
                 title=title,
@@ -475,6 +612,7 @@ def extract_from_microdata(
                 description=description if isinstance(description, str) else None,
                 price_raw_text=raw_price,
                 currency_raw=currency_raw_val,
+                brand=brand,
             )
             _ensure_title(ep, soup, page_url)
             return ep
@@ -741,6 +879,8 @@ def merge_results(*results: ExtractedProduct) -> ExtractedProduct:
         "description",
         "price_raw_text",
         "currency_raw",
+        "brand",
+        "category_path",
     ]:
         for result in results:
             value = getattr(result, field_name, None)
