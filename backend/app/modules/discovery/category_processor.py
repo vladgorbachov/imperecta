@@ -144,6 +144,8 @@ async def run_product_harvest(
 
         categories_processed += 1
         saved_for_this_category = 0
+        candidates_for_this_category = 0
+        accepted_for_this_category = 0
         current_url: str | None = category_url
         page_num = 0
         while current_url and page_num < MAX_PAGES_PER_CATEGORY:
@@ -179,12 +181,14 @@ async def run_product_harvest(
                 product_urls = extract_product_links(soup, marketplace.base_url)
             if product_urls:
                 candidate_urls_extracted += len(product_urls)
+                candidates_for_this_category += len(product_urls)
                 gated_urls = await _gate_urls_for_pool(
                     product_urls,
                     marketplace,
                     filter_urls_by_role=filter_urls_by_role,
                 )
                 gated_urls_accepted += len(gated_urls)
+                accepted_for_this_category += len(gated_urls)
                 saved_this_call = 0
                 save_exhausted = False
                 if gated_urls:
@@ -207,10 +211,14 @@ async def run_product_harvest(
         if more_remaining:
             break
 
-        if saved_for_this_category == 0:
-            empty_streak += 1
-        else:
+        if saved_for_this_category > 0:
             empty_streak = 0
+        elif accepted_for_this_category > 0 or candidates_for_this_category == 0:
+            # Exhaustion evidence: page yielded only already-known products
+            # (accepted, all deduped) or nothing at all. A hub page whose
+            # candidates were all classified non-product is NOT evidence —
+            # its children are categories; the streak stays unchanged.
+            empty_streak += 1
 
         if empty_streak >= CATEGORY_CONVERGENCE_STREAK:
             logger.info(

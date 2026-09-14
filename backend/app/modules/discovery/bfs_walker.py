@@ -7,6 +7,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,12 @@ RECON_BFS_MAX_DEPTH = 3
 PHASE1_EXHAUSTED_STREAK_THRESHOLD = 3
 
 
+def _url_path_depth(url: str) -> int:
+    """Count non-empty path segments — structural depth of a category URL."""
+    path = urlparse(url).path
+    return sum(1 for segment in path.split("/") if segment)
+
+
 def _publish_category_batch(
     marketplace: DimMarketplace,
     listing_urls: list[str],
@@ -49,6 +56,11 @@ def _publish_category_batch(
         if url not in seen:
             seen.add(url)
             unique.append(url)
+    # Deepest-first work-list: leaf categories (more path segments) list
+    # products directly, while shallow hubs/home yield only category links and
+    # would burn the convergence streak before any product is reached.
+    # Stable sort keeps BFS order within one depth.
+    unique.sort(key=_url_path_depth, reverse=True)
     cursor_store.set_discovered_category_urls(marketplace, unique)
     cursor_store.set_category_resume_index(marketplace, 0)
     cursor_store.set_last_category_recon_at(

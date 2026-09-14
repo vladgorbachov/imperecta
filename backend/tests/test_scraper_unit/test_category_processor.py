@@ -40,7 +40,8 @@ async def test_run_product_harvest_empty_window_when_list_shrank() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_product_harvest_convergence_streak_stops() -> None:
+async def test_run_product_harvest_hub_pages_do_not_burn_convergence_streak() -> None:
+    """Candidates present but none accepted = hub page: streak must not count it."""
     mp = MagicMock()
     mp.id = "mp-id"
     mp.base_url = "https://shop.example/"
@@ -81,7 +82,47 @@ async def test_run_product_harvest_convergence_streak_stops() -> None:
     assert next_index == 0
     assert more is False
     assert save_calls == 0
-    assert pool.scrape_page_for_analysis.await_count == category_processor.CATEGORY_CONVERGENCE_STREAK
+    assert pool.scrape_page_for_analysis.await_count == len(urls)
+
+
+async def test_run_product_harvest_duplicate_only_categories_converge() -> None:
+    """Accepted URLs that all dedupe to zero saves ARE exhaustion evidence."""
+    mp = MagicMock()
+    mp.id = "mp-id"
+    mp.base_url = "https://shop.example/"
+    pool = MagicMock()
+    pool.scrape_page_for_analysis = AsyncMock(return_value=("<html></html>", MagicMock()))
+    db = AsyncMock()
+
+    async def filter_urls_by_role(urls, **kwargs):
+        return list(urls), {"mode": "full"}
+
+    async def save_product_urls(*args, **kwargs):
+        return (0, 0, False)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "app.modules.discovery.category_processor.extract_links_from_repeated_structure",
+            lambda soup, base, current: ["https://shop.example/p/1"],
+        )
+        monkeypatch.setattr(
+            "app.modules.discovery.category_processor.detect_next_page",
+            lambda soup, current: None,
+        )
+        urls = [f"https://shop.example/c/{i}" for i in range(5)]
+        total, next_index, more = await category_processor.run_product_harvest(
+            mp,
+            pool,
+            db,
+            urls,
+            filter_urls_by_role=filter_urls_by_role,
+            save_product_urls=save_product_urls,
+        )
+
+    assert total == 0
+    assert more is False
+    expected = category_processor.CATEGORY_CONVERGENCE_STREAK
+    assert pool.scrape_page_for_analysis.await_count == expected
 
 
 def _harvest_fixtures() -> tuple[MagicMock, MagicMock, AsyncMock]:
