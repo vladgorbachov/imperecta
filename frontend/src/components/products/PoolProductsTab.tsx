@@ -215,11 +215,11 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-12" />
+                    <TableHead className="w-14" />
                     <TableHead>{t("products.name")}</TableHead>
-                    <TableHead>{t("products.marketplace")}</TableHead>
-                    <TableHead>{t("products.price")}</TableHead>
-                    <TableHead>{t("products.change24h")}</TableHead>
+                    <TableHead className="w-44">{t("products.marketplace")}</TableHead>
+                    <TableHead className="w-32 text-right">{t("products.price")}</TableHead>
+                    <TableHead className="w-32 text-right">{t("products.change24h")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -238,11 +238,11 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                         if (item.url) window.open(item.url, "_blank");
                       }}
                     >
-                      <TableCell className="w-12">
+                      <TableCell className="w-14">
                         <ProductThumbnail item={item} />
                       </TableCell>
                       <TableCell>
-                        <span className="line-clamp-2 font-medium">
+                        <span className="line-clamp-2 text-[0.9375rem] font-medium leading-snug">
                           {item.title || "—"}
                         </span>
                       </TableCell>
