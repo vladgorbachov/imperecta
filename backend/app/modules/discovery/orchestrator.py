@@ -62,6 +62,7 @@ from app.modules.persist.writer import (
     build_fact_listing_fields,
 )
 from app.modules.scraper.locale_selection import build_accept_language_header
+from app.modules.scraper import page_cache
 from app.modules.scraper.scraper_pool import ScraperPool
 
 import structlog
@@ -461,6 +462,10 @@ class DiscoveryOrchestrator:
             canonical = url_canonicalizer.canonical_from_soup(soup, url)
             pool_url = url_canonicalizer.pool_url(canonical, url)
             role = classifier_adapter.classify_page_role(soup, pool_url)
+            if role == "product" and _html:
+                # Bridge the already-fetched PDP to the scrape phase so it
+                # does not re-fetch the same page minutes later.
+                page_cache.put_html(pool_url, _html)
             return role, pool_url, canonical is None
         except Exception:
             return "unknown", url, None

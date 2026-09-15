@@ -46,6 +46,9 @@ class BackendId(str, Enum):
     DIRECT_HTTP = "direct_http"
     PROXY_PROVIDER = "proxy_provider"
     BROWSER_RENDER = "browser_render"
+    # Not a network backend: HTML bridged from the discovery classify fetch
+    # via page_cache; never appears in _layer_order / _BACKENDS.
+    PAGE_CACHE = "page_cache"
 
 
 LEGACY_LAYER_TO_BACKEND: dict[str, BackendId] = {

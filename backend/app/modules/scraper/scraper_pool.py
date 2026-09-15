@@ -24,7 +24,7 @@ from app.modules.scraper.extractors import (
     extract_with_custom_selectors,
     merge_and_finalize,
 )
-from app.modules.scraper import host_throttle
+from app.modules.scraper import host_throttle, page_cache
 from app.modules.scraper.fetch_backends import (
     BackendId,
     ProxyProviderBackend,
@@ -208,6 +208,14 @@ class ScraperPool:
     ) -> ListingFetchResult:
         """Fetch HTML for one listing URL without extraction."""
         started = time.perf_counter()
+        cached = page_cache.get_html(url)
+        if cached:
+            return ListingFetchResult(
+                html=cached,
+                used_backend=BackendId.PAGE_CACHE,
+                last_error="",
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
         backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
 
         html = None
