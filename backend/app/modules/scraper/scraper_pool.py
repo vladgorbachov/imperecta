@@ -24,6 +24,7 @@ from app.modules.scraper.extractors import (
     extract_with_custom_selectors,
     merge_and_finalize,
 )
+from app.modules.scraper import host_throttle
 from app.modules.scraper.fetch_backends import (
     BackendId,
     ProxyProviderBackend,
@@ -722,6 +723,7 @@ class ScraperPool:
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         backend = get_fetch_backend(backend_id)
+        await host_throttle.acquire(url)
         return await backend.fetch(
             url,
             render_js=render_js,

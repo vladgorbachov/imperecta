@@ -88,13 +88,23 @@ def test_extract_product_links_four_segment_path():
     assert urls
 
 
-def test_detect_next_page_russian_label():
+def test_detect_next_page_rel_next_anchor():
+    """Language-neutral: <a rel=next> wins regardless of link text."""
     html = """
-    <html><body><a href="/page/2">далее</a></body></html>
+    <html><body><a rel="next" href="/page/2">tulevane</a></body></html>
     """
     soup = BeautifulSoup(html, "html.parser")
     u = ex.detect_next_page(soup, "https://shop.example/list")
     assert u and "page" in u
+
+
+def test_detect_next_page_numeric_progression_in_path():
+    html = """
+    <html><body><a href="/list/page/3">3</a></body></html>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    u = ex.detect_next_page(soup, "https://shop.example/list/page/2")
+    assert u == "https://shop.example/list/page/3"
 
 
 def test_detect_next_page_increment():

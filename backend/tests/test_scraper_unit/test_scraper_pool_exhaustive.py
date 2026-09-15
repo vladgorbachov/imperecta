@@ -172,19 +172,14 @@ async def test_browser_render_fetch_404_branch(monkeypatch):
     mock_page.goto = AsyncMock(return_value=mock_resp)
     mock_page.wait_for_timeout = AsyncMock()
     mock_page.content = AsyncMock(return_value="<html></html>")
-    mock_browser = MagicMock()
-    mock_browser.close = AsyncMock()
     mock_ctx = MagicMock()
     mock_ctx.new_page = AsyncMock(return_value=mock_page)
-    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+    mock_ctx.close = AsyncMock()
+    holder = MagicMock()
+    holder.pages_served = 0
+    holder.close = AsyncMock()
+    holder.browser = MagicMock(new_context=AsyncMock(return_value=mock_ctx))
 
-    class PW:
-        async def __aenter__(self):
-            return MagicMock(chromium=MagicMock(launch=AsyncMock(return_value=mock_browser)))
-
-        async def __aexit__(self, *a):
-            return None
-
-    monkeypatch.setattr(fb, "async_playwright", lambda: PW())
+    monkeypatch.setattr(fb, "_shared_browser", AsyncMock(return_value=holder))
     out, err = await backend.fetch("https://x.com/p")
     assert out is None and err == "not_found"

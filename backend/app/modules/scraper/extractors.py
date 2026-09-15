@@ -1126,20 +1126,33 @@ def detect_next_page(
     if rel_next and rel_next.get("href"):
         return urljoin(current_url, str(rel_next.get("href")).strip())
 
+    # Structural signals only — no language word lists (universality rule):
+    # <a rel=next>, arrow glyphs, page-number progression in query or path,
+    # and an anchor whose entire text is the next page number.
     candidates = soup.find_all("a", href=True)
-    page_match = re.search(r"([?&]page=)(\d+)", current_url)
+    page_match = re.search(r"([?&](?:page|p)=)(\d+)", current_url) or re.search(
+        r"(/page/)(\d+)", current_url
+    )
     current_page = int(page_match.group(2)) if page_match else None
 
     for node in candidates:
-        text = node.get_text(" ", strip=True).lower()
         href = str(node.get("href", "")).strip()
         if not href:
             continue
-        if text in {"next", "далее", "вперед"} or "›" in text or "→" in text:
+        rel = node.get("rel") or []
+        rel_values = rel if isinstance(rel, list) else str(rel).split()
+        if any(str(r).lower() == "next" for r in rel_values):
+            return urljoin(current_url, href)
+        text = node.get_text(" ", strip=True)
+        if "›" in text or "→" in text or "»" in text:
             return urljoin(current_url, href)
         if current_page is not None:
-            m = re.search(r"([?&]page=)(\d+)", href)
+            m = re.search(r"([?&](?:page|p)=)(\d+)", href) or re.search(
+                r"(/page/)(\d+)", href
+            )
             if m and int(m.group(2)) == current_page + 1:
+                return urljoin(current_url, href)
+            if text.strip() == str(current_page + 1):
                 return urljoin(current_url, href)
     return None
 

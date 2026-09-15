@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
+import weakref
 from enum import Enum
 from typing import ClassVar, Protocol
 
@@ -86,6 +88,29 @@ class FetchBackend(Protocol):
         """Return (html, error_code). error_code is None on success."""
 
 
+# One keep-alive client per running event loop: connection/TLS reuse across
+# the thousands of same-host fetches a scrape or discovery job performs.
+# Celery tasks each run a fresh loop, so clients are cached per loop; a dead
+# loop's entry is dropped by the weak reference together with its sockets.
+_loop_http_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _shared_http_client() -> httpx.AsyncClient:
+    loop = asyncio.get_running_loop()
+    client = _loop_http_clients.get(loop)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(HTTP_TIMEOUT_SEC),
+            follow_redirects=True,
+            http2=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+        _loop_http_clients[loop] = client
+    return client
+
+
 class DirectHttpBackend:
     """Direct HTTP GET without a proxy provider or browser."""
 
@@ -101,10 +126,9 @@ class DirectHttpBackend:
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
         headers = _request_headers(accept_language)
-        timeout = httpx.Timeout(HTTP_TIMEOUT_SEC)
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                response = await client.get(url, headers=headers)
+            client = _shared_http_client()
+            response = await client.get(url, headers=headers)
             if response.status_code == 404:
                 return None, "not_found"
             if response.status_code in (403, 401):
@@ -202,8 +226,60 @@ class ProxyProviderBackend:
             return None, "fetch_failed"
 
 
+# Reusable headless browser per event loop: chromium launch costs seconds and
+# real CPU, so one job launches once and renders many pages. The browser is
+# recycled after RENDER_PAGES_PER_BROWSER fetches (memory hygiene) and dropped
+# on any launch/render infrastructure failure.
+RENDER_PAGES_PER_BROWSER = 40
+
+
+class _BrowserHolder:
+    def __init__(self) -> None:
+        self.playwright = None
+        self.browser = None
+        self.pages_served = 0
+
+    async def close(self) -> None:
+        try:
+            if self.browser is not None:
+                await self.browser.close()
+        except Exception:
+            pass
+        try:
+            if self.playwright is not None:
+                await self.playwright.stop()
+        except Exception:
+            pass
+        self.playwright = None
+        self.browser = None
+        self.pages_served = 0
+
+
+_loop_browsers: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _BrowserHolder]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+async def _shared_browser() -> "_BrowserHolder":
+    loop = asyncio.get_running_loop()
+    holder = _loop_browsers.get(loop)
+    if holder is None:
+        holder = _BrowserHolder()
+        _loop_browsers[loop] = holder
+    if holder.browser is not None and holder.pages_served >= RENDER_PAGES_PER_BROWSER:
+        await holder.close()
+    if holder.browser is None or not holder.browser.is_connected():
+        await holder.close()
+        holder.playwright = await async_playwright().start()
+        holder.browser = await holder.playwright.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+    return holder
+
+
 class BrowserRenderBackend:
-    """Headless browser render fetch."""
+    """Headless browser render fetch (shared browser, fresh context per page)."""
 
     backend_id = BackendId.BROWSER_RENDER
 
@@ -216,49 +292,52 @@ class BrowserRenderBackend:
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
+        holder: _BrowserHolder | None = None
+        context = None
         try:
-            async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+            holder = await _shared_browser()
+            context = await holder.browser.new_context(
+                user_agent=_DEFAULT_USER_AGENT,
+                locale=(accept_language.split(",")[0].strip() if accept_language else None),
+                extra_http_headers=(
+                    {"Accept-Language": accept_language} if accept_language else None
+                ),
+                viewport={"width": 1920, "height": 1080},
+            )
+            page = await context.new_page()
+            holder.pages_served += 1
+            try:
+                resp = await page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=PLAYWRIGHT_GOTO_TIMEOUT_MS,
                 )
-                context = await browser.new_context(
-                    user_agent=_DEFAULT_USER_AGENT,
-                    locale=(accept_language.split(",")[0].strip() if accept_language else None),
-                    extra_http_headers=(
-                        {"Accept-Language": accept_language} if accept_language else None
-                    ),
-                    viewport={"width": 1920, "height": 1080},
-                )
-                page = await context.new_page()
-                try:
-                    resp = await page.goto(
-                        url,
-                        wait_until="domcontentloaded",
-                        timeout=PLAYWRIGHT_GOTO_TIMEOUT_MS,
-                    )
-                    if resp is not None and resp.status == 404:
-                        await browser.close()
-                        return None, "not_found"
-                    if resp is not None and resp.status in (401, 403):
-                        await browser.close()
-                        return None, "blocked"
-                except Exception as exc:
-                    await browser.close()
-                    msg = str(exc).lower()
-                    if "timeout" in msg or "timed out" in msg:
-                        return None, "timeout"
-                    return None, "fetch_failed"
-                await page.wait_for_timeout(PLAYWRIGHT_WAIT_MS)
-                html = await page.content()
-                await browser.close()
-                return html, None
+                if resp is not None and resp.status == 404:
+                    return None, "not_found"
+                if resp is not None and resp.status in (401, 403):
+                    return None, "blocked"
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "timeout" in msg or "timed out" in msg:
+                    return None, "timeout"
+                return None, "fetch_failed"
+            await page.wait_for_timeout(PLAYWRIGHT_WAIT_MS)
+            html = await page.content()
+            return html, None
         except Exception as exc:
             logger.warning("browser_render fetch failed for %s: %s", url[:120], exc)
+            if holder is not None:
+                await holder.close()
             msg = str(exc).lower()
             if "timeout" in msg or "timed out" in msg:
                 return None, "timeout"
             return None, "fetch_failed"
+        finally:
+            if context is not None:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
 
 
 _BACKENDS: dict[BackendId, FetchBackend] = {

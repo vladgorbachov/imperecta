@@ -16,6 +16,18 @@ from app.modules.scraper.fetch_backends import (
 from app.modules.scraper.scraper_pool import ScraperPool
 
 
+def _fake_browser_holder(mock_page):
+    """Holder stub matching fetch_backends._shared_browser contract."""
+    mock_ctx = MagicMock()
+    mock_ctx.new_page = AsyncMock(return_value=mock_page)
+    mock_ctx.close = AsyncMock()
+    holder = MagicMock()
+    holder.pages_served = 0
+    holder.close = AsyncMock()
+    holder.browser = MagicMock(new_context=AsyncMock(return_value=mock_ctx))
+    return holder
+
+
 @pytest.mark.asyncio
 async def test_scrape_listing_success_with_product_links(monkeypatch):
     pool = ScraperPool()
@@ -58,33 +70,20 @@ async def test_layer_order_requires_js_inserts_browser_render(monkeypatch):
 async def test_fetch_direct_http_404_and_403(monkeypatch):
     backend = DirectHttpBackend()
 
-    class CM403:
-        async def __aenter__(self):
-            return MagicMock(
-                get=AsyncMock(
-                    return_value=MagicMock(status_code=403, text="", raise_for_status=lambda: None),
-                ),
-            )
+    client_403 = MagicMock(
+        get=AsyncMock(
+            return_value=MagicMock(status_code=403, text="", raise_for_status=lambda: None),
+        ),
+    )
+    client_404 = MagicMock(
+        get=AsyncMock(return_value=MagicMock(status_code=404, text="")),
+    )
 
-        async def __aexit__(self, *a):
-            return None
-
-    class CM404:
-        async def __aenter__(self):
-            return MagicMock(
-                get=AsyncMock(
-                    return_value=MagicMock(status_code=404, text=""),
-                ),
-            )
-
-        async def __aexit__(self, *a):
-            return None
-
-    monkeypatch.setattr(fb.httpx, "AsyncClient", lambda **k: CM403())
+    monkeypatch.setattr(fb, "_shared_http_client", lambda: client_403)
     out, err = await backend.fetch("https://x.com")
     assert out is None and err == "blocked"
 
-    monkeypatch.setattr(fb.httpx, "AsyncClient", lambda **k: CM404())
+    monkeypatch.setattr(fb, "_shared_http_client", lambda: client_404)
     out2, err2 = await backend.fetch("https://x.com")
     assert out2 is None and err2 == "not_found"
 
@@ -94,16 +93,8 @@ async def test_fetch_direct_http_timeout(monkeypatch):
     backend = DirectHttpBackend()
     import httpx
 
-    class CM:
-        async def __aenter__(self):
-            return MagicMock(
-                get=AsyncMock(side_effect=httpx.TimeoutException("timeout")),
-            )
-
-        async def __aexit__(self, *a):
-            return None
-
-    monkeypatch.setattr(fb.httpx, "AsyncClient", lambda **k: CM())
+    client = MagicMock(get=AsyncMock(side_effect=httpx.TimeoutException("timeout")))
+    monkeypatch.setattr(fb, "_shared_http_client", lambda: client)
     out, err = await backend.fetch("https://x.com")
     assert out is None and err == "timeout"
 
@@ -142,20 +133,9 @@ async def test_browser_render_fetch_403(monkeypatch):
     mock_resp = MagicMock()
     mock_resp.status = 403
     mock_page.goto = AsyncMock(return_value=mock_resp)
-    mock_browser = MagicMock()
-    mock_browser.close = AsyncMock()
-    mock_ctx = MagicMock()
-    mock_ctx.new_page = AsyncMock(return_value=mock_page)
-    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+    holder = _fake_browser_holder(mock_page)
 
-    class PW:
-        async def __aenter__(self):
-            return MagicMock(chromium=MagicMock(launch=AsyncMock(return_value=mock_browser)))
-
-        async def __aexit__(self, *a):
-            return None
-
-    monkeypatch.setattr(fb, "async_playwright", lambda: PW())
+    monkeypatch.setattr(fb, "_shared_browser", AsyncMock(return_value=holder))
     out, err = await backend.fetch("https://x.com/p")
     assert out is None and err == "blocked"
 
@@ -165,20 +145,9 @@ async def test_browser_render_goto_timeout_message(monkeypatch):
     backend = BrowserRenderBackend()
     mock_page = MagicMock()
     mock_page.goto = AsyncMock(side_effect=Exception("navigation timeout exceeded"))
-    mock_browser = MagicMock()
-    mock_browser.close = AsyncMock()
-    mock_ctx = MagicMock()
-    mock_ctx.new_page = AsyncMock(return_value=mock_page)
-    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+    holder = _fake_browser_holder(mock_page)
 
-    class PW:
-        async def __aenter__(self):
-            return MagicMock(chromium=MagicMock(launch=AsyncMock(return_value=mock_browser)))
-
-        async def __aexit__(self, *a):
-            return None
-
-    monkeypatch.setattr(fb, "async_playwright", lambda: PW())
+    monkeypatch.setattr(fb, "_shared_browser", AsyncMock(return_value=holder))
     out, err = await backend.fetch("https://x.com/p")
     assert out is None and err == "timeout"
 
