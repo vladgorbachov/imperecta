@@ -21,12 +21,42 @@ import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useDashboardCountryStore } from "@/stores/dashboardCountryStore";
 
+/** 7-day mini sparkline; renders only when history points exist (no mock data). */
+function KpiSparkline({ points }: { points: number[] }) {
+  if (points.length < 2) {
+    return null;
+  }
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = max - min || 1;
+  const coords = points
+    .map((point, index) => {
+      const x = (index / (points.length - 1)) * 64;
+      const y = 18 - ((point - min) / range) * 14 + 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg viewBox="0 0 64 22" width="64" height="22" aria-hidden className="shrink-0">
+      <polyline
+        points={coords}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function KpiCard({
   label,
   value,
   error,
   title,
   pending = false,
+  spark,
 }: {
   label: string;
   value: string;
@@ -34,10 +64,15 @@ function KpiCard({
   title?: string;
   /** Data not accumulated yet — render the honest-empty text small and muted. */
   pending?: boolean;
+  /** Optional 7d history for the sparkline (wired once GET /markets/kpi-history lands). */
+  spark?: number[];
 }) {
   return (
     <div className="surface-base rounded-lg p-3">
-      <p className="label-mono">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="label-mono">{label}</p>
+        {spark ? <KpiSparkline points={spark} /> : null}
+      </div>
       <div className="mt-1 flex items-center gap-1.5">
         <p
           className={cn(
