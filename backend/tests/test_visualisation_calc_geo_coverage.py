@@ -159,3 +159,33 @@ def test_world_breakdown_benchmarks_against_grand_pool() -> None:
     assert row.avg_price_eur == Decimal("20.50")
     assert out.pool_avg_price_eur == Decimal("10.25")
     assert out.pool_movers_rate_pct == Decimal("10.00")
+
+
+@pytest.mark.asyncio
+async def test_geo_coverage_route_world_mode(client, geo_coverage_auth_override) -> None:
+    """ZZ branch wires read_world_marketplace_stats + world builder."""
+    from decimal import Decimal
+
+    with (
+        patch(
+            "app.modules.visualisation_calc.api.read_marketplace_breakdown",
+            new_callable=AsyncMock,
+            return_value=[(_MP_A, "Amazon", "amazon.com", 50)],
+        ),
+        patch(
+            "app.modules.visualisation_calc.api.read_world_marketplace_stats",
+            new_callable=AsyncMock,
+            return_value=(
+                [(_MP_A, Decimal("20.5"), 5, 50)],
+                Decimal("10.25"),
+                20,
+                200,
+            ),
+        ) as world_mock,
+    ):
+        resp = await client.get("/api/markets/geo-coverage?country_code=ZZ")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pool_total"] == 200
+    assert body["rows"][0]["share_pct"] == "25.00"
+    world_mock.assert_awaited_once()

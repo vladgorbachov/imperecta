@@ -15,11 +15,13 @@ from app.modules.currency import CurrencyConverter, normalize_display_currency
 from app.modules.visualisation_calc.coverage.read import (
     read_country_rollup,
     read_marketplace_breakdown,
+    read_world_marketplace_stats,
 )
 from app.modules.visualisation_calc.coverage.schemas import CoverageBreakdown
 from app.modules.visualisation_calc.coverage.service import (
     build_country_rollup,
     build_marketplace_breakdown,
+    build_world_marketplace_breakdown,
 )
 from app.modules.visualisation_calc.kpi.read import read_dashboard_kpi
 from app.modules.visualisation_calc.kpi.schemas import DashboardKpi
