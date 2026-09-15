@@ -39,12 +39,6 @@ os.environ.setdefault(
 os.environ.setdefault("CLAUDE_MODEL", os.environ.get("TEST_CLAUDE_MODEL", ""))
 os.environ.setdefault("EMAIL_FROM", os.environ.get("TEST_EMAIL_FROM", ""))
 os.environ.setdefault("APP_URL", os.environ.get("TEST_APP_URL", ""))
-os.environ.setdefault(
-    "PROXY_STICKY_DURATION", os.environ.get("TEST_PROXY_STICKY_DURATION", "")
-)
-os.environ.setdefault(
-    "PROXY_COUNTRY_ROUTING", os.environ.get("TEST_PROXY_COUNTRY_ROUTING", "")
-)
 os.environ.setdefault("PROXY_PROVIDER", os.environ.get("TEST_PROXY_PROVIDER", "decodo"))
 os.environ.setdefault(
     "PROXY_PROVIDER_RPS", os.environ.get("TEST_PROXY_PROVIDER_RPS", "10")

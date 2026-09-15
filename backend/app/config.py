@@ -38,11 +38,7 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str | None = None  # Validates X-Telegram-Bot-Api-Secret-Token
     app_url: str
 
-    proxy_list: str | None = None
-    proxy_sticky_duration: int
-    proxy_country_routing: bool
-
-  # Provider-neutral proxy fetch configuration (Stage 2).
+    # Provider-neutral proxy fetch configuration (Stage 2).
     proxy_provider: str = "decodo"
     proxy_provider_rps: int = 10
     proxy_provider_api_url: str | None = Field(
@@ -173,20 +169,6 @@ class Settings(BaseSettings):
                 "BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD must be set together."
             )
         return self
-
-    @property
-    def proxy_url(self) -> str | None:
-        """Primary proxy URL from PROXY_LIST."""
-        if not self.proxy_list:
-            return None
-        return self.proxy_list.split(",")[0].strip()
-
-    @property
-    def proxy_urls(self) -> list[str]:
-        """All proxy URLs from PROXY_LIST."""
-        if not self.proxy_list:
-            return []
-        return [p.strip() for p in self.proxy_list.split(",") if p.strip()]
 
     @property
     def origins_list(self) -> list[str]:

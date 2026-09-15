@@ -32,8 +32,6 @@ def _base_env(**overrides: str) -> dict[str, str]:
         "CLAUDE_MODEL": "claude-test",
         "EMAIL_FROM": "test@example.com",
         "APP_URL": "http://localhost:8000",
-        "PROXY_STICKY_DURATION": "300",
-        "PROXY_COUNTRY_ROUTING": "false",
         "ALLOWED_ORIGINS": "http://localhost:5173",
         "APP_ENV": "test",
         "PORT": "8000",

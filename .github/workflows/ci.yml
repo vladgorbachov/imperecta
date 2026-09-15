@@ -63,8 +63,6 @@ jobs:
           CLAUDE_MODEL: claude-sonnet-5
           EMAIL_FROM: ci@ci.invalid
           APP_URL: https://ci.invalid
-          PROXY_STICKY_DURATION: "600"
-          PROXY_COUNTRY_ROUTING: "false"
           PROXY_PROVIDER: decodo
           PROXY_PROVIDER_RPS: "10"
           DECODO_API_URL: https://ci.invalid/proxy
