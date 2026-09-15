@@ -6,8 +6,9 @@
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router-dom";
-import { Menu, LogOut, Bell, Sun, Moon, Settings } from "lucide-react";
+import { Menu, LogOut, Bell, Search, Sun, Moon, Settings } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { usePaletteStore } from "@/stores/paletteStore";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -64,6 +65,16 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <button
+          type="button"
+          onClick={() => usePaletteStore.getState().setOpen(true)}
+          className="hidden h-9 items-center gap-2 rounded-md border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 text-sm text-[var(--foreground-muted)] transition-colors hover:border-[var(--glass-border-hover)] hover:text-[var(--foreground)] sm:flex"
+          aria-label={t("palette.placeholder")}
+        >
+          <Search className="size-3.5" />
+          <span className="hidden md:inline">{t("palette.hint")}</span>
+          <kbd className="label-mono rounded border border-[var(--glass-border)] px-1 py-px">⌘K</kbd>
+        </button>
         <Button
           variant="ghost"
           size="icon"

@@ -10,6 +10,7 @@
  */
 
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
@@ -83,8 +84,9 @@ function ProductThumbnail({ item }: { item: PoolProductItem }) {
 
 export function PoolProductsTab({ locale: _locale }: { locale: string }) {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
 
-  const [searchRaw, setSearchRaw] = useState("");
+  const [searchRaw, setSearchRaw] = useState(() => searchParams.get("search") ?? "");
   const [marketplaceId, setMarketplaceId] = useState<string>("all");
   const [sort, setSort] = useState<string>("recent");
   const [page, setPage] = useState(1);

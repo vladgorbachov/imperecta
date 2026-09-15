@@ -3,7 +3,10 @@ import type { PoolProductsParams } from "@/api/products";
 import { productsApi } from "@/api/products";
 import { useDisplayCurrencyStore } from "@/stores/displayCurrencyStore";
 
-export function usePoolProducts(params: PoolProductsParams) {
+export function usePoolProducts(
+  params: PoolProductsParams,
+  options?: { enabled?: boolean },
+) {
   const displayCurrency = useDisplayCurrencyStore((state) => state.displayCurrency);
   const requestParams = { ...params, display_currency: displayCurrency };
 
@@ -14,6 +17,7 @@ export function usePoolProducts(params: PoolProductsParams) {
       return data;
     },
     staleTime: 30_000,
+    enabled: options?.enabled ?? true,
   });
 }
 

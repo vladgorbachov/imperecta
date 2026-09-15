@@ -3,19 +3,35 @@
  * Graphite design language: flat surfaces, hairline borders.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { MobileSidebar } from "./MobileSidebar";
 import { BottomNavigation } from "./BottomNavigation";
+import { CommandPalette } from "@/components/CommandPalette";
 import { SessionExpiryWarning } from "@/components/SessionExpiryWarning";
 import { Scrollable } from "@/components/ui/Scrollable";
 import { useSidebar } from "@/hooks/useSidebar";
+import { usePaletteStore } from "@/stores/paletteStore";
 
 export function DashboardLayout() {
   const { isCollapsed, toggle } = useSidebar();
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const paletteOpen = usePaletteStore((s) => s.open);
+  const setPaletteOpen = usePaletteStore((s) => s.setOpen);
+  const togglePalette = usePaletteStore((s) => s.toggle);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        togglePalette();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [togglePalette]);
 
   return (
     <div
@@ -41,6 +57,7 @@ export function DashboardLayout() {
       </main>
       <MobileSidebar open={mobileSheetOpen} onOpenChange={setMobileSheetOpen} />
       <BottomNavigation />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <SessionExpiryWarning />
     </div>
   );
