@@ -26,6 +26,7 @@ import {
   type PoolProductItem,
   type PriceHistoryPeriod,
 } from "@/api/products";
+import { CreateAlertDialog } from "@/components/alerts/CreateAlertDialog";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { Button } from "@/components/ui/button";
@@ -35,11 +36,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  Tooltip as UiTooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { CHART_PRIMARY } from "@/lib/design-tokens";
@@ -67,6 +63,7 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
   const { apiParam: displayCurrency } = useDisplayCurrency();
   const [period, setPeriod] = useState<PriceHistoryPeriod>("30d");
+  const [alertOpen, setAlertOpen] = useState(false);
 
   /* P2: fresh detail by id (description/brand/category grow as shops rescrape). */
   const { data: detail } = useQuery({
@@ -121,6 +118,7 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
   const hasHistory = historyRows.length >= 2;
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -315,19 +313,10 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
 
           {/* Actions */}
           <div className="flex flex-wrap items-center gap-2 border-t border-[var(--glass-border)] pt-4">
-            <UiTooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Button variant="outline" size="sm" disabled>
-                    <Bell className="me-1.5 size-3.5" />
-                    {t("products.peek.setAlert")}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="surface-overlay">
-                {t("products.peek.alertPending")}
-              </TooltipContent>
-            </UiTooltip>
+            <Button variant="outline" size="sm" onClick={() => setAlertOpen(true)}>
+              <Bell className="me-1.5 size-3.5" />
+              {t("products.peek.setAlert")}
+            </Button>
             {item.url ? (
               <Button variant="outline" size="sm" asChild>
                 <a href={item.url} target="_blank" rel="noopener noreferrer">
@@ -340,5 +329,11 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
         </div>
       </SheetContent>
     </Sheet>
+    <CreateAlertDialog
+      open={alertOpen}
+      onOpenChange={setAlertOpen}
+      prefill={{ listingId: item.id, title: item.title ?? item.url }}
+    />
+    </>
   );
 }
