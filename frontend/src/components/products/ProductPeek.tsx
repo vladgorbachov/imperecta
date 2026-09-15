@@ -9,8 +9,9 @@
  * docs/FRONTEND_BACKEND_REQUESTS.md.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { Bell, ExternalLink } from "lucide-react";
 import {
   Area,
@@ -20,7 +21,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { PoolProductItem } from "@/api/products";
+import {
+  productsApi,
+  type PoolProductItem,
+  type PriceHistoryPeriod,
+} from "@/api/products";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { Button } from "@/components/ui/button";
@@ -35,6 +40,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { CHART_PRIMARY } from "@/lib/design-tokens";
 import { formatChartDate, formatPriceNumber, formatRelativeTime } from "@/lib/formatters";
@@ -53,28 +59,65 @@ function formatPercent(value?: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+const HISTORY_PERIODS: PriceHistoryPeriod[] = ["7d", "30d", "90d"];
+
 export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "en";
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
+  const { apiParam: displayCurrency } = useDisplayCurrency();
+  const [period, setPeriod] = useState<PriceHistoryPeriod>("30d");
+
+  /* P2: fresh detail by id (description/brand/category grow as shops rescrape). */
+  const { data: detail } = useQuery({
+    queryKey: ["pool-product-detail", item?.id ?? null, displayCurrency],
+    queryFn: () =>
+      productsApi.getPoolProduct(item!.id, displayCurrency).then((r) => r.data),
+    enabled: open && !!item,
+    staleTime: 30_000,
+  });
+
+  /* P1: real per-listing price history from fact_price. */
+  const { data: history } = useQuery({
+    queryKey: ["pool-price-history", item?.id ?? null, period],
+    queryFn: () =>
+      productsApi.getPriceHistory(item!.id, period).then((r) => r.data),
+    enabled: open && !!item,
+    staleTime: 30_000,
+  });
+
+  const serverHistoryReady =
+    history?.data_ready === true && (history?.points?.length ?? 0) >= 2;
 
   const historyRows = useMemo(() => {
+    if (serverHistoryReady) {
+      return (history?.points ?? [])
+        .filter((row) => row.price != null && Number.isFinite(Number(row.price)))
+        .map((row) => ({ date: row.date, price: Number(row.price) }));
+    }
+    /* Fallback while server history is still accumulating: the recent_prices
+       already carried by the list item. */
     const rows = item?.recent_prices ?? [];
     return rows
       .filter((row) => row.price != null && Number.isFinite(Number(row.price)))
       .map((row) => ({ date: row.date, price: Number(row.price) }));
-  }, [item?.recent_prices]);
+  }, [serverHistoryReady, history?.points, item?.recent_prices]);
 
   if (!item) {
     return null;
   }
 
+  const view = { ...item, ...(detail ?? {}) };
+  const description = detail?.description ?? item.description ?? null;
+  const brand = detail?.brand ?? null;
+  const category = detail?.category ?? null;
+
   const marketplaceLabel = formatMarketplaceLabel({
-    name: item.marketplace_name,
-    domain: item.marketplace_domain,
-    countryCode: item.country_code,
+    name: view.marketplace_name,
+    domain: view.marketplace_domain,
+    countryCode: view.country_code,
   });
-  const changeValue = item.price_change_pct ?? null;
+  const changeValue = view.price_change_pct ?? null;
   const hasHistory = historyRows.length >= 2;
 
   return (
@@ -111,14 +154,24 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
               <div className="flex flex-wrap items-center gap-1.5">
                 <MarketplaceBadge
                   marketplace={
-                    item.marketplace_domain ||
-                    item.marketplace_name ||
-                    String(item.marketplace_id)
+                    view.marketplace_domain ||
+                    view.marketplace_name ||
+                    String(view.marketplace_id)
                   }
                   label={marketplaceLabel}
                   size="sm"
                 />
-                {item.in_stock != null && (
+                {brand ? (
+                  <span className="label-mono rounded border border-[var(--glass-border)] px-1.5 py-0.5">
+                    {brand}
+                  </span>
+                ) : null}
+                {category ? (
+                  <span className="label-mono rounded border border-[var(--glass-border)] px-1.5 py-0.5">
+                    {category}
+                  </span>
+                ) : null}
+                {view.in_stock != null && (
                   <span
                     className={cn(
                       "label-mono",
@@ -127,7 +180,7 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
                         : "!text-[var(--status-error)]",
                     )}
                   >
-                    {item.in_stock
+                    {view.in_stock
                       ? t("products.peek.inStock")
                       : t("products.peek.outOfStock")}
                   </span>
@@ -164,18 +217,37 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
           </div>
 
           {/* Description */}
-          {item.description ? (
+          {description ? (
             <div>
               <p className="label-mono mb-1.5">{t("products.peek.description")}</p>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                {item.description}
+                {description}
               </p>
             </div>
           ) : null}
 
-          {/* Recent price history (from pool payload; full history endpoint pending) */}
+          {/* Price history — server fact_price series (P1), recent_prices fallback */}
           <div>
-            <p className="label-mono mb-1.5">{t("products.peek.priceHistory")}</p>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <p className="label-mono">{t("products.peek.priceHistory")}</p>
+              <div className="flex gap-0.5 rounded-md border border-[var(--glass-border)] p-0.5">
+                {HISTORY_PERIODS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setPeriod(option)}
+                    className={cn(
+                      "rounded px-2 py-0.5 text-2xs transition-colors",
+                      period === option
+                        ? "bg-[var(--accent-bg-subtle)] font-medium text-[var(--foreground)]"
+                        : "text-muted-foreground hover:text-[var(--foreground)]",
+                    )}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
             {hasHistory ? (
               <div className="h-[140px] w-full">
                 <ResponsiveContainer width="100%" height={140}>
@@ -198,7 +270,9 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
                     />
                     <Tooltip
                       formatter={(value: number) => [
-                        `${formatPriceNumber(value, locale)} ${item.currency}`,
+                        `${formatPriceNumber(value, locale)} ${
+                          serverHistoryReady ? history?.currency ?? view.currency : view.currency
+                        }`,
                         "",
                       ]}
                       labelFormatter={(value: string) => formatChartDate(value, locale)}

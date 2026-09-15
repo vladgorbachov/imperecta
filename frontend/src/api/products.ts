@@ -83,10 +83,39 @@ export interface PoolCategoryItem {
   listing_count: number;
 }
 
+/** Extended detail returned by GET /pool/products/{id} (P2). */
+export interface PoolProductDetail extends PoolProductItem {
+  attributes?: Record<string, unknown> | null;
+  brand?: string | null;
+  category?: string | null;
+}
+
+export type PriceHistoryPeriod = "7d" | "30d" | "90d";
+
+/** GET /pool/products/{id}/price-history response (P1). */
+export interface PriceHistoryResponse {
+  listing_id: string;
+  currency: string;
+  period: PriceHistoryPeriod;
+  points: Array<{ date: string; price: number; price_eur: number | null }>;
+  data_ready: boolean;
+}
+
 export const productsApi = {
   fetchPoolProducts: (params: PoolProductsParams) =>
     apiClient.get<PoolProductsResponse>("/pool/products", { params }),
 
   getPoolCategories: () =>
     apiClient.get<PoolCategoryItem[]>("/pool/categories"),
+
+  getPoolProduct: (listingId: string, displayCurrency?: DisplayCurrency) =>
+    apiClient.get<PoolProductDetail>(`/pool/products/${listingId}`, {
+      params: displayCurrency ? { display_currency: displayCurrency } : undefined,
+    }),
+
+  getPriceHistory: (listingId: string, period: PriceHistoryPeriod = "30d") =>
+    apiClient.get<PriceHistoryResponse>(
+      `/pool/products/${listingId}/price-history`,
+      { params: { period, bucket: "day" } },
+    ),
 };
