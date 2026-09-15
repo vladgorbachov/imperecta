@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { newsApi, newsQueryKeys } from "@/api/news";
@@ -8,7 +8,7 @@ import { formatRelativeTime } from "@/lib/formatters";
 import { formatNewsSource } from "@/lib/formatNewsSource";
 import { cn } from "@/lib/utils";
 
-const MAX_ITEMS = 8;
+const MAX_ITEMS = 4;
 
 export interface MarketNewsWidgetProps {
   countryCode: string | null;
@@ -16,16 +16,11 @@ export interface MarketNewsWidgetProps {
 
 function NewsSkeleton() {
   return (
-    <div className="space-y-4" data-testid="news-skeleton">
+    <div className="space-y-3" data-testid="news-skeleton">
       {Array.from({ length: 4 }, (_, index) => (
-        <div key={index} className="flex gap-4 rounded-lg border border-border/50 p-4">
-          <Skeleton className="hidden size-20 shrink-0 rounded-md sm:block" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-3 w-1/3" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-5/6" />
-          </div>
+        <div key={index} className="space-y-1.5 py-1">
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-3 w-1/3" />
         </div>
       ))}
     </div>
@@ -46,7 +41,6 @@ function NewsItemCard({
   };
   locale: string;
 }) {
-  const [imageHidden, setImageHidden] = useState(false);
   const sourceLabel = useMemo(() => formatNewsSource(item.source), [item.source]);
   const publishedLabel = useMemo(() => {
     const parsed = new Date(item.published_at);
@@ -57,17 +51,8 @@ function NewsItemCard({
   }, [item.published_at, locale]);
 
   return (
-    <article className="-mx-2 flex gap-4 rounded-md px-2 py-3 transition-colors hover:bg-[var(--glass-bg-hover)]">
-      {item.image_url && !imageHidden ? (
-        <img
-          src={item.image_url}
-          alt=""
-          loading="lazy"
-          className="hidden aspect-[4/3] w-20 shrink-0 rounded-md object-cover sm:block"
-          onError={() => setImageHidden(true)}
-        />
-      ) : null}
-      <div className="min-w-0 flex-1 space-y-1.5">
+    <article className="-mx-2 rounded-md px-2 py-2.5 transition-colors hover:bg-[var(--glass-bg-hover)]">
+      <div className="min-w-0 space-y-1">
         <a
           href={item.url}
           target="_blank"
@@ -92,11 +77,6 @@ function NewsItemCard({
             {publishedLabel ? (
               <time dateTime={item.published_at}>{publishedLabel}</time>
             ) : null}
-          </p>
-        ) : null}
-        {item.snippet ? (
-          <p className="line-clamp-3 break-words text-sm leading-relaxed text-muted-foreground">
-            {item.snippet}
           </p>
         ) : null}
       </div>

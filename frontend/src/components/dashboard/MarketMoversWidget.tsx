@@ -211,7 +211,7 @@ export function MarketMoversWidget({
   }, [items]);
 
   return (
-    <div className="surface-base rounded-xl p-3.5">
+    <div className="surface-base h-full rounded-xl p-3.5">
       <h3 className="label-mono mb-3 !text-[var(--foreground)]">{t("market.overview.movements.title")}</h3>
 
       {isLoading ? (

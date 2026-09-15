@@ -73,7 +73,10 @@ describe("MarketNewsWidget", () => {
     renderWidget();
     expect(await screen.findByText("Retail chain expands in Baltics")).toBeInTheDocument();
     expect(screen.getByText("Retail Week")).toBeInTheDocument();
-    expect(screen.getByText("A major EU retailer announced new store openings.")).toBeInTheDocument();
+    // Compact layout: snippets are intentionally not rendered.
+    expect(
+      screen.queryByText("A major EU retailer announced new store openings."),
+    ).not.toBeInTheDocument();
     const link = screen.getByRole("link", { name: "Retail chain expands in Baltics" });
     expect(link).toHaveAttribute("href", "https://example.com/article-1");
     expect(link).toHaveAttribute("target", "_blank");

@@ -28,7 +28,6 @@ import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { TickerSettings } from "@/components/settings/TickerSettings";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -466,18 +465,6 @@ export function SettingsPage() {
               <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                 {t("settings.digestTimeComingSoon")}
               </p>
-            </CardContent>
-          </Card>
-
-          <Separator />
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("settings.ticker.title")}</CardTitle>
-              <CardDescription>{t("settings.ticker.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <TickerSettings />
             </CardContent>
           </Card>
 

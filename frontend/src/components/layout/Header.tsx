@@ -1,14 +1,13 @@
 /**
- * Top bar: hamburger (mobile), breadcrumb, theme toggle, notifications, avatar.
- * Glassmorphism design with glow accents.
+ * Top bar: hamburger (mobile), theme toggle, notifications, avatar.
+ * Market scope controls live in the dashboard ScopeBar, not here.
  */
 
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Menu, LogOut, Bell, Sun, Moon, Settings } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
-import { DashboardHeaderCountrySelector } from "@/components/dashboard/DashboardHeaderCountrySelector";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { HeaderTicker } from "./HeaderTicker";
 import { cn } from "@/lib/utils";
 
 interface HeaderProps {
@@ -31,9 +29,6 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
-  const location = useLocation();
-  const isDashboardRoute =
-    location.pathname === "/dashboard" || location.pathname.endsWith("/dashboard");
 
   const handleLogout = () => {
     logout();
@@ -67,10 +62,8 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
             <Menu className="size-4" />
           </Button>
         )}
-        <HeaderTicker className="min-w-0 flex-1" />
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        {isDashboardRoute ? <DashboardHeaderCountrySelector /> : null}
         <Button
           variant="ghost"
           size="icon"

@@ -282,26 +282,11 @@ describe("MarketsOverviewSection", () => {
     expect(screen.queryByText("0.00%")).not.toBeInTheDocument();
   });
 
-  it("renders product cards with image and external product link", async () => {
+  it("does not render the catalog on the dashboard (moved to Products)", async () => {
     renderSection();
-    await screen.findByText("Смартфон X");
+    await screen.findByText("market.overview.kpi.totalPool");
 
-    const image = screen.getByAltText("Смартфон X") as HTMLImageElement;
-    expect(image.src).toBe("https://img.example/1.jpg");
-
-    const externalLinks = screen
-      .getAllByRole("link")
-      .filter((link) => link.getAttribute("href") === "https://example.com/1");
-    expect(externalLinks.length).toBeGreaterThan(0);
-  });
-
-  it("exposes marketplace filters in the side panel", async () => {
-    renderSection();
-    await screen.findByText("Смартфон X");
-
-    expect(screen.getByText("market.filters.marketplaces")).toBeInTheDocument();
-    expect(screen.getAllByText(/Barbora \(LV\)/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Barbora \(LT\)/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Store Beta \(UA\)/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText("market.filters.marketplaces")).not.toBeInTheDocument();
+    expect(screen.queryByText("Смартфон X")).not.toBeInTheDocument();
   });
 });

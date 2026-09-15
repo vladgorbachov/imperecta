@@ -1,84 +1,25 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+/**
+ * Overview dashboard — the command center.
+ * Answers "what changed and does it need action": scope bar, KPI band,
+ * movers feed, price-trend hero, coverage, alerts stream, compact news.
+ * The catalog lives on the Products page, not here.
+ */
+
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import {
-  AlertTriangle,
-  ChevronDown,
-  ExternalLink,
-  Search,
-  SlidersHorizontal,
-} from "lucide-react";
-import { marketsApi, marketsQueryKeys, type MarketsOverviewItem, type MovementsQueryParams } from "@/api/markets";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { EmptyState } from "@/components/ui-custom/EmptyState";
-import { ErrorState } from "@/components/ui-custom/ErrorState";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
+import { marketsApi, marketsQueryKeys, type MovementsQueryParams } from "@/api/markets";
+import { AlertsStreamWidget } from "@/components/dashboard/AlertsStreamWidget";
 import { MarketMoversWidget } from "@/components/dashboard/MarketMoversWidget";
 import { MarketCoverageWidget } from "@/components/dashboard/MarketCoverageWidget";
 import { MarketTrendWidget } from "@/components/dashboard/MarketTrendWidget";
 import { MarketNewsWidget } from "@/components/dashboard/MarketNewsWidget";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Scrollable } from "@/components/ui/Scrollable";
-import { Skeleton } from "@/components/ui/skeleton";
-import { DisplayCurrencySelector } from "@/components/ui/DisplayCurrencySelector";
-import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
-import { useDebounce } from "@/hooks/useDebounce";
+import { ScopeBar } from "@/components/dashboard/ScopeBar";
 import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
-import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useDashboardCountryStore } from "@/stores/dashboardCountryStore";
-
-type SortKey = "random" | "recent" | "gainers" | "losers" | "volatile" | "trending";
-
-const PAGE_LIMIT = 200;
-
-/** Denser product grid — roughly 2× columns vs the prior layout. */
-const PRODUCT_GRID_CLASS =
-  "grid grid-cols-4 gap-1.5 sm:grid-cols-6 sm:gap-2 lg:grid-cols-6 xl:grid-cols-8";
-
-/** Sort keys backed by the /markets/overview endpoint. "random" maps to "recent". */
-const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string }> = [
-  { key: "random", labelKey: "market.sort.random" },
-  { key: "recent", labelKey: "dashboard.market.recentlyUpdated" },
-  { key: "gainers", labelKey: "dashboard.market.topGainers" },
-  { key: "losers", labelKey: "dashboard.market.topLosers" },
-  { key: "volatile", labelKey: "dashboard.market.mostVolatile" },
-  { key: "trending", labelKey: "dashboard.market.trendingNow" },
-];
-
-function toBackendSort(sort: SortKey): string {
-  return sort === "random" ? "recent" : sort;
-}
-
-function formatPercent(value?: number | null): string {
-  if (value == null) {
-    return "—";
-  }
-  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
-}
-
-/** Stable pseudo-random rank for a listing id, seeded once per session. */
-function seededRank(id: string, seed: number): number {
-  let hash = seed >>> 0;
-  for (let index = 0; index < id.length; index += 1) {
-    hash = Math.imul(hash ^ id.charCodeAt(index), 0x01000193) >>> 0;
-  }
-  return hash;
-}
 
 function KpiCard({
   label,
@@ -125,184 +66,15 @@ function KpiCard({
   );
 }
 
-function FilterSection({
-  title,
-  defaultOpen = true,
-  children,
-}: {
-  title: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <Collapsible defaultOpen={defaultOpen} className="border-b border-border pb-3">
-      <CollapsibleTrigger className="label-mono group flex w-full items-center justify-between py-2 !text-[var(--foreground)]">
-        {title}
-        <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-2 pt-1">{children}</CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function ProductImage({ item }: { item: MarketsOverviewItem }) {
-  if (item.image_url) {
-    return (
-      <img
-        src={item.image_url}
-        alt={item.title ?? ""}
-        loading="lazy"
-        className="h-full w-full object-contain"
-      />
-    );
-  }
-  return (
-    <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-muted-foreground">
-      {(item.title ?? "?").slice(0, 1).toUpperCase()}
-    </div>
-  );
-}
-
-function ProductCard({
-  item,
-}: {
-  item: MarketsOverviewItem;
-}) {
-  const { t } = useTranslation();
-  const formatMarketplaceLabel = useMarketplaceLabelFormatter();
-  const marketplaceLabel = formatMarketplaceLabel({
-    name: item.marketplace_name,
-    domain: item.marketplace_domain,
-    countryCode: item.country_code,
-  });
-  const externalHref = item.url || undefined;
-  const changeValue = item.price_change_pct ?? null;
-
-  const imageContent = (
-    <div className="aspect-square w-full overflow-hidden rounded-lg bg-[var(--background-elevated)]">
-      <ProductImage item={item} />
-    </div>
-  );
-  const titleContent = (
-    <p className="line-clamp-2 min-h-[2rem] text-xs font-medium leading-snug text-foreground">
-      {item.title ?? t("market.overview.untitled")}
-    </p>
-  );
-
-  return (
-    <article className="surface-base is-interactive flex flex-col gap-1.5 rounded-lg p-2">
-      {externalHref ? (
-        <a
-          href={externalHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="space-y-1.5"
-          aria-label={t("market.openProduct")}
-        >
-          {imageContent}
-          {titleContent}
-        </a>
-      ) : (
-        <div className="space-y-1.5">
-          {imageContent}
-          {titleContent}
-        </div>
-      )}
-
-      <div className="mt-auto space-y-1">
-        <PriceDisplay
-          className="text-sm font-bold text-foreground"
-          localAmount={item.price}
-          localCurrency={item.currency}
-          displayAmount={item.display_price}
-          displayCurrency={item.display_currency}
-          conversionAvailable={item.conversion_available}
-        />
-        <div className="flex items-center justify-between gap-2">
-          <Badge variant="outline" className="max-w-[60%] truncate text-2xs">
-            {marketplaceLabel || t("dashboard.market.marketplace")}
-          </Badge>
-          {changeValue != null && (
-            <span
-              className={cn(
-                "text-xs font-medium",
-                changeValue > 0 && "text-[var(--color-price-up)]",
-                changeValue < 0 && "text-[var(--color-price-down)]",
-              )}
-            >
-              {formatPercent(changeValue)}
-            </span>
-          )}
-        </div>
-        {externalHref && (
-          <div className="flex items-center gap-1 pt-0.5">
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" asChild>
-              <a
-                href={externalHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t("market.overview.details")}
-              >
-                <ExternalLink className="size-3.5" />
-              </a>
-            </Button>
-          </div>
-        )}
-      </div>
-    </article>
-  );
-}
-
 export function MarketsOverviewSection() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "en";
-  const formatMarketplaceLabel = useMarketplaceLabelFormatter();
   const { apiParam: displayCurrency } = useDisplayCurrency();
 
-  const [searchRaw, setSearchRaw] = useState("");
-  const [marketplaceSearch, setMarketplaceSearch] = useState("");
   const selectedCountry = useDashboardCountryStore((state) => state.selectedCountry);
   const setCountryOptions = useDashboardCountryStore((state) => state.setCountryOptions);
   const setOptionsLoading = useDashboardCountryStore((state) => state.setOptionsLoading);
-  const [selectedMarketplaces, setSelectedMarketplaces] = useState<string[]>([]);
-  const [priceMin, setPriceMin] = useState("");
-  const [priceMax, setPriceMax] = useState("");
-  const [historyOnly, setHistoryOnly] = useState(false);
-  const [sort, setSort] = useState<SortKey>("random");
-  const [filtersOpenMobile, setFiltersOpenMobile] = useState(false);
-  const debouncedSearch = useDebounce(searchRaw, 400);
 
-  // Random order seed: stable for the session so cards don't reshuffle on re-render.
-  const shuffleSeed = useRef<number>(Math.floor(Math.random() * 0x7fffffff) + 1);
-
-  const overviewParams = useMemo(
-    () => ({
-      sort: toBackendSort(sort),
-      limit: PAGE_LIMIT,
-      offset: 0,
-      search: debouncedSearch.length >= 2 ? debouncedSearch : undefined,
-      country_code: selectedCountry ?? undefined,
-      display_currency: displayCurrency,
-    }),
-    [sort, debouncedSearch, selectedCountry, displayCurrency],
-  );
-
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: marketsQueryKeys.overview(overviewParams),
-    queryFn: () => marketsApi.getOverview(overviewParams).then((response) => response.data),
-    staleTime: 30_000,
-    placeholderData: keepPreviousData,
-  });
-  const {
-    data: marketplaceStats,
-    isLoading: mpStatsLoading,
-    isError: mpStatsError,
-    refetch: refetchMpStats,
-  } = useQuery({
-    queryKey: marketsQueryKeys.poolMarketplaceStats(),
-    queryFn: () => marketsApi.getPoolMarketplaceStats().then((response) => response.data),
-    staleTime: 60_000,
-  });
   const {
     data: poolStats,
     isError: poolStatsError,
@@ -313,31 +85,12 @@ export function MarketsOverviewSection() {
     staleTime: 60_000,
   });
 
-  const rawItems = useMemo(() => data?.items ?? [], [data?.items]);
-
-  const scopedMarketplaceId = useMemo((): string | undefined => {
-    if (selectedMarketplaces.length !== 1) {
-      return undefined;
-    }
-    const domain = selectedMarketplaces[0];
-    const item = rawItems.find((candidate) => candidate.marketplace_domain === domain);
-    return item?.marketplace_id ?? undefined;
-  }, [selectedMarketplaces, rawItems]);
-
-  const countryRollupParams = useMemo(
-    () => ({
-      marketplace_id: scopedMarketplaceId,
-    }),
-    [scopedMarketplaceId],
-  );
-
   const {
     data: countryRollup,
     isLoading: countryRollupLoading,
   } = useQuery({
-    queryKey: marketsQueryKeys.geoCoverage(countryRollupParams),
-    queryFn: () =>
-      marketsApi.getGeoCoverage(countryRollupParams).then((response) => response.data),
+    queryKey: marketsQueryKeys.geoCoverage({}),
+    queryFn: () => marketsApi.getGeoCoverage({}).then((response) => response.data),
     staleTime: 30_000,
   });
 
@@ -361,16 +114,9 @@ export function MarketsOverviewSection() {
     setOptionsLoading(countryRollupLoading);
   }, [countryRollupLoading, setOptionsLoading]);
 
-  const kpiScopeParams = useMemo((): Pick<MovementsQueryParams, "country_code" | "marketplace_id"> => {
-    const params: Pick<MovementsQueryParams, "country_code" | "marketplace_id"> = {};
-    if (selectedCountry) {
-      params.country_code = selectedCountry;
-    }
-    if (scopedMarketplaceId) {
-      params.marketplace_id = scopedMarketplaceId;
-    }
-    return params;
-  }, [selectedCountry, scopedMarketplaceId]);
+  const kpiScopeParams = useMemo((): Pick<MovementsQueryParams, "country_code"> => {
+    return selectedCountry ? { country_code: selectedCountry } : {};
+  }, [selectedCountry]);
 
   const movementsFilterParams = useMemo(
     (): MovementsQueryParams => ({
@@ -431,58 +177,15 @@ export function MarketsOverviewSection() {
   const movementsKpisErrored =
     moversKpiError || moversSummaryError || moversCoverageError;
 
-  const orderedItems = useMemo(() => {
-    if (sort !== "random") {
-      return rawItems;
-    }
-    const seed = shuffleSeed.current;
-    return [...rawItems].sort(
-      (a, b) => seededRank(a.id, seed) - seededRank(b.id, seed),
-    );
-  }, [rawItems, sort]);
-
-  const filteredItems = useMemo(() => {
-    const min = priceMin.trim() === "" ? null : Number(priceMin);
-    const max = priceMax.trim() === "" ? null : Number(priceMax);
-    return orderedItems.filter((item) => {
-      const inMarketplace =
-        selectedMarketplaces.length === 0 ||
-        selectedMarketplaces.includes(item.marketplace_domain ?? "");
-      if (!inMarketplace) {
-        return false;
-      }
-      if (historyOnly && (item.recent_prices?.length ?? 0) < 2) {
-        return false;
-      }
-      const price = item.price;
-      if (min != null && !Number.isNaN(min) && (price == null || price < min)) {
-        return false;
-      }
-      if (max != null && !Number.isNaN(max) && (price == null || price > max)) {
-        return false;
-      }
-      return true;
-    });
-  }, [orderedItems, selectedMarketplaces, historyOnly, priceMin, priceMax]);
-
   const updated24hValue = useMemo(() => {
-    if (dashboardKpiLoading) {
-      return t("common.dash");
-    }
-    if (dashboardKpiError) {
-      return t("common.dash");
-    }
-    if (dashboardKpi == null) {
+    if (dashboardKpiLoading || dashboardKpiError || dashboardKpi == null) {
       return t("common.dash");
     }
     return String(dashboardKpi.updated_24h);
   }, [dashboardKpi, dashboardKpiError, dashboardKpiLoading, t]);
 
   const lastUpdateValue = useMemo(() => {
-    if (dashboardKpiLoading) {
-      return t("common.dash");
-    }
-    if (dashboardKpiError) {
+    if (dashboardKpiLoading || dashboardKpiError) {
       return t("common.dash");
     }
     if (!dashboardKpi?.last_update) {
@@ -499,10 +202,7 @@ export function MarketsOverviewSection() {
   }, [dashboardKpi, dashboardKpiError, dashboardKpiLoading, locale]);
 
   const changedMore5Value = useMemo(() => {
-    if (movementsKpisPending) {
-      return t("common.dash");
-    }
-    if (movementsKpisErrored) {
+    if (movementsKpisPending || movementsKpisErrored) {
       return t("common.dash");
     }
     if (!movementsDataReady) {
@@ -512,10 +212,7 @@ export function MarketsOverviewSection() {
   }, [movementsKpisPending, movementsKpisErrored, movementsDataReady, moversKpi, t]);
 
   const avgVolatilityValue = useMemo(() => {
-    if (movementsKpisPending) {
-      return t("common.dash");
-    }
-    if (movementsKpisErrored) {
+    if (movementsKpisPending || movementsKpisErrored) {
       return t("common.dash");
     }
     if (!movementsDataReady) {
@@ -532,186 +229,23 @@ export function MarketsOverviewSection() {
   }, [movementsKpisPending, movementsKpisErrored, movementsDataReady, moversSummary, t]);
 
   const accumulatingHint = t("market.overview.kpi.accumulatingDataHint");
+  const movementsPendingState =
+    !movementsDataReady && !movementsKpisPending && !movementsKpisErrored;
 
   const totalPoolKpi = poolStatsError
     ? null
     : poolStats?.total_products ?? null;
 
-  const localCurrencyUnavailable = useMemo(() => {
-    if (selectedMarketplaces.length !== 1) {
-      return false;
-    }
-    const target = selectedMarketplaces[0];
-    const item = rawItems.find(
-      (candidate) => candidate.marketplace_domain === target,
-    );
-    if (!item) {
-      return false;
-    }
-    if (item.local_currency_unavailable === true) {
-      return true;
-    }
-    return item.local_currency_resolution?.source === "unknown";
-  }, [selectedMarketplaces, rawItems]);
-
-  const visibleMarketplaces = useMemo(() => {
-    const stats = marketplaceStats ?? [];
-    const query = marketplaceSearch.trim().toLowerCase();
-    if (!query) {
-      return stats;
-    }
-    return stats.filter((item) => {
-      const label = formatMarketplaceLabel({
-        name: item.marketplace_name,
-        domain: item.marketplace_domain,
-        countryCode: item.country_code,
-      });
-      return `${label} ${item.marketplace_domain ?? ""}`.toLowerCase().includes(query);
-    });
-  }, [marketplaceStats, marketplaceSearch, formatMarketplaceLabel]);
-
-  const hasActiveFilters =
-    selectedMarketplaces.length > 0 ||
-    priceMin !== "" ||
-    priceMax !== "" ||
-    historyOnly ||
-    searchRaw !== "";
-
-  const toggleMarketplace = (domain: string) => {
-    setSelectedMarketplaces((prev) =>
-      prev.includes(domain) ? prev.filter((value) => value !== domain) : [...prev, domain],
-    );
+  const movementsRetry = () => {
+    void refetchMoversKpi();
+    void refetchMoversSummary();
+    void refetchMoversCoverage();
   };
-
-  const clearFilters = () => {
-    setSelectedMarketplaces([]);
-    setPriceMin("");
-    setPriceMax("");
-    setHistoryOnly(false);
-    setSearchRaw("");
-    setMarketplaceSearch("");
-  };
-
-  const filterPanel = (
-    <div className="space-y-3">
-      <FilterSection title={t("displayCurrency.label")}>
-        <DisplayCurrencySelector
-          compact={false}
-          className="w-full"
-          localUnavailable={localCurrencyUnavailable}
-        />
-      </FilterSection>
-
-      <FilterSection title={t("market.filters.marketplaces")}>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={marketplaceSearch}
-            onChange={(event) => setMarketplaceSearch(event.target.value)}
-            placeholder={t("common.search")}
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
-        <Scrollable axis="y" className="max-h-56 space-y-1 overflow-y-auto pr-1">
-          {mpStatsError ? (
-            <button
-              type="button"
-              onClick={() => refetchMpStats()}
-              className="flex items-center gap-1.5 px-1 py-1 text-2xs text-destructive transition-colors hover:text-destructive/80"
-            >
-              <AlertTriangle className="size-3.5" />
-              {t("common.error")} · {t("common.refresh")}
-            </button>
-          ) : mpStatsLoading ? (
-            <div className="space-y-2 px-1 py-1" aria-hidden data-testid="marketplace-filters-loading">
-              {Array.from({ length: 3 }, (_, index) => (
-                <Skeleton key={index} className="h-6 w-full" />
-              ))}
-            </div>
-          ) : visibleMarketplaces.length === 0 ? (
-            <p className="px-1 py-2 text-center text-2xs text-muted-foreground">
-              {(marketplaceStats ?? []).length === 0
-                ? t("market.filters.noMarketplaces")
-                : t("products.noResults")}
-            </p>
-          ) : (
-            visibleMarketplaces.map((item) => {
-              const checked = selectedMarketplaces.includes(item.marketplace_domain);
-              return (
-                <label
-                  key={item.marketplace_domain}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-xs hover:bg-[var(--glass-bg-hover)]"
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() => toggleMarketplace(item.marketplace_domain)}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-foreground">
-                    {formatMarketplaceLabel({
-                      name: item.marketplace_name,
-                      domain: item.marketplace_domain,
-                      countryCode: item.country_code,
-                    }) || item.marketplace_domain}
-                  </span>
-                  <span className="shrink-0 text-muted-foreground">{item.product_count}</span>
-                </label>
-              );
-            })
-          )}
-        </Scrollable>
-      </FilterSection>
-
-      <FilterSection title={t("market.filters.price")}>
-        <div className="flex items-center gap-2">
-          <Input
-            type="number"
-            inputMode="decimal"
-            value={priceMin}
-            onChange={(event) => setPriceMin(event.target.value)}
-            placeholder={t("market.filters.from")}
-            className="h-8 text-xs"
-          />
-          <span className="text-muted-foreground">—</span>
-          <Input
-            type="number"
-            inputMode="decimal"
-            value={priceMax}
-            onChange={(event) => setPriceMax(event.target.value)}
-            placeholder={t("market.filters.to")}
-            className="h-8 text-xs"
-          />
-        </div>
-      </FilterSection>
-
-      <FilterSection title={t("market.filters.options")}>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-          <Checkbox
-            checked={historyOnly}
-            onCheckedChange={(value) => setHistoryOnly(value === true)}
-          />
-          {t("market.overview.historyOnly")}
-        </label>
-      </FilterSection>
-
-      {hasActiveFilters && (
-        <Button variant="outline" size="sm" className="w-full" onClick={clearFilters}>
-          {t("products.clearFilters")}
-        </Button>
-      )}
-    </div>
-  );
-
-  if (isError) {
-    return (
-      <ErrorState
-        title="market.overview.loadFailed"
-        retry={{ label: "common.refresh", onClick: () => refetch() }}
-      />
-    );
-  }
 
   return (
     <section className="space-y-3">
+      <ScopeBar />
+
       <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           label={t("market.overview.kpi.totalPool")}
@@ -739,36 +273,22 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.changedMore5")}
           value={changedMore5Value}
-          pending={!movementsDataReady && !movementsKpisPending && !movementsKpisErrored}
-          title={!movementsDataReady && !movementsKpisPending ? accumulatingHint : undefined}
+          pending={movementsPendingState}
+          title={movementsPendingState ? accumulatingHint : undefined}
           error={
             movementsKpisErrored
-              ? {
-                  onRetry: () => {
-                    void refetchMoversKpi();
-                    void refetchMoversSummary();
-                    void refetchMoversCoverage();
-                  },
-                  title: t("common.error"),
-                }
+              ? { onRetry: movementsRetry, title: t("common.error") }
               : undefined
           }
         />
         <KpiCard
           label={t("market.overview.kpi.avgVolatility")}
           value={avgVolatilityValue}
-          pending={!movementsDataReady && !movementsKpisPending && !movementsKpisErrored}
-          title={!movementsDataReady && !movementsKpisPending ? accumulatingHint : undefined}
+          pending={movementsPendingState}
+          title={movementsPendingState ? accumulatingHint : undefined}
           error={
             movementsKpisErrored
-              ? {
-                  onRetry: () => {
-                    void refetchMoversKpi();
-                    void refetchMoversSummary();
-                    void refetchMoversCoverage();
-                  },
-                  title: t("common.error"),
-                }
+              ? { onRetry: movementsRetry, title: t("common.error") }
               : undefined
           }
         />
@@ -789,118 +309,25 @@ export function MarketsOverviewSection() {
         />
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.18fr)] lg:items-stretch">
-        <div className="flex min-w-0 flex-col gap-3">
+      <div className="grid gap-3 lg:grid-cols-12 lg:items-stretch">
+        <div className="min-w-0 lg:col-span-4">
           <MarketMoversWidget
             movementsDataReady={movementsDataReady}
             displayCurrency={displayCurrency}
             countryCode={selectedCountry}
           />
-          <MarketCoverageWidget
-            countryCode={selectedCountry}
-            marketplaceId={scopedMarketplaceId}
-          />
-          <MarketTrendWidget
-            countryCode={selectedCountry}
-            marketplaceId={scopedMarketplaceId}
-          />
         </div>
-        <div className="min-h-0 min-w-0 lg:flex lg:flex-col">
+        <div className="min-w-0 lg:col-span-8">
+          <MarketTrendWidget countryCode={selectedCountry} chartHeight={300} />
+        </div>
+        <div className="min-w-0 lg:col-span-4">
+          <MarketCoverageWidget countryCode={selectedCountry} />
+        </div>
+        <div className="min-w-0 lg:col-span-4">
+          <AlertsStreamWidget />
+        </div>
+        <div className="min-w-0 lg:col-span-4">
           <MarketNewsWidget countryCode={selectedCountry} />
-        </div>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-[260px_1fr] lg:items-stretch">
-        <aside className="hidden min-h-0 lg:block">
-          <div className="surface-base surface-liquid flex h-full flex-col rounded-xl p-3.5">
-            <div className="relative mb-3">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchRaw}
-                onChange={(event) => setSearchRaw(event.target.value)}
-                placeholder={t("market.overview.searchPlaceholder")}
-                className="pl-9"
-              />
-            </div>
-            {filterPanel}
-          </div>
-        </aside>
-
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="surface-base surface-liquid flex min-h-0 flex-col rounded-xl p-3.5 lg:h-full lg:overflow-hidden">
-            <div className="shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="label-mono !text-[var(--foreground)]">
-                  {t("market.found", { count: filteredItems.length })}
-                </h3>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="lg:hidden"
-                    onClick={() => setFiltersOpenMobile((value) => !value)}
-                  >
-                    <SlidersHorizontal className="size-4" />
-                    {t("market.filters.title")}
-                  </Button>
-                  <span className="hidden text-xs text-muted-foreground sm:inline">
-                    {t("market.sort.label")}
-                  </span>
-                  <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
-                    <SelectTrigger className="h-8 w-[170px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      {SORT_OPTIONS.map((option) => (
-                        <SelectItem key={option.key} value={option.key}>
-                          {t(option.labelKey)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {filtersOpenMobile && (
-                <div className="mt-3 lg:hidden">
-                  <div className="relative mb-3">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      value={searchRaw}
-                      onChange={(event) => setSearchRaw(event.target.value)}
-                      placeholder={t("market.overview.searchPlaceholder")}
-                      className="pl-9"
-                    />
-                  </div>
-                  {filterPanel}
-                </div>
-              )}
-            </div>
-
-            <div className="catalog-scroll-hidden mt-3 min-h-0 flex-1 overflow-y-auto lg:mt-3">
-              {isLoading ? (
-                <div className={PRODUCT_GRID_CLASS}>
-                  {Array.from({ length: 16 }).map((_, index) => (
-                    <Skeleton key={index} className="aspect-[3/4] w-full rounded-lg" />
-                  ))}
-                </div>
-              ) : filteredItems.length === 0 ? (
-                <div className="flex min-h-[14rem] items-center justify-center py-6 lg:min-h-full">
-                  <EmptyState
-                    title="dashboard.market.noData"
-                    description="market.overview.noDataDescription"
-                    icon={AlertTriangle}
-                  />
-                </div>
-              ) : (
-                <div className={PRODUCT_GRID_CLASS}>
-                  {filteredItems.map((item) => (
-                    <ProductCard key={item.id} item={item} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
     </section>

@@ -5,7 +5,6 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Header } from "./Header";
-import { useDashboardCountryStore } from "@/stores/dashboardCountryStore";
 
 vi.mock("next-themes", () => ({
   useTheme: () => ({
@@ -27,56 +26,29 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("./HeaderTicker", () => ({
-  HeaderTicker: ({ className }: { className?: string }) => (
-    <div data-testid="header-ticker" className={className} />
-  ),
-}));
-
-describe("Header dashboard country selector", () => {
+describe("Header", () => {
   afterEach(() => {
     cleanup();
-    useDashboardCountryStore.setState({
-      selectedCountry: null,
-      countryOptions: [],
-      optionsLoading: false,
-    });
   });
 
-  it("renders country selector on the dashboard route", () => {
-    useDashboardCountryStore.setState({
-      countryOptions: [{ code: "LV", label: "Latvia" }],
-      optionsLoading: false,
-    });
-
+  it("renders theme toggle and notifications controls", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>
         <Header />
       </MemoryRouter>,
     );
 
-    expect(screen.getByLabelText("markets.countrySelector.placeholder")).toBeInTheDocument();
+    expect(screen.getByLabelText("common.toggleTheme")).toBeInTheDocument();
+    expect(screen.getByLabelText("common.notifications")).toBeInTheDocument();
   });
 
-  it("hides country selector outside the dashboard route", () => {
-    render(
-      <MemoryRouter initialEntries={["/products"]}>
-        <Header />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByLabelText("markets.countrySelector.placeholder")).not.toBeInTheDocument();
-  });
-
-  it("keeps ticker full width without artificial max-width cap", () => {
+  it("does not render the removed market ticker", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>
         <Header />
       </MemoryRouter>,
     );
 
-    const tickerClass = screen.getByTestId("header-ticker").className;
-    expect(tickerClass).not.toMatch(/max-w-/);
-    expect(tickerClass).toMatch(/flex-1/);
+    expect(screen.queryByTestId("header-ticker")).not.toBeInTheDocument();
   });
 });

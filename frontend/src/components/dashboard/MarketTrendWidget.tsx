@@ -106,11 +106,14 @@ function TrendChartTooltip({
 export interface MarketTrendWidgetProps {
   countryCode: string | null;
   marketplaceId?: string;
+  /** Chart plot height in px; the dashboard hero uses a taller plot. */
+  chartHeight?: number;
 }
 
 export function MarketTrendWidget({
   countryCode,
   marketplaceId,
+  chartHeight = 200,
 }: MarketTrendWidgetProps) {
   const { t, i18n } = useTranslation();
   const [period, setPeriod] = useState<TrendPeriod>("30d");
@@ -195,8 +198,8 @@ export function MarketTrendWidget({
           className="py-8"
         />
       ) : showChart ? (
-        <div className="min-h-[200px] min-w-0 w-full" data-testid="trend-chart">
-          <ResponsiveContainer width="100%" height={200}>
+        <div className="min-w-0 w-full" style={{ minHeight: chartHeight }} data-testid="trend-chart">
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <AreaChart data={chartRows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
               <XAxis
