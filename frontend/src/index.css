@@ -55,6 +55,17 @@
   --glow-red: rgba(226, 141, 141, 0.18);
   --glow-amber: rgba(214, 189, 127, 0.18);
 
+  /* === Ops status colors (jobs, alerts, health) === */
+  --status-ok: #6fc7a0;
+  --status-warn: #d6bd7f;
+  --status-error: #e28d8d;
+  --status-ok-bg: rgba(111, 199, 160, 0.14);
+  --status-warn-bg: rgba(214, 189, 127, 0.16);
+  --status-error-bg: rgba(226, 141, 141, 0.14);
+  --status-ok-border: rgba(111, 199, 160, 0.4);
+  --status-warn-border: rgba(214, 189, 127, 0.45);
+  --status-error-border: rgba(226, 141, 141, 0.4);
+
   /* Semantic badge/background variants */
   --color-price-down-bg: rgba(111, 199, 160, 0.12);
   --color-price-down-border: rgba(111, 199, 160, 0.28);
@@ -211,6 +222,16 @@
   --glow-green: rgba(26, 143, 104, 0.12);
   --glow-red: rgba(195, 71, 71, 0.12);
   --glow-amber: rgba(160, 122, 30, 0.12);
+
+  --status-ok: #1a8f68;
+  --status-warn: #a07a1e;
+  --status-error: #c34747;
+  --status-ok-bg: rgba(26, 143, 104, 0.12);
+  --status-warn-bg: rgba(160, 122, 30, 0.14);
+  --status-error-bg: rgba(195, 71, 71, 0.12);
+  --status-ok-border: rgba(26, 143, 104, 0.35);
+  --status-warn-border: rgba(160, 122, 30, 0.4);
+  --status-error-border: rgba(195, 71, 71, 0.35);
 
   --color-price-down-bg: rgba(26, 143, 104, 0.1);
   --color-price-down-border: rgba(26, 143, 104, 0.24);

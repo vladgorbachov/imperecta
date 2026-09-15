@@ -121,32 +121,32 @@ function statusBadgeVariant(status: ParsingPipelineJobStatus) {
 
 function statusBadgeClassName(status: ParsingPipelineJobStatus): string {
   if (status === "completed") {
-    return "border-green-500/50 bg-green-500/20 text-[var(--foreground)]";
+    return "border-[var(--status-ok-border)] bg-[var(--status-ok-bg)] text-[var(--foreground)]";
   }
   if (status === "running") {
-    return "border-amber-500/50 bg-amber-500/25 text-[var(--foreground)]";
+    return "border-[var(--status-warn-border)] bg-[var(--status-warn-bg)] text-[var(--foreground)]";
   }
   if (status === "partial") {
-    return "border-amber-500/50 bg-amber-500/25 text-[var(--foreground)]";
+    return "border-[var(--status-warn-border)] bg-[var(--status-warn-bg)] text-[var(--foreground)]";
   }
   if (status === "cancelled") {
     return "border-border bg-muted/60 text-[var(--foreground)]";
   }
   if (status === "failed") {
-    return "border-red-500/50 bg-red-500/20 text-[var(--foreground)]";
+    return "border-[var(--status-error-border)] bg-[var(--status-error-bg)] text-[var(--foreground)]";
   }
   return "border-border bg-muted/60 text-[var(--foreground)]";
 }
 
 function collectionStageClassName(status: CollectionStageStatus): string {
   if (status === "completed") {
-    return "border-green-500/50 bg-green-500/20 text-[var(--foreground)]";
+    return "border-[var(--status-ok-border)] bg-[var(--status-ok-bg)] text-[var(--foreground)]";
   }
   if (status === "failed") {
-    return "border-red-500/50 bg-red-500/20 text-[var(--foreground)]";
+    return "border-[var(--status-error-border)] bg-[var(--status-error-bg)] text-[var(--foreground)]";
   }
   if (status === "in_progress") {
-    return "border-amber-500/50 bg-amber-500/25 text-[var(--foreground)]";
+    return "border-[var(--status-warn-border)] bg-[var(--status-warn-bg)] text-[var(--foreground)]";
   }
   return "border-border bg-muted/60 text-[var(--foreground)]";
 }
@@ -684,7 +684,7 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                   enabled={monitorStatus?.status === "running"}
                 />
                 {activityStale ? (
-                  <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  <div className="flex items-center gap-2 rounded-md border border-[var(--status-warn-border)] bg-[var(--status-warn-bg)] p-3 text-sm text-[var(--status-warn)]">
                     <AlertTriangle className="size-4 shrink-0" />
                     {t("admin.dataCollection.staleActivity", {
                       at: formatDateTime(lastActivityAt ?? null, locale, dash),
@@ -763,11 +763,11 @@ export function DataCollectionTab({ onOpenRunDetails }: DataCollectionTabProps) 
                       </div>
                     ) : null}
                     {discoveryErrors.length > 0 ? (
-                      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-                        <p className="mb-2 font-medium text-amber-800 dark:text-amber-200">
+                      <div className="rounded-md border border-[var(--status-warn-border)] bg-[var(--status-warn-bg)] p-3 text-sm">
+                        <p className="mb-2 font-medium text-[var(--status-warn)]">
                           {t("admin.dataCollection.discoveryErrors")}
                         </p>
-                        <ul className="list-inside list-disc space-y-1 text-amber-900/90 dark:text-amber-100/90">
+                        <ul className="list-inside list-disc space-y-1 text-[var(--foreground-muted)]">
                           {discoveryErrors.slice(0, 10).map((err) => (
                             <li key={err} className="break-all">
                               {err}
