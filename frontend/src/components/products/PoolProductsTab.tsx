@@ -9,10 +9,10 @@
  * - Each product row: image, title (clickable), marketplace badge, price, price change
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Search } from "lucide-react";
+import { Bookmark, Download, Rows2, Rows4, Search, Trash2 } from "lucide-react";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePoolProducts, usePoolCategories } from "@/hooks/usePoolProducts";
@@ -37,6 +37,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { ProductPeek } from "@/components/products/ProductPeek";
@@ -56,6 +69,74 @@ const SORT_OPTIONS = [
   { value: "losers", labelKey: "products.sort.losers" },
   { value: "volatile", labelKey: "products.sort.volatile" },
 ] as const;
+
+/** Saved view: a named filter+sort snapshot, persisted per browser. */
+interface SavedView {
+  name: string;
+  search: string;
+  marketplaceId: string;
+  sort: string;
+}
+
+const VIEWS_STORAGE_KEY = "imperecta_products_views";
+const DENSITY_STORAGE_KEY = "imperecta_products_density";
+
+function loadSavedViews(): SavedView[] {
+  try {
+    const raw = localStorage.getItem(VIEWS_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as SavedView[]) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedViews(views: SavedView[]) {
+  try {
+    localStorage.setItem(VIEWS_STORAGE_KEY, JSON.stringify(views));
+  } catch {
+    // storage unavailable — views stay session-only
+  }
+}
+
+function loadDensity(): "comfortable" | "compact" {
+  try {
+    return localStorage.getItem(DENSITY_STORAGE_KEY) === "compact"
+      ? "compact"
+      : "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
+
+function exportCsv(items: PoolProductItem[]) {
+  const header = ["title", "marketplace", "country", "price", "currency", "change_24h_pct", "url"];
+  const escape = (value: unknown) => {
+    const text = value == null ? "" : String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const rows = items.map((item) =>
+    [
+      item.title ?? "",
+      item.marketplace_name ?? item.marketplace_domain ?? "",
+      item.country_code ?? "",
+      item.price ?? "",
+      item.currency,
+      item.price_change_pct ?? "",
+      item.url,
+    ]
+      .map(escape)
+      .join(","),
+  );
+  const csv = [header.join(","), ...rows].join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `imperecta-products-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 function ProductThumbnail({ item }: { item: PoolProductItem }) {
   const letter = (item.title || "?")[0].toUpperCase();
@@ -93,6 +174,47 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
   const [pageSize, setPageSize] = useState(20);
   const [peekItem, setPeekItem] = useState<PoolProductItem | null>(null);
   const [peekOpen, setPeekOpen] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>(() => loadSavedViews());
+  const [density, setDensity] = useState<"comfortable" | "compact">(() => loadDensity());
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DENSITY_STORAGE_KEY, density);
+    } catch {
+      // storage unavailable
+    }
+  }, [density]);
+
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [viewName, setViewName] = useState("");
+
+  const saveCurrentView = () => {
+    const name = viewName.trim();
+    if (!name) {
+      return;
+    }
+    const next = [
+      ...savedViews.filter((view) => view.name !== name),
+      { name, search: searchRaw, marketplaceId, sort },
+    ];
+    setSavedViews(next);
+    persistSavedViews(next);
+    setViewName("");
+    setSaveViewOpen(false);
+  };
+
+  const applyView = (view: SavedView) => {
+    setSearchRaw(view.search);
+    setMarketplaceId(view.marketplaceId);
+    setSort(view.sort);
+    setPage(1);
+  };
+
+  const deleteView = (name: string) => {
+    const next = savedViews.filter((view) => view.name !== name);
+    setSavedViews(next);
+    persistSavedViews(next);
+  };
 
   const search = useDebounce(searchRaw, 500);
   const offset = (page - 1) * pageSize;
@@ -173,7 +295,102 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
             ))}
           </SelectContent>
         </Select>
+
+        <div className="ms-auto flex items-center gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Bookmark className="me-1.5 size-3.5" />
+                {t("products.views.label")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="surface-overlay w-56">
+              {savedViews.length === 0 ? (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                  {t("products.views.empty")}
+                </p>
+              ) : (
+                savedViews.map((view) => (
+                  <DropdownMenuItem
+                    key={view.name}
+                    className="group flex items-center justify-between gap-2 focus:bg-[var(--glass-bg-hover)]"
+                    onClick={() => applyView(view)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{view.name}</span>
+                    <button
+                      type="button"
+                      aria-label={t("common.delete")}
+                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-[var(--status-error)] group-hover:opacity-100"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteView(view.name);
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </DropdownMenuItem>
+                ))
+              )}
+              <DropdownMenuSeparator className="bg-[var(--glass-border)]" />
+              <DropdownMenuItem
+                className="focus:bg-[var(--glass-bg-hover)]"
+                onClick={() => setSaveViewOpen(true)}
+              >
+                {t("products.views.saveCurrent")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={t("products.density.toggle")}
+            title={t("products.density.toggle")}
+            onClick={() =>
+              setDensity((value) => (value === "compact" ? "comfortable" : "compact"))
+            }
+          >
+            {density === "compact" ? (
+              <Rows2 className="size-3.5" />
+            ) : (
+              <Rows4 className="size-3.5" />
+            )}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={items.length === 0}
+            onClick={() => exportCsv(items)}
+            title={t("products.export.hint")}
+          >
+            <Download className="me-1.5 size-3.5" />
+            {t("products.export.label")}
+          </Button>
+        </div>
       </div>
+
+      <Dialog open={saveViewOpen} onOpenChange={setSaveViewOpen}>
+        <DialogContent className="surface-overlay sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t("products.views.saveCurrent")}</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={viewName}
+            onChange={(event) => setViewName(event.target.value)}
+            placeholder={t("products.views.namePrompt")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                saveCurrentView();
+              }
+            }}
+          />
+          <Button className="w-full" onClick={saveCurrentView} disabled={!viewName.trim()}>
+            {t("common.save")}
+          </Button>
+        </DialogContent>
+      </Dialog>
 
       {/* Table */}
       <div className="surface-base overflow-hidden rounded-xl">
@@ -217,7 +434,12 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
               axis="both"
               className="max-h-[55vh] overflow-auto scrollbar-none sm:max-h-[calc(100vh-20rem)]"
             >
-              <Table>
+              <Table
+                className={cn(
+                  density === "compact" &&
+                    "[&_td]:py-1.5 [&_th]:py-2 [&_td]:text-xs",
+                )}
+              >
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="w-14" />
