@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
+from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
     GlobalScrapeService,
     _payload_has_product_name_field,
     _should_replace_placeholder_name,
 )
-from app.modules.scraper.scraper_pool import PoolScrapeResult
 
 
 def test_should_replace_placeholder_name_branches():

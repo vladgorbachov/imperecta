@@ -12,7 +12,6 @@ import pytest
 
 from app.modules.alerts import engine
 from app.modules.alerts.engine import (
-    TriggerDecision,
     decide_availability_trigger,
     decide_price_trigger,
 )

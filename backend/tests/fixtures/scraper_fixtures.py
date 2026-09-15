@@ -104,7 +104,6 @@ def pg_session():
 
 
 def _ensure_currency(session, code: str = "USD") -> None:
-    from app.models.dimensions import DimCurrency
 
     if session.get(DimCurrency, code):
         return

@@ -19,7 +19,6 @@ from app.modules.scraper.extractors import (
     merge_and_finalize,
 )
 
-
 # Mirror of gate constant; the whole point of this strategy is to keep
 # currency_raw short. Hard-coded here so this test file is self-contained.
 _MAX_CURRENCY_RAW_LEN = 50

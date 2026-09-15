@@ -23,9 +23,9 @@ from app.modules.persist.retention_config import (
     RetentionTableConfig,
 )
 from app.modules.persist.writer import (
+    SUPPORTED_WRITE_OPERATIONS,
     PersistContext,
     PersistResult,
-    SUPPORTED_WRITE_OPERATIONS,
     write_sync,
 )
 

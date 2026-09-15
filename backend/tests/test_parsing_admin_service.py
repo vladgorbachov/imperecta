@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+
 from app.database import async_session_maker
 from app.models.app_tables import ScrapeJob
 from app.modules.admin.parsing_admin import ParsingAdminService

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from uuid import uuid4
 
-import pytest
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.app_tables import ScrapeJob

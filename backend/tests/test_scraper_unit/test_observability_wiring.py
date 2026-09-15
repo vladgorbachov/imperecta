@@ -16,7 +16,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.modules.discovery import orchestrator as disc
 from app.modules.scraper import tasks as scraper_tasks
 
 

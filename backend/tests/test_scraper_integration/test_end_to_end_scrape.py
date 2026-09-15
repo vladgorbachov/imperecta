@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import pytest
+from fixtures.scraper_fixtures import _pg_available, load_active_listings_from_db
 from sqlalchemy import func, select
 
 from app.models.app_tables import ScrapeLog
-from app.models.facts import FactListing, FactPrice
+from app.models.facts import FactPrice
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
-from fixtures.scraper_fixtures import _pg_available, load_active_listings_from_db
 
 
 @pytest.fixture(scope="module")
@@ -98,7 +98,6 @@ def test_idempotent_second_scrape_second_log(sample_listing_row: object):
 def test_fact_price_written_when_success_with_price_currency(sample_listing_row: object):
     """When scrape succeeds with title, price, currency, a FactPrice row may exist for today."""
     from app.database import sync_session_factory
-
     from app.models.dimensions import DimDate
 
     listing_id: UUID = sample_listing_row.id

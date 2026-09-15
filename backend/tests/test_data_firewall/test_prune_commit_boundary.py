@@ -9,7 +9,7 @@ import pytest
 
 from app.modules.data_firewall.firewall import FirewallOutcome
 from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache
-from app.modules.persist.writer import PersistContext, PersistResult
+from app.modules.persist.writer import PersistResult
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import GlobalScrapeService
 

@@ -22,9 +22,9 @@ from app.modules.persist.scrape_gate_fields import (
     build_product_update_fields,
 )
 from app.modules.persist.writer import (
+    SUPPORTED_WRITE_OPERATIONS,
     PersistContext,
     PersistResult,
-    SUPPORTED_WRITE_OPERATIONS,
     write_sync,
 )
 

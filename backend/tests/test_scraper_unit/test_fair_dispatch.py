@@ -16,10 +16,10 @@ from app.modules.scraper.pipeline.tick_orchestrator import (
     run_tick,
 )
 from tests.test_scraper_unit.test_tick_orchestrator import (
-    _StoreStub,
     _install_store,
     _make_job,
     _mock_db,
+    _StoreStub,
 )
 
 

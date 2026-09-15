@@ -3,14 +3,13 @@
 import pytest
 from bs4 import BeautifulSoup
 
+import app.modules.scraper.fetch_backends as fb
 from app.modules.scraper.extractors import (
     extract_auto_detect,
     extract_from_jsonld,
     extract_from_meta_tags,
     extract_product_links,
 )
-from app.modules.scraper.fetch_backends import ProxyProviderBackend
-import app.modules.scraper.fetch_backends as fb
 from app.modules.scraper.scraper_pool import ScraperPool
 
 _ECOMMERCE_CATEGORY_URL = (

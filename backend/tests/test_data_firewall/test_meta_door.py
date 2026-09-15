@@ -8,7 +8,11 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS, TABLE_LOCATORS, extract_locator
+from app.modules.data_firewall.contracts import (
+    FACT_TABLE_CONTRACTS,
+    TABLE_LOCATORS,
+    extract_locator,
+)
 from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.data_firewall.signing import reset_signing_settings_cache, sign, verify
 from app.modules.persist.meta_write import (

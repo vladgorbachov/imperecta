@@ -9,11 +9,11 @@ from uuid import uuid4
 
 import pytest
 
+from app.models.facts import FactPrice
 from app.modules.data_firewall.contracts import extract_locator
 from app.modules.data_firewall.firewall import (
     FORCED_NOT_A_PRODUCT,
     REJECT_CONTRACT_VIOLATION,
-    REJECT_NOT_A_PRODUCT_PAGE,
     evaluate_ecommerce,
     evaluate_market,
 )
@@ -25,7 +25,6 @@ from app.modules.data_firewall.signing import (
     verify,
 )
 from app.modules.persist.writer import PersistContext, build_fact_price_fields, write_sync
-from app.models.facts import FactPrice
 
 
 class _FakeResolver:

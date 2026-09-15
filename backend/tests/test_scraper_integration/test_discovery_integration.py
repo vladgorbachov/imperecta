@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from fixtures.scraper_fixtures import _pg_available
 from sqlalchemy import select
 
 from app.database import async_session_maker
 from app.models.dimensions import DimMarketplace
 from app.modules.discovery.orchestrator import DiscoveryOrchestrator
 from app.modules.scraper.scraper_pool import ListingScrapeResult, ScraperPool
-from fixtures.scraper_fixtures import _pg_available
 
 
 @pytest.mark.integration

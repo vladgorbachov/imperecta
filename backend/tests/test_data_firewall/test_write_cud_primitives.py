@@ -11,7 +11,6 @@ from app.modules.data_firewall.contracts import extract_locator
 from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache, sign
 from app.modules.persist.writer import (
     PersistContext,
-    SUPPORTED_WRITE_OPERATIONS,
     build_dim_product_fields,
     write_sync,
 )

@@ -24,7 +24,7 @@ def test_allocate_with_backlog_caps_phase1_reserves_phase2_headroom() -> None:
     headroom = time.monotonic() + 100.0
     before = time.monotonic()
     phase1, phase2 = budget_governor.allocate(headroom, has_backlog=True)
-    after = time.monotonic()
+    _after = time.monotonic()
 
     assert phase2 == headroom
     remaining = max(0.0, headroom - before)

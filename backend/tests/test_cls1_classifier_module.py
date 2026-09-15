@@ -44,7 +44,6 @@ from app.modules.classifier.constants import (
 )
 from app.modules.scraper import extractors as ex
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_APP = REPO_ROOT / "app"
 

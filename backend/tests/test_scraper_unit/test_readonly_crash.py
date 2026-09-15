@@ -15,7 +15,7 @@ from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _is_read_only_error
 
 
-class _ReadOnlySqlTransaction(Exception):
+class _ReadOnlySqlTransactionError(Exception):
     pgcode = "25006"
 
 
@@ -84,7 +84,7 @@ def test_child_pulse_swallows_readonly(monkeypatch):
     db.commit.side_effect = OperationalError(
         "stmt",
         {},
-        _ReadOnlySqlTransaction("cannot execute UPDATE in a read-only transaction"),
+        _ReadOnlySqlTransactionError("cannot execute UPDATE in a read-only transaction"),
     )
     db.close = MagicMock()
 
@@ -101,7 +101,7 @@ def test_is_read_only_error():
     ro = OperationalError(
         "stmt",
         {},
-        _ReadOnlySqlTransaction("read-only transaction"),
+        _ReadOnlySqlTransactionError("read-only transaction"),
     )
     assert _is_read_only_error(ro) is True
     assert _is_read_only_error(ValueError("nope")) is False
@@ -120,7 +120,7 @@ def test_scrape_listing_readonly_does_not_advance_last_checked(monkeypatch):
     session.commit.side_effect = OperationalError(
         "stmt",
         {},
-        _ReadOnlySqlTransaction("read-only"),
+        _ReadOnlySqlTransactionError("read-only"),
     )
     invalidate = MagicMock()
     monkeypatch.setattr(scraper_service, "invalidate_sync_session", invalidate)

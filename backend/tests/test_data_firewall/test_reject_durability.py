@@ -10,11 +10,11 @@ import pytest
 from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.data_firewall.reject_store import write_reject_data_isolated
 from app.modules.data_firewall.signing import reset_signing_settings_cache
-from app.modules.persist.writer import build_dim_product_fields, build_fact_listing_fields
 from app.modules.discovery.gate_persist import (
     PoolInsertDTO,
     write_pool_dtos_sync,
 )
+from app.modules.persist.writer import build_dim_product_fields, build_fact_listing_fields
 
 
 @pytest.fixture(autouse=True)

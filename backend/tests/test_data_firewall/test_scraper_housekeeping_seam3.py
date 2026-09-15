@@ -18,8 +18,8 @@ from app.modules.persist.scrape_gate_fields import build_listing_update_fields
 from app.modules.persist.writer import PersistContext, write_sync
 from app.modules.scraper.scraper_pool import PoolScrapeResult
 from app.modules.scraper.service import (
-    GlobalScrapeService,
     LISTING_DEACTIVATE_AFTER_ERRORS,
+    GlobalScrapeService,
 )
 
 

@@ -9,11 +9,11 @@ from bs4 import BeautifulSoup
 
 from app.common import html_parsing as hp
 from app.modules.ingestion.gate import (
+    MAX_CURRENCY_RAW_LEN,
     SKIP_CURRENCY_COUNTRY_MISMATCH,
     SKIP_CURRENCY_RAW_TOO_LONG,
     evaluate_gate,
 )
-from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
 from app.modules.scraper.extractors import (
     _detect_currency,
     extract_auto_detect,

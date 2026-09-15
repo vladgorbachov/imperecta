@@ -60,8 +60,8 @@ os.environ.setdefault(
     os.environ.get("TEST_DATA_FIREWALL_SIGNING_SECRET", "test-data-firewall-signing-secret"),
 )
 
-from app.database import async_session_maker, get_db
-from app.main import app
+from app.database import async_session_maker, get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 @pytest.fixture(scope="session")

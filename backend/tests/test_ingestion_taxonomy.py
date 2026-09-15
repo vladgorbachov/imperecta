@@ -14,10 +14,10 @@ from app.modules.ingestion.taxonomy import (
     ensure_category_chain,
 )
 from app.modules.scraper.extractors import (
+    ExtractedProduct,
     extract_from_jsonld,
     extract_from_microdata,
     merge_results,
-    ExtractedProduct,
 )
 
 PAGE_URL = "https://shop.example/products/scrub-lollipop"

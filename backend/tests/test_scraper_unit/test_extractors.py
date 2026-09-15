@@ -1,7 +1,6 @@
 """Unit tests for extractors, log status mapping, and pool (no outbound HTTP)."""
 
 import pytest
-
 from bs4 import BeautifulSoup
 
 from app.modules.scraper.extractors import (

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from fixtures.scraper_fixtures import _pg_available, _seed_listing
 from sqlalchemy import func, select
 
 from app.models.app_tables import ScrapeLog
@@ -12,8 +13,6 @@ from app.models.facts import FactPrice
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
-
-from fixtures.scraper_fixtures import _pg_available, _seed_listing
 
 
 def _make_ok_worker(

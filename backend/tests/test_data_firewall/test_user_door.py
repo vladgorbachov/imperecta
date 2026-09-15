@@ -10,17 +10,15 @@ import pytest
 
 from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS, TABLE_LOCATORS
 from app.modules.data_firewall.signing import reset_signing_settings_cache, sign, verify
+from app.modules.data_firewall.user_active_predicate import may_set_active
 from app.modules.data_firewall.user_door import (
     REJECT_COLUMN_NOT_ALLOWED,
-    REJECT_IS_ACTIVE_FORBIDDEN,
-    REJECT_PASSWORD_HASH_FORBIDDEN,
     REJECT_PRIVILEGE_ESCALATION,
     REJECT_REACTIVATION_FORBIDDEN,
     USER_INSERT_ALLOWLIST,
     USER_UPDATE_ALLOWLIST,
     authorize_user_write,
 )
-from app.modules.data_firewall.user_active_predicate import may_set_active
 from app.modules.data_firewall.user_superuser_predicate import may_set_superuser
 from app.modules.persist.user_write import build_user_fields, write_user_sync
 

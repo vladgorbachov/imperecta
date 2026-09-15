@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from bs4 import BeautifulSoup
+from fixtures.scraper_fixtures import _pg_available, load_active_listings_from_db
 
 from app.modules.scraper.extractors import (
     extract_auto_detect,
@@ -13,7 +14,6 @@ from app.modules.scraper.extractors import (
 )
 from app.modules.scraper.scraper_pool import ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
-from fixtures.scraper_fixtures import _pg_available, load_active_listings_from_db
 
 
 @pytest.fixture(scope="module")

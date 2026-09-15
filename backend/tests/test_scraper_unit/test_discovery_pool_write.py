@@ -9,14 +9,14 @@ import pytest
 
 from app.modules.data_firewall.firewall import FirewallOutcome
 from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache
+from app.modules.discovery.gate_persist import (
+    PoolInsertDTO,
+    write_pool_dtos_sync,
+)
 from app.modules.persist.writer import (
     build_dim_product_fields,
     build_fact_listing_fields,
     build_fact_price_fields,
-)
-from app.modules.discovery.gate_persist import (
-    PoolInsertDTO,
-    write_pool_dtos_sync,
 )
 
 

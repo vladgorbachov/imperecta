@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.modules.discovery import cursor_store, sitemap_harvester
 from app.models.dimensions import DimMarketplace
+from app.modules.discovery import cursor_store, sitemap_harvester
 from app.modules.discovery.constants import (
     SITEMAP_BAD_HARVEST_RETRY_HOURS,
     SITEMAP_MIN_USEFUL_URLS,

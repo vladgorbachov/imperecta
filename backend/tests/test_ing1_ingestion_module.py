@@ -36,11 +36,9 @@ from app.modules.ingestion.gate import (
     SKIP_CURRENCY_RAW_TOO_LONG,
     SKIP_MISSING_NAME_OR_CURRENCY,
     SKIP_PRICE_NOT_POSITIVE,
-    CurrencyResolver,
     evaluate_gate,
 )
 from app.modules.ingestion.service import IngestionService
-
 
 # ---------------------------------------------------------------------------
 # Helpers — minimal in-memory fakes for the IngestionService unit tests

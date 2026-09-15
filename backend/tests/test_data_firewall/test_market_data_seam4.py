@@ -19,8 +19,8 @@ from app.modules.persist.scrape_gate_fields import (
     build_dim_date_fields_from_day,
 )
 from app.modules.persist.writer import (
-    PersistContext,
     SUPPORTED_WRITE_OPERATIONS,
+    PersistContext,
     write_sync,
 )
 

@@ -6,19 +6,16 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 import pytest
+from bs4 import BeautifulSoup
 
 from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS
-from app.modules.data_firewall.firewall import evaluate_ecommerce, evaluate_market
+from app.modules.data_firewall.firewall import evaluate_ecommerce
 from app.modules.data_firewall.rules import MAX_CURRENCY_RAW_LEN
 from app.modules.ingestion.gate import (
     SKIP_CURRENCY_COUNTRY_MISMATCH,
-    SKIP_CURRENCY_RAW_TOO_LONG,
-    SKIP_MISSING_NAME_OR_CURRENCY,
-    SKIP_PRICE_NOT_POSITIVE,
     evaluate_gate,
 )
 from app.modules.scraper.extractors import ExtractedProduct, merge_and_finalize
-from bs4 import BeautifulSoup
 
 
 class _FakeResolver:

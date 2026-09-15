@@ -14,7 +14,6 @@ from app.modules.scraper.pipeline import tick_orchestrator as tick_mod
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 from app.modules.scraper.pipeline.tick_orchestrator import run_tick
 
-
 # ---------- 5a cohort threshold --------------------------------------------
 
 
@@ -62,7 +61,7 @@ def test_scrape_cohort_threshold_used(monkeypatch):
         dt_mock.now.return_value = fixed_now
         dt_mock.side_effect = lambda *a, **k: datetime(*a, **k)
         scraper_tasks._run_scrape_all_pool_impl()
-        expected_default = fixed_now - timedelta(hours=6)
+        _expected_default = fixed_now - timedelta(hours=6)
         # Second call uses default threshold path (no stale_before).
         assert dt_mock.now.called
 
@@ -372,7 +371,7 @@ async def test_counter_scope_child_ids():
 
     captured_queries: list = []
 
-    original_execute = db.execute
+    _original_execute = db.execute
 
     async def _capture_execute(stmt):
         captured_queries.append(stmt)

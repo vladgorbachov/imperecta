@@ -6,7 +6,6 @@ import pytest
 from bs4 import BeautifulSoup
 
 from app.modules.scraper.extractors import (
-    ExtractedProduct,
     _detect_currency,
     extract_auto_detect,
     extract_from_jsonld,
@@ -16,7 +15,6 @@ from app.modules.scraper.extractors import (
     parse_currency_symbol,
     parse_price_text,
 )
-
 
 # ---------------------------------------------------------------------------
 #  parse_price_text — EU + CIS number formats

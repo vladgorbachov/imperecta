@@ -8,7 +8,7 @@ purity of _next_backoff.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -23,7 +23,6 @@ from app.modules.scraper.pipeline.tick_orchestrator import (
     _next_backoff,
     run_tick,
 )
-
 
 # ---------- 6.1 pure backoff -----------------------------------------------
 

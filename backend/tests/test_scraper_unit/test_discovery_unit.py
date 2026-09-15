@@ -11,9 +11,9 @@ import pytest
 
 import app.modules.discovery.constants as disc_constants
 import app.modules.discovery.orchestrator as disc
+from app.models.dimensions import DimMarketplace
 from app.modules.discovery import bfs_walker, category_processor
 from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
-from app.models.dimensions import DimMarketplace
 
 
 @contextmanager
@@ -532,7 +532,7 @@ class TestPhase1FrontierResume:
         db.commit = AsyncMock()
         db.flush = AsyncMock()
 
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
 
         with patch(
             "app.modules.discovery.bfs_walker.time.monotonic",
@@ -566,7 +566,7 @@ class TestPhase1FrontierResume:
         db.commit = AsyncMock()
         db.flush = AsyncMock()
 
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
 
         import logging as _logging
         with caplog.at_level(_logging.INFO, logger="app.modules.discovery.bfs_walker"):
@@ -599,7 +599,7 @@ class TestPhase1FrontierResume:
         db.commit = AsyncMock()
         db.flush = AsyncMock()
 
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
         urls, exhausted = await bfs_walker.run_category_bfs(
             mp, pool, db, deadline_monotonic=None,
         )
@@ -889,7 +889,7 @@ class TestPhase1BatchPublish:
         db = AsyncMock()
         db.flush = AsyncMock()
 
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
 
         with patch(
             "app.modules.discovery.classifier_adapter.classify_page_role",
@@ -924,7 +924,7 @@ class TestPhase1BatchPublish:
         pool = MagicMock()
         db = AsyncMock()
         db.flush = AsyncMock()
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
 
         with patch(
             "app.modules.discovery.bfs_walker.time.monotonic",
@@ -947,7 +947,7 @@ class TestPhase1BatchPublish:
         pool.scrape_page_for_analysis = AsyncMock()
         db = AsyncMock()
         db.flush = AsyncMock()
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
 
         with patch(
             "app.modules.discovery.bfs_walker.time.monotonic",
@@ -976,7 +976,7 @@ class TestPhase1BatchPublish:
         pool.scrape_page_for_analysis = AsyncMock(return_value=(None, None))
         db = AsyncMock()
         db.flush = AsyncMock()
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
 
         urls, exhausted = await bfs_walker.run_category_bfs(
             mp, pool, db, deadline_monotonic=None,
@@ -1203,7 +1203,7 @@ class TestPhase2CategoryResume:
         db.commit = AsyncMock()
         db.flush = AsyncMock()
 
-        crawler = disc.DiscoveryOrchestrator(db, pool)
+        _crawler = disc.DiscoveryOrchestrator(db, pool)
         urls, exhausted = await bfs_walker.run_category_bfs(
             mp, pool, db, deadline_monotonic=None,
         )

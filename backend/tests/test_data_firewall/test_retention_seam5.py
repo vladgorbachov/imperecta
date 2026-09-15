@@ -51,8 +51,9 @@ def test_scrape_logs_retention_uses_14_day_window(
     mock_authorize,
     mock_write_sync,
 ) -> None:
-    from app.modules.data_firewall.firewall import FirewallOutcome
     from unittest.mock import MagicMock
+
+    from app.modules.data_firewall.firewall import FirewallOutcome
 
     now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
     expected_cutoff = now - timedelta(days=14)
@@ -88,8 +89,9 @@ def test_api_logs_retention_uses_60_day_window(
     mock_authorize,
     mock_write_sync,
 ) -> None:
-    from app.modules.data_firewall.firewall import FirewallOutcome
     from unittest.mock import MagicMock
+
+    from app.modules.data_firewall.firewall import FirewallOutcome
 
     now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=timezone.utc)
     expected_cutoff = now - timedelta(days=60)

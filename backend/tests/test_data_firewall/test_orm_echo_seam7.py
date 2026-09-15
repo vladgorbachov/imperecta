@@ -18,7 +18,7 @@ from app.modules.persist.scrape_gate_fields import (
     build_listing_update_fields,
     build_product_update_fields,
 )
-from app.modules.persist.writer import PersistContext, PersistResult
+from app.modules.persist.writer import PersistResult
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 

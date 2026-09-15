@@ -272,7 +272,9 @@ def _csv_row(record: dict[str, Any]) -> dict[str, str]:
     return {
         "url": record.get("url") or "",
         "fetch_backend": str(record.get("fetch_backend") or ""),
-        "http_status": str(record.get("http_status") if record.get("http_status") is not None else ""),
+        "http_status": (
+            str(record.get("http_status")) if record.get("http_status") is not None else ""
+        ),
         "title": _field("title"),
         "price": _field("price"),
         "price_type": _ptype("price"),

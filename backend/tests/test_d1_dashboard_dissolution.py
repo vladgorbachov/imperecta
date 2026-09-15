@@ -20,8 +20,6 @@ and `AnalyticsKpiService`; the surviving frontend usage consumer moves to
 
 import importlib
 import inspect
-from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 

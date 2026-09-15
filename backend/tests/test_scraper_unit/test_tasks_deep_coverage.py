@@ -5,10 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
-
-from app.modules.scraper import tasks as scraper_tasks
 from app.modules.discovery.orchestrator import DiscoveryResult
+from app.modules.scraper import tasks as scraper_tasks
 from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult
 
@@ -69,7 +67,6 @@ def test_discover_all_marketplaces_mocked_engine(monkeypatch):
 
 
 def test_discover_all_marketplace_loop_exception(monkeypatch):
-    from datetime import datetime, timezone
 
     from app.modules.marketplaces.service import MarketplacePoolService
 

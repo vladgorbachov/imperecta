@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import re
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from bs4 import BeautifulSoup
 
 import app.modules.discovery.orchestrator as disc
-from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
-from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.data_firewall.firewall import evaluate_ecommerce
+from app.modules.discovery.gate_persist import PoolWriteResult, write_pool_dtos_sync
 from app.modules.scraper.extractors import parse_sitemap_xml
 from app.modules.scraper.fetch_backends import DirectHttpBackend
 from app.modules.scraper.locale_selection import (

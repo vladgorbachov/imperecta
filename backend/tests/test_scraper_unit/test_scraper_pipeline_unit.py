@@ -6,13 +6,13 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
+from fixtures.scraper_fixtures import _pg_available, patch_resolve_price_eur_for_unit
 
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _today_date_id
-from fixtures.scraper_fixtures import _pg_available, patch_resolve_price_eur_for_unit, pg_session
 
 
 def _session_with_listing(

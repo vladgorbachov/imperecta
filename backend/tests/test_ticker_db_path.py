@@ -1,7 +1,6 @@
 """DB-path ticker assembly tests for MarketDataService.get_ticker."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 

@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache, sign
 from app.modules.data_firewall.contracts import extract_locator
+from app.modules.data_firewall.signing import SignedRecord, reset_signing_settings_cache, sign
 from app.modules.persist.gate_rpc import GateRpcError, _classify_gate_error
 from app.modules.persist.writer import (
     PersistContext,

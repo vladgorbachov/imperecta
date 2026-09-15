@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -54,11 +53,11 @@ def test_run_scrape_all_pool_outer_technical_error(monkeypatch):
 
 @pytest.mark.integration
 def test_fast_scrape_all_pool_one_listing(monkeypatch):
+    from fixtures.scraper_fixtures import _pg_available, load_active_listings_from_db
+
     from app.database import sync_session_factory
     from app.modules.scraper.scraper_pool import ScraperPool
     from app.modules.scraper.service import GlobalScrapeService
-
-    from fixtures.scraper_fixtures import _pg_available, load_active_listings_from_db
 
     if not _pg_available():
         pytest.skip("PostgreSQL required")

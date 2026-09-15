@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
-import inspect
-
 import pytest
+from fixtures.scraper_fixtures import _fake_run_coro, patch_resolve_price_eur_for_unit
 
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
-from fixtures.scraper_fixtures import _fake_run_coro, patch_resolve_price_eur_for_unit
 
 
 def test_scrape_product_pool_raises_exception(monkeypatch):

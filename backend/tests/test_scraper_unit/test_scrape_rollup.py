@@ -18,7 +18,6 @@ from app.modules.scraper.pipeline.child_aggregation import (
 )
 from app.modules.scraper.pipeline.job_completion import decide_parent_status
 
-
 # ---------- aggregate_scrape_children --------------------------------------
 
 

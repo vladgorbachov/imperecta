@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import app.modules.scraper.fetch_backends as fb
-import app.modules.scraper.scraper_pool as sp
 from app.modules.scraper.fetch_backends import BackendId, ProxyProviderBackend
 from app.modules.scraper.scraper_pool import ScraperPool
 

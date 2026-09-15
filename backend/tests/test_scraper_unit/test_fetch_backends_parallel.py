@@ -16,15 +16,14 @@ from app.modules.ingestion.dto import IngestionResult
 from app.modules.scraper import proxy_provider_limiter as limiter
 from app.modules.scraper import service as scraper_service
 from app.modules.scraper import tasks as scraper_tasks
+from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.proxy_provider_limiter import (
-    PROXY_PROVIDER_REDIS_KEY,
     acquire_proxy_provider_token,
     proxy_provider_bucket_capacity,
     proxy_provider_max_rps,
     reset_limiter_state_for_tests,
 )
-from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService
 
@@ -406,7 +405,7 @@ async def test_limiter_lua_bucket_no_overshoot_refill_window(monkeypatch):
     assert granted <= max_allowed
 
 
-class _ReadOnlySqlTransaction(Exception):
+class _ReadOnlySqlTransactionError(Exception):
     pgcode = "25006"
 
 
@@ -504,7 +503,7 @@ def test_parallel_persist_read_only_does_not_advance_last_checked(monkeypatch):
     session.commit.side_effect = OperationalError(
         "stmt",
         {},
-        _ReadOnlySqlTransaction("read-only transaction"),
+        _ReadOnlySqlTransactionError("read-only transaction"),
     )
     invalidate = MagicMock()
     monkeypatch.setattr(scraper_service, "invalidate_sync_session", invalidate)

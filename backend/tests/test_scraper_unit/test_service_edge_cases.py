@@ -6,13 +6,13 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
+from fixtures.scraper_fixtures import _fake_run_coro
 
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _run_coro_in_worker
-from fixtures.scraper_fixtures import _fake_run_coro
 
 
 def test_listing_not_found_returns_early():
@@ -114,8 +114,9 @@ def test_persist_commit_failure(monkeypatch):
 
 @pytest.mark.integration
 def test_get_stale_and_incomplete_from_db():
-    from app.database import sync_session_factory
     from fixtures.scraper_fixtures import _pg_available
+
+    from app.database import sync_session_factory
 
     if not _pg_available():
         pytest.skip("PostgreSQL required")

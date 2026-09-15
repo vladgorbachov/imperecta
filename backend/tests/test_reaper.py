@@ -13,7 +13,6 @@ import pytest
 
 from app.workers import reaper_tasks
 
-
 _NOW = datetime(2026, 6, 7, 12, 0, 0, tzinfo=timezone.utc)
 _PIPELINE = "full_pipeline_test"
 

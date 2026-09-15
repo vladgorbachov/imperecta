@@ -8,6 +8,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fixtures.scraper_fixtures import (
+    _fake_run_coro,
+    _seed_listing,
+    patch_resolve_price_eur_for_unit,
+)
 from sqlalchemy import select, text
 
 from app.models.dimensions import DimMarketplace, DimProduct
@@ -15,7 +20,6 @@ from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _today_date_id
-from fixtures.scraper_fixtures import _fake_run_coro, _seed_listing, patch_resolve_price_eur_for_unit, pg_session
 
 
 def _patch_commit_flush(session) -> None:
@@ -204,9 +208,9 @@ def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
 
 def test_today_date_id_deadlock_safe():
     """SELECT → INSERT ON CONFLICT DO NOTHING → SELECT; second call uses first SELECT only."""
-    import app.modules.ingestion.service as ing_svc
-
     from datetime import datetime as dt
+
+    import app.modules.ingestion.service as ing_svc
 
     orig_dt = ing_svc.datetime
 
