@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, ArrowRight, Bell, Database, Store, Users } from "lucide-react";
 import * as adminApi from "@/api/admin";
+import { marketsApi, marketsQueryKeys } from "@/api/markets";
 import { useServiceAlerts } from "@/hooks/useAdmin";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -94,6 +95,14 @@ export function AdminOpsOverview() {
 
   const { data: openAlerts } = useServiceAlerts({ resolved: "open", limit: 200 });
 
+  /* Pool size from /pool/stats — the same source the dashboard KPI trusts
+     (admin/stats.products_in_pool is not reliably populated). */
+  const { data: poolStats } = useQuery({
+    queryKey: marketsQueryKeys.poolStats(),
+    queryFn: () => marketsApi.getPoolStats().then((r) => r.data),
+    staleTime: 60_000,
+  });
+
   const severityCounts = useMemo(() => {
     const counts = { critical: 0, error: 0, warning: 0, info: 0 };
     for (const alert of openAlerts?.items ?? []) {
@@ -174,7 +183,7 @@ export function AdminOpsOverview() {
               {t("market.overview.kpi.totalPool")}
             </p>
             <p className="mt-0.5 text-lg font-semibold tabular-nums">
-              {stats?.products_in_pool ?? 0}
+              {poolStats?.total_products ?? stats?.products_in_pool ?? 0}
             </p>
           </div>
           <div>
