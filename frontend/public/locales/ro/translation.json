@@ -743,6 +743,8 @@
   "products.density.toggle": "Comută densitatea rândurilor",
   "products.export.label": "CSV",
   "products.export.hint": "Exportă rândurile vizibile în CSV",
+  "products.export.visible": "Rânduri vizibile (CSV)",
+  "products.export.full": "Tot pool-ul (CSV)",
   "forcePassword.title": "Schimbă parola administrator",
   "forcePassword.subtitle": "Credențialele implicite trebuie schimbate pentru securitate",
   "forcePassword.newEmail": "Email nou",

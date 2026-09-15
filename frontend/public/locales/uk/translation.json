@@ -758,6 +758,8 @@
   "products.density.toggle": "Перемкнути щільність рядків",
   "products.export.label": "CSV",
   "products.export.hint": "Експорт видимих рядків у CSV",
+  "products.export.visible": "Видимі рядки (CSV)",
+  "products.export.full": "Увесь пул (CSV)",
   "forcePassword.title": "Змінити пароль адміністратора",
   "forcePassword.subtitle": "Пароль за замовчуванням потрібно змінити з міркувань безпеки",
   "forcePassword.newEmail": "Новий email",

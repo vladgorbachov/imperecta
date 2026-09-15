@@ -836,6 +836,8 @@
   "products.density.toggle": "Переключить плотность строк",
   "products.export.label": "CSV",
   "products.export.hint": "Экспорт видимых строк в CSV",
+  "products.export.visible": "Видимые строки (CSV)",
+  "products.export.full": "Весь пул (CSV)",
   "forcePassword.title": "Смените пароль администратора",
   "forcePassword.subtitle": "Дефолтные credentials должны быть заменены для безопасности",
   "forcePassword.newEmail": "Новый email",

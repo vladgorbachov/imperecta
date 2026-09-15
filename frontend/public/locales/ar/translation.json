@@ -736,6 +736,8 @@
   "products.density.toggle": "تبديل كثافة الصفوف",
   "products.export.label": "CSV",
   "products.export.hint": "تصدير الصفوف المرئية إلى CSV",
+  "products.export.visible": "الصفوف المرئية (CSV)",
+  "products.export.full": "المجموعة الكاملة (CSV)",
   "forcePassword.title": "تغيير كلمة مرور المسؤول",
   "forcePassword.subtitle": "يجب تغيير بيانات الدخول الافتراضية للأمان",
   "forcePassword.newEmail": "البريد الجديد",

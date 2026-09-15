@@ -736,6 +736,8 @@
   "products.density.toggle": "Cambiar densidad de filas",
   "products.export.label": "CSV",
   "products.export.hint": "Exportar filas visibles a CSV",
+  "products.export.visible": "Filas visibles (CSV)",
+  "products.export.full": "Todo el pool (CSV)",
   "forcePassword.title": "Cambiar contraseña del administrador",
   "forcePassword.subtitle": "Las credenciales por defecto deben cambiarse por seguridad",
   "forcePassword.newEmail": "Nuevo email",

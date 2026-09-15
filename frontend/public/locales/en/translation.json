@@ -845,6 +845,8 @@
   "products.density.toggle": "Toggle row density",
   "products.export.label": "CSV",
   "products.export.hint": "Export the visible rows to CSV",
+  "products.export.visible": "Visible rows (CSV)",
+  "products.export.full": "Full pool (CSV)",
   "forcePassword.title": "Change administrator password",
   "forcePassword.subtitle": "Default credentials must be changed for security",
   "forcePassword.newEmail": "New email",

@@ -7,11 +7,11 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarketsOverviewSection } from "./MarketsOverviewSection";
 
-const getOverviewMock = vi.fn();
 const getPoolMarketplaceStatsMock = vi.fn();
 const getPoolStatsMock = vi.fn();
 const getMoversKpiMock = vi.fn();
-const getMoversSummaryMock = vi.fn();
+const getVolatilityMock = vi.fn();
+const getKpiHistoryMock = vi.fn();
 const getMoversCoverageMock = vi.fn();
 const getMoversMock = vi.fn();
 const getDashboardKpiMock = vi.fn();
@@ -30,7 +30,6 @@ vi.mock("@/api/news", () => ({
 
 vi.mock("@/api/markets", () => ({
   marketsApi: {
-    getOverview: (...args: unknown[]) => getOverviewMock(...args),
     getPoolMarketplaceStats: (...args: unknown[]) => getPoolMarketplaceStatsMock(...args),
     getPoolStats: (...args: unknown[]) => getPoolStatsMock(...args),
     getDashboardKpi: (...args: unknown[]) => getDashboardKpiMock(...args),
@@ -38,19 +37,20 @@ vi.mock("@/api/markets", () => ({
     getTrend: (...args: unknown[]) => getTrendMock(...args),
     getMovers: (...args: unknown[]) => getMoversMock(...args),
     getMoversKpi: (...args: unknown[]) => getMoversKpiMock(...args),
-    getMoversSummary: (...args: unknown[]) => getMoversSummaryMock(...args),
     getMoversCoverage: (...args: unknown[]) => getMoversCoverageMock(...args),
+    getVolatility: (...args: unknown[]) => getVolatilityMock(...args),
+    getKpiHistory: (...args: unknown[]) => getKpiHistoryMock(...args),
   },
   marketsQueryKeys: {
-    overview: (params?: unknown) => ["markets", "overview", params],
     poolMarketplaceStats: () => ["markets", "pool-marketplace-stats"],
+    kpiHistory: (params?: unknown) => ["markets", "kpi-history", params],
+    volatility: (params?: unknown) => ["markets", "volatility", params],
     poolStats: () => ["markets", "pool-stats"],
     dashboardKpi: (params?: unknown) => ["markets", "dashboard-kpi", params],
     geoCoverage: (params?: unknown) => ["markets", "geo-coverage", params],
     trend: (params?: unknown) => ["markets", "trend", params],
     movements: (params?: unknown) => ["markets", "movements", params],
     movementsKpi: (params?: unknown) => ["markets", "movements", params, "kpi"],
-    movementsSummary: (params?: unknown) => ["markets", "movements", params, "summary"],
     movementsCoverage: (params?: unknown) => ["markets", "movements", params, "coverage"],
   },
 }));
@@ -78,51 +78,6 @@ describe("MarketsOverviewSection", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    getOverviewMock.mockResolvedValue({
-      data: {
-        items: [
-          {
-            id: "listing-1",
-            product_id: "product-1",
-            marketplace_id: "market-1",
-            marketplace_name: "Barbora",
-            marketplace_domain: "barbora.lv",
-            country_code: "LV",
-            url: "https://example.com/1",
-            title: "Смартфон X",
-            image_url: "https://img.example/1.jpg",
-            price: 1200,
-            currency: "UAH",
-            price_change_pct: 6.2,
-            status: "active",
-            last_checked_at: "2026-05-21T10:00:00Z",
-            recent_prices: [
-              { date: "2026-05-15", price: 1000, currency: "UAH" },
-              { date: "2026-05-16", price: 1050, currency: "UAH" },
-            ],
-          },
-          {
-            id: "listing-2",
-            product_id: "product-2",
-            marketplace_id: "market-2",
-            marketplace_name: "Store Beta",
-            marketplace_domain: "store-beta.example",
-            url: "https://example.com/2",
-            title: "Ноутбук Y",
-            image_url: null,
-            price: 2000,
-            currency: "UAH",
-            price_change_pct: -3,
-            status: "active",
-            last_checked_at: "2026-05-20T10:00:00Z",
-            recent_prices: [],
-          },
-        ],
-        total: 2,
-        limit: 200,
-        offset: 0,
-      },
-    });
     getPoolMarketplaceStatsMock.mockResolvedValue({
       data: [
         {
@@ -151,15 +106,24 @@ describe("MarketsOverviewSection", () => {
       },
     });
     getMoversKpiMock.mockResolvedValue({ data: { count: 4 } });
-    getMoversSummaryMock.mockResolvedValue({
+    getVolatilityMock.mockResolvedValue({
       data: {
-        up_count: 2,
-        down_count: 1,
-        unchanged_count: 0,
-        biggest_gainer: null,
-        biggest_loser: null,
-        avg_abs_change: "6.25",
-        buckets: [],
+        avg_volatility_pct: 6.25,
+        listings_covered: 10,
+        window_days: 30,
+        period: "30d",
+        data_ready: true,
+      },
+    });
+    getKpiHistoryMock.mockResolvedValue({
+      data: {
+        days: 7,
+        series: {
+          total_pool: [],
+          updated_24h: [],
+          changed_gt5: [],
+          avg_volatility: [],
+        },
       },
     });
     getMoversCoverageMock.mockResolvedValue({
@@ -217,7 +181,7 @@ describe("MarketsOverviewSection", () => {
     expect(await screen.findByText("12")).toBeInTheDocument();
     expect(screen.getByText("6.25%")).toBeInTheDocument();
     expect(getMoversKpiMock).toHaveBeenCalled();
-    expect(getMoversSummaryMock).toHaveBeenCalled();
+    expect(getVolatilityMock).toHaveBeenCalled();
     expect(getMoversCoverageMock).toHaveBeenCalled();
     expect(getDashboardKpiMock).toHaveBeenCalled();
     expect(getGeoCoverageMock).toHaveBeenCalled();
@@ -259,15 +223,13 @@ describe("MarketsOverviewSection", () => {
       },
     });
     getMoversKpiMock.mockResolvedValue({ data: { count: 0 } });
-    getMoversSummaryMock.mockResolvedValue({
+    getVolatilityMock.mockResolvedValue({
       data: {
-        up_count: 0,
-        down_count: 0,
-        unchanged_count: 0,
-        biggest_gainer: null,
-        biggest_loser: null,
-        avg_abs_change: null,
-        buckets: [],
+        avg_volatility_pct: null,
+        listings_covered: 0,
+        window_days: 30,
+        period: "30d",
+        data_ready: false,
       },
     });
 

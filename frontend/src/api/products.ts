@@ -113,6 +113,13 @@ export const productsApi = {
       params: displayCurrency ? { display_currency: displayCurrency } : undefined,
     }),
 
+  /** P5: full filtered pool as CSV (server-streamed; auth via the api client). */
+  exportPoolCsv: (params: Pick<PoolProductsParams, "search" | "marketplace_id" | "sort">) =>
+    apiClient.get<Blob>("/pool/products/export.csv", {
+      params,
+      responseType: "blob",
+    }),
+
   getPriceHistory: (listingId: string, period: PriceHistoryPeriod = "30d") =>
     apiClient.get<PriceHistoryResponse>(
       `/pool/products/${listingId}/price-history`,

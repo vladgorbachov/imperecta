@@ -184,17 +184,6 @@ export function MarketsOverviewSection() {
     staleTime: 30_000,
   });
   const {
-    data: moversSummary,
-    isLoading: moversSummaryLoading,
-    isError: moversSummaryError,
-    refetch: refetchMoversSummary,
-  } = useQuery({
-    queryKey: marketsQueryKeys.movementsSummary(movementsFilterParams),
-    queryFn: () =>
-      marketsApi.getMoversSummary(movementsFilterParams).then((response) => response.data),
-    staleTime: 30_000,
-  });
-  const {
     data: moversCoverage,
     isLoading: moversCoverageLoading,
     isError: moversCoverageError,
@@ -206,11 +195,40 @@ export function MarketsOverviewSection() {
     staleTime: 30_000,
   });
 
+  /* P4: 7-day KPI history for sparklines. */
+  const kpiHistoryParams = useMemo(
+    () => ({ days: 7, country_code: selectedCountry ?? undefined }),
+    [selectedCountry],
+  );
+  const { data: kpiHistory } = useQuery({
+    queryKey: marketsQueryKeys.kpiHistory(kpiHistoryParams),
+    queryFn: () => marketsApi.getKpiHistory(kpiHistoryParams).then((r) => r.data),
+    staleTime: 300_000,
+  });
+  const sparkOf = (points?: Array<{ value: number }>) => {
+    const values = (points ?? []).map((point) => point.value);
+    return values.length >= 2 ? values : undefined;
+  };
+
+  /* Real volatility endpoint (stddev of daily EUR returns). */
+  const volatilityParams = useMemo(
+    () => ({ period: "30d" as const, country_code: selectedCountry ?? undefined }),
+    [selectedCountry],
+  );
+  const {
+    data: volatility,
+    isLoading: volatilityLoading,
+    isError: volatilityError,
+    refetch: refetchVolatility,
+  } = useQuery({
+    queryKey: marketsQueryKeys.volatility(volatilityParams),
+    queryFn: () => marketsApi.getVolatility(volatilityParams).then((r) => r.data),
+    staleTime: 60_000,
+  });
+
   const movementsDataReady = moversCoverage?.data_ready === true;
-  const movementsKpisPending =
-    moversKpiLoading || moversSummaryLoading || moversCoverageLoading;
-  const movementsKpisErrored =
-    moversKpiError || moversSummaryError || moversCoverageError;
+  const movementsKpisPending = moversKpiLoading || moversCoverageLoading;
+  const movementsKpisErrored = moversKpiError || moversCoverageError;
 
   const updated24hValue = useMemo(() => {
     if (dashboardKpiLoading || dashboardKpiError || dashboardKpi == null) {
@@ -247,21 +265,21 @@ export function MarketsOverviewSection() {
   }, [movementsKpisPending, movementsKpisErrored, movementsDataReady, moversKpi, t]);
 
   const avgVolatilityValue = useMemo(() => {
-    if (movementsKpisPending || movementsKpisErrored) {
+    if (volatilityLoading || volatilityError) {
       return t("common.dash");
     }
-    if (!movementsDataReady) {
+    if (volatility?.data_ready !== true || volatility.avg_volatility_pct == null) {
       return t("market.overview.kpi.accumulatingData");
     }
-    if (moversSummary?.avg_abs_change == null) {
-      return t("common.dash");
-    }
-    const numeric = Number(moversSummary.avg_abs_change);
+    const numeric = Number(volatility.avg_volatility_pct);
     if (Number.isNaN(numeric)) {
       return t("common.dash");
     }
     return `${numeric.toFixed(2)}%`;
-  }, [movementsKpisPending, movementsKpisErrored, movementsDataReady, moversSummary, t]);
+  }, [volatilityLoading, volatilityError, volatility, t]);
+
+  const volatilityPendingState =
+    !volatilityLoading && !volatilityError && volatility?.data_ready !== true;
 
   const accumulatingHint = t("market.overview.kpi.accumulatingDataHint");
   const movementsPendingState =
@@ -273,7 +291,6 @@ export function MarketsOverviewSection() {
 
   const movementsRetry = () => {
     void refetchMoversKpi();
-    void refetchMoversSummary();
     void refetchMoversCoverage();
   };
 
@@ -285,6 +302,7 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.totalPool")}
           value={totalPoolKpi == null ? t("common.dash") : String(totalPoolKpi)}
+          spark={sparkOf(kpiHistory?.series?.total_pool)}
           error={
             poolStatsError
               ? { onRetry: () => refetchPoolStats(), title: t("common.error") }
@@ -294,6 +312,7 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.updated24h")}
           value={updated24hValue}
+          spark={sparkOf(kpiHistory?.series?.updated_24h)}
           error={
             dashboardKpiError
               ? {
@@ -308,6 +327,7 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.changedMore5")}
           value={changedMore5Value}
+          spark={sparkOf(kpiHistory?.series?.changed_gt5)}
           pending={movementsPendingState}
           title={movementsPendingState ? accumulatingHint : undefined}
           error={
@@ -319,11 +339,17 @@ export function MarketsOverviewSection() {
         <KpiCard
           label={t("market.overview.kpi.avgVolatility")}
           value={avgVolatilityValue}
-          pending={movementsPendingState}
-          title={movementsPendingState ? accumulatingHint : undefined}
+          spark={sparkOf(kpiHistory?.series?.avg_volatility)}
+          pending={volatilityPendingState}
+          title={volatilityPendingState ? accumulatingHint : undefined}
           error={
-            movementsKpisErrored
-              ? { onRetry: movementsRetry, title: t("common.error") }
+            volatilityError
+              ? {
+                  onRetry: () => {
+                    void refetchVolatility();
+                  },
+                  title: t("common.error"),
+                }
               : undefined
           }
         />

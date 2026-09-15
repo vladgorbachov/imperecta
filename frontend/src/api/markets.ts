@@ -111,6 +111,37 @@ export interface MarketsOverviewResponse {
   offset: number;
 }
 
+/** GET /markets/kpi-history (P4) — daily series for KPI sparklines. */
+export interface KpiHistoryPoint {
+  date: string;
+  value: number;
+}
+
+export interface KpiHistoryResponse {
+  days: number;
+  series: {
+    total_pool: KpiHistoryPoint[];
+    updated_24h: KpiHistoryPoint[];
+    changed_gt5: KpiHistoryPoint[];
+    avg_volatility: KpiHistoryPoint[];
+  };
+}
+
+/** GET /markets/volatility — real volatility (stddev of daily EUR returns). */
+export interface VolatilityParams {
+  period?: "7d" | "30d" | "90d";
+  country_code?: string;
+  marketplace_id?: string;
+}
+
+export interface VolatilityResponse {
+  avg_volatility_pct: number | null;
+  listings_covered: number;
+  window_days: number;
+  period: string;
+  data_ready: boolean;
+}
+
 export interface PoolMarketplaceStatsItem {
   marketplace_domain: string;
   marketplace_name?: string | null;
@@ -273,27 +304,20 @@ export const marketsApi = {
   updatePreferences: (body: MarketsPreferencesUpdate) =>
     apiClient.put<MarketsPreferences>("/markets/preferences", body),
 
-  getTicker: () =>
-    apiClient.get<MarketsTickerResponse>("/markets/ticker"),
-
-  getOverview: (params?: {
-    sort?: string;
-    search?: string;
-    marketplace_id?: number;
-    country_code?: string;
-    limit?: number;
-    offset?: number;
-    display_currency?: DisplayCurrency;
-  }) =>
-    apiClient.get<MarketsOverviewResponse>("/markets/overview", {
+  getKpiHistory: (params?: { days?: number; country_code?: string }) =>
+    apiClient.get<KpiHistoryResponse>("/markets/kpi-history", {
       params: {
-        sort: params?.sort ?? "volatile",
-        search: params?.search,
-        marketplace_id: params?.marketplace_id,
-        country_code: params?.country_code,
-        limit: params?.limit ?? 50,
-        offset: params?.offset ?? 0,
-        display_currency: params?.display_currency ?? "local",
+        days: params?.days ?? 7,
+        ...(params?.country_code ? { country_code: params.country_code } : {}),
+      },
+    }),
+
+  getVolatility: (params?: VolatilityParams) =>
+    apiClient.get<VolatilityResponse>("/markets/volatility", {
+      params: {
+        period: params?.period ?? "30d",
+        ...(params?.country_code ? { country_code: params.country_code } : {}),
+        ...(params?.marketplace_id ? { marketplace_id: params.marketplace_id } : {}),
       },
     }),
 
@@ -335,28 +359,22 @@ export const marketsQueryKeys = {
   all: ["markets"] as const,
   preferences: () => [...marketsQueryKeys.all, "preferences"] as const,
   instruments: () => [...marketsQueryKeys.all, "instruments"] as const,
-  ticker: () => [...marketsQueryKeys.all, "ticker"] as const,
-  overview: (params?: {
-    sort?: string;
-    search?: string;
-    marketplace_id?: number;
-    country_code?: string;
-    limit?: number;
-    offset?: number;
-    display_currency?: DisplayCurrency;
-  }) =>
+  poolMarketplaceStats: () => [...marketsQueryKeys.all, "pool-marketplace-stats"] as const,
+  kpiHistory: (params?: { days?: number; country_code?: string }) =>
     [
       ...marketsQueryKeys.all,
-      "overview",
-      params?.sort ?? "volatile",
-      params?.search ?? "",
-      params?.marketplace_id ?? null,
+      "kpi-history",
+      params?.days ?? 7,
       params?.country_code ?? null,
-      params?.limit ?? 50,
-      params?.offset ?? 0,
-      params?.display_currency ?? "local",
     ] as const,
-  poolMarketplaceStats: () => [...marketsQueryKeys.all, "pool-marketplace-stats"] as const,
+  volatility: (params?: VolatilityParams) =>
+    [
+      ...marketsQueryKeys.all,
+      "volatility",
+      params?.period ?? "30d",
+      params?.country_code ?? null,
+      params?.marketplace_id ?? null,
+    ] as const,
   poolStats: () => [...marketsQueryKeys.all, "pool-stats"] as const,
   dashboardKpi: (params?: DashboardKpiParams) =>
     [

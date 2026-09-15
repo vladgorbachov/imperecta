@@ -736,6 +736,8 @@
   "products.density.toggle": "切换行密度",
   "products.export.label": "CSV",
   "products.export.hint": "将可见行导出为 CSV",
+  "products.export.visible": "可见行 (CSV)",
+  "products.export.full": "完整数据池 (CSV)",
   "forcePassword.title": "更改管理员密码",
   "forcePassword.subtitle": "必须更改默认凭据以确保安全",
   "forcePassword.newEmail": "新邮箱",

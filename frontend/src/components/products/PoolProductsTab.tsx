@@ -55,7 +55,8 @@ import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { ProductPeek } from "@/components/products/ProductPeek";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { PoolProductItem } from "@/api/products";
+import { toast } from "sonner";
+import { productsApi, type PoolProductItem } from "@/api/products";
 
 const PAGE_SIZES = [20, 50, 100] as const;
 const SORT_OPTIONS = [
@@ -216,6 +217,25 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
     persistSavedViews(next);
   };
 
+  /* P5: server-streamed CSV of the full filtered pool. */
+  const exportFullPool = async () => {
+    try {
+      const response = await productsApi.exportPoolCsv({
+        search: search.length >= 2 ? search : undefined,
+        marketplace_id: marketplaceId !== "all" ? marketplaceId : undefined,
+        sort: sort as Parameters<typeof usePoolProducts>[0]["sort"],
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "imperecta_pool.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t("common.error"));
+    }
+  };
+
   const search = useDebounce(searchRaw, 500);
   const offset = (page - 1) * pageSize;
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
@@ -357,16 +377,29 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
             )}
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={items.length === 0}
-            onClick={() => exportCsv(items)}
-            title={t("products.export.hint")}
-          >
-            <Download className="me-1.5 size-3.5" />
-            {t("products.export.label")}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" title={t("products.export.hint")}>
+                <Download className="me-1.5 size-3.5" />
+                {t("products.export.label")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="surface-overlay">
+              <DropdownMenuItem
+                disabled={items.length === 0}
+                className="focus:bg-[var(--glass-bg-hover)]"
+                onClick={() => exportCsv(items)}
+              >
+                {t("products.export.visible")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="focus:bg-[var(--glass-bg-hover)]"
+                onClick={() => void exportFullPool()}
+              >
+                {t("products.export.full")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

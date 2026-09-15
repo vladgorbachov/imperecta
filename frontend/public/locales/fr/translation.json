@@ -736,6 +736,8 @@
   "products.density.toggle": "Basculer la densité des lignes",
   "products.export.label": "CSV",
   "products.export.hint": "Exporter les lignes visibles en CSV",
+  "products.export.visible": "Lignes visibles (CSV)",
+  "products.export.full": "Pool complet (CSV)",
   "forcePassword.title": "Changer le mot de passe administrateur",
   "forcePassword.subtitle": "Les identifiants par défaut doivent être changés pour la sécurité",
   "forcePassword.newEmail": "Nouvel email",
