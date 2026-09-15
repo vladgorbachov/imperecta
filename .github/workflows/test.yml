@@ -1,5 +1,8 @@
 name: Tests
 
+# Backend unit tests run in ci.yml (backend-test, DB-free suite). This
+# workflow keeps only the live E2E smoke against the deployed frontend/API.
+
 on:
   pull_request:
     branches: [main]
@@ -7,72 +10,9 @@ on:
     branches: [main]
 
 jobs:
-  backend-contract-tests:
-    name: Backend Contract Tests
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: ${{ secrets.TEST_POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.TEST_POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.TEST_POSTGRES_DB }}
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio
-      - name: Run tests
-        env:
-          APP_ENV: test
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
-          REDIS_URL: ${{ secrets.TEST_REDIS_URL }}
-          JWT_SECRET: ${{ secrets.TEST_JWT_SECRET }}
-          JWT_ALGORITHM: ${{ secrets.TEST_JWT_ALGORITHM }}
-          JWT_EXPIRATION_MINUTES: ${{ secrets.TEST_JWT_EXPIRATION_MINUTES }}
-          JWT_REFRESH_EXPIRATION_DAYS: ${{ secrets.TEST_JWT_REFRESH_EXPIRATION_DAYS }}
-          JWT_REFRESH_EXPIRATION_DAYS_REMEMBER: ${{ secrets.TEST_JWT_REFRESH_EXPIRATION_DAYS_REMEMBER }}
-          MARKET_DATA_FOREX_URL: ${{ secrets.TEST_MARKET_DATA_FOREX_URL }}
-          MARKET_DATA_CRYPTO_URL: ${{ secrets.TEST_MARKET_DATA_CRYPTO_URL }}
-          MARKET_DATA_TIMEOUT_SECONDS: ${{ secrets.TEST_MARKET_DATA_TIMEOUT_SECONDS }}
-          MARKET_DATA_RETRY_ATTEMPTS: ${{ secrets.TEST_MARKET_DATA_RETRY_ATTEMPTS }}
-          CLAUDE_MODEL: ${{ secrets.TEST_CLAUDE_MODEL }}
-          EMAIL_FROM: ${{ secrets.TEST_EMAIL_FROM }}
-          APP_URL: ${{ secrets.TEST_APP_URL }}
-          PROXY_STICKY_DURATION: ${{ secrets.TEST_PROXY_STICKY_DURATION }}
-          PROXY_COUNTRY_ROUTING: ${{ secrets.TEST_PROXY_COUNTRY_ROUTING }}
-          PROXY_PROVIDER: decodo
-          PROXY_PROVIDER_RPS: "10"
-          DECODO_API_URL: ${{ secrets.TEST_DECODO_API_URL }}
-          DECODO_ENABLED: ${{ secrets.TEST_DECODO_ENABLED }}
-          ALLOWED_ORIGINS: ${{ secrets.TEST_ALLOWED_ORIGINS }}
-          PORT: ${{ secrets.TEST_PORT }}
-          BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.TEST_BOOTSTRAP_ADMIN_EMAIL }}
-          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.TEST_BOOTSTRAP_ADMIN_PASSWORD }}
-          BOOTSTRAP_ADMIN_NAME: ${{ secrets.TEST_BOOTSTRAP_ADMIN_NAME }}
-          BOOTSTRAP_ADMIN_LANGUAGE: ${{ secrets.TEST_BOOTSTRAP_ADMIN_LANGUAGE }}
-          BOOTSTRAP_ADMIN_PLAN: ${{ secrets.TEST_BOOTSTRAP_ADMIN_PLAN }}
-        run: pytest tests/ -v --tb=short
-
   e2e-smoke:
     name: E2E Smoke Tests
     runs-on: ubuntu-latest
-    needs: backend-contract-tests
     defaults:
       run:
         working-directory: e2e

@@ -11,6 +11,7 @@ import pytest
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_pipeline_job_honest_failed_excludes_filtered_and_unchanged():
     """job.failed counts only real failures; not_a_product and no_change are separate."""
@@ -81,6 +82,7 @@ async def test_complete_pipeline_job_honest_failed_excludes_filtered_and_unchang
     assert job.failed == 3
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_pipeline_job_preserves_discovery_errors_in_errors_count():
     """Discovery-phase errors stay in errors_count; job.failed is scrape failures only."""

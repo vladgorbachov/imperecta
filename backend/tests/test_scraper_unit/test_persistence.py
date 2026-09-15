@@ -78,6 +78,7 @@ def _build_mock_scrape_session(
     return session, product, listing
 
 
+@pytest.mark.integration
 def test_scrape_product_full_success(monkeypatch):
     """Successful scrape: clears legacy errors, gate-writes FactPrice, enriches product name."""
     patch_resolve_price_eur_for_unit(monkeypatch)
@@ -124,6 +125,7 @@ def test_scrape_product_full_success(monkeypatch):
     assert session.commit.called
 
 
+@pytest.mark.integration
 def test_scrape_product_price_not_found_partial(monkeypatch):
     """Pool reports price_not_found: no FactPrice, scrape_logs price_not_found, listing error counters."""
     listing_id = uuid.uuid4()
@@ -164,6 +166,7 @@ def test_scrape_product_price_not_found_partial(monkeypatch):
     assert log_rows[0]["status"] == "price_not_found"
 
 
+@pytest.mark.integration
 def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
     """Only title (no product_name field): gate FactPrice + dim_product.name from title."""
     patch_resolve_price_eur_for_unit(monkeypatch)
@@ -235,6 +238,7 @@ def test_today_date_id_deadlock_safe():
         ing_svc.datetime = orig_dt
 
 
+@pytest.mark.integration
 def test_fact_price_written_only_when_all_required_fields(monkeypatch):
     """Gate: name (or title), positive price, currency — otherwise no FactPrice row."""
     patch_resolve_price_eur_for_unit(monkeypatch)

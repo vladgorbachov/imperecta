@@ -217,6 +217,7 @@ def patched_ingestion(monkeypatch):
     yield
 
 
+@pytest.mark.integration
 def test_persist_extracted_writes_fact_price_on_pass(patched_ingestion) -> None:
     db = MagicMock()
     db.get.return_value = SimpleNamespace(
@@ -329,6 +330,7 @@ def test_persist_extracted_gate_skip_returns_currency_rejected(patched_ingestion
     assert result.skip_reason == SKIP_CURRENCY_RAW_TOO_LONG
 
 
+@pytest.mark.integration
 def test_persist_extracted_dim_enrichment_only_image_when_absent(
     patched_ingestion,
 ) -> None:

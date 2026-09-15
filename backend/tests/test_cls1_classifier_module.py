@@ -321,6 +321,7 @@ class TestConsumersRepointed:
         merge_and_finalize(s, "https://x/p/1", ep)
         assert calls, "merge_and_finalize must call classify_page_role_for_discovery"
 
+    @pytest.mark.integration
     def test_discovery_module_imports_classifier(self):
         mods = _read_imports(BACKEND_APP / "modules" / "scraper" / "discovery.py")
         assert "app.modules.classifier" in mods

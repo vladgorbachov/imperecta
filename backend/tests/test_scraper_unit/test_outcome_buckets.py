@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from app.modules.scraper.pipeline.outcome_buckets import (
     ALL_KNOWN_TERMINAL_STATUSES,
     BUCKET_FAILED,
@@ -130,6 +132,7 @@ def test_canonical_scrape_log_statuses_matches_migration_024_check():
     assert frozenset(CANONICAL_SCRAPE_LOG_STATUSES) == _MIGRATION_024_SCRAPE_LOG_STATUSES
 
 
+@pytest.mark.integration
 def test_repair_sites_import_canonical_status_tuple():
     from app.modules.scraper import service as scraper_service
     from app.modules.scraper import tasks as scraper_tasks

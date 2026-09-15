@@ -39,6 +39,7 @@ def test_build_dashboard_kpi_preserves_null_last_update() -> None:
     assert payload.last_update is None
 
 
+@pytest.mark.integration
 def test_dashboard_kpi_route_registered() -> None:
     paths = {route.path for route in app.routes}
     assert "/api/markets/dashboard-kpi" in paths

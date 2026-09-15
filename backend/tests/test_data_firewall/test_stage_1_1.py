@@ -111,6 +111,7 @@ def test_page_role_on_extracted_product_from_classifier() -> None:
     assert merged.page_role == "product"
 
 
+@pytest.mark.integration
 def test_contract_structure_loaded() -> None:
     assert len(FACT_TABLE_CONTRACTS) == 18
     assert "dim_date" in FACT_TABLE_CONTRACTS

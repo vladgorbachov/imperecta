@@ -462,6 +462,7 @@ def _parallel_path_session(*, listing_id: uuid.UUID):
     return session, listing
 
 
+@pytest.mark.integration
 def test_parallel_persist_success_advances_last_checked(monkeypatch):
     """GAP (b): success on scrape_listing_from_fetch advances last_checked_at."""
     listing_id = uuid.uuid4()
@@ -531,6 +532,7 @@ def test_parallel_persist_read_only_does_not_advance_last_checked(monkeypatch):
     invalidate.assert_called_once()
 
 
+@pytest.mark.integration
 def test_parallel_persist_honest_absent_advances_last_checked(monkeypatch):
     """GAP (b): honest-absent verdict advances last_checked_at on parallel path."""
     listing_id = uuid.uuid4()

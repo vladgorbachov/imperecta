@@ -114,6 +114,7 @@ async def test_discover_one_marketplace_opens_cm_under_parent_id(monkeypatch):
     assert len(captured_on_activity) == 1, "on_activity must be wired"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scrape_one_marketplace_opens_cm_under_parent_id(monkeypatch):
     child_id = uuid4()

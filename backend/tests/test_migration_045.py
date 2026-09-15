@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+import pytest
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_045 = (
@@ -29,6 +30,7 @@ def test_migration_045_grant_insert() -> None:
     assert "9.6" in source or "reject_data" in source
 
 
+@pytest.mark.integration
 def test_migration_045_chain_head() -> None:
     versions_dir = BACKEND_ROOT / "alembic" / "versions"
     revisions: dict[str, str | None] = {}

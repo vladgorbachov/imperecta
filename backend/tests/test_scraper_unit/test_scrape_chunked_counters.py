@@ -132,6 +132,7 @@ def _wire_session_factory(monkeypatch, *, get_results):
     return engine, db
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scrape_child_partial_on_deadline(monkeypatch):
     child_id = uuid4()
@@ -334,6 +335,7 @@ async def test_tick_completes_when_all_cohorts_drained(monkeypatch):
 # ---------- 5f counter scope child ids ---------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_counter_scope_child_ids():
     """ScrapeLog rows under child scrape ids roll up to parent.successful."""

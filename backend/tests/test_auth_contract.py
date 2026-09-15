@@ -3,6 +3,7 @@
 import pytest
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_register_returns_tokens(client):
     """Register returns access_token, refresh_token, token_type."""
@@ -23,6 +24,7 @@ async def test_register_returns_tokens(client):
     assert data["token_type"] == "bearer"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_login_returns_tokens_and_flags(client):
     """Login returns tokens. Frontend checks for remember-me and force-password-change."""
@@ -47,6 +49,7 @@ async def test_login_returns_tokens_and_flags(client):
     assert "refresh_token" in data
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_login_wrong_password_401(client):
     """Wrong password returns 401."""
@@ -68,6 +71,7 @@ async def test_login_wrong_password_401(client):
     assert resp.status_code == 401
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_me_returns_user_profile(client, auth_headers):
     """Me endpoint returns user profile with expected fields."""
@@ -103,6 +107,7 @@ async def test_register_invalid_language_422(client):
     assert resp.status_code == 422
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_put_me_updates_profile(client, auth_headers):
     """PUT /api/users/me updates profile and returns user."""
@@ -122,6 +127,7 @@ async def test_put_me_updates_profile(client, auth_headers):
     assert data["avatar_url"] == "https://example.com/avatar.png"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_put_me_with_data_url_avatar(client, auth_headers):
     """PUT /api/users/me accepts data URL avatar (base64 image)."""

@@ -46,6 +46,7 @@ def test_monitor_module_gone() -> None:
         importlib.import_module("app.modules.ai_analyst.monitor")
 
 
+@pytest.mark.integration
 def test_only_chat_route_under_ai() -> None:
     pairs: set[tuple[str, str]] = set()
     for route in app.routes:
@@ -188,6 +189,7 @@ def test_module_artifacts_clean() -> None:
 
 # 9. chat() persistence (A-keep) ----------------------------------------------
 
+@pytest.mark.integration
 def test_chat_persists_session_message_and_apilog() -> None:
     """A-keep semantics: chat() writes AIChatSession + AIChatMessage + api_logs via LOGS door."""
     src = (AI_ANALYST_DIR / "service.py").read_text(encoding="utf-8")

@@ -103,6 +103,7 @@ def test_no_dead_analytics_symbols_in_backend_source() -> None:
     )
 
 
+@pytest.mark.integration
 def test_entitlements_usage_mounted_under_api_prefix() -> None:
     """`/api/entitlements/usage` is registered exactly once."""
     paths = [getattr(r, "path", None) for r in app.routes]

@@ -28,6 +28,7 @@ def adapter(monkeypatch: pytest.MonkeyPatch) -> CommoditiesUnifiedAdapter:
     return CommoditiesUnifiedAdapter(timeout=5.0, retry_attempts=0)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_fetch_metal_falls_back_to_yahoo_when_gold_api_fails(
     adapter: CommoditiesUnifiedAdapter,
@@ -76,6 +77,7 @@ async def test_fetch_metal_falls_back_to_yahoo_when_gold_api_fails(
     assert item.provider_source == "yahoo"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_fetch_metal_skips_symbol_when_both_sources_fail(
     adapter: CommoditiesUnifiedAdapter,

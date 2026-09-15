@@ -25,6 +25,7 @@ async def _active_marketplace_codes(limit: int = 2) -> list[str]:
         return [row[0] for row in result.all() if row[0]]
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_trigger_full_pipeline_stores_marketplace_codes_in_metadata():
     """Admin trigger persists optional marketplace filter on the parent job."""

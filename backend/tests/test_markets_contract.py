@@ -3,6 +3,7 @@
 import pytest
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_ingest_forbidden_for_regular_user(client, auth_headers):
     """Regular user cannot trigger market data ingestion."""
@@ -27,6 +28,7 @@ async def test_markets_ingest_ok_for_superuser(client, superuser_headers):
     assert "task_id" in data
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_removed_market_endpoints_not_registered(client, auth_headers):
     """Per-class market read endpoints were removed (ticker/instruments remain)."""
@@ -40,6 +42,7 @@ async def test_removed_market_endpoints_not_registered(client, auth_headers):
         assert resp.status_code == 404
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_overview_returns_stored_data(client, auth_headers):
     """Overview endpoint returns paginated payload from pool data source."""
@@ -61,6 +64,7 @@ async def test_markets_overview_returns_stored_data(client, auth_headers):
         assert isinstance(first_item["recent_prices"], list)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_overview_applies_visibility_flag_by_role(client, auth_headers, superuser_headers, monkeypatch):
     """Overview endpoint propagates public/admin visibility flag to pool service."""
@@ -93,6 +97,7 @@ async def test_markets_overview_applies_visibility_flag_by_role(client, auth_hea
     assert observed == [False, True]
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_pool_categories_applies_visibility_flag_by_role(client, auth_headers, superuser_headers, monkeypatch):
     """Pool categories endpoint propagates visibility flag by role."""

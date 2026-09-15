@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+import pytest
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_039 = (
@@ -74,6 +75,7 @@ def test_migration_039_documents_idle_seam_and_vault_prerequisite() -> None:
     assert "gate._canonical_record" in source
 
 
+@pytest.mark.integration
 def test_alembic_single_head_includes_039() -> None:
     versions_dir = BACKEND_ROOT / "alembic" / "versions"
     revisions: dict[str, str | None] = {}

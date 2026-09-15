@@ -34,6 +34,7 @@ def movements_auth_override():
     app.dependency_overrides.pop(get_current_user, None)
 
 
+@pytest.mark.integration
 def test_movements_routes_registered() -> None:
     paths = {route.path for route in app.routes}
     assert "/api/markets/movements" in paths

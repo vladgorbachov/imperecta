@@ -11,6 +11,7 @@ from app.models.app_tables import ScrapeJob
 from app.modules.admin.parsing_admin import ParsingAdminService
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_test_marketplaces_contract_shape():
     """Marketplace list response contains strict frontend keys."""
@@ -34,6 +35,7 @@ async def test_get_test_marketplaces_contract_shape():
             assert isinstance(item["success_rate"], float)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_trigger_full_pipeline_test_creates_job():
     """Service creates a full-pipeline parent scrape job when none is running."""
@@ -48,6 +50,7 @@ async def test_trigger_full_pipeline_test_creates_job():
             await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_trigger_status_and_runs_with_supported_job_type(monkeypatch):
     """When job_type is allowed by schema, service returns poll/status history contracts."""
@@ -107,6 +110,7 @@ async def test_trigger_status_and_runs_with_supported_job_type(monkeypatch):
         await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_test_runs_limit_is_clamped(monkeypatch):
     """Limit values are safely clamped to service bounds."""
@@ -127,6 +131,7 @@ async def test_get_test_runs_limit_is_clamped(monkeypatch):
         await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_job_status_failed_contains_metadata(monkeypatch):
     """Failed status returns metadata payload for frontend breakdown rendering."""
@@ -171,6 +176,7 @@ async def test_get_job_status_failed_contains_metadata(monkeypatch):
         await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_job_status_not_found():
     """Unknown job id raises explicit not-found error."""
@@ -181,6 +187,7 @@ async def test_get_job_status_not_found():
         assert "Scrape job not found" in str(exc.value)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_job_live_feed_contract_for_empty_job(monkeypatch):
     """Live feed returns stable contract even before any scrape_logs exist."""
@@ -202,6 +209,7 @@ async def test_get_job_live_feed_contract_for_empty_job(monkeypatch):
             await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_active_pipeline_job_returns_latest_running(monkeypatch):
     """Active job endpoint helper should return running pipeline row."""
@@ -221,6 +229,7 @@ async def test_get_active_pipeline_job_returns_latest_running(monkeypatch):
             await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_trigger_full_pipeline_test_blocks_parallel_running_job(monkeypatch):
     """Second trigger is rejected while one full-pipeline job is still running."""
@@ -239,6 +248,7 @@ async def test_trigger_full_pipeline_test_blocks_parallel_running_job(monkeypatc
             await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_stale_running_pipeline_job_is_marked_failed(monkeypatch):
     """Stale running pipeline jobs are auto-failed before active-job lookup."""
@@ -280,6 +290,7 @@ async def test_stale_running_pipeline_job_is_marked_failed(monkeypatch):
         await session.commit()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_test_runs_falls_back_to_job_counters(monkeypatch):
     """History payload falls back to ScrapeJob counters when metadata summary is missing."""

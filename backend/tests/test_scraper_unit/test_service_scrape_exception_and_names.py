@@ -71,6 +71,7 @@ def test_scrape_product_pool_raises_exception(monkeypatch):
     assert r.success is False and "exception" in (r.error or "").lower()
 
 
+@pytest.mark.integration
 def test_product_name_replace_placeholder_and_title_only(monkeypatch):
     patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
@@ -153,6 +154,7 @@ class _PayloadWithProductName:
     original_price: float | None = None
 
 
+@pytest.mark.integration
 def test_product_name_nonempty_updates_dim_product(monkeypatch):
     patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()

@@ -215,6 +215,7 @@ async def test_save_product_urls_sets_page_role(monkeypatch) -> None:
     assert pool_state["batches"][0][0].fact_listing["page_role"] == "product"
 
 
+@pytest.mark.integration
 def test_scrape_prunes_nonproduct() -> None:
     db = MagicMock()
     listing_id = uuid4()

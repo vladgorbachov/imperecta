@@ -672,6 +672,7 @@ async def test_create_pending_child_returns_none_for_unknown_code():
     db.flush.assert_not_awaited()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_pending_child_inserts_and_returns_id():
     parent_id = uuid4()

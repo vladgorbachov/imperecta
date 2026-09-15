@@ -66,6 +66,7 @@ def test_empty_locator_sign_and_verify_batch() -> None:
     )
 
 
+@pytest.mark.integration
 def test_evaluate_logs_well_typed_batch_inserts_on_stub() -> None:
     rows = [_scrape_row(), _scrape_row(status="price_not_found", price_found=None)]
     db = MagicMock()

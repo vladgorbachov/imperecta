@@ -64,6 +64,7 @@ def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
         ("listing_deactivate", {"is_active": False}),
     ],
 )
+@pytest.mark.integration
 def test_each_housekeeping_kind_routes_by_url_hash(kind: str, delta: dict) -> None:
     fields = build_listing_update_fields(url_hash="listinghash", **delta)
     outcome = authorize_scrape_update(
@@ -141,6 +142,7 @@ def _patch_scrape_context(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.integration
 def test_start_reset_syncs_in_memory_before_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.models.facts import FactListing
 

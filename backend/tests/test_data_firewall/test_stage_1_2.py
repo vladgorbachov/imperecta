@@ -194,6 +194,7 @@ def test_persist_rejects_unsigned() -> None:
     assert not any(isinstance(a, FactPrice) for a in added)
 
 
+@pytest.mark.integration
 def test_persist_writes_verbatim_no_mutation() -> None:
     db = MagicMock()
     listing_id = uuid4()

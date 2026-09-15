@@ -3,6 +3,7 @@
 import pytest
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_admin_stats_forbidden_for_regular_user(client, auth_headers):
     """Regular user cannot access admin stats."""
@@ -10,6 +11,7 @@ async def test_admin_stats_forbidden_for_regular_user(client, auth_headers):
     assert resp.status_code == 403
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_admin_claude_status_forbidden_for_regular_user(client, auth_headers):
     """Regular user cannot access admin claude-status."""

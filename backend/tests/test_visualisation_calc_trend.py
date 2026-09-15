@@ -106,6 +106,7 @@ def test_build_trend_series_preserves_none_avg() -> None:
     ]
 
 
+@pytest.mark.integration
 def test_trend_route_registered() -> None:
     paths = {route.path for route in app.routes}
     assert "/api/markets/trend" in paths

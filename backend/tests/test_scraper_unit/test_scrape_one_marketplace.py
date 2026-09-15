@@ -44,6 +44,7 @@ def _wire_session_factory(monkeypatch, *, get_results):
     return engine, db
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scrape_one_marketplace_runs_and_owns_job(monkeypatch):
     child_id = uuid4()
@@ -111,6 +112,7 @@ async def test_scrape_one_marketplace_runs_and_owns_job(monkeypatch):
     ],
     ids=["all-ok", "mixed-partial", "all-failed", "hard-error-trumps"],
 )
+@pytest.mark.integration
 async def test_scrape_one_marketplace_partial_aware_status(
     monkeypatch, scraped_ok, scraped_failed, error, expected_status
 ):
@@ -198,6 +200,7 @@ async def test_scrape_one_marketplace_job_not_found(monkeypatch):
     engine.dispose.assert_awaited_once()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scrape_one_marketplace_marketplace_not_found(monkeypatch):
     child_id = uuid4()

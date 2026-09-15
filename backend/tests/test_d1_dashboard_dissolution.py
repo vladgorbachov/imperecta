@@ -118,6 +118,7 @@ def test_overview_query_params_preserved() -> None:
     assert set(OVERVIEW_SORT) == {"volatile", "trending", "gainers", "losers", "recent"}
 
 
+@pytest.mark.integration
 def test_overview_app_route_is_under_api_prefix() -> None:
     """The mounted /markets/overview endpoint is reachable under the /api prefix."""
     actual_paths = {getattr(route, "path", None) for route in app.routes}

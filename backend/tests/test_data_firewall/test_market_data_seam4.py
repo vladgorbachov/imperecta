@@ -56,6 +56,7 @@ def test_dim_date_already_registered_in_all_four_maps() -> None:
     assert SUPPORTED_WRITE_OPERATIONS["dim_date"] == frozenset({"insert"})
 
 
+@pytest.mark.integration
 def test_migration_trim_single_statement_and_fixed_boundary() -> None:
     source = (BACKEND_ROOT / "alembic/versions/037_trim_dim_date_preseed.py").read_text(
         encoding="utf-8",
@@ -100,6 +101,7 @@ def test_no_raw_db_add_dim_date_in_market_data_ingestion() -> None:
     assert "build_dim_date_fields_from_day" in source
 
 
+@pytest.mark.integration
 def test_dim_date_insert_uses_on_conflict_do_nothing() -> None:
     fields = build_dim_date_fields_from_day(date(2026, 6, 28))
     outcome = evaluate_market(

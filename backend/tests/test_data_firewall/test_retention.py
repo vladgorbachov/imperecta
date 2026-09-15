@@ -247,6 +247,7 @@ def test_run_retention_pass_audits_each_table(mock_delete_table, mock_audit) -> 
         assert call.kwargs["status"] == "success"
 
 
+@pytest.mark.integration
 def test_write_sync_retention_delete_executes_cutoff_predicate() -> None:
     now = _fixed_now()
     cutoff = retention_cutoff(table="reject_data", now=now)

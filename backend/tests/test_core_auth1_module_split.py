@@ -68,6 +68,7 @@ def test_auth_router_owns_only_the_four_extracted_routes() -> None:
 
 # 2. /api/auth/* paths preserved ----------------------------------------------
 
+@pytest.mark.integration
 def test_auth_paths_preserved_under_api() -> None:
     """CORE-AUTH1 owns these four routes; CORE-USERS1 moved /me out
     (now /api/users/me), so the /api/auth/* surface here is only the four

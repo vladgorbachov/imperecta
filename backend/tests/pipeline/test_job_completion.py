@@ -14,6 +14,7 @@ from app.models.facts import FactListing
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_pipeline_job_updates_metadata_and_duration():
     """Completion writes timings/summary/per_marketplace and job status fields."""
@@ -119,6 +120,7 @@ async def test_complete_pipeline_job_updates_metadata_and_duration():
         assert refreshed.completed_at is not None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_pipeline_job_failed_sets_error_payload():
     """Completion marks failed jobs and stores error details for polling diagnostics."""
@@ -151,6 +153,7 @@ async def test_complete_pipeline_job_failed_sets_error_payload():
         assert refreshed.failed == 0
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_pipeline_job_includes_marketplaces_from_logs_when_seed_empty():
     """Summary uses scrape_logs even if discovery seed is empty."""

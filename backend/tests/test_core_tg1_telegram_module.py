@@ -38,6 +38,7 @@ def test_telegram_module_imports_clean() -> None:
         assert hasattr(schemas, symbol), f"telegram.schemas.{symbol} missing"
 
 
+@pytest.mark.integration
 def test_telegram_router_mounts_canonical_three_routes() -> None:
     """Three canonical routes are mounted exactly once under /api/telegram/*."""
     inventory = sorted(
@@ -77,6 +78,7 @@ def test_old_telegram_link_response_unimportable() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_generate_link_code_response_model_is_typed() -> None:
     """The route declares TelegramLinkCodeResponse with code + bot_url only."""
     from app.modules.telegram.schemas import TelegramLinkCodeResponse
@@ -94,6 +96,7 @@ def test_generate_link_code_response_model_is_typed() -> None:
     assert route.response_model is TelegramLinkCodeResponse
 
 
+@pytest.mark.integration
 def test_generate_link_code_handler_flushes_and_uses_alnum_code() -> None:
     """Handler uses the 6-char ALNUM alphabet and awaits db.flush()."""
     from app.modules.telegram import api as telegram_api
@@ -113,6 +116,7 @@ def test_generate_link_code_handler_flushes_and_uses_alnum_code() -> None:
     )
 
 
+@pytest.mark.integration
 def test_unlink_response_is_typed() -> None:
     """Unlink route uses a typed Pydantic model."""
     from app.modules.telegram.schemas import TelegramUnlinkResponse

@@ -144,6 +144,7 @@ def test_to_admin_row_does_not_fabricate_stats() -> None:
         )
 
 
+@pytest.mark.integration
 def test_update_keys_strip_per_shop_selectors_and_scraper_type() -> None:
     """No per-shop CSS selector or scraper_type knobs survive in the whitelist."""
     keys = MarketplaceService._UPDATE_KEYS
@@ -205,6 +206,7 @@ def test_logs_route_deleted() -> None:
     assert not leaked, f"/logs route leak: {sorted(leaked)}"
 
 
+@pytest.mark.integration
 def test_admin_marketplace_crud_intact() -> None:
     """Four expected (method, path) pairs survive MP1."""
     live = _live_routes()

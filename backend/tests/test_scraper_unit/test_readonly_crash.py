@@ -148,6 +148,7 @@ def test_scrape_listing_readonly_does_not_advance_last_checked(monkeypatch):
     invalidate.assert_called_once()
 
 
+@pytest.mark.integration
 def test_scrape_listing_success_advances_last_checked(monkeypatch):
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
@@ -180,6 +181,7 @@ def test_scrape_listing_success_advances_last_checked(monkeypatch):
     assert listing.last_checked_at is not None
 
 
+@pytest.mark.integration
 def test_scrape_listing_honest_absent_advances_last_checked(monkeypatch):
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()

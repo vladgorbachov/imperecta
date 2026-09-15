@@ -89,6 +89,7 @@ def test_build_marketplace_breakdown_empty_honest() -> None:
     assert payload.total == 0
 
 
+@pytest.mark.integration
 def test_geo_coverage_route_registered() -> None:
     paths = {route.path for route in app.routes}
     assert "/api/markets/geo-coverage" in paths

@@ -12,6 +12,7 @@ from app.models.app_tables import ScrapeJob
 from app.modules.admin.parsing_admin import ParsingAdminService
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_parsing_admin_endpoints_forbidden_for_regular_user(client, auth_headers):
     """Non-superuser cannot access parsing admin endpoints."""

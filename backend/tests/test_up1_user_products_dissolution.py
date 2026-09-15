@@ -120,6 +120,7 @@ def test_user_products_routes_gone() -> None:
     assert not leaked, f"user_products routes still mounted: {sorted(leaked)}"
 
 
+@pytest.mark.integration
 def test_unrelated_routes_preserved() -> None:
     """Routes from other modules must not be collateral damage."""
     registered = _registered_paths()

@@ -67,6 +67,7 @@ def _session_with_listing(
     return session, listing
 
 
+@pytest.mark.integration
 def test_scrape_resets_errors_before_worker(monkeypatch):
     """Stale last_error / consecutive_errors cleared before pool I/O."""
     listing_id = uuid.uuid4()
@@ -165,6 +166,7 @@ def test_fact_price_skipped_without_currency(monkeypatch):
     assert not any(isinstance(x, FactPrice) for x in added)
 
 
+@pytest.mark.integration
 def test_failure_streak_deactivates_listing_at_threshold(monkeypatch):
     """failure_streak (not consecutive_errors) drives listing deactivation."""
     listing_id = uuid.uuid4()

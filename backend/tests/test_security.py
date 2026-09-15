@@ -54,6 +54,7 @@ async def test_unauthenticated_cannot_access_protected_endpoints(client):
         assert resp.status_code in (401, 403), f"{method} {path} should require auth"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_non_superuser_cannot_access_admin(client, auth_headers):
     """Regular user cannot access admin endpoints."""
@@ -66,6 +67,7 @@ async def test_non_superuser_cannot_access_admin(client, auth_headers):
         assert resp.status_code == 403, f"{method} {path} should be forbidden for non-superuser"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_change_initial_password_requires_force_flag(client, auth_headers):
     """change-initial-password returns 403 when user does not have force_password_change."""
@@ -80,6 +82,7 @@ async def test_change_initial_password_requires_force_flag(client, auth_headers)
     assert resp.status_code == 403
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_me_returns_user_profile_without_sensitive_fields(client, auth_headers):
     """Me endpoint does not expose password_hash or internal fields."""
@@ -93,6 +96,7 @@ async def test_me_returns_user_profile_without_sensitive_fields(client, auth_hea
 # --- IDOR / OBJECT OWNERSHIP ---
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_user_a_cannot_overwrite_user_b_preferences(client, auth_headers, auth_headers_b):
     """User A cannot overwrite User B's markets preferences via API."""
@@ -112,6 +116,7 @@ async def test_user_a_cannot_overwrite_user_b_preferences(client, auth_headers, 
 # --- MASS ASSIGNMENT / OVER-POSTING ---
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_put_me_rejects_extra_fields(client, auth_headers):
     """PUT /me does not accept is_superuser or other privileged fields."""
@@ -135,6 +140,7 @@ async def test_put_me_rejects_extra_fields(client, auth_headers):
 # --- AI ENDPOINT ---
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_ai_chat_requires_entitlement(client, auth_headers):
     """AI chat endpoint enforces entitlement (Trial/Free may get 403)."""
@@ -160,6 +166,7 @@ async def test_ai_chat_requires_entitlement(client, auth_headers):
 # --- MARKETS SORT INJECTION ---
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_overview_invalid_sort(client, auth_headers):
     """Invalid sort param is safely handled."""
@@ -173,6 +180,7 @@ async def test_markets_overview_invalid_sort(client, auth_headers):
     assert "items" in data
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_overview_limit_bounds(client, auth_headers):
     """Limit param is bounded."""
@@ -186,6 +194,7 @@ async def test_markets_overview_limit_bounds(client, auth_headers):
     assert len(data.get("items", [])) <= 100
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_preferences_rejects_oversized_favorites(client, auth_headers):
     """Markets preferences rejects oversized favorite_instrument_ids list."""

@@ -56,6 +56,7 @@ def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
     return captured
 
 
+@pytest.mark.integration
 def test_dim_date_insert_uses_on_conflict_do_nothing() -> None:
     today = date(2026, 6, 17)
     fields = _dim_date_row_for_day(today)
@@ -78,6 +79,7 @@ def test_dim_date_insert_uses_on_conflict_do_nothing() -> None:
     assert stmt._post_values_clause is not None  # noqa: SLF001 ON CONFLICT clause present
 
 
+@pytest.mark.integration
 def test_enrich_update_only_allowed_columns() -> None:
     product_id = uuid4()
     fields = build_product_update_fields(
@@ -130,6 +132,7 @@ def test_enrich_skips_when_nothing_changed() -> None:
     mock_update.assert_not_called()
 
 
+@pytest.mark.integration
 def test_denorm_success_routed_by_url_hash() -> None:
     fields = build_listing_update_fields(
         url_hash="listinghash",

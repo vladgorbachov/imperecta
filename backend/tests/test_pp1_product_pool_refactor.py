@@ -245,6 +245,7 @@ def _route_for(path: str, method: str = "GET"):
         ("/api/pool/stats", "PoolStatsResponse"),
     ],
 )
+@pytest.mark.integration
 def test_routes_are_typed(path: str, expected_class_name: str) -> None:
     route = _route_for(path)
     assert route is not None, f"Route missing: {path}"
@@ -257,6 +258,7 @@ def test_routes_are_typed(path: str, expected_class_name: str) -> None:
     )
 
 
+@pytest.mark.integration
 def test_overview_and_pool_products_both_live() -> None:
     """Both pages-on-one-source pattern: /markets/overview and /pool/products
     must coexist and both delegate to list_products."""

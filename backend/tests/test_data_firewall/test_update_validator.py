@@ -186,6 +186,7 @@ def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
     return captured
 
 
+@pytest.mark.integration
 def test_prune_listing_delete_by_url_hash() -> None:
     fields = build_listing_delete_fields(url_hash="deadbeef")
     outcome = authorize_scrape_delete(table="fact_listing", fields=fields, db=MagicMock())
@@ -201,6 +202,7 @@ def test_prune_listing_delete_by_url_hash() -> None:
     assert isinstance(captured[0], Delete)
 
 
+@pytest.mark.integration
 def test_prune_product_delete_gated_by_orphan_count() -> None:
     """Product DELETE only when orphan COUNT == 0 (read on producer session)."""
     product_id = uuid4()

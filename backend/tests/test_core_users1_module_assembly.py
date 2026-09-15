@@ -116,6 +116,7 @@ def test_admin_router_superuser_gated() -> None:
 
 # 2. path migration -----------------------------------------------------------
 
+@pytest.mark.integration
 def test_live_app_routes_after_migration() -> None:
     inventory = {
         (",".join(sorted(r.methods - {"HEAD"})), r.path)

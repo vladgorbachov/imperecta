@@ -50,6 +50,7 @@ def test_run_coro_in_worker_ignores_shutdown_asyncgen_error(monkeypatch):
     assert _run_coro_in_worker(coro()) == 42
 
 
+@pytest.mark.integration
 def test_persist_commit_failure(monkeypatch):
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()

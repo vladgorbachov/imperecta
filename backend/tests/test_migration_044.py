@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+import pytest
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_044 = (
@@ -59,6 +60,7 @@ def test_migration_044_has_single_statement_per_op_execute() -> None:
     assert offenders == [], f"multi-statement op.execute literals: {offenders}"
 
 
+@pytest.mark.integration
 def test_alembic_single_head_includes_044() -> None:
     versions_dir = BACKEND_ROOT / "alembic" / "versions"
     revisions: dict[str, str | None] = {}
