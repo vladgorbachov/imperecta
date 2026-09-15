@@ -1,6 +1,8 @@
 """Schemas for product pool (listings tied to dim_product / dim_marketplace)."""
 
+import datetime as dt
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -96,3 +98,28 @@ class PoolCategorySummary(BaseModel):
     country_code: str | None = None
     product_count: int
     avg_price: float | None = None
+
+
+class PoolProductDetail(PoolProductItem):
+    """Full product card for /pool/products/{listing_id} (P2)."""
+
+    description: str | None = None
+    attributes: dict | None = None
+    brand: str | None = None
+    category: str | None = None
+
+
+class PriceHistoryPoint(BaseModel):
+    date: dt.date
+    price: float | None = None
+    price_eur: float | None = None
+
+
+class PriceHistoryResponse(BaseModel):
+    """Daily price series for one listing (P1). Honest empty under 2 buckets."""
+
+    listing_id: UUID
+    currency: str | None = None
+    period: Literal["7d", "30d", "90d"]
+    points: list[PriceHistoryPoint]
+    data_ready: bool

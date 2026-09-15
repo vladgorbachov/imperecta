@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.models.app_tables import (
     AIChatMessage,
     AIChatSession,
+    Alert,
     ApiLog,
     ScrapeJob,
     ScrapeLog,
@@ -131,6 +132,7 @@ FACT_TABLE_CONTRACTS: dict[str, dict[str, ColumnContract]] = {
     "dim_marketplace": build_table_contract(DimMarketplace),
     "dim_brand": build_table_contract(DimBrand),
     "dim_category": build_table_contract(DimCategory),
+    "alerts": build_table_contract(Alert),
     "fact_listing": build_table_contract(FactListing),
     "fact_price": build_table_contract(FactPrice),
     "fact_review": build_table_contract(FactReview),
@@ -160,6 +162,7 @@ TABLE_LOCATORS: dict[str, tuple[str, ...]] = {
     "dim_marketplace": ("id",),
     "dim_brand": ("id",),
     "dim_category": ("id",),
+    "alerts": ("id",),
     "scrape_jobs": ("id",),
     "fact_currency_rate": ("date_id", "currency_code", "source"),
     "fact_crypto_price": ("date_id", "symbol", "source"),

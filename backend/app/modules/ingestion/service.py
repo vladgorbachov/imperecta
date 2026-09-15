@@ -484,6 +484,17 @@ class IngestionService:
             if brand_id is not None:
                 delta["brand_id"] = str(brand_id)
 
+        description = getattr(data, "description", None)
+        if isinstance(description, str) and description.strip():
+            existing_attrs = (
+                dict(product.attributes)
+                if isinstance(getattr(product, "attributes", None), dict)
+                else {}
+            )
+            if not existing_attrs.get("description"):
+                existing_attrs["description"] = description.strip()[:2000]
+                delta["attributes"] = existing_attrs
+
         category_path = getattr(data, "category_path", None)
         if (
             isinstance(category_path, list)

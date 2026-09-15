@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.app_tables import (
     AIChatMessage,
     AIChatSession,
+    Alert,
     ApiLog,
     ScrapeJob,
     ScrapeLog,
@@ -48,6 +49,7 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
     "dim_marketplace": frozenset({"insert", "update", "delete"}),
     "dim_brand": frozenset({"insert", "update"}),
     "dim_category": frozenset({"insert", "update"}),
+    "alerts": frozenset({"insert", "update", "delete"}),
     "scrape_jobs": frozenset({"insert", "update", "delete"}),
     "fact_listing": frozenset({"insert", "update", "delete"}),
     "fact_price": frozenset({"insert", "delete"}),
@@ -69,6 +71,7 @@ _TABLE_MODELS: dict[str, type] = {
     "dim_marketplace": DimMarketplace,
     "dim_brand": DimBrand,
     "dim_category": DimCategory,
+    "alerts": Alert,
     "scrape_jobs": ScrapeJob,
     "fact_listing": FactListing,
     "fact_price": FactPrice,

@@ -26,6 +26,12 @@ from app.modules.visualisation_calc.coverage.service import (
 from app.modules.visualisation_calc.kpi.read import read_dashboard_kpi
 from app.modules.visualisation_calc.kpi.schemas import DashboardKpi
 from app.modules.visualisation_calc.kpi.service import build_dashboard_kpi
+from app.modules.visualisation_calc.kpi_history.read import (
+    read_daily_pool_entries,
+    read_daily_price_kpis,
+)
+from app.modules.visualisation_calc.kpi_history.schemas import KpiHistoryResponse
+from app.modules.visualisation_calc.kpi_history.service import build_kpi_history
 from app.modules.visualisation_calc.movements.read import (
     read_coverage_counts,
     read_mover_rows,
@@ -124,6 +130,21 @@ async def get_dashboard_kpi(
         marketplace_id=marketplace_id,
     )
     return build_dashboard_kpi(updated_24h, last_update)
+
+
+@router.get("/kpi-history", response_model=KpiHistoryResponse)
+async def get_kpi_history(
+    _current_user: CurrentUser,
+    db: DbSession,
+    days: int = Query(default=7, ge=2, le=90),
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+) -> KpiHistoryResponse:
+    """Per-day KPI history for dashboard sparklines (P4); missing days absent."""
+    price_rows = await read_daily_price_kpis(db, days=days, country_code=country_code)
+    pool_before, pool_entries = await read_daily_pool_entries(
+        db, days=days, country_code=country_code
+    )
+    return build_kpi_history(price_rows, pool_before, pool_entries, days=days)
 
 
 @router.get("/geo-coverage", response_model=CoverageBreakdown)

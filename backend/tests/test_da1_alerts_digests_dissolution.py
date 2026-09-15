@@ -90,9 +90,6 @@ BACKEND_APP_DIR = Path(__file__).resolve().parents[1] / "app"
 @pytest.mark.parametrize(
     "module_path",
     [
-        "app.modules.alerts.api",
-        "app.modules.alerts.service",
-        "app.modules.alerts.schemas",
         "app.modules.alerts.tasks",
         "app.modules.alerts.models",
         "app.modules.digests.api",

@@ -45,7 +45,6 @@ from app.modules.market_data.ticker import get_ticker_data
 EXPECTED_MARKETS_ROUTES: set[str] = {
     "/markets/preferences",
     "/markets/instruments",
-    "/markets/ticker",
     "/markets/ingest",
 }
 

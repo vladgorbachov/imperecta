@@ -17,15 +17,13 @@ from app.database import engine
 from app.modules.admin.api_alerts import router as admin_alerts_router
 from app.modules.admin.api_parsing import router as admin_parsing_router
 from app.modules.ai_analyst.api import router as ai_router
+from app.modules.alerts.api import router as alerts_router
 from app.modules.auth.api import router as auth_router
 from app.modules.core.api_admin import router as admin_router
 from app.modules.entitlements.api import router as entitlements_router
 from app.modules.market_data.api import router as market_data_router
 from app.modules.marketplaces.api import router as marketplaces_router
 from app.modules.news.api import router as news_router
-from app.modules.product_pool.api import (
-    markets_overview_router as markets_overview_router,
-)
 from app.modules.product_pool.api import router as pool_router
 from app.modules.telegram.api import router as telegram_router
 from app.modules.users.api import admin_router as users_admin_router
@@ -145,12 +143,12 @@ for router in [
     telegram_router,
     marketplaces_router,
     pool_router,
-    markets_overview_router,
     market_data_router,
     news_router,
     visualisation_calc_router,
     entitlements_router,
     ai_router,
+    alerts_router,
 ]:
     app.include_router(router, prefix="/api")
 

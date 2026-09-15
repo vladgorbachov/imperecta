@@ -49,7 +49,7 @@ def test_no_orm_cache_sync_helpers_remain() -> None:
 
 def test_denorm_columns_in_gated_allowlists() -> None:
     assert SCRAPE_UPDATE_ALLOWLIST["dim_product"]["product_enrich"] == frozenset(
-        {"name", "name_normalized", "image_url", "brand_id", "category_id"},
+        {"name", "name_normalized", "image_url", "brand_id", "category_id", "attributes"},
     )
     assert SCRAPE_UPDATE_ALLOWLIST["fact_listing"]["listing_denorm_success"] == frozenset(
         {"last_price", "last_currency_code", "last_price_changed_at", "last_price_eur"},

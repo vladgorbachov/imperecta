@@ -32,11 +32,24 @@ _SCRAPE_JOB_INSERT_ORM_DEFAULTS: dict[str, Any] = {
 }
 
 
+def _pg_array_literal(items: list | tuple) -> str:
+    """Postgres array literal for scalar lists — the gate casts wire values
+    with ::type[] and a JSON-shaped '["PL"]' is a malformed array literal."""
+    parts = []
+    for item in items:
+        text_value = str(item)
+        escaped = text_value.replace("\\", "\\\\").replace('"', '\\"')
+        parts.append(f'"{escaped}"')
+    return "{" + ",".join(parts) + "}"
+
+
 def _serialize_meta_value(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
+    if isinstance(value, (list, tuple)):
+        return _pg_array_literal(value)
     return value
 
 

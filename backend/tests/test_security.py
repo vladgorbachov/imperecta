@@ -44,7 +44,7 @@ async def test_unauthenticated_cannot_access_protected_endpoints(client):
     endpoints = [
         ("GET", "/api/users/me"),
         ("GET", "/api/markets/preferences"),
-        ("GET", "/api/markets/overview"),
+        ("GET", "/api/pool/products"),
     ]
     for method, path in endpoints:
         if method == "GET":
@@ -169,9 +169,9 @@ async def test_ai_chat_requires_entitlement(client, auth_headers):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_overview_invalid_sort(client, auth_headers):
-    """Invalid sort param is safely handled."""
+    """Invalid sort param is safely handled (catalog moved to /pool/products)."""
     resp = await client.get(
-        "/api/markets/overview",
+        "/api/pool/products",
         headers=auth_headers,
         params={"sort": "'; DROP TABLE markets_overview;"},
     )
@@ -183,9 +183,9 @@ async def test_markets_overview_invalid_sort(client, auth_headers):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_markets_overview_limit_bounds(client, auth_headers):
-    """Limit param is bounded."""
+    """Limit param is bounded (catalog moved to /pool/products)."""
     resp = await client.get(
-        "/api/markets/overview",
+        "/api/pool/products",
         headers=auth_headers,
         params={"limit": 999999},
     )

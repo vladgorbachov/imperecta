@@ -1,12 +1,13 @@
 """Global product pool: listings joined to dim_product and dim_marketplace."""
 
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.dimensions import DimDate, DimMarketplace, DimProduct
+from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.currency import (
     DISPLAY_LOCAL,
@@ -205,6 +206,158 @@ class ProductPoolService:
             item["recent_prices"] = recent_prices_by_listing.get(item["id"], [])
         await self._apply_display_currency(items, display_currency)
         return items, int(total)
+
+
+    async def get_product_detail(
+        self,
+        listing_id: UUID,
+        *,
+        include_blocked_countries: bool = False,
+        display_currency: str = DISPLAY_LOCAL,
+    ) -> dict[str, Any] | None:
+        """One PoolProductItem by listing id + taxonomy labels; None when hidden.
+
+        Same visibility rules as the list (active gated product + blocked-country
+        filter), so a hidden/blocked listing is indistinguishable from absent.
+        """
+        latest_pc = _latest_price_change_subquery()
+        stmt = self._base_listing_stmt(latest_pc).where(FactListing.id == listing_id)
+        stmt = stmt.add_columns(
+            DimProduct.attributes.label("attributes"),
+            DimBrand.name.label("brand"),
+            DimCategory.name.label("category"),
+        )
+        stmt = stmt.outerjoin(DimBrand, DimProduct.brand_id == DimBrand.id)
+        stmt = stmt.outerjoin(DimCategory, DimProduct.category_id == DimCategory.id)
+        stmt = self._apply_country_visibility_filter(
+            stmt,
+            include_blocked_countries=include_blocked_countries,
+        )
+        row = (await self.db.execute(stmt)).mappings().first()
+        if row is None:
+            return None
+        raw = dict(row)
+        attributes = raw.pop("attributes", None)
+        brand = raw.pop("brand", None)
+        category = raw.pop("category", None)
+        item = _row_to_pool_item(raw)
+        prices_map = await self._get_recent_prices_map([item["id"]])
+        item["recent_prices"] = prices_map.get(item["id"], [])
+        await self._apply_display_currency([item], display_currency)
+        item["attributes"] = attributes if isinstance(attributes, dict) and attributes else None
+        item["description"] = (
+            attributes.get("description") if isinstance(attributes, dict) else None
+        )
+        item["brand"] = brand
+        item["category"] = category
+        return item
+
+    async def get_price_history(
+        self,
+        listing_id: UUID,
+        *,
+        period: str = "30d",
+        include_blocked_countries: bool = False,
+    ) -> dict[str, Any] | None:
+        """Daily price series for one listing; None when the listing is hidden.
+
+        Latest scrape per day wins (same dedupe as visualisation_calc/trend);
+        native price and price_eur both returned; data_ready needs >=2 days.
+        """
+        visible = await self.get_product_detail(
+            listing_id,
+            include_blocked_countries=include_blocked_countries,
+        )
+        if visible is None:
+            return None
+
+        days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 30)
+        today = datetime.now(timezone.utc).date()
+        start = today - timedelta(days=days)
+        min_date_id = start.year * 10_000 + start.month * 100 + start.day
+        max_date_id = today.year * 10_000 + today.month * 100 + today.day
+
+        ranked = (
+            select(
+                FactPrice.date_id,
+                FactPrice.price,
+                FactPrice.price_eur,
+                FactPrice.currency_code,
+                func.row_number()
+                .over(
+                    partition_by=[FactPrice.date_id],
+                    order_by=desc(FactPrice.scraped_at),
+                )
+                .label("rn"),
+            )
+            .where(
+                FactPrice.listing_id == listing_id,
+                FactPrice.date_id >= min_date_id,
+                FactPrice.date_id <= max_date_id,
+            )
+        ).subquery("ranked_prices")
+        stmt = (
+            select(ranked.c.date_id, ranked.c.price, ranked.c.price_eur, ranked.c.currency_code)
+            .where(ranked.c.rn == 1)
+            .order_by(ranked.c.date_id)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        points = [
+            {
+                "date": date(r.date_id // 10_000, r.date_id // 100 % 100, r.date_id % 100),
+                "price": float(r.price) if r.price is not None else None,
+                "price_eur": float(r.price_eur) if r.price_eur is not None else None,
+            }
+            for r in rows
+        ]
+        return {
+            "listing_id": listing_id,
+            "currency": visible.get("currency"),
+            "period": period,
+            "points": points if len(points) >= 2 else [],
+            "data_ready": len(points) >= 2,
+        }
+
+    async def iter_export_rows(
+        self,
+        *,
+        sort: str = "recent",
+        search: str | None = None,
+        marketplace_id: UUID | None = None,
+        category: str | None = None,
+        country_code: str | None = None,
+        include_blocked_countries: bool = False,
+        batch_size: int = 500,
+    ):
+        """Yield the FULL filtered pool (no pagination) for CSV export."""
+        latest_pc = _latest_price_change_subquery()
+        stmt = self._base_listing_stmt(latest_pc)
+        stmt = self._apply_filters(
+            stmt,
+            search=search,
+            marketplace_id=marketplace_id,
+            category=category,
+            country_code=country_code,
+        )
+        stmt = self._apply_country_visibility_filter(
+            stmt,
+            include_blocked_countries=include_blocked_countries,
+        )
+        stmt = self._apply_sort(stmt, sort, latest_pc)
+        offset = 0
+        while True:
+            page = (
+                (await self.db.execute(stmt.limit(batch_size).offset(offset)))
+                .mappings()
+                .all()
+            )
+            if not page:
+                return
+            for row in page:
+                yield _row_to_pool_item(dict(row))
+            if len(page) < batch_size:
+                return
+            offset += batch_size
 
     async def _apply_display_currency(
         self,

@@ -34,13 +34,16 @@ def test_removed_legacy_endpoints_not_found(admin_client):
     assert admin_client.post("/api/admin/trigger-scrape").status_code == 404
     assert admin_client.get("/api/admin/scrape-activity").status_code == 404
     assert admin_client.get("/api/admin/error-distribution").status_code == 404
+    # /pool/products/{listing_id} (GET-only, P2) now shadows this path shape:
+    # a DELETE lands as 405 Method Not Allowed — the legacy bulk route is gone
+    # either way.
     assert (
         admin_client.request(
             "DELETE",
             "/api/pool/products/bulk",
             json={"product_ids": [1]},
         ).status_code
-        == 404
+        in (404, 405)
     )
     assert admin_client.delete("/api/admin/products/clear-test-data").status_code == 404
     assert admin_client.post("/api/admin/products/clear-pool").status_code == 404

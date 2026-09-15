@@ -7,9 +7,9 @@ structural-test style. They guard:
 1. The `app.modules.dashboard` package and its submodules are gone.
 2. The six empty handlers (3 under `/dashboard/*`, 3 under
    `/markets/*-analytics` + `/markets/opportunities`) are no longer mounted.
-3. `/markets/overview` is preserved verbatim and is now served by the
-   product_pool module (path + query params unchanged, frontend contract
-   intact).
+3. `/markets/overview` is RETIRED (UI redesign V1-V6 moved the catalog to
+   /products -> GET /pool/products; route-audit ritual run 2026-09-16:
+   the only remaining FE reference was a test mock).
 4. `MarketsService` (market_data facade) no longer exposes the C3 stubs.
 
 A1 (analytics dissolution) further removes `/analytics/dashboard/summary`
@@ -27,13 +27,11 @@ import pytest
 
 from app.main import app
 from app.modules.market_data.facade import MarketsService
-from app.modules.product_pool.api import (
-    OVERVIEW_SORT,
-    markets_overview_router,
-    router as pool_router,
-)
+from app.modules.product_pool.api import router as pool_router
 
 DELETED_PATHS: set[str] = {
+    "/api/markets/overview",
+    "/api/markets/ticker",
     "/api/dashboard/kpi",
     "/api/dashboard/anomalies",
     "/api/dashboard/aggregate-trend",
@@ -42,16 +40,6 @@ DELETED_PATHS: set[str] = {
     "/api/markets/opportunities",
 }
 
-OVERVIEW_QUERY_PARAMS: set[str] = {
-    "sort",
-    "search",
-    "marketplace_id",
-    "limit",
-    "offset",
-    "display_currency",
-}
-
-OVERVIEW_RESPONSE_KEYS: set[str] = {"items", "total", "limit", "offset"}
 
 
 @pytest.mark.parametrize(
@@ -94,76 +82,15 @@ def test_deleted_routes_absent_from_app() -> None:
     )
 
 
-def test_overview_route_owned_by_product_pool() -> None:
-    """`/markets/overview` lives on product_pool's markets_overview_router (not dashboard)."""
-    overview_paths = {route.path for route in markets_overview_router.routes}
-    assert "/markets/overview" in overview_paths, (
-        "product_pool.markets_overview_router must publish /markets/overview"
-    )
+def test_overview_and_ticker_retired_from_product_pool_and_market_data() -> None:
+    """The retired dashboard endpoints are not published by any surviving router."""
+    from app.modules.market_data.api import router as market_data_router
+
     pool_paths = {route.path for route in pool_router.routes}
-    assert "/markets/overview" not in pool_paths, (
-        "/markets/overview must not be on the /pool router"
-    )
-
-
-def test_overview_query_params_preserved() -> None:
-    """Frontend marketsApi.getOverview depends on exact query params + sort whitelist."""
-    overview_route = next(
-        route for route in markets_overview_router.routes if route.path == "/markets/overview"
-    )
-    signature = inspect.signature(overview_route.endpoint)
-    actual_params = set(signature.parameters.keys())
-    missing = OVERVIEW_QUERY_PARAMS - actual_params
-    assert not missing, f"/markets/overview lost query params: {sorted(missing)}"
-    assert set(OVERVIEW_SORT) == {"volatile", "trending", "gainers", "losers", "recent"}
-
-
-@pytest.mark.integration
-def test_overview_app_route_is_under_api_prefix() -> None:
-    """The mounted /markets/overview endpoint is reachable under the /api prefix."""
-    actual_paths = {getattr(route, "path", None) for route in app.routes}
-    assert "/api/markets/overview" in actual_paths
-
-
-@pytest.mark.asyncio
-async def test_overview_invokes_product_pool_list_products(monkeypatch: pytest.MonkeyPatch) -> None:
-    """/markets/overview is a thin caller of ProductPoolService.list_products with preserved shape."""
-    captured: dict[str, object] = {}
-
-    async def fake_list_products(self, **kwargs):  # noqa: ARG001
-        captured.update(kwargs)
-        return [{"id": "sentinel"}], 1
-
-    monkeypatch.setattr(
-        "app.modules.product_pool.service.ProductPoolService.list_products",
-        fake_list_products,
-    )
-
-    overview_route = next(
-        route for route in markets_overview_router.routes if route.path == "/markets/overview"
-    )
-    fake_user = SimpleNamespace(id=uuid4(), is_superuser=False)
-    fake_db = SimpleNamespace()
-
-    response = await overview_route.endpoint(
-        current_user=fake_user,
-        db=fake_db,
-        sort="not-a-real-sort",
-        search=None,
-        marketplace_id=None,
-        country_code=None,
-        limit=25,
-        offset=0,
-        display_currency="EUR",
-    )
-
-    assert set(response.keys()) == OVERVIEW_RESPONSE_KEYS
-    assert response == {"items": [{"id": "sentinel"}], "total": 1, "limit": 25, "offset": 0}
-    assert captured["sort"] == "volatile", "Invalid sort must fall back to 'volatile'"
-    assert captured["limit"] == 25
-    assert captured["offset"] == 0
-    assert captured["display_currency"] == "EUR"
-    assert captured["include_blocked_countries"] is False
+    market_paths = {route.path for route in market_data_router.routes}
+    assert "/markets/overview" not in pool_paths | market_paths
+    assert "/markets/ticker" not in pool_paths | market_paths
+    assert "/pool/products" in pool_paths, "the replacement catalog read must stay"
 
 
 @pytest.mark.parametrize(

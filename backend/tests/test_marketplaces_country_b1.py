@@ -82,5 +82,5 @@ async def test_update_country_syncs_operates_in_and_currency() -> None:
     assert result is mp
     fields = captured["fields"]
     assert fields["country_code"] == "NL"
-    assert fields["operates_in"] == ["NL"]
+    assert fields["operates_in"] == '{"NL"}'
     assert fields["currency_code"] == "EUR"

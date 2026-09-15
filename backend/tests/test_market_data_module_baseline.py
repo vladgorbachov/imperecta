@@ -21,7 +21,6 @@ PROVIDERS_DIR = Path(providers_pkg.__path__[0])
 EXPECTED_ROUTES: set[str] = {
     "/markets/preferences",
     "/markets/instruments",
-    "/markets/ticker",
     "/markets/ingest",
 }
 
