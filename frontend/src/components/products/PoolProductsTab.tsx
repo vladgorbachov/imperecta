@@ -38,6 +38,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { ErrorState } from "@/components/ui-custom/ErrorState";
+import { ProductPeek } from "@/components/products/ProductPeek";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PoolProductItem } from "@/api/products";
@@ -88,6 +89,8 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
   const [sort, setSort] = useState<string>("recent");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [peekItem, setPeekItem] = useState<PoolProductItem | null>(null);
+  const [peekOpen, setPeekOpen] = useState(false);
 
   const search = useDebounce(searchRaw, 500);
   const offset = (page - 1) * pageSize;
@@ -235,7 +238,8 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                             : undefined
                       }
                       onClick={() => {
-                        if (item.url) window.open(item.url, "_blank");
+                        setPeekItem(item);
+                        setPeekOpen(true);
                       }}
                     >
                       <TableCell className="w-14">
@@ -346,6 +350,8 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
           </div>
         </div>
       )}
+
+      <ProductPeek item={peekItem} open={peekOpen} onOpenChange={setPeekOpen} />
     </div>
   );
 }
