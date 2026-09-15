@@ -30,4 +30,10 @@ celery_app.conf.beat_schedule = {
         "task": "ingest_commodities",
         "schedule": crontab(minute=35, hour="2,8,14,20"),
     },
+    # User alert rules: evaluate against fresh fact_price / listing state.
+    # Cheap when nothing changed (rule-count bounded); writes via ALERT door.
+    "evaluate-price-alerts": {
+        "task": "evaluate_price_alerts",
+        "schedule": 600.0,
+    },
 }

@@ -25,11 +25,14 @@ class NotificationMessage:
         parse_mode: Channel-specific rendering hint. Telegram supports
             ``"HTML"`` / ``"Markdown"``; email channels ignore it. ``None``
             means plain text.
+        data: Optional structured payload for machine-readable channels
+            (webhook). Text channels (email, Telegram) ignore it.
     """
 
     body: str
     title: str | None = None
     parse_mode: str | None = None
+    data: dict | None = None
 
 
 class NotificationChannel(ABC):

@@ -15,9 +15,11 @@ from app.modules.data_firewall.firewall import FirewallOutcome, _sign_fields
 from app.modules.data_firewall.reject_store import write_reject_data_isolated
 
 ALERTS_TABLE = "alerts"
+ALERT_EVENTS_TABLE = "alert_events"
 
 ALERT_TYPES = frozenset({"price_drop", "price_rise", "availability"})
 ALERT_CHANNELS = frozenset({"email", "telegram", "webhook"})
+EVENT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 REJECT_UNKNOWN_ALERT_KIND = "unknown_alert_kind"
 REJECT_ALERT_FIELD_NOT_ALLOWED = "alert_field_not_allowed"
@@ -57,12 +59,33 @@ ALERT_WRITE_ALLOWLIST: dict[str, frozenset[str]] = {
         }
     ),
     "rule_delete": frozenset({"id"}),
+    # Server-side kinds (trigger engine) — never reachable from the API layer.
+    "rule_trigger": frozenset({"id", "last_triggered_at", "trigger_count"}),
+    "event_create": frozenset(
+        {
+            "alert_id",
+            "alert_class",
+            "listing_id",
+            "fact_price_id",
+            "old_value",
+            "new_value",
+            "change_pct",
+            "message",
+            "severity",
+            "sent_via",
+            "delivered_at",
+            "triggered_at",
+        }
+    ),
 }
 
-_KIND_OPERATIONS: dict[str, str] = {
-    "rule_create": "insert",
-    "rule_update": "update",
-    "rule_delete": "delete",
+# kind -> (table, operation)
+_KIND_TARGETS: dict[str, tuple[str, str]] = {
+    "rule_create": (ALERTS_TABLE, "insert"),
+    "rule_update": (ALERTS_TABLE, "update"),
+    "rule_delete": (ALERTS_TABLE, "delete"),
+    "rule_trigger": (ALERTS_TABLE, "update"),
+    "event_create": (ALERT_EVENTS_TABLE, "insert"),
 }
 
 
@@ -73,10 +96,11 @@ def _reject(
     fields: dict[str, Any],
     reject_source: str,
     operation: str,
+    table: str = ALERTS_TABLE,
 ) -> FirewallOutcome:
     write_reject_data_isolated(
         source=reject_source,
-        table_target=ALERTS_TABLE,
+        table_target=table,
         reject_reason=reject_reason,
         failed_rules=failed_rules,
         raw_payload=fields,
@@ -90,7 +114,7 @@ def _reject(
         failed_rules=failed_rules,
         forced_log_status=None,
         page_role_verdict=None,
-        notes={"table": ALERTS_TABLE, "kind": failed_rules[:1]},
+        notes={"table": table, "kind": failed_rules[:1]},
     )
 
 
@@ -138,15 +162,50 @@ def _semantic_failures(kind: str, fields: dict[str, Any]) -> list[str]:
     return failed
 
 
+def _event_semantic_failures(kind: str, fields: dict[str, Any]) -> list[str]:
+    failed: list[str] = []
+    if kind == "event_create":
+        if not fields.get("alert_id"):
+            failed.append("alert_id_required")
+        message = fields.get("message")
+        if not (isinstance(message, str) and message.strip()):
+            failed.append("message_required")
+        severity = fields.get("severity")
+        if severity is not None and severity not in EVENT_SEVERITIES:
+            failed.append("severity_invalid")
+        sent_via = fields.get("sent_via")
+        if sent_via is not None and sent_via not in ALERT_CHANNELS:
+            failed.append("sent_via_invalid")
+        for numeric_key in ("old_value", "new_value", "change_pct"):
+            value = fields.get(numeric_key)
+            if value is None:
+                continue
+            try:
+                float(value)
+            except (TypeError, ValueError):
+                failed.append(f"{numeric_key}_invalid")
+
+    if kind == "rule_trigger":
+        if not fields.get("last_triggered_at"):
+            failed.append("last_triggered_at_required")
+        count = fields.get("trigger_count")
+        try:
+            if count is None or int(count) < 1:
+                failed.append("trigger_count_invalid")
+        except (TypeError, ValueError):
+            failed.append("trigger_count_invalid")
+    return failed
+
+
 def authorize_alert_write(
     fields: dict[str, Any],
     *,
     kind: str,
     reject_source: str = "alerts_write",
 ) -> FirewallOutcome:
-    """Authorize an alerts write: kind allowlist + rule semantics, then sign."""
+    """Authorize an alerts-domain write: kind allowlist + semantics, then sign."""
     allowlist = ALERT_WRITE_ALLOWLIST.get(kind)
-    operation = _KIND_OPERATIONS.get(kind, "insert")
+    table, operation = _KIND_TARGETS.get(kind, (ALERTS_TABLE, "insert"))
     if allowlist is None:
         return _reject(
             reject_reason=REJECT_UNKNOWN_ALERT_KIND,
@@ -154,6 +213,7 @@ def authorize_alert_write(
             fields=fields,
             reject_source=reject_source,
             operation=operation,
+            table=table,
         )
 
     extra = sorted(set(fields) - allowlist)
@@ -164,9 +224,11 @@ def authorize_alert_write(
             fields=fields,
             reject_source=reject_source,
             operation=operation,
+            table=table,
         )
 
-    failed = _semantic_failures(kind, fields)
+    failed = _semantic_failures(kind, fields) if table == ALERTS_TABLE else []
+    failed += _event_semantic_failures(kind, fields)
     if failed:
         return _reject(
             reject_reason=REJECT_ALERT_SEMANTICS,
@@ -174,9 +236,10 @@ def authorize_alert_write(
             fields=fields,
             reject_source=reject_source,
             operation=operation,
+            table=table,
         )
 
-    passed, contract_failed, reason = _validate_contract_subset(ALERTS_TABLE, fields)
+    passed, contract_failed, reason = _validate_contract_subset(table, fields)
     if not passed:
         return _reject(
             reject_reason=reason or "contract_violation",
@@ -184,9 +247,10 @@ def authorize_alert_write(
             fields=fields,
             reject_source=reject_source,
             operation=operation,
+            table=table,
         )
 
-    signed_record = _sign_fields(ALERTS_TABLE, operation, fields)
+    signed_record = _sign_fields(table, operation, fields)
     if signed_record is None:
         return _reject(
             reject_reason="signing_unavailable",
@@ -194,6 +258,7 @@ def authorize_alert_write(
             fields=fields,
             reject_source=reject_source,
             operation=operation,
+            table=table,
         )
     return FirewallOutcome(
         passed=True,
@@ -201,6 +266,6 @@ def authorize_alert_write(
         failed_rules=[],
         forced_log_status=None,
         page_role_verdict=None,
-        notes={"table": ALERTS_TABLE, "kind": kind},
+        notes={"table": table, "kind": kind},
         signed_record=signed_record,
     )

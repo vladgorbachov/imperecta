@@ -118,6 +118,7 @@ class Alert(Base):
     __table_args__ = (
         CheckConstraint(
             "alert_type IN ("
+            "'price_rise','availability',"
             "'price_drop','price_increase','price_threshold',"
             "'new_competitor','competitor_promo',"
             "'review_drop','review_spike',"

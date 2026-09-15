@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -15,6 +17,10 @@ from app.modules.persist.writer import PersistContext, write_sync
 def _serialize_alert_value(value: Any) -> Any:
     if isinstance(value, UUID):
         return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
     return value
 
 
@@ -24,6 +30,15 @@ def build_alert_rule_fields(*, id: UUID | None = None, **columns: Any) -> dict[s
     for key, value in columns.items():
         fields[key] = _serialize_alert_value(value)
     return fields
+
+
+def build_alert_event_fields(**columns: Any) -> dict[str, Any]:
+    """alert_events columns serialized for signing (append-only: no locator id)."""
+    return {
+        key: _serialize_alert_value(value)
+        for key, value in columns.items()
+        if value is not None
+    }
 
 
 @dataclass(frozen=True)

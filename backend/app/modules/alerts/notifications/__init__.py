@@ -18,10 +18,12 @@ from app.modules.alerts.notifications.base import (
 )
 from app.modules.alerts.notifications.email import EmailChannel
 from app.modules.alerts.notifications.telegram import TelegramChannel
+from app.modules.alerts.notifications.webhook import WebhookChannel
 
 __all__ = [
     "NotificationChannel",
     "NotificationMessage",
     "TelegramChannel",
     "EmailChannel",
+    "WebhookChannel",
 ]
