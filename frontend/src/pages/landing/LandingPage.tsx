@@ -19,9 +19,10 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 
-const LANDING_GRADIENT = "linear-gradient(135deg, #050810 0%, #0a0e1a 25%, #0d1525 50%, #0a1628 100%)";
-const LANDING_ACCENT = "#38bdf8";
-const LANDING_ACCENT_DIM = "#0ea5e9";
+/* Landing is a standalone always-dark page — Graphite constants, not theme vars. */
+const LANDING_INK = "#0b0e13";
+const LANDING_GRADIENT = LANDING_INK;
+const LANDING_ACCENT = "#7fc3e8";
 
 function LandingHeader() {
   return (
@@ -65,16 +66,8 @@ function HeroSection() {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(135deg, rgba(5,8,16,0.75) 0%, rgba(10,14,26,0.6) 50%, rgba(13,21,37,0.5) 100%)",
+            "linear-gradient(180deg, rgba(11,14,19,0.9) 0%, rgba(11,14,19,0.82) 50%, rgba(11,14,19,0.88) 100%)",
         }}
-      />
-      <div
-        className="absolute -top-40 -right-40 h-96 w-96 rounded-full opacity-20 blur-[100px]"
-        style={{ background: LANDING_ACCENT }}
-      />
-      <div
-        className="absolute top-1/2 -left-20 h-64 w-64 rounded-full opacity-10 blur-[80px]"
-        style={{ background: "#0ea5e9" }}
       />
       <div className="absolute inset-0 opacity-30">
         <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
@@ -90,14 +83,12 @@ function HeroSection() {
       <div className="relative mx-auto max-w-7xl">
         <div className="grid gap-16 lg:grid-cols-2 lg:gap-20">
           <div className="flex flex-col justify-center">
-            <p className="mb-5 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
+            <p className="mb-5 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#7fc3e8]/80">
               AI Market Intelligence Platform
             </p>
-            <h1 className="font-display text-4xl font-bold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
+            <h1 className="font-display text-4xl font-semibold leading-[1.08] tracking-[-0.02em] text-white sm:text-5xl lg:text-6xl">
               See market shifts{" "}
-              <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-                before they hit revenue
-              </span>
+              <span style={{ color: LANDING_ACCENT }}>before they hit revenue</span>
             </h1>
             <p className="mt-8 max-w-lg text-base leading-relaxed text-white/75">
               Competitor intelligence, pricing signals, forecasting, and strategic alerts in one platform.
@@ -106,35 +97,32 @@ function HeroSection() {
             <div className="mt-12 flex flex-wrap gap-4">
               <Link
                 to="/register"
-                className="inline-flex items-center gap-2 rounded-xl px-8 py-4 text-base font-semibold text-white transition-all hover:opacity-95"
-                style={{
-                  background: `linear-gradient(135deg, ${LANDING_ACCENT_DIM}, ${LANDING_ACCENT})`,
-                  boxShadow: "0 0 32px rgba(14, 165, 233, 0.35)",
-                }}
+                className="inline-flex items-center gap-2 rounded-lg px-8 py-4 text-base font-semibold transition-opacity hover:opacity-90"
+                style={{ background: LANDING_ACCENT, color: LANDING_INK }}
               >
                 Request Demo
               </Link>
               <Link
                 to="/login"
-                className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-8 py-4 text-base font-semibold text-white backdrop-blur-sm transition-colors hover:border-white/30 hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/5 px-8 py-4 text-base font-semibold text-white backdrop-blur-sm transition-colors hover:border-white/30 hover:bg-white/10"
               >
                 Explore Platform
               </Link>
             </div>
           </div>
           <div className="relative hidden lg:block">
-            <div className="absolute inset-0 rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-xl" />
+            <div className="absolute inset-0 rounded-xl border border-white/10 bg-white/[0.03]" />
             <div className="relative grid grid-cols-2 gap-4 p-6">
               {previewCards.map((card, i) => (
                 <div
                   key={i}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm"
+                  className="rounded-xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm"
                 >
                   <p className="text-xs font-medium uppercase tracking-wider text-white/50">
                     {card.label}
                   </p>
                   <p className="mt-2 font-display text-2xl font-bold text-white">{card.value}</p>
-                  <p className="mt-1 text-sm text-cyan-400/90">{card.trend}</p>
+                  <p className="mt-1 text-sm text-[#7fc3e8]">{card.trend}</p>
                 </div>
               ))}
             </div>
@@ -217,11 +205,11 @@ function WhatImperectaDoes() {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(135deg, rgba(5,8,16,0.75) 0%, rgba(10,14,26,0.6) 50%, rgba(13,21,37,0.5) 100%)",
+            "linear-gradient(180deg, rgba(11,14,19,0.9) 0%, rgba(11,14,19,0.82) 50%, rgba(11,14,19,0.88) 100%)",
         }}
       />
       <div className="relative mx-auto max-w-7xl">
-        <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
+        <p className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#7fc3e8]/80">
           Platform capabilities
         </p>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -234,9 +222,9 @@ function WhatImperectaDoes() {
           {cards.map((card, i) => (
             <div
               key={i}
-              className="group rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-xl transition-colors hover:border-white/15 hover:bg-white/5"
+              className="group rounded-xl border border-white/10 bg-white/[0.03] p-6 transition-colors hover:border-white/15 hover:bg-white/5"
             >
-              <card.icon className="mb-4 size-8 text-cyan-400/90" />
+              <card.icon className="mb-4 size-8 text-[#7fc3e8]" />
               <h3 className="font-display text-lg font-semibold text-white">{card.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-white/65">{card.desc}</p>
             </div>
@@ -259,9 +247,9 @@ function FeatureSection() {
 
   return (
     <section className="relative overflow-hidden px-6 py-28">
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-950/5 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/[0.015] to-transparent" />
       <div className="relative mx-auto max-w-7xl">
-        <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
+        <p className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#7fc3e8]/80">
           Product
         </p>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -271,10 +259,10 @@ function FeatureSection() {
           {features.map((f, i) => (
             <div
               key={i}
-              className="flex gap-5 rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-xl"
+              className="flex gap-5 rounded-xl border border-white/10 bg-white/[0.03] p-6"
             >
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15">
-                <f.icon className="size-6 text-cyan-400/90" />
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-[#7fc3e8]/12">
+                <f.icon className="size-6 text-[#7fc3e8]" />
               </div>
               <div>
                 <h3 className="font-display font-semibold text-white">{f.title}</h3>
@@ -314,11 +302,11 @@ function WhyTeamsChoose() {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(135deg, rgba(5,8,16,0.75) 0%, rgba(10,14,26,0.6) 50%, rgba(13,21,37,0.5) 100%)",
+            "linear-gradient(180deg, rgba(11,14,19,0.9) 0%, rgba(11,14,19,0.82) 50%, rgba(11,14,19,0.88) 100%)",
         }}
       />
       <div className="relative mx-auto max-w-7xl">
-        <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
+        <p className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#7fc3e8]/80">
           Business impact
         </p>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -331,9 +319,9 @@ function WhyTeamsChoose() {
           {items.map((item, i) => (
             <div
               key={i}
-              className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 backdrop-blur-xl"
+              className="rounded-xl border border-white/10 bg-white/[0.03] p-8"
             >
-              <p className="text-xs font-medium uppercase tracking-wider text-cyan-400/90">
+              <p className="text-xs font-medium uppercase tracking-wider text-[#7fc3e8]">
                 Without Imperecta
               </p>
               <h3 className="mt-2 font-display text-xl font-semibold text-white">{item.pain}</h3>
@@ -362,9 +350,9 @@ function PlatformPreview() {
 
   return (
     <section className="relative overflow-hidden px-6 py-28">
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-950/5 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/[0.015] to-transparent" />
       <div className="relative mx-auto max-w-7xl">
-        <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
+        <p className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#7fc3e8]/80">
           Platform preview
         </p>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -374,10 +362,10 @@ function PlatformPreview() {
           Competitor price movement, market signals, forecasts, and strategic alerts — unified in one view.
         </p>
         <div className="mt-20 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-xl">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-white/60">Competitor price movement</span>
-              <span className="rounded-full bg-cyan-500/15 px-2.5 py-0.5 text-xs font-medium text-cyan-400">
+              <span className="rounded-full bg-[#7fc3e8]/12 px-2.5 py-0.5 text-xs font-medium text-[#7fc3e8]">
                 Live
               </span>
             </div>
@@ -389,13 +377,13 @@ function PlatformPreview() {
                 >
                   <span className="text-white/90">{row.product}</span>
                   <span className="text-white/55">{row.marketplace}</span>
-                  <span className="ml-auto font-mono text-cyan-400/90">{row.price}</span>
+                  <span className="ml-auto font-mono text-[#7fc3e8]">{row.price}</span>
                   <span className="font-mono text-white/75">{row.change}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-xl">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-white/60">Strategic alerts</span>
             </div>
@@ -403,9 +391,9 @@ function PlatformPreview() {
               {alerts.map((a, i) => (
                 <div
                   key={i}
-                  className="flex items-center gap-3 rounded-lg border border-amber-500/15 bg-amber-500/5 px-4 py-3"
+                  className="flex items-center gap-3 rounded-lg border border-[#d6bd7f]/20 bg-[#d6bd7f]/8 px-4 py-3"
                 >
-                  <div className="h-2 w-2 shrink-0 rounded-full bg-amber-400/90" />
+                  <div className="h-2 w-2 shrink-0 rounded-full bg-[#d6bd7f]" />
                   <span className="text-sm text-white/90">{a.msg}</span>
                 </div>
               ))}
@@ -436,7 +424,7 @@ function TestimonialsSection() {
   return (
     <section className="relative overflow-hidden px-6 py-28" style={{ background: LANDING_GRADIENT }}>
       <div className="mx-auto max-w-7xl">
-        <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-white/50">
+        <p className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#7fc3e8]/80">
           Trusted by teams
         </p>
         <h2 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -446,7 +434,7 @@ function TestimonialsSection() {
           {testimonials.map((t, i) => (
             <div
               key={i}
-              className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-xl"
+              className="rounded-xl border border-white/10 bg-white/[0.03] p-6"
             >
               <p className="text-[17px] leading-relaxed text-white/85">&ldquo;{t.quote}&rdquo;</p>
               <p className="mt-5 text-xs font-medium text-white/50">{t.role}</p>
@@ -482,17 +470,14 @@ function CTASection() {
         <div className="mt-12 flex flex-wrap justify-center gap-4">
           <Link
             to="/register"
-            className="inline-flex items-center gap-2 rounded-xl px-8 py-4 text-base font-semibold text-white transition-opacity hover:opacity-95"
-            style={{
-              background: `linear-gradient(135deg, ${LANDING_ACCENT_DIM}, ${LANDING_ACCENT})`,
-              boxShadow: "0 0 32px rgba(14, 165, 233, 0.35)",
-            }}
+            className="inline-flex items-center gap-2 rounded-lg px-8 py-4 text-base font-semibold transition-opacity hover:opacity-90"
+            style={{ background: LANDING_ACCENT, color: LANDING_INK }}
           >
             Request Demo
           </Link>
           <Link
             to="/login"
-            className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-8 py-4 text-base font-semibold text-white backdrop-blur-sm transition-colors hover:border-white/30 hover:bg-white/10"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/5 px-8 py-4 text-base font-semibold text-white backdrop-blur-sm transition-colors hover:border-white/30 hover:bg-white/10"
           >
             Explore Platform
           </Link>
