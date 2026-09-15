@@ -19,9 +19,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useServiceAlerts } from "@/hooks/useAdmin";
 import { cn } from "@/lib/utils";
 
-const DISCOVERY_MODULE = "discovery";
 const PAGE_LIMIT = 50;
 
+/** Static discovery submodules (documented set); other modules derive
+    submodule filter options from the loaded rows. */
 const DISCOVERY_SUBMODULES = [
   "fetch_adapter",
   "url_canonicalizer",
@@ -29,11 +30,17 @@ const DISCOVERY_SUBMODULES = [
   "budget_governor",
 ] as const;
 
-const SOON_MODULES = [
+/** Every module now has real server-side emitters (backend 2026-09-16). */
+const MODULES = [
+  { id: "discovery", labelKey: "admin.alerts.module.discovery" },
   { id: "scraper", labelKey: "admin.alerts.module.scraper" },
   { id: "parser", labelKey: "admin.alerts.module.parser" },
+  { id: "quality", labelKey: "admin.alerts.module.quality" },
   { id: "market_data", labelKey: "admin.alerts.module.marketData" },
+  { id: "data_firewall", labelKey: "admin.alerts.module.dataFirewall" },
 ] as const;
+
+type ModuleId = (typeof MODULES)[number]["id"];
 
 const SEVERITY_OPTIONS: ServiceAlertSeverity[] = ["critical", "error", "warning", "info"];
 
@@ -69,8 +76,49 @@ function countBySeverity(
   return counts;
 }
 
+/** Sidebar entry with its own open-count badge (one cheap limit-1 query each). */
+function ModuleButton({
+  module,
+  active,
+  onSelect,
+}: {
+  module: (typeof MODULES)[number];
+  active: boolean;
+  onSelect: (id: ModuleId) => void;
+}) {
+  const { t } = useTranslation();
+  const openCount = useServiceAlerts({
+    module: module.id,
+    resolved: "open",
+    limit: 1,
+    offset: 0,
+  });
+  const count = openCount.data?.total ?? 0;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(module.id)}
+      className={cn(
+        "flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors",
+        active
+          ? "border-[var(--accent-border)] bg-[var(--accent-bg)] text-foreground"
+          : "border-border/60 text-muted-foreground hover:bg-[var(--glass-bg-hover)] hover:text-foreground",
+      )}
+    >
+      <span>{t(module.labelKey)}</span>
+      {count > 0 ? (
+        <Badge variant="outline" className="text-2xs">
+          {count}
+        </Badge>
+      ) : null}
+    </button>
+  );
+}
+
 export function AlertsTab() {
   const { t } = useTranslation();
+  const [selectedModule, setSelectedModule] = useState<ModuleId>("discovery");
   const [resolved, setResolved] = useState<ServiceAlertResolvedFilter>("open");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [submoduleFilter, setSubmoduleFilter] = useState<string>("all");
@@ -78,20 +126,20 @@ export function AlertsTab() {
 
   const listParams = useMemo(
     () => ({
-      module: DISCOVERY_MODULE,
+      module: selectedModule,
       resolved,
       limit: PAGE_LIMIT,
       offset,
       ...(severityFilter !== "all" ? { severity: severityFilter } : {}),
       ...(submoduleFilter !== "all" ? { submodule: submoduleFilter } : {}),
     }),
-    [resolved, severityFilter, submoduleFilter, offset],
+    [selectedModule, resolved, severityFilter, submoduleFilter, offset],
   );
 
   const { data, isLoading, isError, isFetching } = useServiceAlerts(listParams);
 
   const openCountQuery = useServiceAlerts({
-    module: DISCOVERY_MODULE,
+    module: selectedModule,
     resolved: "open",
     limit: 1,
     offset: 0,
@@ -102,6 +150,21 @@ export function AlertsTab() {
   const openTotal = openCountQuery.data?.total ?? 0;
   const severityCounts = useMemo(() => countBySeverity(items), [items]);
   const countsPartial = total > items.length;
+
+  /* Submodule filter options: static for discovery, derived from rows elsewhere. */
+  const submoduleOptions = useMemo(() => {
+    if (selectedModule === "discovery") {
+      return [...DISCOVERY_SUBMODULES];
+    }
+    return [...new Set(items.map((item) => item.submodule))].sort();
+  }, [selectedModule, items]);
+
+  const handleModuleSelect = (id: ModuleId) => {
+    setSelectedModule(id);
+    setSubmoduleFilter("all");
+    setSeverityFilter("all");
+    setOffset(0);
+  };
 
   const hasMore = offset + PAGE_LIMIT < total;
   const hasPrev = offset > 0;
@@ -128,29 +191,13 @@ export function AlertsTab() {
           <CardTitle className="text-sm">{t("admin.alerts.modules")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 p-3 pt-0">
-          <button
-            type="button"
-            className={cn(
-              "flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm",
-              "border-[var(--accent-border)] bg-[var(--accent-bg)] text-foreground",
-            )}
-          >
-            <span>{t("admin.alerts.module.discovery")}</span>
-            {openTotal > 0 ? (
-              <Badge variant="outline" className="text-2xs">
-                {openTotal}
-              </Badge>
-            ) : null}
-          </button>
-          {SOON_MODULES.map((module) => (
-            <div
+          {MODULES.map((module) => (
+            <ModuleButton
               key={module.id}
-              className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-sm text-muted-foreground opacity-60"
-              aria-disabled
-            >
-              <span>{t(module.labelKey)}</span>
-              <span className="text-2xs">{t("admin.alerts.soon")}</span>
-            </div>
+              module={module}
+              active={selectedModule === module.id}
+              onSelect={handleModuleSelect}
+            />
           ))}
         </CardContent>
       </Card>
@@ -227,7 +274,7 @@ export function AlertsTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t("admin.alerts.allSubmodules")}</SelectItem>
-                  {DISCOVERY_SUBMODULES.map((submodule) => (
+                  {submoduleOptions.map((submodule) => (
                     <SelectItem key={submodule} value={submodule}>
                       {submodule}
                     </SelectItem>
