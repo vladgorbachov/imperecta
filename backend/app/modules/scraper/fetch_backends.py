@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import weakref
 from enum import Enum
 from typing import ClassVar, Protocol
+from urllib.parse import urlparse
 
 import httpx
 from playwright.async_api import async_playwright
@@ -25,19 +27,46 @@ HTTP_TIMEOUT_SEC = 25.0
 PROXY_PROVIDER_TIMEOUT_SEC = 60.0
 PLAYWRIGHT_GOTO_TIMEOUT_MS = 35_000
 PLAYWRIGHT_WAIT_MS = 2_500
-_DEFAULT_USER_AGENT = (
+# Small pool of current desktop browser identities. The pick is stable per
+# HOST (hash of netloc), so one shop always sees one consistent browser —
+# rotating per request is a stronger bot signal than a fixed identity.
+_USER_AGENT_POOL: tuple[str, ...] = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) "
+    "Gecko/20100101 Firefox/133.0",
 )
+_DEFAULT_USER_AGENT = _USER_AGENT_POOL[0]
 
+_ACCEPT_HTML = (
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+    "image/webp,*/*;q=0.8"
+)
 
 _DEFAULT_ACCEPT_LANGUAGE = "en, en-US;q=0.9"
 
 
-def _request_headers(accept_language: str | None = None) -> dict[str, str]:
-    headers = {"User-Agent": _DEFAULT_USER_AGENT}
-    headers["Accept-Language"] = accept_language or _DEFAULT_ACCEPT_LANGUAGE
-    return headers
+def _user_agent_for(url: str | None) -> str:
+    """Stable per-host identity from the UA pool."""
+    if not url:
+        return _DEFAULT_USER_AGENT
+    host = urlparse(url).netloc.lower()
+    if not host:
+        return _DEFAULT_USER_AGENT
+    digest = hashlib.sha256(host.encode("utf-8")).digest()
+    return _USER_AGENT_POOL[digest[0] % len(_USER_AGENT_POOL)]
+
+
+def _request_headers(accept_language: str | None = None, url: str | None = None) -> dict[str, str]:
+    return {
+        "User-Agent": _user_agent_for(url),
+        "Accept": _ACCEPT_HTML,
+        "Accept-Language": accept_language or _DEFAULT_ACCEPT_LANGUAGE,
+    }
 
 
 class BackendId(str, Enum):
@@ -128,7 +157,7 @@ class DirectHttpBackend:
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
-        headers = _request_headers(accept_language)
+        headers = _request_headers(accept_language, url=url)
         try:
             client = _shared_http_client()
             response = await client.get(url, headers=headers)
@@ -300,7 +329,7 @@ class BrowserRenderBackend:
         try:
             holder = await _shared_browser()
             context = await holder.browser.new_context(
-                user_agent=_DEFAULT_USER_AGENT,
+                user_agent=_user_agent_for(url),
                 locale=(accept_language.split(",")[0].strip() if accept_language else None),
                 extra_http_headers=(
                     {"Accept-Language": accept_language} if accept_language else None
