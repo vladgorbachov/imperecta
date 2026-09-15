@@ -37,6 +37,9 @@ from app.modules.visualisation_calc.movements.schemas import (
 )
 from app.modules.visualisation_calc.movements.service import MovementsCalc, apply_display_currency
 from app.modules.visualisation_calc.trend.read import read_price_trend
+from app.modules.visualisation_calc.volatility.read import read_daily_price_series, window_days
+from app.modules.visualisation_calc.volatility.schemas import VolatilityKpi
+from app.modules.visualisation_calc.volatility.service import build_volatility_kpi
 from app.modules.visualisation_calc.trend.schemas import TrendSeries
 from app.modules.visualisation_calc.trend.service import build_trend_series
 
@@ -158,6 +161,25 @@ async def get_price_trend(
         marketplace_id=marketplace_id,
     )
     return build_trend_series(rows, period=period, bucket=bucket)
+
+
+@router.get("/volatility", response_model=VolatilityKpi)
+async def get_volatility_kpi(
+    _current_user: CurrentUser,
+    db: DbSession,
+    period: Literal["7d", "30d", "90d"] = Query(default="30d"),
+    country_code: str | None = Query(default=None, min_length=2, max_length=2),
+    marketplace_id: UUID | None = Query(default=None),
+) -> VolatilityKpi:
+    """Average per-listing volatility of daily EUR returns (dedicated Slice E
+    submodule; replaces the movements.summary avg_abs_change proxy)."""
+    rows = await read_daily_price_series(
+        db,
+        period=period,
+        country_code=country_code,
+        marketplace_id=marketplace_id,
+    )
+    return build_volatility_kpi(rows, period=period, window_days=window_days(period))
 
 
 @router.get("/movements", response_model=MoversPage)
