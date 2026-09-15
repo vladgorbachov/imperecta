@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from jose import jwt
+import jwt
 from passlib.context import CryptContext
 
 from app.common.security import decode_token  # noqa: F401  re-exported for callers

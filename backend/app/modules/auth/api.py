@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy import select
 
 from app.common.deps import CurrentUser, DbSession

@@ -1,2 +1,8 @@
+# Snyk policy file for backend/requirements.txt
+# The runtime is Python 3.12 (see Dockerfile: FROM python:3.12-slim).
+# Without this, Snyk resolves requirements.txt under its default Python 3.7,
+# which selects ancient transitive pins (e.g. starlette 0.27 via old fastapi)
+# and reports phantom vulnerabilities that never ship to production.
 version: v1.5.0
-ignore: {}
+language-settings:
+  python: "3.12"

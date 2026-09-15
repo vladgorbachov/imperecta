@@ -6,7 +6,7 @@ Tier-1 (app.modules.auth). Token *creation* and password hashing stay in
 app.modules.auth.service, which re-exports decode_token for compatibility.
 """
 
-from jose import jwt
+import jwt
 
 from app.config import Settings
 
@@ -14,7 +14,7 @@ settings = Settings()
 
 
 def decode_token(token: str) -> dict:
-    """Decode and validate a JWT token. Raises jose.JWTError if invalid."""
+    """Decode and validate a JWT token. Raises jwt.PyJWTError if invalid."""
     return jwt.decode(
         token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
     )

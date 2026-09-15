@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+// dompurify >=3.4 needs a spec-complete DOM; happy-dom silently fails to
+// sanitize (scripts pass through), so this suite runs under jsdom.
 import { describe, it, expect } from "vitest";
 import { sanitizeHtml } from "./sanitize";
 

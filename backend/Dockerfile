@@ -1,8 +1,10 @@
 # Production-ready Dockerfile for Imperecta backend (Railway deploy)
 FROM python:3.12-slim
 
-# System deps for Playwright and app
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Pull all pending Debian security fixes (base image tags lag behind the
+# archive: perl-base CVE-2026-8376/13221/42496, sqlite3, gzip et al. ship as
+# +deb13uN updates), then system deps for Playwright and app
+RUN apt-get update && apt-get dist-upgrade -y && apt-get install -y --no-install-recommends \
     wget \
     gnupg \
     curl \
@@ -11,9 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Python dependencies
+# Python dependencies (pip itself first: PYSEC-2026-3721 fixed in 26.2)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Playwright: install Chromium and system deps (single command for Docker)
 RUN playwright install --with-deps chromium
