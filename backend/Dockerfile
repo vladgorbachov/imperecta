@@ -1,4 +1,12 @@
 # Production-ready Dockerfile for Imperecta backend (Railway deploy)
+
+# --- Stage 1: Rust extraction core (backend/rust_core -> abi3 wheel) --------
+FROM ghcr.io/pyo3/maturin:latest AS rustcore
+WORKDIR /io
+COPY rust_core/ .
+RUN maturin build --release
+
+# --- Stage 2: application runtime -------------------------------------------
 FROM python:3.12-slim
 
 # Pull all pending Debian security fixes (base image tags lag behind the
@@ -17,6 +25,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
+
+# Rust extraction core (parity-blessed: tests/test_rust_core_parity.py)
+COPY --from=rustcore /io/target/wheels/*.whl /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
+# Compiled engine on by default; QUALITY_GATE_MODE stays observe until the
+# live score distribution has been reviewed (flip to enforce separately).
+ENV EXTRACTOR_ENGINE=rust
 
 # Playwright: install Chromium and system deps (single command for Docker)
 RUN playwright install --with-deps chromium

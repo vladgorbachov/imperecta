@@ -16,7 +16,27 @@ re-creating the extractor<->classifier cycle.
 
 from __future__ import annotations
 
+import os
 import re
+
+try:  # Rust extraction core (backend/rust_core) — optional until built
+    import imperecta_core as _rust_core
+except ImportError:  # pragma: no cover - depends on build environment
+    _rust_core = None
+
+
+def _use_rust() -> bool:
+    """True when the Rust engine is both requested and importable.
+
+    EXTRACTOR_ENGINE=rust flips the hot primitives below to the compiled
+    implementations; default stays python until the parity harness has
+    blessed a build (see tests/test_rust_core_parity.py).
+    """
+    return (
+        _rust_core is not None
+        and os.getenv("EXTRACTOR_ENGINE", "python").strip().lower() == "rust"
+    )
+
 
 _CURRENCY_SYMBOLS: dict[str, str] = {
     "€": "EUR",
@@ -61,6 +81,8 @@ _AMBIGUOUS_TOKENS: frozenset[str] = frozenset({"lei", "лей", "kr", "kr."})
 
 def currency_token_is_ambiguous(raw_text: str | None) -> bool:
     """True when the raw currency evidence is one of the shared tokens."""
+    if _use_rust():
+        return _rust_core.currency_token_is_ambiguous(raw_text)
     if not raw_text:
         return False
     lowered = str(raw_text).strip().lower()
@@ -173,6 +195,8 @@ def parse_currency_symbol(text: str) -> str | None:
     symbols (kr, zł, lei) require a token boundary so substrings inside hashes
     do not match.
     """
+    if _use_rust():
+        return _rust_core.parse_currency_symbol(text)
     lowered = text.lower()
     for symbol, code in _CURRENCY_SYMBOLS.items():
         if len(symbol) == 1:
@@ -186,6 +210,8 @@ def parse_currency_symbol(text: str) -> str | None:
 
 def parse_currency_code(text: str) -> str | None:
     """Detect currency ISO code from textual code / abbreviation near a price."""
+    if _use_rust():
+        return _rust_core.parse_currency_code(text)
     lowered = text.lower()
     for token, code in sorted(_CURRENCY_TEXT_CODES.items(), key=lambda item: -len(item[0])):
         if _token_boundary_pattern(token).search(lowered):
@@ -195,6 +221,8 @@ def parse_currency_code(text: str) -> str | None:
 
 def _detect_currency(text: str) -> str | None:
     """Detect currency from symbols or textual codes embedded in *text*."""
+    if _use_rust():
+        return _rust_core.detect_currency(text)
     result = parse_currency_symbol(text)
     if result:
         return result
@@ -213,6 +241,8 @@ def parse_price_text(text: str) -> float | None:
       1234.56    (plain)         →  1234.56
       1234       (integer)       →  1234.0
     """
+    if _use_rust():
+        return _rust_core.parse_price_text(str(text)) if text else None
     if not text:
         return None
 

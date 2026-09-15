@@ -36,4 +36,12 @@ celery_app.conf.beat_schedule = {
         "task": "evaluate_price_alerts",
         "schedule": 600.0,
     },
+    # Permanent collection: re-scrape stale pool listings (last_checked_at
+    # older than 6h). Self-dosing — a tick with no stale listings is a no-op,
+    # so the 30-min cadence controls latency, not volume. Direct-HTTP shops
+    # only spend their own rate budget (host_throttle); no proxy credits.
+    "scrape-stale-pool-products": {
+        "task": "scrape_all_pool_products",
+        "schedule": crontab(minute="*/30"),
+    },
 }

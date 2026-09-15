@@ -31,6 +31,7 @@ from app.models.dimensions import DimDate, DimProduct
 from app.models.facts import FactListing
 from app.modules.currency import resolve_price_eur
 from app.modules.data_firewall.firewall import FirewallOutcome, evaluate_ecommerce, evaluate_market
+from app.modules.data_firewall.quality_gate import assess_extracted
 from app.modules.data_firewall.update_validator import authorize_scrape_update
 from app.modules.ingestion.dto import IngestionResult
 from app.modules.ingestion.gate import (
@@ -282,6 +283,14 @@ class IngestionService:
                 scrape_job_id=scrape_job_id,
                 price_eur=scrape_price_eur,
             )
+
+        assess_extracted(
+            data,
+            url=listing.external_url,
+            allowed_currencies=self._currency_resolver.whitelist_for(
+                listing.marketplace_id
+            ),
+        )
 
         outcome = evaluate_ecommerce(
             data,

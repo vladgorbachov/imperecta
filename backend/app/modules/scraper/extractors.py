@@ -17,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from app.common import html_parsing as _hp
 from app.common.html_parsing import (
     _CURRENCY_SYMBOLS,
     _CURRENCY_TEXT_CODES,
@@ -340,6 +341,27 @@ def _category_path_from_breadcrumbs(
 
 def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedProduct:
     """Level 1: JSON-LD."""
+    if _hp._use_rust():
+        bodies = [
+            script.string or ""
+            for script in soup.find_all("script", type="application/ld+json")
+        ]
+        data = _hp._rust_core.extract_jsonld(bodies, page_url or "")
+        ep = ExtractedProduct(
+            title=data["title"],
+            price=data["price"],
+            original_price=data["original_price"],
+            currency=data["currency"],
+            image_url=data["image_url"],
+            description=data["description"],
+            price_raw_text=data["price_raw_text"],
+            currency_raw=data["currency_raw"],
+            brand=data["brand"],
+            category_path=data["category_path"],
+        )
+        _ensure_title(ep, soup, page_url)
+        return ep
+
     scripts = soup.find_all("script", type="application/ld+json")
     parsed_docs: list[dict] = []
     for script in scripts:
