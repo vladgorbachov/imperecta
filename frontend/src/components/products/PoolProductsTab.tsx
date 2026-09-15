@@ -164,7 +164,7 @@ function ProductThumbnail({ item }: { item: PoolProductItem }) {
   );
 }
 
-export function PoolProductsTab({ locale: _locale }: { locale: string }) {
+export function PoolProductsTab() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
 

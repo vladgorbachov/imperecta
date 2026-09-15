@@ -206,11 +206,9 @@ function SidebarSection({ label, collapsed, children, rightAction }: SidebarSect
 
 function SidebarFooter({
   collapsed,
-  onToggle,
   isMobile,
 }: {
   collapsed: boolean;
-  onToggle: () => void;
   isMobile?: boolean;
 }) {
   const { t } = useTranslation();
@@ -411,7 +409,7 @@ export function Sidebar({
         )}
       </nav>
 
-      <SidebarFooter collapsed={collapsed} onToggle={onToggle} isMobile={isMobile} />
+      <SidebarFooter collapsed={collapsed} isMobile={isMobile} />
     </aside>
   );
 }

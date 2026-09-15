@@ -34,7 +34,7 @@ export function ProductsPage() {
         </TabsList>
 
         <TabsContent value="pool" className="mt-0 flex-1">
-          <PoolProductsTab locale={locale} />
+          <PoolProductsTab />
         </TabsContent>
 
         <TabsContent value="my" className="mt-0 flex-1">
