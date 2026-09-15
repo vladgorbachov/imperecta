@@ -180,6 +180,13 @@ export function AdminPage() {
   const activeTab =
     tab && (ADMIN_TABS as readonly string[]).includes(tab) ? tab : "ops";
 
+  const { data: adminPoolStats } = useQuery({
+    queryKey: marketsQueryKeys.poolStats(),
+    queryFn: () => marketsApi.getPoolStats().then((r) => r.data),
+    staleTime: 60_000,
+    enabled: activeTab === "overview",
+  });
+
   /* Pool source of truth for per-marketplace product counts (see table note). */
   const { data: poolMarketplaceStats } = useQuery({
     queryKey: marketsQueryKeys.poolMarketplaceStats(),
@@ -415,7 +422,10 @@ export function AdminPage() {
               </div>
               <div className="rounded-lg border p-4">
                 <p className="text-sm text-muted-foreground">{t("admin.marketplaces.products")}</p>
-                <p className="text-2xl font-semibold">{stats?.total_products_monitored ?? 0}</p>
+                {/* Pool source of truth — admin stats' monitored-products field is not populated. */}
+                <p className="text-2xl font-semibold">
+                  {adminPoolStats?.total_products ?? stats?.total_products_monitored ?? 0}
+                </p>
               </div>
             </CardContent>
           </Card>
