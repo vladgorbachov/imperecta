@@ -275,8 +275,8 @@ export function PoolProductsTab({ locale: _locale }: { locale: string }) {
                           <span
                             className={cn(
                               "font-medium font-mono tabular-nums text-right",
-                              item.price_change_pct > 0 && "text-green-500",
-                              item.price_change_pct < 0 && "text-red-500"
+                              item.price_change_pct > 0 && "text-[var(--color-price-up)]",
+                              item.price_change_pct < 0 && "text-[var(--color-price-down)]"
                             )}
                           >
                             {item.price_change_pct > 0 ? "+" : ""}

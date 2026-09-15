@@ -31,18 +31,19 @@ thead th {
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
-/* Sign-based row tint (opt-in via data-trend on the row) */
+/* Sign-based row tint (opt-in via data-trend on the row).
+   Canon semantics: price up = red (alert), price down = green (opportunity). */
 tbody tr[data-trend="up"] {
-  background: var(--row-tint-green);
-}
-tbody tr[data-trend="down"] {
   background: var(--row-tint-red);
 }
+tbody tr[data-trend="down"] {
+  background: var(--row-tint-green);
+}
 tbody tr[data-trend="up"]:hover {
-  background: color-mix(in srgb, var(--row-tint-green) 55%, var(--glass-bg-hover));
+  background: color-mix(in srgb, var(--row-tint-red) 55%, var(--glass-bg-hover));
 }
 tbody tr[data-trend="down"]:hover {
-  background: color-mix(in srgb, var(--row-tint-red) 55%, var(--glass-bg-hover));
+  background: color-mix(in srgb, var(--row-tint-green) 55%, var(--glass-bg-hover));
 }
 
 /* Badge */

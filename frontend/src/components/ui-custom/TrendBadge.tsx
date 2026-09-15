@@ -18,7 +18,7 @@ export interface TrendBadgeProps {
 
 /**
  * Badge displaying price trend with icon and optional percentage.
- * Up: red glow | Down: emerald glow | Stable: muted.
+ * Up (price increase): red | Down: green | Stable: muted. Token-based.
  */
 type TrendConfig = {
   icon: typeof TrendingUp;
@@ -36,17 +36,17 @@ function getTrendConfig(trend: TrendDirection): TrendConfig {
           border: "1px solid var(--color-price-up-border)",
           color: "var(--color-price-up)",
         },
-        iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-red))" },
+        iconStyle: undefined,
       };
     case "down":
       return {
         icon: TrendingDown,
         style: {
-          background: "rgba(52, 211, 153, 0.15)",
-          border: "1px solid rgba(52, 211, 153, 0.3)",
+          background: "var(--color-price-down-bg)",
+          border: "1px solid var(--color-price-down-border)",
           color: "var(--color-price-down)",
         },
-        iconStyle: { filter: "drop-shadow(0 0 4px var(--glow-green))" },
+        iconStyle: undefined,
       };
     case "stable":
       return {

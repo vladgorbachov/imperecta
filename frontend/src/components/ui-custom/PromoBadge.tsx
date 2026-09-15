@@ -27,7 +27,6 @@ function getPromoConfig(type: PromoType, label: string | undefined, t: TFunction
           background: "var(--color-promo-bg)",
           border: "1px solid var(--color-promo-border)",
           color: "var(--color-promo)",
-          boxShadow: "0 0 8px var(--glow-amber)",
         },
       };
     case "discount":
@@ -37,7 +36,6 @@ function getPromoConfig(type: PromoType, label: string | undefined, t: TFunction
           background: "var(--color-promo-bg)",
           border: "1px solid var(--color-promo-border)",
           color: "var(--color-promo)",
-          boxShadow: "0 0 8px var(--glow-amber)",
         },
       };
     case "out_of_stock":
@@ -56,7 +54,6 @@ function getPromoConfig(type: PromoType, label: string | undefined, t: TFunction
           background: "var(--accent-bg)",
           border: "1px solid var(--accent-border)",
           color: "var(--accent)",
-          boxShadow: "0 0 8px var(--accent-glow)",
         },
       };
   }

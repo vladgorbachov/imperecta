@@ -76,13 +76,7 @@ export function StatCard({
               borderColor: "var(--glass-border)",
             }}
           >
-            <Icon
-              className="size-4"
-              style={{
-                color: "var(--accent)",
-                filter: "drop-shadow(0 0 6px var(--accent-glow))",
-              }}
-            />
+            <Icon className="size-4" style={{ color: "var(--accent)" }} />
           </div>
         )}
       </div>
