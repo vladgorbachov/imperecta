@@ -109,6 +109,22 @@ def record_reject_spike_signal(
             capture_exception_if_initialized(exc)
 
 
+def _json_safe(value: Any) -> Any:
+    """Deep-convert a payload to stdlib-json-serializable form.
+
+    Rejected payloads carry UUID/datetime/Decimal objects straight from the
+    doors; the JSONB column serializer is stdlib json.dumps, which raises on
+    them — and a reject that cannot be recorded is a silent data loss.
+    """
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def _reject_data_row(
     *,
     source: str,
@@ -122,6 +138,7 @@ def _reject_data_row(
     signature_present: bool = False,
     operation: str = "insert",
 ) -> RejectData:
+    raw_payload = _json_safe(raw_payload)
     return RejectData(
         source=source,
         table_target=table_target,
