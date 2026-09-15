@@ -131,7 +131,10 @@ async def get_geo_coverage(
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     marketplace_id: UUID | None = Query(default=None),
 ) -> CoverageBreakdown:
-    """Geographic listing coverage: country roll-up or per-marketplace breakdown."""
+    """Geographic listing coverage: country roll-up or per-marketplace breakdown.
+
+    country_code='ZZ' (World) benchmarks each global shop against the grand
+    pool total instead of the ZZ subtotal (Zones C/D)."""
     if country_code is None:
         rows = await read_country_rollup(db, marketplace_id=marketplace_id)
         return build_country_rollup(rows)
@@ -140,6 +143,17 @@ async def get_geo_coverage(
         country_code=country_code,
         marketplace_id=marketplace_id,
     )
+    if country_code.strip().upper() == "ZZ":
+        world_stats, pool_avg, pool_movers, pool_total = (
+            await read_world_marketplace_stats(db)
+        )
+        return build_world_marketplace_breakdown(
+            rows,
+            world_stats=world_stats,
+            pool_total=pool_total,
+            pool_avg_price_eur=pool_avg,
+            pool_movers=pool_movers,
+        )
     return build_marketplace_breakdown(rows)
 
 

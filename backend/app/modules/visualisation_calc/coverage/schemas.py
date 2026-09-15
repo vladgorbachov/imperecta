@@ -19,6 +19,9 @@ class CoverageRow(BaseModel):
     marketplace_domain: str | None = None
     count: int
     share_pct: Decimal | None = None
+    # World mode (Zone D) only — None elsewhere:
+    avg_price_eur: Decimal | None = None
+    movers_rate_pct: Decimal | None = None
 
 
 class CoverageBreakdown(BaseModel):
@@ -27,3 +30,8 @@ class CoverageBreakdown(BaseModel):
     mode: Literal["countries", "marketplaces"]
     rows: list[CoverageRow]
     total: int
+    # World mode (Zone C/D) only — share_pct uses the grand pool denominator
+    # and these carry the pool benchmark; None elsewhere:
+    pool_total: int | None = None
+    pool_avg_price_eur: Decimal | None = None
+    pool_movers_rate_pct: Decimal | None = None

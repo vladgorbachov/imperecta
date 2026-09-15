@@ -104,7 +104,14 @@ async def test_geo_coverage_route_country_rollup(client, geo_coverage_auth_overr
     ) as read_mock:
         resp = await client.get("/api/markets/geo-coverage")
     assert resp.status_code == 200
-    assert resp.json() == {"mode": "countries", "rows": [], "total": 0}
+    assert resp.json() == {
+        "mode": "countries",
+        "rows": [],
+        "total": 0,
+        "pool_total": None,
+        "pool_avg_price_eur": None,
+        "pool_movers_rate_pct": None,
+    }
     read_mock.assert_awaited_once()
 
 
@@ -122,3 +129,33 @@ async def test_geo_coverage_route_marketplace_breakdown(
     assert resp.status_code == 200
     assert resp.json()["mode"] == "marketplaces"
     read_mock.assert_awaited_once()
+
+
+def test_world_breakdown_benchmarks_against_grand_pool() -> None:
+    from decimal import Decimal
+    from uuid import uuid4
+
+    from app.modules.visualisation_calc.coverage.service import (
+        build_world_marketplace_breakdown,
+    )
+
+    mp = uuid4()
+    rows = [(mp, "Amazon", "amazon.com", 50)]
+    world_stats = [(mp, Decimal("20.5"), 5, 50)]
+    out = build_world_marketplace_breakdown(
+        rows,
+        world_stats=world_stats,
+        pool_total=200,
+        pool_avg_price_eur=Decimal("10.25"),
+        pool_movers=20,
+    )
+    assert out.total == 50
+    assert out.pool_total == 200
+    row = out.rows[0]
+    # Zone C: share vs the GRAND pool, not the ZZ subtotal
+    assert row.share_pct == Decimal("25.00")
+    # Zone D: rates + pool benchmark, never absolutes
+    assert row.movers_rate_pct == Decimal("10.00")
+    assert row.avg_price_eur == Decimal("20.50")
+    assert out.pool_avg_price_eur == Decimal("10.25")
+    assert out.pool_movers_rate_pct == Decimal("10.00")
