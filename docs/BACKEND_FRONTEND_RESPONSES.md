@@ -72,10 +72,16 @@ Validation (422 on violation): `alert_type ∈ price_drop|price_rise|availabilit
 `https://…` when channel=webhook (and only then); `threshold_pct ∈ (0,100]`;
 `cooldown_minutes ∈ [0,10080]`.
 
-⚠️ Honest caveat: the **trigger engine does not exist yet** — rules persist and
-manage fine, but `/alerts/events` will be an empty list and
-`last_triggered_at`/`trigger_count` stay 0/null until the evaluation worker
-ships (next backend slice). Render the events tab with its honest empty state.
+✅ Update (2026-09-15, deployed): the **trigger engine is live**. A worker
+evaluates every active rule each 10 minutes: `price_drop`/`price_rise` fire
+when a new scrape moves the price past `threshold_pct` (vs the previous
+price), `availability` fires on listing active/inactive transitions.
+`/alerts/events` fills as rules fire; `last_triggered_at`/`trigger_count`
+update on each firing; `cooldown_minutes` is respected. Delivery: email
+(Resend), telegram (for users with a linked chat), webhook (JSON POST
+`{title, message, data{rule_id, listing_id, alert_type, old_value,
+new_value, change_pct, severity}}`). Events are recorded even when delivery
+fails. Expect events only after prices actually move — no synthetic firings.
 
 ## P4 — KPI history ✅ DONE
 
