@@ -864,6 +864,7 @@
   "admin.marketplaces.activeListings": "القوائم النشطة",
   "admin.marketplaces.statusActive": "نشط",
   "admin.marketplaces.statusInactive": "غير نشط",
+  "admin.marketplaces.js": "JS",
   "admin.users.add": "إضافة مستخدم",
   "admin.users.totalUsers": "إجمالي المستخدمين",
   "admin.users.activeUsers": "المستخدمون النشطون",

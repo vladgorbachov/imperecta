@@ -864,6 +864,7 @@
   "admin.marketplaces.activeListings": "Annonces actives",
   "admin.marketplaces.statusActive": "actif",
   "admin.marketplaces.statusInactive": "inactif",
+  "admin.marketplaces.js": "JS",
   "admin.users.add": "Ajouter un utilisateur",
   "admin.users.totalUsers": "Total des utilisateurs",
   "admin.users.activeUsers": "Utilisateurs actifs",

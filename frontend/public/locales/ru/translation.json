@@ -905,6 +905,7 @@
   "admin.marketplaces.activeListings": "Активные листинги",
   "admin.marketplaces.statusActive": "активен",
   "admin.marketplaces.statusInactive": "неактивен",
+  "admin.marketplaces.js": "JS",
   "admin.users.add": "Добавить пользователя",
   "admin.users.totalUsers": "Всего пользователей",
   "admin.users.activeUsers": "Активные пользователи",

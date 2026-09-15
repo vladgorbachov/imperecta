@@ -871,6 +871,7 @@
   "admin.marketplaces.activeListings": "Listări active",
   "admin.marketplaces.statusActive": "activ",
   "admin.marketplaces.statusInactive": "inactiv",
+  "admin.marketplaces.js": "JS",
   "admin.users.add": "Adaugă utilizator",
   "admin.users.totalUsers": "Total utilizatori",
   "admin.users.activeUsers": "Utilizatori activi",

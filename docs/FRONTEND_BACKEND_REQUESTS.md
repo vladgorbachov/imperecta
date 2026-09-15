@@ -131,6 +131,17 @@ currency, price_eur, in_stock, url }] }`
 - Blocked on product identity matching across shops (Phase 5/6 territory). The peek
   section renders a pending note until then. Do not fake matches.
 
+## P8 — Data-consistency report: products_in_pool in the parsing registry (2026-09-16)
+
+`GET /admin/parsing/…marketplaces-detailed` returns `products_in_pool: 0` while the
+pool actually holds products for that marketplace (`active_listings` shows 58 for
+alarmtrade, `/pool/marketplace-stats` agrees with the pool). The frontend now
+treats **`/pool/marketplace-stats` as the only source for per-marketplace product
+counts** (admin Marketplaces table merges it in by domain) and ignores the
+registry's `products_in_pool`/`active_listings` pair. Either populate
+`products_in_pool` from the pool grain or drop both fields from the detailed
+response — frontend no longer reads them.
+
 ## P7 — Optional: saved views in user profile
 
 V4 stores table views in `localStorage`. If/when cross-device sync is wanted:

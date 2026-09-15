@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { marketsApi, marketsQueryKeys } from "@/api/markets";
+import { cn } from "@/lib/utils";
 import {
   KeyRound,
   Loader2,
@@ -177,6 +179,21 @@ export function AdminPage() {
   const { tab } = useParams<{ tab: string }>();
   const activeTab =
     tab && (ADMIN_TABS as readonly string[]).includes(tab) ? tab : "ops";
+
+  /* Pool source of truth for per-marketplace product counts (see table note). */
+  const { data: poolMarketplaceStats } = useQuery({
+    queryKey: marketsQueryKeys.poolMarketplaceStats(),
+    queryFn: () => marketsApi.getPoolMarketplaceStats().then((r) => r.data),
+    staleTime: 60_000,
+    enabled: activeTab === "overview",
+  });
+  const poolCountByDomain = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const row of poolMarketplaceStats ?? []) {
+      map.set(row.marketplace_domain, row.product_count);
+    }
+    return map;
+  }, [poolMarketplaceStats]);
   const [detailsJobId, setDetailsJobId] = useState<string | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -484,26 +501,57 @@ export function AdminPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t("products.marketplace")}</TableHead>
-                      <TableHead>{t("admin.marketOverview.urlColumn")}</TableHead>
-                      <TableHead>{t("admin.pool.productsInPool")}</TableHead>
-                      <TableHead>{t("admin.marketplaces.activeListings")}</TableHead>
+                      <TableHead className="text-right">{t("admin.pool.productsInPool")}</TableHead>
+                      <TableHead className="text-right">{t("admin.marketplaces.successRate")}</TableHead>
                       <TableHead>{t("admin.marketplaces.lastScrape")}</TableHead>
-                      <TableHead>{t("admin.marketplaces.successRate")}</TableHead>
                       <TableHead>{t("admin.markets.lastRefresh")}</TableHead>
+                      <TableHead>{t("admin.marketplaces.js")}</TableHead>
                       <TableHead>{t("common.status")}</TableHead>
                       <TableHead className="text-right">{t("common.actions")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {marketOverviewItems.map((item) => (
+                    {marketOverviewItems.map((item) => {
+                      /* Product counts come from /pool/marketplace-stats (the pool
+                         source of truth) — the parsing registry's products_in_pool
+                         is not populated and disagrees with the pool. */
+                      const poolCount = poolCountByDomain.get(item.domain);
+                      return (
                       <TableRow key={item.id}>
-                        <TableCell className="font-medium">{item.name}</TableCell>
-                        <TableCell className="max-w-60 truncate">{item.base_url}</TableCell>
-                        <TableCell>{item.products_in_pool}</TableCell>
-                        <TableCell>{item.active_listings}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="min-w-0">
+                            <p className="truncate">{item.name}</p>
+                            <p className="truncate font-mono text-xs font-normal text-muted-foreground">
+                              {item.domain}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {poolCount ?? t("common.dash")}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right font-mono tabular-nums",
+                            item.success_rate >= 80
+                              ? "text-[var(--status-ok)]"
+                              : item.success_rate >= 50
+                                ? "text-[var(--status-warn)]"
+                                : "text-[var(--status-error)]",
+                          )}
+                        >
+                          {item.success_rate.toFixed(0)}%
+                        </TableCell>
                         <TableCell>{formatDateTime(item.last_scrape_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
-                        <TableCell>{item.success_rate.toFixed(2)}%</TableCell>
                         <TableCell>{formatDateTime(item.last_discovery_at, i18n.resolvedLanguage || "en", t("common.dash"))}</TableCell>
+                        <TableCell>
+                          {item.requires_js ? (
+                            <span className="label-mono rounded border border-[var(--status-warn-border)] bg-[var(--status-warn-bg)] px-1.5 py-0.5 !text-[var(--status-warn)]">
+                              JS
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">{t("common.dash")}</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Badge variant={item.is_active ? "default" : "destructive"}>
                             {t(item.is_active ? "admin.marketplaces.statusActive" : "admin.marketplaces.statusInactive")}
@@ -539,7 +587,8 @@ export function AdminPage() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}

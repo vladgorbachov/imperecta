@@ -864,6 +864,7 @@
   "admin.marketplaces.activeListings": "活跃列表",
   "admin.marketplaces.statusActive": "活跃",
   "admin.marketplaces.statusInactive": "停用",
+  "admin.marketplaces.js": "JS",
   "admin.users.add": "添加用户",
   "admin.users.totalUsers": "用户总数",
   "admin.users.activeUsers": "活跃用户",

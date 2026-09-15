@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, ArrowRight, Bell, Database, Store, Users } from "lucide-react";
 import * as adminApi from "@/api/admin";
 import { marketsApi, marketsQueryKeys } from "@/api/markets";
+import { WorkerLogRelayPanel } from "@/components/admin/WorkerLogRelayPanel";
 import { useServiceAlerts } from "@/hooks/useAdmin";
 import { formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -210,6 +211,14 @@ export function AdminOpsOverview() {
           {t("admin.ops.inventoryHint")}
         </div>
       </OpsCard>
+
+      {job ? (
+        <div className="lg:col-span-2 xl:col-span-3">
+          <OpsCard title={t("admin.dataCollection.liveMonitor")} to="/admin/data-collection">
+            <WorkerLogRelayPanel jobId={job.job_id} enabled={job.status === "running"} />
+          </OpsCard>
+        </div>
+      ) : null}
 
       <div className="lg:col-span-2 xl:col-span-3">
         <OpsCard title={t("admin.ops.latestAlerts")} to="/admin/alerts">

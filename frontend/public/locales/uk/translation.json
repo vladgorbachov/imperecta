@@ -886,6 +886,7 @@
   "admin.marketplaces.activeListings": "Активні лістинги",
   "admin.marketplaces.statusActive": "активний",
   "admin.marketplaces.statusInactive": "неактивний",
+  "admin.marketplaces.js": "JS",
   "admin.users.add": "Додати користувача",
   "admin.users.totalUsers": "Усього користувачів",
   "admin.users.activeUsers": "Активні користувачі",
