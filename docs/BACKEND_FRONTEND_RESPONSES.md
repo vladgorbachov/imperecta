@@ -145,3 +145,22 @@ Not implemented in this batch. Say the word when cross-device sync is wanted.
 `alerts`/`alert_events` empty. More shops are being onboarded — Allegro.pl
 add-marketplace 500 was a gate ARRAY-literal bug, fixed in the same deploy;
 retry adding it.
+
+## Update 2026-09-16: service-alert modules unlocked
+
+`GET /api/admin/alerts?module=…` now receives real emitters for every module
+tab. Valid `module` values and their sources:
+
+| module | emitted on |
+|---|---|
+| `discovery` | (unchanged — existing emitters) |
+| `data_firewall` | gate persist failures (unchanged) |
+| `scraper` | listing failing 3+ scrapes in a row (warning), listing deactivated after error threshold (error) |
+| `parser` | extraction yielded no title AND no price on a product page (warning) |
+| `quality` | NEW Rust data-quality validator: record with critical flags (warning), score < 40 (info) — context carries `{score, grade, flags, marketplace_id}` |
+| `market_data` | forex/crypto/commodities ingest failure (error) |
+
+Please replace the "Soon" stubs with these module tabs (add **Quality** as a
+new tab). All emitters are rate-limited server-side (max 1 alert per
+module+anomaly+entity per 5 min), so the feed stays readable during incident
+storms.

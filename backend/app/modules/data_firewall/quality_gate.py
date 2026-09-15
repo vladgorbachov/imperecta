@@ -21,6 +21,8 @@ from typing import Any
 
 import structlog
 
+from app.common.ops_alerts import emit_ops_alert
+
 try:  # optional compiled core
     import imperecta_core as _rust_core
 except ImportError:  # pragma: no cover - depends on build environment
@@ -29,6 +31,7 @@ except ImportError:  # pragma: no cover - depends on build environment
 slog = structlog.get_logger(__name__)
 
 _VALID_MODES = {"off", "observe", "enforce"}
+_LOW_SCORE_ALERT_THRESHOLD = 40
 
 
 def quality_mode() -> str:
@@ -45,6 +48,7 @@ def assess_extracted(
     *,
     url: str | None,
     allowed_currencies: list[str] | tuple[str, ...] | frozenset[str] | None,
+    marketplace_id: Any = None,
 ) -> dict[str, Any] | None:
     """Score one ExtractedProduct-shaped object; None when off/unavailable.
 
@@ -54,10 +58,54 @@ def assess_extracted(
     if _rust_core is None or quality_mode() == "off":
         return None
     try:
-        return _assess(data, url=url, allowed_currencies=allowed_currencies)
+        report = _assess(data, url=url, allowed_currencies=allowed_currencies)
     except Exception as exc:
         slog.warning("quality_assessment_failed", error=str(exc)[:300], url=url)
         return None
+    _alert_on_report(report, url=url, marketplace_id=marketplace_id)
+    return report
+
+
+def _alert_on_report(
+    report: dict[str, Any],
+    *,
+    url: str | None,
+    marketplace_id: Any,
+) -> None:
+    """service_alerts (module=quality): critical flags + low-score records."""
+    entity = str(marketplace_id) if marketplace_id is not None else (url or "")
+    context = {
+        "score": report["score"],
+        "grade": report["grade"],
+        "flags": report["flags"],
+        "marketplace_id": str(marketplace_id) if marketplace_id is not None else None,
+    }
+    if report["critical"]:
+        emit_ops_alert(
+            module="quality",
+            submodule="assessment",
+            severity="warning",
+            anomaly_type="quality_critical",
+            message=(
+                f"Quality critical flags={','.join(report['flags'][:4])} "
+                f"score={report['score']} marketplace_id={context['marketplace_id']}"
+            ),
+            entity=entity,
+            context=context,
+        )
+    elif report["score"] < _LOW_SCORE_ALERT_THRESHOLD:
+        emit_ops_alert(
+            module="quality",
+            submodule="assessment",
+            severity="info",
+            anomaly_type="quality_low_score",
+            message=(
+                f"Quality low score={report['score']} grade={report['grade']} "
+                f"marketplace_id={context['marketplace_id']}"
+            ),
+            entity=entity,
+            context=context,
+        )
 
 
 def _assess(

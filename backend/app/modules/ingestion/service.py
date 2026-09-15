@@ -26,6 +26,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.common.ops_alerts import emit_ops_alert
 from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.dimensions import DimDate, DimProduct
 from app.models.facts import FactListing
@@ -284,12 +285,31 @@ class IngestionService:
                 price_eur=scrape_price_eur,
             )
 
+        if (
+            getattr(data, "title", None) is None
+            and getattr(data, "price", None) is None
+            and getattr(data, "page_role", None) == "product"
+        ):
+            emit_ops_alert(
+                module="parser",
+                submodule="extraction",
+                severity="warning",
+                anomaly_type="extraction_empty",
+                message=(
+                    "Extraction yielded no title and no price for a product page "
+                    f"marketplace_id={listing.marketplace_id}"
+                ),
+                entity=str(listing.marketplace_id),
+                context={"marketplace_id": str(listing.marketplace_id)},
+            )
+
         assess_extracted(
             data,
             url=listing.external_url,
             allowed_currencies=self._currency_resolver.whitelist_for(
                 listing.marketplace_id
             ),
+            marketplace_id=listing.marketplace_id,
         )
 
         outcome = evaluate_ecommerce(

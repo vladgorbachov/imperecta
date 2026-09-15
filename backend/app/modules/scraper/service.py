@@ -23,6 +23,7 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.common.ops_alerts import emit_ops_alert
 from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
@@ -316,6 +317,25 @@ class GlobalScrapeService:
                 source="scraper_listing_housekeeping_failure",
             )
 
+            if hk_delta["failure_streak"] == 3:
+                emit_ops_alert(
+                    module="scraper",
+                    submodule="listing",
+                    severity="warning",
+                    anomaly_type="listing_failure_streak",
+                    message=(
+                        f"Listing failing 3 scrapes in a row "
+                        f"marketplace_id={listing.marketplace_id} "
+                        f"error={str(result.error or 'scrape_failed')[:120]}"
+                    ),
+                    entity=str(listing.marketplace_id),
+                    context={
+                        "marketplace_id": str(listing.marketplace_id),
+                        "listing_id": str(listing_id),
+                        "failure_streak": hk_delta["failure_streak"],
+                    },
+                )
+
             if hk_delta["failure_streak"] >= LISTING_DEACTIVATE_AFTER_ERRORS:
                 deactivate_delta = {"is_active": False}
                 deactivate_fields = build_listing_update_fields(
@@ -333,6 +353,23 @@ class GlobalScrapeService:
                         listing_id,
                         hk_delta["failure_streak"],
                         listing.external_url,
+                    )
+                    emit_ops_alert(
+                        module="scraper",
+                        submodule="listing",
+                        severity="error",
+                        anomaly_type="listing_deactivated",
+                        message=(
+                            f"Listing deactivated after "
+                            f"{hk_delta['failure_streak']} failures "
+                            f"marketplace_id={listing.marketplace_id}"
+                        ),
+                        entity=str(listing_id),
+                        context={
+                            "marketplace_id": str(listing.marketplace_id),
+                            "listing_id": str(listing_id),
+                            "failure_streak": hk_delta["failure_streak"],
+                        },
                     )
 
     def _persist_listing_housekeeping_or_fail(

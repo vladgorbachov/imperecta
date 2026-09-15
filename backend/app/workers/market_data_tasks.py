@@ -9,6 +9,7 @@ Tier-1 definitions verbatim so beat schedules and `/markets/ingest` remain compa
 import asyncio
 import logging
 
+from app.common.ops_alerts import emit_ops_alert
 from app.database import sync_session_factory
 from app.models.facts import (
     FactCommodityPrice,
@@ -58,6 +59,14 @@ def ingest_market_data(self):
         return {"status": "ok", "counts": result, "fact_tables": list(FACT_TABLE_NAMES)}
     except Exception as exc:
         logger.exception("ingest_market_data failed: %s", exc)
+        emit_ops_alert(
+            module="market_data",
+            submodule="ingest",
+            severity="error",
+            anomaly_type="ingest_failed",
+            message=f"Market data ingest failed: {str(exc)[:200]}",
+            entity="ingest_market_data",
+        )
         return {"status": "error", "message": str(exc)}
 
 
@@ -76,4 +85,12 @@ def ingest_commodities(self):
         return {"status": "ok", "commodities": n, "fact_tables": list(FACT_TABLE_NAMES)}
     except Exception as exc:
         logger.exception("ingest_commodities failed: %s", exc)
+        emit_ops_alert(
+            module="market_data",
+            submodule="ingest",
+            severity="error",
+            anomaly_type="commodities_ingest_failed",
+            message=f"Commodities ingest failed: {str(exc)[:200]}",
+            entity="ingest_commodities",
+        )
         return {"status": "error", "message": str(exc)}
