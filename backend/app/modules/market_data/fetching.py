@@ -48,7 +48,11 @@ async def fetch_forex_rates(base: str = "EUR") -> list[dict]:
             "provider_source": dto.provider_source,
         })
     normalized.sort(key=lambda row: row["pair"])
-    logger.info("Forex rates fetched via unified adapter: %d pairs (base=%s)", len(normalized), base)
+    logger.info(
+        "Forex rates fetched via unified adapter: %d pairs (base=%s)",
+        len(normalized),
+        base,
+    )
     return normalized
 
 

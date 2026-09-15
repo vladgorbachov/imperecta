@@ -6,19 +6,18 @@ and `ticker.get_ticker_data`. It performs no external HTTP — all upstream
 fetch lives in `providers/`, wrapped by `fetching.py`.
 """
 
-from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import asc, func, nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.models.core import User
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
     FactCurrencyRate,
 )
-from app.config import Settings
 from app.modules.market_data.forex_pairs import derive_forex_pairs
 from app.modules.persist.user_write import build_user_fields, write_user_async
 

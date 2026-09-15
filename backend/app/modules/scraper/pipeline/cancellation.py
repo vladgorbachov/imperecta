@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_tables import ScrapeJob

@@ -39,11 +39,11 @@ from app.modules.visualisation_calc.movements.schemas import (
 )
 from app.modules.visualisation_calc.movements.service import MovementsCalc, apply_display_currency
 from app.modules.visualisation_calc.trend.read import read_price_trend
+from app.modules.visualisation_calc.trend.schemas import TrendSeries
+from app.modules.visualisation_calc.trend.service import build_trend_series
 from app.modules.visualisation_calc.volatility.read import read_daily_price_series, window_days
 from app.modules.visualisation_calc.volatility.schemas import VolatilityKpi
 from app.modules.visualisation_calc.volatility.service import build_volatility_kpi
-from app.modules.visualisation_calc.trend.schemas import TrendSeries
-from app.modules.visualisation_calc.trend.service import build_trend_series
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 

@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 
 from app.common.deps import CurrentSuperuser, CurrentUser, DbSession
+from app.modules.market_data.facade import MarketsService
 from app.modules.market_data.schemas import (
     MarketsInstrumentsResponse,
     MarketsPreferencesResponse,
     MarketsPreferencesUpdate,
     MarketsTickerResponse,
 )
-from app.modules.market_data.facade import MarketsService
 from app.modules.market_data.ticker import get_ticker_data
 
 router = APIRouter(prefix="/markets", tags=["markets"])
@@ -41,7 +41,10 @@ async def update_preferences(
 
 
 @router.get("/instruments", response_model=MarketsInstrumentsResponse)
-async def get_available_instruments(current_user: CurrentUser, db: DbSession) -> MarketsInstrumentsResponse:
+async def get_available_instruments(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> MarketsInstrumentsResponse:
     service = MarketsService(db, current_user.id)
     data = await service.get_available_instruments()
     return MarketsInstrumentsResponse(**data)

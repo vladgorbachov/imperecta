@@ -34,7 +34,11 @@ def create_access_token(user_id: UUID, expires_delta: timedelta | None = None) -
 
 def create_refresh_token(user_id: UUID, persistent: bool = False) -> tuple[str, datetime]:
     """Create JWT refresh token and return token + expiration."""
-    days = settings.jwt_refresh_expiration_days_remember if persistent else settings.jwt_refresh_expiration_days
+    days = (
+        settings.jwt_refresh_expiration_days_remember
+        if persistent
+        else settings.jwt_refresh_expiration_days
+    )
     expire = datetime.now(timezone.utc) + timedelta(days=days)
     payload = {
         "sub": str(user_id),

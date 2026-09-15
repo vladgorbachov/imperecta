@@ -20,23 +20,23 @@ from typing import Any, Awaitable, TypeVar
 from uuid import UUID
 
 import structlog
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import invalidate_sync_session, is_read_only_sql_error
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
+from app.modules.data_firewall.update_validator import (
+    authorize_scrape_delete,
+    authorize_scrape_update,
+)
+from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
 from app.modules.ingestion.service import (
     IngestionService,
     _normalize_product_name,
     _payload_has_product_name_field,
     _should_replace_placeholder_name,
     _today_date_id,
-)
-from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN
-from app.modules.data_firewall.update_validator import (
-    authorize_scrape_delete,
-    authorize_scrape_update,
 )
 from app.modules.persist.logs_write import build_scrape_log_fields, persist_logs_batch
 from app.modules.persist.scrape_gate_fields import (
@@ -45,9 +45,8 @@ from app.modules.persist.scrape_gate_fields import (
     build_product_delete_fields,
 )
 from app.modules.persist.writer import PersistContext, write_sync
-from app.modules.scraper.fetch_backends import backend_id_persisted
-from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
 from app.modules.scraper import access_policy, host_throttle
+from app.modules.scraper.fetch_backends import backend_id_persisted
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)

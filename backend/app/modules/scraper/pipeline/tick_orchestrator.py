@@ -14,7 +14,6 @@ pick picks up the parent metadata + child rows and resumes.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -26,12 +25,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
+from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
 from app.modules.persist.meta_write import (
     build_scrape_job_failed_fields,
     build_scrape_job_insert_fields,
     write_meta_async,
 )
-from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
 
 slog = structlog.get_logger(__name__)

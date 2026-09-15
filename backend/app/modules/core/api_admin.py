@@ -44,7 +44,10 @@ async def admin_claude_status(_current_user: CurrentSuperuser) -> dict:
     resolved_model: str | None = None
     if settings.claude_api_key:
         try:
-            resolved_model = await resolve_claude_model(settings.claude_model, settings.claude_api_key)
+            resolved_model = await resolve_claude_model(
+                settings.claude_model,
+                settings.claude_api_key,
+            )
         except Exception:
             resolved_model = None
     return {

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from app.modules.data_firewall.firewall import FirewallOutcome, REJECT_SIGNING_UNAVAILABLE
+from app.modules.data_firewall.firewall import REJECT_SIGNING_UNAVAILABLE, FirewallOutcome
 from app.modules.data_firewall.reject_store import write_reject_data_isolated
 from app.modules.data_firewall.signing import SignedRecord, sign
 from app.modules.persist.retention_config import RETENTION_TABLES

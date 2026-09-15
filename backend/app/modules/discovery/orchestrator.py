@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
+import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,11 @@ from app.modules.discovery import (
     fetch_adapter,
     sitemap_harvester,
     url_canonicalizer,
+)
+from app.modules.discovery.alerting import (
+    emit_canonical_missing_rate_high_if_needed,
+    emit_classify_unknown_rate_high_if_needed,
+    emit_discovery_service_alert,
 )
 from app.modules.discovery.constants import (
     CATEGORY_RECON_STALE_DAYS,
@@ -52,20 +58,13 @@ from app.modules.persist.meta_write import (
     build_scrape_job_insert_fields,
     write_meta_async,
 )
-from app.modules.discovery.alerting import (
-    emit_canonical_missing_rate_high_if_needed,
-    emit_classify_unknown_rate_high_if_needed,
-    emit_discovery_service_alert,
-)
 from app.modules.persist.writer import (
     build_dim_product_fields,
     build_fact_listing_fields,
 )
-from app.modules.scraper.locale_selection import build_accept_language_header
 from app.modules.scraper import page_cache
+from app.modules.scraper.locale_selection import build_accept_language_header
 from app.modules.scraper.scraper_pool import ScraperPool
-
-import structlog
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)

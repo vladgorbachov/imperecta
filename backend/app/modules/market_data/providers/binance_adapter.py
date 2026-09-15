@@ -23,7 +23,11 @@ TOP_N = 50
 class BinanceCryptoAdapter(CryptoProviderAdapter):
     """Binance markets adapter. Returns top 50 USDT pairs by 24h volume."""
 
-    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    ):
         self.base_url = base_url or BINANCE_API_URL
         self.timeout = timeout
 

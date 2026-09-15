@@ -24,7 +24,8 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -75,7 +76,11 @@ class FactListing(Base):
     last_review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scraper_type: Mapped[str] = mapped_column(String(30), default="web_api", nullable=False)
-    scraper_config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    scraper_config: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
     scrape_interval_minutes: Mapped[int] = mapped_column(Integer, default=360, nullable=False)
     consecutive_errors: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     failure_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -309,7 +314,12 @@ class FactCurrencyRate(Base):
             ")",
             name="ck_fact_currency_rate_source",
         ),
-        UniqueConstraint("date_id", "currency_code", "source", name="uq_fact_currency_rate_date_ccy_source"),
+        UniqueConstraint(
+            "date_id",
+            "currency_code",
+            "source",
+            name="uq_fact_currency_rate_date_ccy_source",
+        ),
         Index("idx_rate_date", "date_id"),
         Index("idx_rate_currency", "currency_code"),
         Index("idx_rate_date_currency", "date_id", "currency_code"),

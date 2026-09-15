@@ -5,7 +5,6 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-
 # --- User dashboard preferences (stored in users.preferences JSONB) ---
 
 

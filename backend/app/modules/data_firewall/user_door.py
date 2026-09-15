@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS, TABLE_LOCATORS, extract_locator
+from app.modules.data_firewall.contracts import (
+    FACT_TABLE_CONTRACTS,
+    TABLE_LOCATORS,
+    extract_locator,
+)
 from app.modules.data_firewall.firewall import (
-    FirewallOutcome,
     REJECT_SIGNING_UNAVAILABLE,
+    FirewallOutcome,
     _sign_fields,
     _validate_against_contract,
 )

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from app.modules.data_firewall.contracts import TABLE_LOCATORS, extract_locator
 from app.modules.data_firewall.firewall import (
-    FirewallOutcome,
     REJECT_SIGNING_UNAVAILABLE,
+    FirewallOutcome,
     _sign_fields,
 )
 from app.modules.data_firewall.reject_store import write_reject_data_isolated

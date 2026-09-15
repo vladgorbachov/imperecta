@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from app.modules.persist.meta_write import MetaWriteResult, write_meta_sync
+from app.modules.persist.meta_write import write_meta_sync
 
 
 def build_service_alert_fields(

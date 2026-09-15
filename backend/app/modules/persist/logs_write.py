@@ -11,7 +11,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.database import sync_session_factory
-from app.modules.data_firewall.firewall import LogsOutcome, evaluate_logs
+from app.modules.data_firewall.firewall import evaluate_logs
 from app.modules.persist.writer import PersistContext, write_batch_sync
 
 

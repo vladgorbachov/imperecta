@@ -6,13 +6,13 @@ from uuid import UUID
 from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.dimensions import DimDate, DimMarketplace, DimProduct
+from app.models.facts import FactListing, FactPrice
 from app.modules.currency import (
     DISPLAY_LOCAL,
     CurrencyConverter,
     compute_display_fields_for_marketplace,
 )
-from app.models.dimensions import DimDate, DimMarketplace, DimProduct
-from app.models.facts import FactListing, FactPrice
 
 _SORT_RECENT = "recent"
 _SORT_NAME_ASC = "name_asc"
@@ -330,7 +330,9 @@ class ProductPoolService:
                 DimMarketplace.name.label("marketplace_name"),
                 DimMarketplace.domain.label("marketplace_domain"),
                 DimMarketplace.country_code,
-                func.sum(case((FactListing.is_active.is_(True), 1), else_=0)).label("listing_count"),
+                func.sum(
+                    case((FactListing.is_active.is_(True), 1), else_=0),
+                ).label("listing_count"),
                 func.avg(FactListing.last_price_eur).filter(FactListing.is_active.is_(True)).label("avg_price_eur"),
             )
             .select_from(DimMarketplace)

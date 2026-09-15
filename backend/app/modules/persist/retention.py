@@ -9,11 +9,11 @@ import structlog
 from app.database import sync_session_factory
 from app.modules.data_firewall.retention_gate import authorize_retention_delete
 from app.modules.persist.maintenance_audit import record_maintenance_audit
+from app.modules.persist.retention_config import RETENTION_TABLES, RetentionTableConfig
 from app.modules.persist.service_alerts_write import (
     build_service_alert_fields,
     write_service_alert_sync,
 )
-from app.modules.persist.retention_config import RETENTION_TABLES, RetentionTableConfig
 from app.modules.persist.writer import PersistContext, PersistResult, write_sync
 
 slog = structlog.get_logger(__name__)

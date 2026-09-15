@@ -33,7 +33,11 @@ from app.modules.currency import resolve_price_eur
 from app.modules.data_firewall.firewall import FirewallOutcome, evaluate_ecommerce, evaluate_market
 from app.modules.data_firewall.update_validator import authorize_scrape_update
 from app.modules.ingestion.dto import IngestionResult
-from app.modules.ingestion.gate import MAX_CURRENCY_RAW_LEN, CurrencyResolver
+from app.modules.ingestion.gate import (
+    MAX_CURRENCY_RAW_LEN,
+    CurrencyResolver,
+    disambiguate_currency,
+)
 from app.modules.ingestion.taxonomy import ensure_brand, ensure_category_chain
 from app.modules.persist.scrape_gate_fields import (
     build_dim_date_fields,
@@ -224,6 +228,21 @@ class IngestionService:
 
         currency_raw_text = getattr(data, "currency_raw", None) or ""
         curr_raw = getattr(data, "currency", None)
+        if curr_raw:
+            resolved_code = disambiguate_currency(
+                str(curr_raw),
+                currency_raw_text or getattr(data, "price_raw_text", None),
+                self._currency_resolver.whitelist_for(listing.marketplace_id),
+            )
+            if resolved_code and resolved_code != curr_raw:
+                slog.info(
+                    "currency_token_disambiguated",
+                    detected=str(curr_raw),
+                    resolved=resolved_code,
+                    marketplace_id=str(listing.marketplace_id),
+                )
+                data.currency = resolved_code
+                curr_raw = resolved_code
 
         persist_fields: dict[str, Any] | None = None
         scrape_price_eur: float | None = None

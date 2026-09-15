@@ -23,7 +23,8 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -137,7 +138,11 @@ class DimMarketplace(Base):
     )
     locale: Mapped[str | None] = mapped_column(String(10), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    reliability_score: Mapped[float | None] = mapped_column(Numeric(3, 2), default=0.00, nullable=True)
+    reliability_score: Mapped[float | None] = mapped_column(
+        Numeric(3, 2),
+        default=0.00,
+        nullable=True,
+    )
     avg_response_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_scrape_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_scrape_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -145,9 +150,24 @@ class DimMarketplace(Base):
     monthly_visits: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Discovery & scraping config (admin UI + workers).
-    product_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default=text("0"))
-    products_in_pool: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default=text("0"))
-    requires_js: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
+    product_quota: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        server_default=text("0"),
+    )
+    products_in_pool: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        server_default=text("0"),
+    )
+    requires_js: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default=text("false"),
+    )
     # How the shop is reachable: direct | render | proxy | proxy_render.
     # requires_js stays a legacy render hint applied when access_mode='direct'.
     access_mode: Mapped[str] = mapped_column(
@@ -167,7 +187,10 @@ class DimMarketplace(Base):
     custom_next_page_selector: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_price_selector: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_title_selector: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_discovery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_discovery_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     last_discovery_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_discovery_products_found: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False, server_default=text("0")
@@ -351,7 +374,11 @@ class DimProduct(Base):
         nullable=True,
         index=True,
     )
-    attributes: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    attributes: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_urls: Mapped[list[str]] = mapped_column(
         ARRAY(Text),

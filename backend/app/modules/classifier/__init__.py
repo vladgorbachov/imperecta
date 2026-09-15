@@ -23,11 +23,11 @@ Edge map (post-CLS1; no cycles):
 
 from app.modules.classifier.service import (
     PageRole,
-    classify_page_role,
-    classify_page_role_for_discovery,
     _get_jsonld_root_types,
     _get_microdata_toplevel_types,
     _get_og_type,
+    classify_page_role,
+    classify_page_role_for_discovery,
 )
 
 __all__ = [

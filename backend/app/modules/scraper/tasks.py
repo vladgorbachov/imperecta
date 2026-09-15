@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -17,21 +17,16 @@ from app.database import sync_session_factory
 from app.models.app_tables import ScrapeJob
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
-from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.admin.parsing_admin import ParsingAdminService
+from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
+from app.modules.discovery.orchestrator import DiscoveryOrchestrator
+from app.modules.marketplaces.service import MarketplacePoolService
 from app.modules.persist.logs_write import build_scrape_log_fields, write_logs_sync
 from app.modules.persist.meta_write import (
     build_dim_marketplace_fields,
     build_scrape_job_fields,
     write_meta_async,
 )
-from app.modules.discovery.constants import DISCOVERY_PER_MARKETPLACE_BUDGET_SECONDS
-from app.modules.discovery.orchestrator import DiscoveryOrchestrator
-
-# ~85% of scrape_one_marketplace soft_time_limit=900 — cooperative exit before
-# Celery soft(900)/hard(960) kill so finalization writes counters + partial status.
-SCRAPE_PER_MARKETPLACE_BUDGET_SECONDS = 765
-from app.modules.scraper.pipeline.job_completion import complete_pipeline_job as _finalize_full_pipeline_job
 from app.modules.scraper.pipeline.activity_pulse import (
     discovery_activity_callback,
     pulse_job_activity_sync,
@@ -44,6 +39,10 @@ from app.modules.scraper.service import GlobalScrapeService, _run_coro_in_worker
 from app.workers.celery_app import celery_app
 
 slog = structlog.get_logger(__name__)
+
+# ~85% of scrape_one_marketplace soft_time_limit=900 — cooperative exit before
+# Celery soft(900)/hard(960) kill so finalization writes counters + partial status.
+SCRAPE_PER_MARKETPLACE_BUDGET_SECONDS = 765
 
 
 def _run_async(coro):
@@ -230,7 +229,11 @@ def discover_all_marketplaces():
                             completed += 1
                         errors.extend(res.errors)
                     except Exception as exc:
-                        slog.exception("discovery_failed", marketplace_id=str(mp.id), error=str(exc))
+                        slog.exception(
+                            "discovery_failed",
+                            marketplace_id=str(mp.id),
+                            error=str(exc),
+                        )
                         errors.append(str(exc))
         finally:
             await engine.dispose()

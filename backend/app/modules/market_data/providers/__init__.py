@@ -12,7 +12,10 @@ from app.modules.market_data.providers.crypto_adapter import (
     CryptoCompositeAdapter,
     CryptoUnifiedAdapter,
 )
-from app.modules.market_data.providers.forex_adapter import ForexFrankfurterAdapter, ForexUnifiedAdapter
+from app.modules.market_data.providers.forex_adapter import (
+    ForexFrankfurterAdapter,
+    ForexUnifiedAdapter,
+)
 
 __all__ = [
     "ForexProviderAdapter",

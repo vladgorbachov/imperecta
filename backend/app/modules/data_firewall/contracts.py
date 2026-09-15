@@ -6,12 +6,19 @@ import re
 from typing import Any, TypedDict
 
 from sqlalchemy import Boolean, Column, Date, DateTime, Integer, Numeric, SmallInteger, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
+from app.models.app_tables import (
+    AIChatMessage,
+    AIChatSession,
+    ApiLog,
+    ScrapeJob,
+    ScrapeLog,
+    ServiceAlert,
+)
 from app.models.core import User
 from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
-from app.models.reject_data import RejectData
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -24,6 +31,7 @@ from app.models.facts import (
     FactSearchTrend,
     FactTariff,
 )
+from app.models.reject_data import RejectData
 
 
 class ColumnContract(TypedDict, total=False):

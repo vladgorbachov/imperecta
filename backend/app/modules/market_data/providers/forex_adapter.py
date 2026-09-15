@@ -12,7 +12,7 @@ from app.modules.market_data.http_config import (
     DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
     with_transient_retries,
 )
-from app.modules.market_data.provider_queue import InstrumentProvider, gap_fill_fetch
+from app.modules.market_data.provider_queue import gap_fill_fetch
 from app.modules.market_data.providers.base import ForexProviderAdapter
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,11 @@ class ForexOpenErAdapter(ForexProviderAdapter):
 
     provider_source = FOREX_PROVIDER_OPENEXCHANGERATES
 
-    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    ):
         self.base_url = base_url or OPEN_ER_FALLBACK_URL
         self.timeout = timeout
 
@@ -81,7 +85,11 @@ class ForexFrankfurterAdapter(ForexProviderAdapter):
 
     provider_source = FOREX_PROVIDER_ECB
 
-    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = DEFAULT_MARKET_DATA_TIMEOUT_SECONDS,
+    ):
         self.base_url = base_url or FRANKFURTER_FALLBACK_URL
         self.timeout = timeout
 
@@ -238,7 +246,11 @@ async def fetch_forex_normalized(
     result = await gap_fill_fetch(providers, requested_currencies)
     if result.missing:
         slog_missing = sorted(result.missing)
-        logger.debug("forex_queue_missing_currencies count=%d keys=%s", len(slog_missing), slog_missing[:20])
+        logger.debug(
+            "forex_queue_missing_currencies count=%d keys=%s",
+            len(slog_missing),
+            slog_missing[:20],
+        )
 
     normalized: list[NormalizedForex] = []
     for quote, (dto, source) in result.items.items():

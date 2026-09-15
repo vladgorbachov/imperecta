@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimMarketplace
@@ -19,8 +20,6 @@ from app.modules.discovery.alerting import (
 )
 from app.modules.scraper.extractors import extract_internal_links_all
 from app.modules.scraper.scraper_pool import ScraperPool
-
-import structlog
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)

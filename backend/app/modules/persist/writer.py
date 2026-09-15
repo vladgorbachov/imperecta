@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID
 
@@ -13,10 +13,16 @@ import structlog
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from app.models.app_tables import AIChatMessage, AIChatSession, ApiLog, ScrapeJob, ScrapeLog, ServiceAlert
+from app.models.app_tables import (
+    AIChatMessage,
+    AIChatSession,
+    ApiLog,
+    ScrapeJob,
+    ScrapeLog,
+    ServiceAlert,
+)
 from app.models.core import User
 from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
-from app.models.reject_data import RejectData
 from app.models.facts import (
     FactCommodityPrice,
     FactCryptoPrice,
@@ -24,6 +30,7 @@ from app.models.facts import (
     FactListing,
     FactPrice,
 )
+from app.models.reject_data import RejectData
 from app.modules.data_firewall.contracts import TABLE_LOCATORS, extract_locator
 from app.modules.data_firewall.reject_store import write_reject_data
 from app.modules.data_firewall.service_alert_store import write_service_alert_isolated

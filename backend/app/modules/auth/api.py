@@ -76,7 +76,10 @@ async def register(data: UserRegister, db: DbSession) -> TokenResponse:
         reject_source="auth_register",
     )
     if not result.ok:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registration failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed",
+        )
     return _create_tokens(user_id)
 
 
@@ -84,7 +87,10 @@ async def register(data: UserRegister, db: DbSession) -> TokenResponse:
 async def login(data: UserLogin, db: DbSession) -> TokenResponse:
     user = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
     if user is None or not verify_password(data.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
     result = await write_user_async(
         operation="update",
         kind="login_touch",
@@ -95,7 +101,10 @@ async def login(data: UserLogin, db: DbSession) -> TokenResponse:
         reject_source="auth_login",
     )
     if not result.ok:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login update failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login update failed",
+        )
     force_change = user.force_password_change if user.force_password_change else None
     return _create_tokens(user.id, force_password_change=force_change, persistent=data.remember_me)
 
@@ -107,8 +116,13 @@ async def change_initial_password(
     db: DbSession,
 ) -> TokenResponse:
     if not current_user.force_password_change:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Initial password change not required")
-    existing = (await db.execute(select(User).where(User.email == data.new_email))).scalar_one_or_none()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Initial password change not required",
+        )
+    existing = (
+        await db.execute(select(User).where(User.email == data.new_email))
+    ).scalar_one_or_none()
     if existing is not None and existing.id != current_user.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
     result = await write_user_async(
@@ -123,7 +137,10 @@ async def change_initial_password(
         reject_source="auth_password_change",
     )
     if not result.ok:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Password change failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Password change failed",
+        )
     await db.refresh(current_user)
     return _create_tokens(current_user.id)
 
@@ -133,16 +150,25 @@ async def refresh(data: RefreshTokenRequest, db: DbSession) -> TokenResponse:
     try:
         payload = decode_token(data.refresh_token)
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
     if payload.get("type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     user_id_str = payload.get("sub")
     if not user_id_str:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
     try:
         user_id = UUID(user_id_str)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")

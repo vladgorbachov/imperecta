@@ -24,7 +24,8 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -89,7 +90,10 @@ class Alert(Base):
     channel: Mapped[str] = mapped_column(String(20), default="email", nullable=False)
     webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     cooldown_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
-    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     trigger_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -211,8 +215,14 @@ class Digest(Base):
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     content_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    product_ids: Mapped[list[UUID] | None] = mapped_column(ARRAY(PG_UUID(as_uuid=True)), nullable=True)
-    marketplace_ids: Mapped[list[UUID] | None] = mapped_column(ARRAY(PG_UUID(as_uuid=True)), nullable=True)
+    product_ids: Mapped[list[UUID] | None] = mapped_column(
+        ARRAY(PG_UUID(as_uuid=True)),
+        nullable=True,
+    )
+    marketplace_ids: Mapped[list[UUID] | None] = mapped_column(
+        ARRAY(PG_UUID(as_uuid=True)),
+        nullable=True,
+    )
     country_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String(2)), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sent_via: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -396,11 +406,16 @@ class ScrapeJob(Base):
         foreign_keys=[triggered_by],
         back_populates="scrape_jobs_triggered",
     )
-    logs: Mapped[list[ScrapeLog]] = relationship("ScrapeLog", back_populates="job", cascade="all, delete-orphan")
+    logs: Mapped[list[ScrapeLog]] = relationship(
+        "ScrapeLog",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         CheckConstraint(
-            "job_type IN ('scheduled','manual','retry','backfill','discovery','full_pipeline_test','scrape')",
+            "job_type IN ('scheduled','manual','retry','backfill',"
+            "'discovery','full_pipeline_test','scrape')",
             name="ck_scrape_jobs_job_type",
         ),
         CheckConstraint(

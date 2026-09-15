@@ -18,12 +18,12 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from app.common.html_parsing import (
-    REPEATED_STRUCTURE_MIN_COUNT,
     _CURRENCY_SYMBOLS,
     _CURRENCY_TEXT_CODES,
     _MAX_REALISTIC_PRICE,
     _PRICE_CONTEXT_NEGATIVE,
     _PRICE_CONTEXT_POSITIVE,
+    REPEATED_STRUCTURE_MIN_COUNT,
     _compute_element_signature,
     _detect_currency,
     compute_element_signature,
@@ -1285,7 +1285,10 @@ def extract_internal_links_all(soup: BeautifulSoup, base_url: str) -> list[str]:
     return results
 
 
-def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str] | list[dict[str, object]]]:
+def parse_sitemap_xml(
+    xml_content: str,
+    base_url: str,
+) -> dict[str, list[str] | list[dict[str, object]]]:
     """Parse a sitemap XML document.
 
     Returns a dict with keys:
@@ -1323,7 +1326,11 @@ def parse_sitemap_xml(xml_content: str, base_url: str) -> dict[str, list[str] | 
             local = _local_name(child.tag)
             if local != "link":
                 continue
-            rel = (child.attrib.get("rel") or child.attrib.get("{http://www.w3.org/1999/xhtml}rel") or "").strip()
+            rel = (
+                child.attrib.get("rel")
+                or child.attrib.get("{http://www.w3.org/1999/xhtml}rel")
+                or ""
+            ).strip()
             hreflang = (
                 child.attrib.get("hreflang")
                 or child.attrib.get("{http://www.w3.org/1999/xhtml}hreflang")

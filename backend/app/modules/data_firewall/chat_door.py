@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.modules.data_firewall.contracts import FACT_TABLE_CONTRACTS, TABLE_LOCATORS, extract_locator
+from app.modules.data_firewall.contracts import (
+    FACT_TABLE_CONTRACTS,
+    TABLE_LOCATORS,
+)
 from app.modules.data_firewall.firewall import (
-    FirewallOutcome,
     REJECT_SIGNING_UNAVAILABLE,
+    FirewallOutcome,
     _sign_fields,
     _validate_against_contract,
 )
@@ -124,7 +127,10 @@ def _owner_present(*, table: str, fields: dict[str, Any]) -> bool:
     return False
 
 
-def _validate_contract_subset(table: str, fields: dict[str, Any]) -> tuple[bool, list[str], str | None]:
+def _validate_contract_subset(
+    table: str,
+    fields: dict[str, Any],
+) -> tuple[bool, list[str], str | None]:
     contract = FACT_TABLE_CONTRACTS.get(table)
     if contract is None:
         return False, ["unknown_table"], "unknown_table"

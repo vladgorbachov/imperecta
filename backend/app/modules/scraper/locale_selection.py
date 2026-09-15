@@ -16,7 +16,9 @@ def _normalize_hreflang(tag: str) -> str:
 
 def _is_english_hreflang(hreflang: str) -> bool:
     normalized = _normalize_hreflang(hreflang)
-    return normalized == ENGLISH_HREFLANG_PREFIX or normalized.startswith(f"{ENGLISH_HREFLANG_PREFIX}-")
+    return normalized == ENGLISH_HREFLANG_PREFIX or normalized.startswith(
+        f"{ENGLISH_HREFLANG_PREFIX}-",
+    )
 
 
 def select_locale_url(

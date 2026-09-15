@@ -21,6 +21,7 @@ slog = structlog.get_logger(__name__)
 
 _FX_RATE_DECIMALS = 8
 _CHANGE_PCT_DECIMALS = 4
+_METAL_SYMBOLS = ("XAU", "XAG", "XPT", "XPD")
 
 
 def _quantize_fx_rate(value: float) -> float:
@@ -263,9 +264,9 @@ class IngestionService:
     async def ingest_all(self, include_commodities: bool = False) -> dict[str, Any]:
         """Fetch from existing adapters and persist (orchestration entrypoint)."""
         from app.modules.market_data.fetching import (
+            fetch_commodities,
             fetch_crypto_prices,
             fetch_forex_rates,
-            fetch_commodities,
         )
 
         out: dict[str, Any] = {"forex": 0, "crypto": 0, "commodities": 0}
@@ -350,11 +351,17 @@ class IngestionService:
                         CommodityIngestItem(
                             symbol=sym,
                             name=name,
-                            commodity_type="metal" if sym in ("XAU", "XAG", "XPT", "XPD") else "energy",
+                            commodity_type=(
+                                "metal" if sym in _METAL_SYMBOLS else "energy"
+                            ),
                             price_usd=price,
                             unit=unit,
                             source=c.get("source")
-                            or ("goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"),
+                            or (
+                                "goldapi"
+                                if sym in _METAL_SYMBOLS
+                                else "alpha_vantage"
+                            ),
                             change_24h_pct=_quantize_change_pct(ch),
                         ),
                     )
@@ -379,9 +386,9 @@ class IngestionService:
                 price = float(c.get("price", 0))
                 ch = c.get("change_24h")
                 src = c.get("source") or (
-                    "goldapi" if sym in ("XAU", "XAG", "XPT", "XPD") else "alpha_vantage"
+                    "goldapi" if sym in _METAL_SYMBOLS else "alpha_vantage"
                 )
-                ctype = "metal" if sym in ("XAU", "XAG", "XPT", "XPD") else "energy"
+                ctype = "metal" if sym in _METAL_SYMBOLS else "energy"
                 comm_items.append(
                     CommodityIngestItem(
                         symbol=sym,

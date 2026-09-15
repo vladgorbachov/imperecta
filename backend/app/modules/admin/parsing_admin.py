@@ -195,7 +195,8 @@ class ParsingAdminService:
         active = await self.get_active_pipeline_job()
         if active is not None:
             raise ValueError(
-                f"Pipeline job already running: {active['job_id']}. Wait until it finishes or fails."
+                f"Pipeline job already running: {active['job_id']}. "
+                "Wait until it finishes or fails."
             )
 
         started_at = datetime.now(UTC)
@@ -203,7 +204,9 @@ class ParsingAdminService:
         metadata["current_stage"] = "dispatching"
         metadata["last_activity_at"] = self._to_iso(started_at)
         if marketplace_codes:
-            metadata["marketplace_codes"] = [code.strip() for code in marketplace_codes if code.strip()]
+            metadata["marketplace_codes"] = [
+                code.strip() for code in marketplace_codes if code.strip()
+            ]
         job_id = uuid4()
         fields = build_scrape_job_insert_fields(
             id=job_id,
@@ -354,7 +357,9 @@ class ParsingAdminService:
         metadata["last_activity_at"] = self._to_iso(now)
         metadata["error"] = "cancelled_by_admin"
         duration_ms = (
-            int((now - job.started_at).total_seconds() * 1000) if job.started_at is not None else None
+            int(
+                (now - job.started_at).total_seconds() * 1000,
+            ) if job.started_at is not None else None
         )
         await write_meta_async(
             table="scrape_jobs",
@@ -574,7 +579,9 @@ class ParsingAdminService:
                 "marketplace_id": str(row["marketplace_id"]),
                 "marketplace_domain": row["marketplace_domain"],
                 "url": row["url"],
-                "price_found": float(row["price_found"]) if row["price_found"] is not None else None,
+                "price_found": float(
+                    row["price_found"],
+                ) if row["price_found"] is not None else None,
                 "duration_ms": row["duration_ms"],
                 "scraper_type": row["scraper_type"],
                 "error_category": row["error_category"],
@@ -607,12 +614,19 @@ class ParsingAdminService:
         ):
             speed = total_steps / elapsed_seconds
             if speed > 0:
-                estimated_remaining_seconds = round((estimated_total_steps - total_steps) / speed, 3)
+                estimated_remaining_seconds = round(
+                    (estimated_total_steps - total_steps) / speed,
+                    3,
+                )
 
         warning_flags: list[str] = []
         missing_critical_count = int(status_counts.get("missing_critical_data", 0))
         technical_error_count = int(status_counts.get("technical_error", 0))
-        error_ratio = (missing_critical_count + technical_error_count) / total_steps if total_steps > 0 else 0.0
+        error_ratio = (
+            (missing_critical_count + technical_error_count) / total_steps
+            if total_steps > 0
+            else 0.0
+        )
         if missing_critical_count > 0:
             warning_flags.append("missing_currency_or_critical_fields")
         if technical_error_count > 0:
@@ -630,7 +644,11 @@ class ParsingAdminService:
             ),
             "started_at": self._to_iso(job.started_at),
             "completed_at": self._to_iso(job.completed_at),
-            "duration_seconds": self._duration_seconds(job.started_at, job.completed_at, job.duration_ms),
+            "duration_seconds": self._duration_seconds(
+                job.started_at,
+                job.completed_at,
+                job.duration_ms,
+            ),
             "total_steps": total_steps,
             "status_counts": status_counts,
             "summary": self._summary_response_fields(summary, job),
@@ -909,7 +927,9 @@ class ParsingAdminService:
                 f"threshold_seconds={effective_timeout_s}"
             )
             duration_ms = (
-                int((now - job.started_at).total_seconds() * 1000) if job.started_at is not None else None
+                int(
+                    (now - job.started_at).total_seconds() * 1000,
+                ) if job.started_at is not None else None
             )
             await write_meta_async(
                 table="scrape_jobs",

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from bs4 import BeautifulSoup
 
 from app.modules.classifier import classify_page_role_for_discovery
+from app.modules.scraper import access_policy, host_throttle, page_cache
 from app.modules.scraper.extractors import (
     ExtractedProduct,
     detect_next_page,
@@ -24,7 +25,6 @@ from app.modules.scraper.extractors import (
     extract_with_custom_selectors,
     merge_and_finalize,
 )
-from app.modules.scraper import access_policy, host_throttle, page_cache
 from app.modules.scraper.fetch_backends import (
     BackendId,
     ProxyProviderBackend,

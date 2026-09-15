@@ -4,6 +4,18 @@ Alembic head revision is tracked in alembic_meta.alembic_version (see migrations
 current chain ends at 009_full_v2_schema_rebuild (idempotent v2 DDL).
 """
 
+from app.models.app_tables import (  # noqa: F401
+    AIChatMessage,
+    AIChatSession,
+    Alert,
+    AlertEvent,
+    ApiLog,
+    DataExport,
+    Digest,
+    ScrapeJob,
+    ScrapeLog,
+    ServiceAlert,
+)
 from app.models.core import User, UserProduct, UserSubscription  # noqa: F401
 from app.models.dimensions import (  # noqa: F401
     DimBrand,
@@ -26,18 +38,6 @@ from app.models.facts import (  # noqa: F401
     FactReview,
     FactSearchTrend,
     FactTariff,
-)
-from app.models.app_tables import (  # noqa: F401
-    AIChatMessage,
-    AIChatSession,
-    Alert,
-    AlertEvent,
-    ApiLog,
-    DataExport,
-    Digest,
-    ScrapeJob,
-    ScrapeLog,
-    ServiceAlert,
 )
 
 __all__ = [

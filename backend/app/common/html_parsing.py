@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import re
 
-
 _CURRENCY_SYMBOLS: dict[str, str] = {
     "€": "EUR",
     "$": "USD",
@@ -42,6 +41,31 @@ _CURRENCY_SYMBOLS: dict[str, str] = {
     "br": "BYN",
     "sm": "TJS",
 }
+
+# Tokens shared by several national currencies: "lei" is both the Romanian
+# and the Moldovan leu, "kr" spans the Nordic krona/krone family. Detection
+# alone cannot pick the right code — the consumer resolves the sibling against
+# the marketplace's allowed-currency whitelist (structural context, no
+# per-shop branching).
+AMBIGUOUS_CURRENCY_SIBLINGS: dict[str, frozenset[str]] = {
+    "RON": frozenset({"MDL"}),
+    "MDL": frozenset({"RON"}),
+    "SEK": frozenset({"NOK", "DKK", "ISK"}),
+    "NOK": frozenset({"SEK", "DKK", "ISK"}),
+    "DKK": frozenset({"SEK", "NOK", "ISK"}),
+    "ISK": frozenset({"SEK", "NOK", "DKK"}),
+}
+
+_AMBIGUOUS_TOKENS: frozenset[str] = frozenset({"lei", "лей", "kr", "kr."})
+
+
+def currency_token_is_ambiguous(raw_text: str | None) -> bool:
+    """True when the raw currency evidence is one of the shared tokens."""
+    if not raw_text:
+        return False
+    lowered = str(raw_text).strip().lower()
+    return any(token in lowered for token in _AMBIGUOUS_TOKENS)
+
 
 # ISO codes mentioned as text near prices (case-insensitive match after a space).
 _CURRENCY_TEXT_CODES: dict[str, str] = {
@@ -242,7 +266,9 @@ def parse_price_text(text: str) -> float | None:
             return None
 
     candidates: list[tuple[float, int]] = []
-    token_pattern = re.compile(r"\d{1,3}(?:[ \u00a0\u2009\u202f.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?")
+    token_pattern = re.compile(
+        r"\d{1,3}(?:[ \u00a0\u2009\u202f.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?",
+    )
     for match in token_pattern.finditer(raw):
         token = match.group(0)
         parsed = _parse_number_token(token)
