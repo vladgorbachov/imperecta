@@ -148,6 +148,11 @@ class DimMarketplace(Base):
     product_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default=text("0"))
     products_in_pool: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default=text("0"))
     requires_js: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
+    # How the shop is reachable: direct | render | proxy | proxy_render.
+    # requires_js stays a legacy render hint applied when access_mode='direct'.
+    access_mode: Mapped[str] = mapped_column(
+        String(16), default="direct", nullable=False, server_default=text("'direct'")
+    )
     # Tiered scrape strategy selector. Maps to the layer-order policy in ScraperPool.
     # 1 — server-rendered shops (proxy-provider + direct-http + browser-render fallback).
     # 2 — modern SPA shops (adds network interception + basic stealth, future).

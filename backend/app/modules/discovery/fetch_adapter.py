@@ -5,7 +5,7 @@ from __future__ import annotations
 from bs4 import BeautifulSoup
 
 from app.models.dimensions import DimMarketplace
-from app.modules.scraper import host_throttle
+from app.modules.scraper import access_policy, host_throttle
 from app.modules.scraper.scraper_pool import ScraperPool
 
 
@@ -16,6 +16,10 @@ def fetch_params_from_marketplace(marketplace: DimMarketplace) -> tuple[bool, in
     host_throttle.set_host_interval(
         marketplace.base_url or marketplace.domain,
         marketplace.rate_limit_delay,
+    )
+    access_policy.set_host_mode(
+        marketplace.base_url or marketplace.domain,
+        getattr(marketplace, "access_mode", None),
     )
     return requires_js, scrape_tier
 

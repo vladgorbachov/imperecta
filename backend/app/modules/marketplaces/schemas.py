@@ -18,6 +18,7 @@ class MarketplaceUpdate(BaseModel):
     url: str | None = Field(None, min_length=1, max_length=2048)
     is_active: bool | None = None
     country_code: str | None = Field(None, min_length=2, max_length=2)
+    access_mode: Literal["direct", "render", "proxy", "proxy_render"] | None = None
 
 
 class CountryRef(BaseModel):

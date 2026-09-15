@@ -24,7 +24,7 @@ from app.modules.scraper.extractors import (
     extract_with_custom_selectors,
     merge_and_finalize,
 )
-from app.modules.scraper import host_throttle, page_cache
+from app.modules.scraper import access_policy, host_throttle, page_cache
 from app.modules.scraper.fetch_backends import (
     BackendId,
     ProxyProviderBackend,
@@ -216,7 +216,7 @@ class ScraperPool:
                 last_error="",
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
-        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
+        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier, url=url)
 
         html = None
         used_backend: BackendId | None = None
@@ -326,6 +326,7 @@ class ScraperPool:
                     backend_ids = self._layer_order(
                         requires_js=requires_js,
                         scrape_tier=scrape_tier,
+                        url=url,
                     )
                     remaining = [
                         backend
@@ -421,7 +422,7 @@ class ScraperPool:
         self, url: str, requires_js: bool = False, *, scrape_tier: int = 1
     ) -> str | None:
         """Fetch raw HTML via fetch backends (discovery uses fetch_adapter)."""
-        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
+        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier, url=url)
         for backend_id in backend_ids:
             html, _err = await self._fetch_layer_with_retries(backend_id, url)
             if html:
@@ -440,7 +441,7 @@ class ScraperPool:
 
         Tries fetch backends in priority order. Returns None on total failure.
         """
-        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier)
+        backend_ids = self._layer_order(requires_js=requires_js, scrape_tier=scrape_tier, url=url)
         for backend_id in backend_ids:
             try:
                 html, _err = await self._fetch_layer_with_retries(
@@ -648,7 +649,7 @@ class ScraperPool:
         custom_next_page_selector: str | None = None,
         requires_js: bool = False,
     ) -> ListingScrapeResult:
-        backend_ids = self._layer_order(requires_js=requires_js)
+        backend_ids = self._layer_order(requires_js=requires_js, url=url)
         for backend_id in backend_ids:
             html, _err = await self._fetch_layer_with_retries(backend_id, url)
             if not html:
@@ -731,6 +732,10 @@ class ScraperPool:
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         backend = get_fetch_backend(backend_id)
+        if backend_id == BackendId.PROXY_PROVIDER:
+            # JS rendering costs extra proxy credits: request it only when the
+            # marketplace's access_mode explicitly asks for it.
+            render_js = access_policy.wants_proxy_render(url)
         await host_throttle.acquire(url)
         return await backend.fetch(
             url,
@@ -739,34 +744,32 @@ class ScraperPool:
             accept_language=accept_language,
         )
 
-    def _layer_order(self, requires_js: bool, scrape_tier: int = 1) -> list[BackendId]:
+    def _layer_order(
+        self,
+        requires_js: bool,
+        scrape_tier: int = 1,
+        url: str | None = None,
+    ) -> list[BackendId]:
         """Return the ordered list of fetch backends to try for one scrape attempt.
 
-        Backend order is determined by two inputs:
-        - scrape_tier: strategic policy choice (1/2/3) tied to marketplace category.
-        - requires_js: fine-grained hint inside a tier (affects backend order, not set).
+        Backend order is determined by the marketplace's access_mode (resolved
+        per URL host via access_policy; scrape/discovery register it when they
+        load the marketplace row) with requires_js kept as a legacy render hint
+        inside direct mode:
 
-        Tier 1 (current default), policy B:
-            Server-rendered (requires_js=False): direct_http -> proxy_provider -> browser_render.
-                direct HTTP is FIRST to save proxy-provider quota — it is free/fast and
-                sufficient for the server-rendered majority of Tier 1 shops.
-                Proxy provider is tried only when direct HTTP fails; browser render last.
-            JS-only (requires_js=True): proxy_provider -> browser_render -> direct_http.
-                direct HTTP cannot execute JS, so leading with it on a JS-only page
-                wastes a request. Proxy provider goes first when configured, then
-                browser render. direct HTTP is kept as a last-resort fallback because
-                some "JS" pages still expose partial server-rendered content.
-            When proxy provider is not configured, it is dropped from both sequences.
+            direct        direct_http -> browser_render
+            render        browser_render -> direct_http (requires_js implies this)
+            proxy         proxy_provider only
+            proxy_render  proxy_provider only (JS rendering requested)
 
-        Tier 2 / Tier 3: backends are documented in _SUPPORTED_SCRAPE_TIERS and are
-                         not yet implemented. They will be added when the platform
-                         onboards marketplaces requiring them.
+        The paid proxy backend participates ONLY in proxy modes: quota is never
+        spent escalating a direct-mode shop — a blocked shop fails honestly and
+        gets its access_mode raised instead. A proxy-mode shop with the proxy
+        unconfigured returns [] (fetch fails, alerts fire; nothing silently
+        downgrades to a datacenter fetch that is known to be blocked).
 
-        Raises NotImplementedError when an unsupported tier is requested, so that
-        operational misconfigurations surface immediately rather than silently
-        degrading to Tier 1 behavior. Raises ValueError for unknown tier values
-        (out of {1, 2, 3}) — this is a defensive API contract, separate from the
-        DB CHECK constraint, and guards against programming errors in callers.
+        Tier 2 / Tier 3 remain documented placeholders in _SUPPORTED_SCRAPE_TIERS.
+        Raises NotImplementedError / ValueError for unsupported / unknown tiers.
         """
         if scrape_tier not in _KNOWN_SCRAPE_TIERS:
             raise ValueError(
@@ -778,19 +781,14 @@ class ScraperPool:
                 f"currently supported tiers: {sorted(_SUPPORTED_SCRAPE_TIERS)}"
             )
 
-        proxy_provider_available = ProxyProviderBackend.is_configured()
-        if requires_js:
-            backends: list[BackendId] = []
-            if proxy_provider_available:
-                backends.append(BackendId.PROXY_PROVIDER)
-            backends.append(BackendId.BROWSER_RENDER)
-            backends.append(BackendId.DIRECT_HTTP)
-            return backends
-        backends = [BackendId.DIRECT_HTTP]
-        if proxy_provider_available:
-            backends.append(BackendId.PROXY_PROVIDER)
-        backends.append(BackendId.BROWSER_RENDER)
-        return backends
+        mode = access_policy.mode_for(url)
+        if mode in (access_policy.MODE_PROXY, access_policy.MODE_PROXY_RENDER):
+            if ProxyProviderBackend.is_configured():
+                return [BackendId.PROXY_PROVIDER]
+            return []
+        if mode == access_policy.MODE_RENDER or requires_js:
+            return [BackendId.BROWSER_RENDER, BackendId.DIRECT_HTTP]
+        return [BackendId.DIRECT_HTTP, BackendId.BROWSER_RENDER]
 
     def _extract_all_levels(
         self,

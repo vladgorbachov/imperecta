@@ -57,13 +57,15 @@ async def test_fetch_html_returns_first_html(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_layer_order_requires_js_inserts_browser_render(monkeypatch):
+async def test_layer_order_requires_js_renders_first(monkeypatch):
     pool = ScraperPool()
     monkeypatch.setattr(fb.settings, "proxy_provider_enabled", True)
     monkeypatch.setattr(fb.settings, "proxy_provider_username", "u")
     monkeypatch.setattr(fb.settings, "proxy_provider_password", "p")
     backends = pool._layer_order(requires_js=True)
-    assert backends[1] == BackendId.BROWSER_RENDER
+    # access-mode policy: render hint puts the browser first and the paid
+    # proxy backend never joins a non-proxy-mode order
+    assert backends == [BackendId.BROWSER_RENDER, BackendId.DIRECT_HTTP]
 
 
 @pytest.mark.asyncio

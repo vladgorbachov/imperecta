@@ -47,7 +47,7 @@ from app.modules.persist.scrape_gate_fields import (
 from app.modules.persist.writer import PersistContext, write_sync
 from app.modules.scraper.fetch_backends import backend_id_persisted
 from app.modules.scraper.pipeline.outcome_buckets import CANONICAL_SCRAPE_LOG_STATUSES
-from app.modules.scraper import host_throttle
+from app.modules.scraper import access_policy, host_throttle
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -459,6 +459,10 @@ class GlobalScrapeService:
         scrape_tier = int(mp.scrape_tier) if mp and mp.scrape_tier is not None else 1
         if mp is not None:
             host_throttle.set_host_interval(mp.base_url or mp.domain, mp.rate_limit_delay)
+            access_policy.set_host_mode(
+                mp.base_url or mp.domain,
+                getattr(mp, "access_mode", None),
+            )
         cfg = listing.scraper_config if isinstance(listing.scraper_config, dict) else {}
         custom_selectors = {
             k: v

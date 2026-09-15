@@ -125,10 +125,14 @@ def serialize_frontier(
     visited: set[str],
     listing_urls: list[str],
 ) -> dict[str, Any]:
-    """Serialize runtime BFS structures into recon_frontier_state JSONB shape."""
+    """Serialize runtime BFS structures into recon_frontier_state JSONB shape.
+
+    visited is a set: sort it so the persisted JSONB is deterministic (stable
+    gated snapshots, no hash-randomized churn between runs).
+    """
     return {
         "queue": [[u, d] for (u, d) in queue],
-        "visited": list(visited),
+        "visited": sorted(visited),
         "listing_urls": list(listing_urls),
     }
 

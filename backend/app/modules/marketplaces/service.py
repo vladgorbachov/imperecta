@@ -96,6 +96,7 @@ class MarketplaceService:
             "rate_limit_delay",
             "locale",
             "country_code",
+            "access_mode",
         }
     )
 
@@ -190,6 +191,7 @@ class MarketplaceService:
             currency_code=currency_code,
             scraper_type="web_api",
             is_active=True,
+            access_mode="direct",
         )
         result = await write_meta_async(
             table="dim_marketplace",
