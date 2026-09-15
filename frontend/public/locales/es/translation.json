@@ -924,5 +924,17 @@
   "admin.users.deleteFailed": "No se pudo eliminar el usuario",
   "admin.users.deleteConfirm": "¿Eliminar al usuario {{email}}? Esta operación es permanente.",
   "admin.dataCollection.celeryTask": "Tarea de Celery",
-  "admin.dataCollection.colJob": "Tarea"
+  "admin.dataCollection.colJob": "Tarea",
+  "admin.tabs.ops": "Ops",
+  "admin.tabs.marketplacesTab": "Marketplaces",
+  "admin.ops.pipeline": "Pipeline",
+  "admin.ops.runActive": "Ejecución en curso",
+  "admin.ops.runIdle": "Sin ejecución activa",
+  "admin.ops.alerts": "Alertas de servicio",
+  "admin.ops.openCount": "abiertas",
+  "admin.ops.inventory": "Inventario",
+  "admin.ops.inventoryHint": "Los contadores del registro se actualizan cada minuto.",
+  "admin.ops.latestAlerts": "Últimas alertas abiertas",
+  "admin.ops.allClear": "Todo en orden: no hay alertas abiertas.",
+  "admin.ops.open": "Abrir"
 }

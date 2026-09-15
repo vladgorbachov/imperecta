@@ -974,5 +974,17 @@
   "admin.users.deleteFailed": "Failed to delete user",
   "admin.users.deleteConfirm": "Delete user {{email}}? This operation is permanent.",
   "admin.dataCollection.celeryTask": "Celery task",
-  "admin.dataCollection.colJob": "Job"
+  "admin.dataCollection.colJob": "Job",
+  "admin.tabs.ops": "Ops",
+  "admin.tabs.marketplacesTab": "Marketplaces",
+  "admin.ops.pipeline": "Pipeline",
+  "admin.ops.runActive": "Run in progress",
+  "admin.ops.runIdle": "No active pipeline run",
+  "admin.ops.alerts": "Service alerts",
+  "admin.ops.openCount": "open",
+  "admin.ops.inventory": "Inventory",
+  "admin.ops.inventoryHint": "Registry counts refresh every minute.",
+  "admin.ops.latestAlerts": "Latest open alerts",
+  "admin.ops.allClear": "All clear — no open alerts.",
+  "admin.ops.open": "Open"
 }

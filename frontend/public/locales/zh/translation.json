@@ -924,5 +924,17 @@
   "admin.users.deleteFailed": "删除用户失败",
   "admin.users.deleteConfirm": "删除用户 {{email}}？此操作不可撤销。",
   "admin.dataCollection.celeryTask": "Celery 任务",
-  "admin.dataCollection.colJob": "任务"
+  "admin.dataCollection.colJob": "任务",
+  "admin.tabs.ops": "运维",
+  "admin.tabs.marketplacesTab": "平台",
+  "admin.ops.pipeline": "流水线",
+  "admin.ops.runActive": "运行中",
+  "admin.ops.runIdle": "当前没有运行",
+  "admin.ops.alerts": "服务警报",
+  "admin.ops.openCount": "未处理",
+  "admin.ops.inventory": "库存",
+  "admin.ops.inventoryHint": "注册表计数每分钟刷新。",
+  "admin.ops.latestAlerts": "最新未处理警报",
+  "admin.ops.allClear": "一切正常——没有未处理警报。",
+  "admin.ops.open": "打开"
 }

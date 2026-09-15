@@ -114,6 +114,7 @@ export function App() {
                     }
                   >
                     <Route index element={<AdminPage />} />
+                    <Route path=":tab" element={<AdminPage />} />
                   </Route>
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>

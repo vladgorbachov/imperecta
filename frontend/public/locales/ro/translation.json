@@ -931,5 +931,17 @@
   "admin.users.deleteFailed": "Ștergerea utilizatorului a eșuat",
   "admin.users.deleteConfirm": "Ștergeți utilizatorul {{email}}? Această operație este permanentă.",
   "admin.dataCollection.celeryTask": "Sarcină Celery",
-  "admin.dataCollection.colJob": "Sarcină"
+  "admin.dataCollection.colJob": "Sarcină",
+  "admin.tabs.ops": "Ops",
+  "admin.tabs.marketplacesTab": "Marketplace-uri",
+  "admin.ops.pipeline": "Pipeline",
+  "admin.ops.runActive": "Rulare în curs",
+  "admin.ops.runIdle": "Nicio rulare activă",
+  "admin.ops.alerts": "Alerte de serviciu",
+  "admin.ops.openCount": "deschise",
+  "admin.ops.inventory": "Inventar",
+  "admin.ops.inventoryHint": "Contoarele registrului se actualizează în fiecare minut.",
+  "admin.ops.latestAlerts": "Ultimele alerte deschise",
+  "admin.ops.allClear": "Totul e în regulă — nicio alertă deschisă.",
+  "admin.ops.open": "Deschide"
 }

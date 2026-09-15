@@ -946,5 +946,17 @@
   "admin.users.deleteFailed": "Не вдалося видалити користувача",
   "admin.users.deleteConfirm": "Видалити користувача {{email}}? Цю операцію не можна скасувати.",
   "admin.dataCollection.celeryTask": "Завдання Celery",
-  "admin.dataCollection.colJob": "Завдання"
+  "admin.dataCollection.colJob": "Завдання",
+  "admin.tabs.ops": "Опс",
+  "admin.tabs.marketplacesTab": "Маркетплейси",
+  "admin.ops.pipeline": "Пайплайн",
+  "admin.ops.runActive": "Виконується ран",
+  "admin.ops.runIdle": "Активного рану немає",
+  "admin.ops.alerts": "Сервісні сповіщення",
+  "admin.ops.openCount": "відкритих",
+  "admin.ops.inventory": "Інвентар",
+  "admin.ops.inventoryHint": "Лічильники реєстру оновлюються щохвилини.",
+  "admin.ops.latestAlerts": "Останні відкриті сповіщення",
+  "admin.ops.allClear": "Усе чисто — відкритих сповіщень немає.",
+  "admin.ops.open": "Відкрити"
 }

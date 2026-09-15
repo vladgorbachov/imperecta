@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui-custom/PageHeader";
+import { AdminOpsOverview } from "@/components/admin/AdminOpsOverview";
 import { DataCollectionTab } from "@/components/admin/DataCollectionTab";
 import { AlertsTab } from "@/components/admin/alerts/AlertsTab";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
@@ -165,10 +167,16 @@ function statusLabelKey(status: ParsingPipelineJobStatus): string {
   return "admin.dataCollection.stageStatus.unknown";
 }
 
+const ADMIN_TABS = ["ops", "data-collection", "overview", "users-management", "alerts"] as const;
+
 export function AdminPage() {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
+  const navigate = useNavigate();
+  const { tab } = useParams<{ tab: string }>();
+  const activeTab =
+    tab && (ADMIN_TABS as readonly string[]).includes(tab) ? tab : "ops";
   const [detailsJobId, setDetailsJobId] = useState<string | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -354,13 +362,24 @@ export function AdminPage() {
     <div className="space-y-6">
       <PageHeader title="nav.admin" />
 
-      <Tabs defaultValue="data-collection" className="space-y-4">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) =>
+          navigate(value === "ops" ? "/admin" : `/admin/${value}`)
+        }
+        className="space-y-4"
+      >
         <TabsList>
-          <TabsTrigger value="overview">{t("admin.tabs.marketOverview")}</TabsTrigger>
+          <TabsTrigger value="ops">{t("admin.tabs.ops")}</TabsTrigger>
           <TabsTrigger value="data-collection">{t("admin.tabs.dataCollection")}</TabsTrigger>
+          <TabsTrigger value="overview">{t("admin.tabs.marketplacesTab")}</TabsTrigger>
           <TabsTrigger value="users-management">{t("admin.tabs.usersManagement")}</TabsTrigger>
           <TabsTrigger value="alerts">{t("admin.alerts.tab")}</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="ops" className="space-y-4">
+          <AdminOpsOverview />
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-4">
           <Card>

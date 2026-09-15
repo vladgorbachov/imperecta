@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminPage } from "./AdminPage";
 
@@ -50,13 +51,18 @@ vi.mock("@/hooks/useAdmin", () => ({
   useDeleteAdminUser: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
-function renderPage() {
+function renderPage(initialPath = "/admin/data-collection") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <AdminPage />
+      <MemoryRouter initialEntries={[initialPath]}>
+        <Routes>
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/admin/:tab" element={<AdminPage />} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -115,7 +121,7 @@ describe("AdminPage parsing section", () => {
 
   it("renders market overview tab", () => {
     renderPage();
-    expect(screen.getByRole("tab", { name: "admin.tabs.marketOverview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "admin.tabs.marketplacesTab" })).toBeInTheDocument();
     expect(mockUseParsingMarketplacesDetailed).toHaveBeenCalled();
   });
 

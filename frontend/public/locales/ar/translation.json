@@ -924,5 +924,17 @@
   "admin.users.deleteFailed": "فشل في حذف المستخدم",
   "admin.users.deleteConfirm": "حذف المستخدم {{email}}؟ هذه العملية نهائية.",
   "admin.dataCollection.celeryTask": "مهمة Celery",
-  "admin.dataCollection.colJob": "المهمة"
+  "admin.dataCollection.colJob": "المهمة",
+  "admin.tabs.ops": "العمليات",
+  "admin.tabs.marketplacesTab": "الأسواق",
+  "admin.ops.pipeline": "خط الأنابيب",
+  "admin.ops.runActive": "تشغيل جارٍ",
+  "admin.ops.runIdle": "لا يوجد تشغيل نشط",
+  "admin.ops.alerts": "تنبيهات الخدمة",
+  "admin.ops.openCount": "مفتوحة",
+  "admin.ops.inventory": "الجرد",
+  "admin.ops.inventoryHint": "تُحدَّث عدادات السجل كل دقيقة.",
+  "admin.ops.latestAlerts": "أحدث التنبيهات المفتوحة",
+  "admin.ops.allClear": "كل شيء على ما يرام — لا توجد تنبيهات مفتوحة.",
+  "admin.ops.open": "فتح"
 }

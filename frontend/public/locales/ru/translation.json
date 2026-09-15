@@ -965,5 +965,17 @@
   "admin.users.deleteFailed": "Не удалось удалить пользователя",
   "admin.users.deleteConfirm": "Удалить пользователя {{email}}? Это действие необратимо.",
   "admin.dataCollection.celeryTask": "Задача Celery",
-  "admin.dataCollection.colJob": "Задача"
+  "admin.dataCollection.colJob": "Задача",
+  "admin.tabs.ops": "Опс",
+  "admin.tabs.marketplacesTab": "Маркетплейсы",
+  "admin.ops.pipeline": "Пайплайн",
+  "admin.ops.runActive": "Идёт ран",
+  "admin.ops.runIdle": "Активного рана нет",
+  "admin.ops.alerts": "Сервисные алерты",
+  "admin.ops.openCount": "открытых",
+  "admin.ops.inventory": "Инвентарь",
+  "admin.ops.inventoryHint": "Счётчики реестра обновляются каждую минуту.",
+  "admin.ops.latestAlerts": "Последние открытые алерты",
+  "admin.ops.allClear": "Всё чисто — открытых алертов нет.",
+  "admin.ops.open": "Открыть"
 }

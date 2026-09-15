@@ -9,10 +9,14 @@ import { useTranslation } from "react-i18next";
 import {
   Activity,
   Bell,
+  DatabaseZap,
+  Gauge,
   LayoutDashboard,
   Package,
   FileText,
   Shield,
+  Store,
+  Users,
   Bot,
   Sparkles,
   ChevronLeft,
@@ -357,13 +361,51 @@ export function Sidebar({
         {user?.is_superuser && (
           <SidebarSection label={t("nav.section.admin")} collapsed={collapsed}>
             <SidebarItem
-              icon={Shield}
-              label={t("nav.admin")}
+              icon={Gauge}
+              label={t("admin.tabs.ops")}
               to="/admin"
               collapsed={collapsed}
               isMobile={isMobile}
               onNavigate={onNavigate}
-              isActive={isActive("/admin")}
+              isActive={
+                location.pathname === "/admin" || location.pathname === "/admin/"
+              }
+            />
+            <SidebarItem
+              icon={DatabaseZap}
+              label={t("admin.tabs.dataCollection")}
+              to="/admin/data-collection"
+              collapsed={collapsed}
+              isMobile={isMobile}
+              onNavigate={onNavigate}
+              isActive={isActive("/admin/data-collection")}
+            />
+            <SidebarItem
+              icon={Store}
+              label={t("admin.tabs.marketplacesTab")}
+              to="/admin/overview"
+              collapsed={collapsed}
+              isMobile={isMobile}
+              onNavigate={onNavigate}
+              isActive={isActive("/admin/overview")}
+            />
+            <SidebarItem
+              icon={Users}
+              label={t("admin.tabs.usersManagement")}
+              to="/admin/users-management"
+              collapsed={collapsed}
+              isMobile={isMobile}
+              onNavigate={onNavigate}
+              isActive={isActive("/admin/users-management")}
+            />
+            <SidebarItem
+              icon={Shield}
+              label={t("admin.alerts.tab")}
+              to="/admin/alerts"
+              collapsed={collapsed}
+              isMobile={isMobile}
+              onNavigate={onNavigate}
+              isActive={isActive("/admin/alerts")}
             />
           </SidebarSection>
         )}

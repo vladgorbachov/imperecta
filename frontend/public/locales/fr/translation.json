@@ -924,5 +924,17 @@
   "admin.users.deleteFailed": "Échec de la suppression de l'utilisateur",
   "admin.users.deleteConfirm": "Supprimer l'utilisateur {{email}} ? Cette opération est définitive.",
   "admin.dataCollection.celeryTask": "Tâche Celery",
-  "admin.dataCollection.colJob": "Tâche"
+  "admin.dataCollection.colJob": "Tâche",
+  "admin.tabs.ops": "Ops",
+  "admin.tabs.marketplacesTab": "Marketplaces",
+  "admin.ops.pipeline": "Pipeline",
+  "admin.ops.runActive": "Exécution en cours",
+  "admin.ops.runIdle": "Aucune exécution active",
+  "admin.ops.alerts": "Alertes de service",
+  "admin.ops.openCount": "ouvertes",
+  "admin.ops.inventory": "Inventaire",
+  "admin.ops.inventoryHint": "Les compteurs du registre se rafraîchissent chaque minute.",
+  "admin.ops.latestAlerts": "Dernières alertes ouvertes",
+  "admin.ops.allClear": "Tout va bien — aucune alerte ouverte.",
+  "admin.ops.open": "Ouvrir"
 }
