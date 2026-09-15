@@ -26,6 +26,8 @@ import { ForgotPasswordPage } from "@/pages/auth/ForgotPasswordPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
+import { MovementsPage } from "@/pages/MovementsPage";
+import { AlertsPage } from "@/pages/AlertsPage";
 import { DigestsPage } from "@/pages/DigestsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AdminPage } from "@/pages/AdminPage";
@@ -97,6 +99,8 @@ export function App() {
                     <Route index element={<Navigate to="/dashboard" replace />} />
                     <Route path="dashboard" element={<DashboardPage />} />
                     <Route path="products" element={<ProductsPage />} />
+                    <Route path="movements" element={<MovementsPage />} />
+                    <Route path="alerts" element={<AlertsPage />} />
                     <Route path="digests" element={<DigestsPage />} />
                     <Route path="ai" element={<AIAnalystRoute />} />
                     <Route path="settings" element={<SettingsPage />} />

@@ -7,6 +7,8 @@
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
+  Activity,
+  Bell,
   LayoutDashboard,
   Package,
   FileText,
@@ -310,6 +312,24 @@ export function Sidebar({
         </SidebarSection>
 
         <SidebarSection label={t("nav.section.intelligence")} collapsed={collapsed}>
+          <SidebarItem
+            icon={Activity}
+            label={t("nav.movements")}
+            to="/movements"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/movements")}
+          />
+          <SidebarItem
+            icon={Bell}
+            label={t("nav.alerts")}
+            to="/alerts"
+            collapsed={collapsed}
+            isMobile={isMobile}
+            onNavigate={onNavigate}
+            isActive={isActive("/alerts")}
+          />
           <SidebarItem
             icon={FileText}
             label={t("nav.digests")}

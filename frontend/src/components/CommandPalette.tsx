@@ -16,6 +16,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import {
+  Activity,
+  Bell,
   Bot,
   FileText,
   LayoutDashboard,
@@ -87,6 +89,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     const pages: PaletteEntry[] = [
       { id: "p-dashboard", section: "pages", label: t("nav.markets"), icon: LayoutDashboard, run: () => go("/dashboard") },
       { id: "p-products", section: "pages", label: t("nav.products"), icon: Package, run: () => go("/products") },
+      { id: "p-movements", section: "pages", label: t("nav.movements"), icon: Activity, run: () => go("/movements") },
+      { id: "p-alerts", section: "pages", label: t("nav.alerts"), icon: Bell, run: () => go("/alerts") },
       { id: "p-digests", section: "pages", label: t("nav.digests"), icon: FileText, run: () => go("/digests") },
       { id: "p-ai", section: "pages", label: t("nav.ai"), icon: Bot, run: () => go("/ai") },
       { id: "p-settings", section: "pages", label: t("nav.settings"), icon: Settings, run: () => go("/settings") },
