@@ -262,7 +262,26 @@ class ProxyProviderBackend:
 # real CPU, so one job launches once and renders many pages. The browser is
 # recycled after RENDER_PAGES_PER_BROWSER fetches (memory hygiene) and dropped
 # on any launch/render infrastructure failure.
-RENDER_PAGES_PER_BROWSER = 40
+# 40 -> 12 after the 2026-09-16 full run: worker pool processes died with
+# SIGKILL (OOM) once render-heavy shops queued up; a long-lived Chromium
+# accretes memory and the container has no headroom for it.
+RENDER_PAGES_PER_BROWSER = 12
+
+# At most ONE in-flight render per event loop: a second concurrent Chromium
+# page is exactly the peak that OOM-killed the worker. Direct/proxy fetches
+# are unaffected.
+_loop_render_semaphores: (
+    "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]"
+) = weakref.WeakKeyDictionary()
+
+
+def _render_semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _loop_render_semaphores.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _loop_render_semaphores[loop] = sem
+    return sem
 
 
 class _BrowserHolder:
@@ -305,7 +324,15 @@ async def _shared_browser() -> "_BrowserHolder":
         holder.playwright = await async_playwright().start()
         holder.browser = await holder.playwright.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-extensions",
+                # We parse DOM, not pixels: skipping image decode cuts the
+                # biggest chunk of renderer memory and bandwidth.
+                "--blink-settings=imagesEnabled=false",
+            ],
         )
     return holder
 
@@ -324,6 +351,14 @@ class BrowserRenderBackend:
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
+        async with _render_semaphore():
+            return await self._fetch_locked(url, accept_language)
+
+    async def _fetch_locked(
+        self,
+        url: str,
+        accept_language: str | None,
+    ) -> tuple[str | None, str | None]:
         holder: _BrowserHolder | None = None
         context = None
         try:
