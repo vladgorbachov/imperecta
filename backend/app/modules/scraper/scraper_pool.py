@@ -9,9 +9,11 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
+from app.common.ops_alerts import emit_ops_alert
 from app.modules.classifier import classify_page_role_for_discovery
 from app.modules.scraper import access_policy, host_throttle, page_cache
 from app.modules.scraper.extractors import (
@@ -785,6 +787,23 @@ class ScraperPool:
         if mode in (access_policy.MODE_PROXY, access_policy.MODE_PROXY_RENDER):
             if ProxyProviderBackend.is_configured():
                 return [BackendId.PROXY_PROVIDER]
+            # A proxy-mode host with no configured provider must NOT fail
+            # silently: every fetch would be skipped and a whole discovery
+            # budget burned with zero requests (barbora probe, 2026-09-16).
+            emit_ops_alert(
+                module="scraper",
+                submodule="proxy",
+                severity="error",
+                anomaly_type="proxy_unconfigured",
+                message=(
+                    "Host requires proxy access but the proxy provider is not "
+                    "configured (set DECODO_API_URL/USERNAME/PASSWORD and "
+                    "DECODO_ENABLED=true on the worker service); all fetches "
+                    "for this host are skipped"
+                ),
+                entity=urlparse(url).netloc if url else "",
+                context={"mode": mode, "host": urlparse(url).netloc if url else None},
+            )
             return []
         if mode == access_policy.MODE_RENDER or requires_js:
             return [BackendId.BROWSER_RENDER, BackendId.DIRECT_HTTP]
