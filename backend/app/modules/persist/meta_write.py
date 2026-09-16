@@ -65,7 +65,9 @@ _ARRAY_COLUMNS_BY_TABLE: dict[str, frozenset[str]] = {
 }
 
 
-def _serialize_meta_value(value: Any, *, table: str | None = None, column: str | None = None) -> Any:
+def _serialize_meta_value(
+    value: Any, *, table: str | None = None, column: str | None = None
+) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, UUID):
