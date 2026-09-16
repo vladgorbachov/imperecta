@@ -20,6 +20,7 @@ from app.modules.persist.meta_write import (
     build_scrape_job_insert_fields,
     write_meta_async,
 )
+from app.modules.product_pool.service import _pool_product_visibility_filter
 
 
 class ParsingAdminService:
@@ -421,6 +422,17 @@ class ParsingAdminService:
             .group_by(FactListing.marketplace_id)
             .subquery()
         )
+        # P8: products_in_pool must agree with /pool/marketplace-stats — count
+        # on the pool grain, not the stale DimMarketplace.products_in_pool column.
+        pool_products_sq = (
+            select(
+                FactListing.marketplace_id.label("marketplace_id"),
+                func.count(FactListing.id).label("pool_products"),
+            )
+            .where(FactListing.is_active.is_(True), _pool_product_visibility_filter())
+            .group_by(FactListing.marketplace_id)
+            .subquery()
+        )
         latest_error_sq = (
             select(
                 ScrapeLog.marketplace_id.label("marketplace_id"),
@@ -449,7 +461,6 @@ class ParsingAdminService:
                 DimMarketplace.requires_js,
                 DimMarketplace.is_active,
                 DimMarketplace.product_quota,
-                DimMarketplace.products_in_pool,
                 DimMarketplace.rate_limit_delay,
                 DimMarketplace.last_discovery_at,
                 DimMarketplace.last_discovery_status,
@@ -460,10 +471,12 @@ class ParsingAdminService:
                 scrape_stats_sq.c.success_runs,
                 scrape_stats_sq.c.last_log_at,
                 active_listings_sq.c.active_listings,
+                pool_products_sq.c.pool_products,
                 latest_error_sq.c.last_error_message,
             )
             .outerjoin(scrape_stats_sq, scrape_stats_sq.c.marketplace_id == DimMarketplace.id)
             .outerjoin(active_listings_sq, active_listings_sq.c.marketplace_id == DimMarketplace.id)
+            .outerjoin(pool_products_sq, pool_products_sq.c.marketplace_id == DimMarketplace.id)
             .outerjoin(
                 latest_error_sq,
                 (latest_error_sq.c.marketplace_id == DimMarketplace.id)
@@ -494,7 +507,7 @@ class ParsingAdminService:
                     "requires_js": bool(row["requires_js"]),
                     "is_active": bool(row["is_active"]),
                     "product_quota": int(row["product_quota"] or 0),
-                    "products_in_pool": int(row["products_in_pool"] or 0),
+                    "products_in_pool": int(row["pool_products"] or 0),
                     "active_listings": int(row["active_listings"] or 0),
                     "rate_limit_delay": float(row["rate_limit_delay"] or 0.0),
                     "last_discovery_at": self._to_iso(row["last_discovery_at"]),

@@ -60,7 +60,7 @@ SUPPORTED_WRITE_OPERATIONS: dict[str, frozenset[str]] = {
     "fact_commodity_price": frozenset({"insert", "delete"}),
     "scrape_logs": frozenset({"insert", "retention_delete"}),
     "api_logs": frozenset({"insert", "retention_delete"}),
-    "service_alerts": frozenset({"insert", "retention_delete"}),
+    "service_alerts": frozenset({"insert", "update", "retention_delete"}),
     "reject_data": frozenset({"retention_delete"}),
     "users": frozenset({"insert", "update", "delete"}),
     "ai_chat_sessions": frozenset({"insert"}),

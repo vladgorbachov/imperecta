@@ -1,13 +1,16 @@
-"""Admin read-only alert endpoints (service + analytic classes)."""
+"""Admin alert endpoints: reads (service + analytic) and the P9 resolve write."""
 
 from __future__ import annotations
 
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.common.deps import CurrentSuperuser, DbSession, get_current_superuser
+from app.modules.admin.alerts_admin_write import resolve_service_alert
+from app.modules.admin.alerts_read import _service_alert_item as service_alert_item
 from app.modules.admin.alerts_read import list_analytic_alerts, list_service_alerts
 
 router = APIRouter(
@@ -38,6 +41,30 @@ async def get_service_alerts(
         limit=limit,
         offset=offset,
     )
+
+
+class ResolveServiceAlertBody(BaseModel):
+    resolved: bool
+
+
+@router.patch("/service_alerts/{alert_id}")
+async def patch_service_alert(
+    alert_id: UUID,
+    body: ResolveServiceAlertBody,
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Resolve one service alert (P9): sets resolved_at once, idempotent.
+
+    Reopen (`resolved: false`) is deliberately unsupported — the UI only
+    sends true (422 per the handoff contract).
+    """
+    if body.resolved is not True:
+        raise HTTPException(status_code=422, detail="only {'resolved': true} is supported")
+    row = await resolve_service_alert(db, alert_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="service alert not found")
+    return service_alert_item(row)
 
 
 @router.get("/analytic_alerts")
