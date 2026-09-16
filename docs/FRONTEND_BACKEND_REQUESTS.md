@@ -131,6 +131,32 @@ currency, price_eur, in_stock, url }] }`
 - Blocked on product identity matching across shops (Phase 5/6 territory). The peek
   section renders a pending note until then. Do not fake matches.
 
+## P9 — Resolve service alert (2026-09-16, frontend already shipped)
+
+`PATCH /api/admin/service_alerts/{id}`
+
+Body: `{ "resolved": true }` — sets `resolved_at = now()` if it is NULL
+(idempotent: resolving an already-resolved alert is a no-op success).
+Optionally accept `{ "resolved": false }` to clear `resolved_at` (reopen);
+if you skip reopen support, 422 on `false` is fine — the UI only sends `true`.
+
+Response: the updated `ServiceAlert` (same shape as list items).
+Auth: admin-only (same guard as `GET /admin/service_alerts`). 404 unknown id.
+Write path: `service_alerts` has the existing carve-out (RLS off, direct
+INSERT allowed for the gate-alert path) — the resolve UPDATE needs the same
+deliberate decision: either extend the carve-out with UPDATE of `resolved_at`
+only, or route through a gate door. Backend's call per the gate law.
+
+Frontend is live already: **Resolve** button in the expanded
+`ServiceAlertRow` (`frontend/src/components/admin/alerts/ServiceAlertRow.tsx`)
+calls this endpoint and refetches the list; until the endpoint deploys the
+click shows an honest "endpoint may not be deployed yet" toast. No FE redeploy
+needed once you ship.
+
+Nice-to-have (not required): `POST /api/admin/service_alerts/resolve` with
+`{ "ids": [...] }` for bulk resolve after an incident storm — the UI would
+grow a "resolve all filtered" action only after this exists.
+
 ## P8 — Data-consistency report: products_in_pool in the parsing registry (2026-09-16)
 
 `GET /admin/parsing/…marketplaces-detailed` returns `products_in_pool: 0` while the

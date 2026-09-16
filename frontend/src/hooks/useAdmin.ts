@@ -259,3 +259,13 @@ export const useServiceAlerts = (params: adminApi.ServiceAlertsParams) =>
     refetchInterval: 60_000,
     placeholderData: keepPreviousData,
   });
+
+export const useResolveServiceAlert = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.resolveServiceAlert(id).then((r) => r.data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "service_alerts"] });
+    },
+  });
+};

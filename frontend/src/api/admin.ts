@@ -462,6 +462,10 @@ export interface ServiceAlertsParams {
   offset?: number;
 }
 
+/** Resolve one service alert (P9 — backend contract in docs/FRONTEND_BACKEND_REQUESTS.md). */
+export const resolveServiceAlert = (id: string) =>
+  apiClient.patch<ServiceAlert>(`/admin/service_alerts/${id}`, { resolved: true });
+
 export const getServiceAlerts = (params?: ServiceAlertsParams) =>
   apiClient.get<ServiceAlertsPage>("/admin/service_alerts", {
     params: {

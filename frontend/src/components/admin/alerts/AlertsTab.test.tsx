@@ -14,6 +14,7 @@ vi.mock("@/hooks/useAdmin", () => ({
     const result = getServiceAlertsMock(params);
     return result;
   },
+  useResolveServiceAlert: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("react-i18next", () => ({

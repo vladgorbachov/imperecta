@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { ServiceAlert } from "@/api/admin";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useResolveServiceAlert } from "@/hooks/useAdmin";
 import { formatDateTime, formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { isServiceAlertSeverity, SEVERITY_STYLES } from "./alertSeverity";
@@ -24,6 +27,7 @@ function formatContextValue(value: unknown): string {
 export function ServiceAlertRow({ alert }: ServiceAlertRowProps) {
   const { t, i18n } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const resolveAlert = useResolveServiceAlert();
   const locale = i18n.language || "en";
   const severity = isServiceAlertSeverity(alert.severity) ? alert.severity : "info";
   const styles = SEVERITY_STYLES[severity];
@@ -87,6 +91,25 @@ export function ServiceAlertRow({ alert }: ServiceAlertRowProps) {
               </div>
             ) : null}
           </div>
+
+          {!alert.resolved_at ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              disabled={resolveAlert.isPending}
+              onClick={() => {
+                resolveAlert.mutate(alert.id, {
+                  onSuccess: () => toast.success(t("admin.alerts.resolveDone")),
+                  onError: () => toast.error(t("admin.alerts.resolveFailed")),
+                });
+              }}
+            >
+              <Check className="me-1.5 size-3.5" />
+              {t("admin.alerts.resolveAction")}
+            </Button>
+          ) : null}
 
           {alert.context && Object.keys(alert.context).length > 0 ? (
             <div>
