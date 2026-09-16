@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import ARRAY
+
 from app.database import sync_session_factory
 from app.models.app_tables import ScrapeJob
+from app.models.dimensions import DimMarketplace
 from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.persist.writer import PersistContext, write_sync
 
@@ -43,13 +47,34 @@ def _pg_array_literal(items: list | tuple) -> str:
     return "{" + ",".join(parts) + "}"
 
 
-def _serialize_meta_value(value: Any) -> Any:
+def _array_column_names(model: type) -> frozenset[str]:
+    return frozenset(
+        column.name
+        for column in model.__table__.columns
+        if isinstance(column.type, ARRAY)
+    )
+
+
+# Wire serialization is column-type-directed: the gate casts each value with
+# the column's ::type, so a list bound for VARCHAR[] needs '{"PL"}' while a
+# list bound for JSONB needs '["url", …]' (discovered_category_urls broke on
+# an array literal fed to the ::jsonb cast — 2026-09-16 full run).
+_ARRAY_COLUMNS_BY_TABLE: dict[str, frozenset[str]] = {
+    "dim_marketplace": _array_column_names(DimMarketplace),
+    "scrape_jobs": _array_column_names(ScrapeJob),
+}
+
+
+def _serialize_meta_value(value: Any, *, table: str | None = None, column: str | None = None) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
     if isinstance(value, (list, tuple)):
-        return _pg_array_literal(value)
+        array_columns = _ARRAY_COLUMNS_BY_TABLE.get(table or "", frozenset())
+        if column in array_columns:
+            return _pg_array_literal(value)
+        return json.dumps(list(value))
     return value
 
 
@@ -59,7 +84,7 @@ def build_scrape_job_fields(*, id: UUID | None = None, **columns: Any) -> dict[s
     if id is not None:
         fields["id"] = str(id)
     for key, value in columns.items():
-        fields[key] = _serialize_meta_value(value)
+        fields[key] = _serialize_meta_value(value, table="scrape_jobs", column=key)
     return fields
 
 
@@ -78,7 +103,7 @@ def build_dim_marketplace_fields(*, id: UUID | None = None, **columns: Any) -> d
     if id is not None:
         fields["id"] = str(id)
     for key, value in columns.items():
-        fields[key] = _serialize_meta_value(value)
+        fields[key] = _serialize_meta_value(value, table="dim_marketplace", column=key)
     return fields
 
 

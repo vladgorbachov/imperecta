@@ -84,3 +84,23 @@ async def test_update_country_syncs_operates_in_and_currency() -> None:
     assert fields["country_code"] == "NL"
     assert fields["operates_in"] == '{"NL"}'
     assert fields["currency_code"] == "EUR"
+
+
+def test_meta_serializer_is_column_type_directed():
+    """ARRAY columns get PG array literals; JSONB columns get JSON (2026-09-16 fix).
+
+    discovered_category_urls (JSONB) broke on an array literal fed to the
+    ::jsonb cast during the first full run; operates_in (VARCHAR[]) breaks
+    on JSON fed to the ::varchar[] cast (the Allegro bug). Serialization
+    keys off the model column type.
+    """
+    from app.modules.persist.meta_write import build_dim_marketplace_fields
+
+    fields = build_dim_marketplace_fields(
+        operates_in=["PL"],
+        discovered_category_urls=["https://a.example/c1", "https://a.example/c2"],
+    )
+    assert fields["operates_in"] == '{"PL"}'
+    assert fields["discovered_category_urls"] == (
+        '["https://a.example/c1", "https://a.example/c2"]'
+    )
