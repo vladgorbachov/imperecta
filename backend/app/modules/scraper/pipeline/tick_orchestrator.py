@@ -32,6 +32,7 @@ from app.modules.persist.meta_write import (
     write_meta_async,
 )
 from app.modules.scraper.pipeline.metadata_store import PipelineMetadataStore
+from app.modules.scraper.pipeline.worker_log_relay import push_relay_line
 
 slog = structlog.get_logger(__name__)
 
@@ -577,6 +578,13 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
             metadata["tick_count"] = 0
             metadata["backoff_s"] = TICK_MIN_SECONDS
             metadata["resume_attempts"] = 0
+            try:
+                push_relay_line(
+                    f"RUN STARTED job={parent_job_id} marketplaces={len(active_codes)}",
+                    job_id=parent_job_id,
+                )
+            except Exception:  # noqa: BLE001 - relay must never break a tick
+                pass
 
         metadata["tick_count"] = int(metadata.get("tick_count", 0)) + 1
 

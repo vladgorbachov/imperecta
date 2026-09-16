@@ -23,6 +23,7 @@ from app.modules.scraper.pipeline.outcome_buckets import (
     empty_outcome_buckets,
     sum_buckets_across_marketplaces,
 )
+from app.modules.scraper.pipeline.worker_log_relay import push_relay_line
 
 
 def _touch_metadata(
@@ -192,4 +193,13 @@ async def complete_pipeline_job(
         ),
         reject_source="pipeline_completion",
     )
+    try:
+        push_relay_line(
+            f"RUN {parent_status.upper()} job={job.id} "
+            f"listings={listings_created} prices={prices_saved} "
+            f"errors={errors_count} duration_ms={total_ms}",
+            job_id=job.id,
+        )
+    except Exception:  # noqa: BLE001 - relay must never break completion
+        pass
     return metadata

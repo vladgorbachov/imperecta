@@ -93,10 +93,17 @@ def push_relay_line(line: str, *, job_id: UUID | None = None) -> int:
 
 
 def fetch_relay_lines(*, after: int = 0, limit: int = 50) -> dict[str, Any]:
-    """Return relay lines with seq > after (newest batch up to limit)."""
+    """Return relay lines with seq > after (newest batch up to limit).
+
+    Self-healing cursor: if the client's cursor is AHEAD of every buffered
+    seq (the seq counter was reset/evicted, or the client kept a cursor from
+    a previous buffer generation), a naive filter would return empty forever
+    and the live panel silently freezes until a page refresh. Detect that
+    case and hand back the tail of the buffer with a corrected cursor.
+    """
     client = _get_redis()
     raw_items = client.lrange(REDIS_LOG_KEY, 0, -1)
-    parsed: list[dict[str, Any]] = []
+    all_rows: list[dict[str, Any]] = []
     for raw in raw_items:
         try:
             item = json.loads(raw)
@@ -104,24 +111,28 @@ def fetch_relay_lines(*, after: int = 0, limit: int = 50) -> dict[str, Any]:
             continue
         if not isinstance(item, dict):
             continue
-        seq = int(item.get("seq") or 0)
-        if seq <= after:
-            continue
         line = str(item.get("line") or "").strip()
         if not line:
             continue
-        parsed.append(
+        all_rows.append(
             {
-                "seq": seq,
+                "seq": int(item.get("seq") or 0),
                 "at": item.get("at"),
                 "line": line,
                 "job_id": item.get("job_id"),
             }
         )
-    parsed.sort(key=lambda row: int(row["seq"]))
+    all_rows.sort(key=lambda row: int(row["seq"]))
+
+    max_seq = int(all_rows[-1]["seq"]) if all_rows else 0
+    cursor_desynced = after > max_seq and bool(all_rows)
+    if cursor_desynced:
+        parsed = all_rows
+    else:
+        parsed = [row for row in all_rows if int(row["seq"]) > after]
     if limit > 0:
         parsed = parsed[-limit:]
-    next_cursor = int(parsed[-1]["seq"]) if parsed else after
+    next_cursor = int(parsed[-1]["seq"]) if parsed else (max_seq if cursor_desynced else after)
     return {
         "lines": parsed,
         "next_cursor": next_cursor,
@@ -219,25 +230,14 @@ def pipeline_worker_log_relay(job_id: UUID) -> Iterator[None]:
     """
     set_active_pipeline_job(job_id)
     _attach_handler_for(job_id)
-    # Relay observability must NEVER crash the task body. Redis being
-    # unreachable (transient outage, dev/test env without a broker) is fine —
-    # we log and continue. The handler's own emit() is already broad-except'd.
-    try:
-        push_relay_line(f"pipeline job {job_id} started", job_id=job_id)
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "pipeline_worker_log_relay_start_push_failed job_id=%s", job_id
-        )
+    # No per-attach start/finish lines: this CM wraps EVERY tick and child,
+    # so pushing them printed "pipeline job <parent> finished" every ~30s
+    # mid-run and confused operators. Run boundaries are announced exactly
+    # once: RUN STARTED on first-tick init (tick_orchestrator) and
+    # RUN COMPLETED/PARTIAL/FAILED on terminal status (job_completion).
     try:
         yield
     finally:
-        try:
-            push_relay_line(f"pipeline job {job_id} finished", job_id=job_id)
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "pipeline_worker_log_relay_finish_push_failed job_id=%s",
-                job_id,
-            )
         _detach_handler_for(job_id)
         set_active_pipeline_job(None)
 
