@@ -32,6 +32,12 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=10,
     broker_pool_limit=5,  # Reduce Redis connections for Upstash limits
+    # Memory leak containment (2026-09-16 full run: pool processes OOM-killed
+    # after ~3h of scraping — soups/render buffers accrete in long-lived
+    # prefork children). Recycle a child between tasks after N tasks or when
+    # its RSS exceeds the cap; a long discovery task is never interrupted.
+    worker_max_tasks_per_child=20,
+    worker_max_memory_per_child=400_000,  # KB = ~400MB
     broker_transport_options={
         "retry_policy": {
             "timeout": 30.0,
