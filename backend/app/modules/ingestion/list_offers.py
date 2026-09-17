@@ -26,6 +26,25 @@ from app.modules.ingestion.service import IngestionService
 
 slog = structlog.get_logger(__name__)
 
+# A list page is a lower-trust context than a product card: extraction noise
+# (a neighbouring card's price, a bundle price) is possible even with
+# currency-anchored parsing. A price that jumps this far from the listing's
+# known last_price is held back for the next card scrape to arbitrate.
+SUSPICIOUS_PRICE_RATIO = 5.0
+
+
+def _price_is_suspicious(new_price: float, last_price) -> bool:
+    if last_price is None:
+        return False
+    try:
+        prior = float(last_price)
+    except (TypeError, ValueError):
+        return False
+    if prior <= 0 or new_price <= 0:
+        return False
+    ratio = new_price / prior
+    return ratio > SUSPICIOUS_PRICE_RATIO or ratio < 1 / SUSPICIOUS_PRICE_RATIO
+
 
 @dataclass
 class ListOfferData:
@@ -57,7 +76,7 @@ def ingest_list_offers(
     unpriced. Commits are owned by IngestionService per offer (decision A).
     """
     if not offers:
-        return {"matched": 0, "saved": 0, "unknown": 0, "unpriced": 0}
+        return {"matched": 0, "saved": 0, "unknown": 0, "unpriced": 0, "suspicious": 0}
 
     hash_by_url = {
         str(offer["url"]): FactListing.compute_url_hash(str(offer["url"]))
@@ -72,7 +91,7 @@ def ingest_list_offers(
     listing_by_hash = {row.url_hash: row for row in rows}
 
     service = IngestionService(db)
-    matched = saved = unknown = unpriced = 0
+    matched = saved = unknown = unpriced = suspicious = 0
     for offer in offers:
         url = str(offer.get("url") or "")
         url_hash = hash_by_url.get(url)
@@ -83,6 +102,15 @@ def ingest_list_offers(
         matched += 1
         if offer.get("price") is None:
             unpriced += 1
+            continue
+        if _price_is_suspicious(float(offer["price"]), listing.last_price):
+            suspicious += 1
+            slog.info(
+                "list_offer_suspicious_price",
+                url=url,
+                offer_price=offer["price"],
+                last_price=str(listing.last_price),
+            )
             continue
         data = ListOfferData(
             title=offer.get("title"),
@@ -104,6 +132,7 @@ def ingest_list_offers(
         "saved": saved,
         "unknown": unknown,
         "unpriced": unpriced,
+        "suspicious": suspicious,
     }
     slog.info("list_offers_ingested", **counters)
     return counters

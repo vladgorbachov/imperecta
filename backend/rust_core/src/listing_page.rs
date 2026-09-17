@@ -124,6 +124,85 @@ fn compact_text(el: &ElementRef, cap: usize) -> String {
     out
 }
 
+/// Card price = first currency-anchored text run that parses as a price.
+///
+/// Parsing the whole card text is unsafe: digit runs in product titles
+/// ("E1504FA-BQ2942W") read as prices (live incident 2026-09-17, datacomp).
+/// A price on a list card always sits next to a currency marker, so only
+/// text nodes carrying one — alone or joined with the previous node, for
+/// markup that splits amount and symbol — are price candidates.
+/// Trailing (or leading) run of purely numeric tokens — "1 299,00" survives
+/// as a whole, while a title's "…BQ2942W" contributes nothing.
+fn numeric_edge_tokens(text: &str, from_end: bool) -> String {
+    fn is_numeric(t: &str) -> bool {
+        !t.is_empty() && t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',')
+    }
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let run: Vec<&str> = if from_end {
+        let mut r: Vec<&str> = tokens
+            .iter()
+            .rev()
+            .take_while(|t| is_numeric(t))
+            .take(4)
+            .copied()
+            .collect();
+        r.reverse();
+        r
+    } else {
+        tokens
+            .iter()
+            .take_while(|t| is_numeric(t))
+            .take(4)
+            .copied()
+            .collect()
+    };
+    run.join(" ")
+}
+
+fn card_price(card: &ElementRef) -> Option<(f64, &'static str, String)> {
+    const MAX_PRICE_NODES: usize = 200;
+    let nodes: Vec<&str> = card
+        .text()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .take(MAX_PRICE_NODES)
+        .collect();
+    for (idx, node) in nodes.iter().enumerate() {
+        if detect_currency(node).is_none() {
+            continue;
+        }
+        // Amount and marker in one node, or split across the neighbour
+        // node on either side ("355,00" + "€", "€" + "355,00"). Only the
+        // adjacent TOKEN of the neighbour joins — a full neighbour node can
+        // be a title whose SKU digits would parse as a price.
+        let mut candidates: Vec<String> = vec![(*node).to_string()];
+        if idx > 0 {
+            let tail = numeric_edge_tokens(nodes[idx - 1], true);
+            if !tail.is_empty() {
+                candidates.push(format!("{tail} {node}"));
+            }
+        }
+        if idx + 1 < nodes.len() {
+            let head = numeric_edge_tokens(nodes[idx + 1], false);
+            if !head.is_empty() {
+                candidates.push(format!("{node} {head}"));
+            }
+        }
+        for candidate in candidates {
+            if let (Some(price), Some(currency)) =
+                (parse_price_text(&candidate), detect_currency(&candidate))
+            {
+                let mut raw = candidate;
+                if raw.chars().count() > MAX_RAW_PRICE_LEN {
+                    raw = raw.chars().take(MAX_RAW_PRICE_LEN).collect();
+                }
+                return Some((price, currency, raw));
+            }
+        }
+    }
+    None
+}
+
 /// Extract (product_url, price, title) offers from a category/list page.
 pub fn extract_list_offers(html: &str, base_url: &str) -> Vec<ListOffer> {
     let document = Html::parse_document(html);
@@ -207,19 +286,9 @@ pub fn extract_list_offers(html: &str, base_url: &str) -> Vec<ListOffer> {
             continue;
         }
 
-        let card_text = compact_text(&card, MAX_RAW_PRICE_LEN * 4);
-        let price = parse_price_text(&card_text);
-        let currency = price
-            .and_then(|_| detect_currency(&card_text))
-            .map(str::to_string);
-        let price_raw_text = if price.is_some() {
-            let mut raw = card_text;
-            if raw.chars().count() > MAX_RAW_PRICE_LEN {
-                raw = raw.chars().take(MAX_RAW_PRICE_LEN).collect();
-            }
-            Some(raw)
-        } else {
-            None
+        let (price, currency, price_raw_text) = match card_price(&card) {
+            Some((p, cur, raw)) => (Some(p), Some(cur.to_string()), Some(raw)),
+            None => (None, None, None),
         };
 
         offers.push(ListOffer {
@@ -282,6 +351,59 @@ mod tests {
         let offers = extract_list_offers(&html, "https://shop.example/c/tools");
         assert_eq!(offers.len(), 6);
         assert!(offers.iter().all(|o| o.url.starts_with("https://shop.example/p/")));
+    }
+
+    #[test]
+    fn sku_digits_in_title_never_become_the_price() {
+        // Live incident 2026-09-17: datacomp card "ASUS … E1504FA-BQ2942W"
+        // ingested price 2942.00 EUR (real price 355,00 €).
+        let mut items = String::new();
+        for i in 0..6 {
+            items.push_str(&format!(
+                r#"<div class="product-card">
+                     <a href="/p/laptop-{i}">ASUS Vivobook Go 15 E1504FA-BQ2942W čierny</a>
+                     <span class="price">355,00 €</span>
+                   </div>"#
+            ));
+        }
+        let html = format!(r#"<html><body><div class="grid">{items}</div></body></html>"#);
+        let offers = extract_list_offers(&html, "https://shop.example/c/laptops");
+        assert_eq!(offers.len(), 6);
+        assert_eq!(offers[0].price, Some(355.00));
+        assert_eq!(offers[0].currency.as_deref(), Some("EUR"));
+    }
+
+    #[test]
+    fn split_amount_and_symbol_nodes_join() {
+        let mut items = String::new();
+        for i in 0..6 {
+            items.push_str(&format!(
+                r#"<div class="product-card">
+                     <a href="/p/tv-{i}">TV Model X{i}000</a>
+                     <span class="amount">1 299,00</span><span class="cur">€</span>
+                   </div>"#
+            ));
+        }
+        let html = format!(r#"<html><body><div class="grid">{items}</div></body></html>"#);
+        let offers = extract_list_offers(&html, "https://shop.example/c/tv");
+        assert_eq!(offers[0].price, Some(1299.00));
+        assert_eq!(offers[0].currency.as_deref(), Some("EUR"));
+    }
+
+    #[test]
+    fn no_currency_marker_means_no_price() {
+        // Facet/filter cards ("17,3\" a viac") must not fabricate prices.
+        let mut items = String::new();
+        for i in 0..6 {
+            items.push_str(&format!(
+                r#"<div class="product-card">
+                     <a href="/f/size-{i}">17,{i}" a viac</a>
+                   </div>"#
+            ));
+        }
+        let html = format!(r#"<html><body><div class="grid">{items}</div></body></html>"#);
+        let offers = extract_list_offers(&html, "https://shop.example/c/x");
+        assert!(offers.iter().all(|o| o.price.is_none() && o.currency.is_none()));
     }
 
     #[test]

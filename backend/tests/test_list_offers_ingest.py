@@ -22,11 +22,11 @@ def _offer(url, price=99.5, currency="EUR", title="Widget"):
     }
 
 
-def _db_with_listings(urls):
+def _db_with_listings(urls, last_price=None):
     listings = {}
     for url in urls:
         h = FactListing.compute_url_hash(url)
-        listings[h] = SimpleNamespace(url_hash=h, external_url=url)
+        listings[h] = SimpleNamespace(url_hash=h, external_url=url, last_price=last_price)
     db = MagicMock()
     db.execute.return_value.scalars.return_value = list(listings.values())
     return db
@@ -41,7 +41,7 @@ def test_matches_known_urls_and_counts_unknown():
             db,
             offers=[_offer(known), _offer("https://shop.example/p/stranger-2")],
         )
-    assert counters == {"matched": 1, "saved": 1, "unknown": 1, "unpriced": 0}
+    assert counters == {"matched": 1, "saved": 1, "unknown": 1, "unpriced": 0, "suspicious": 0}
     data = pe.call_args.kwargs["data"]
     assert data.title == "Widget"
     assert data.price == 99.5
@@ -65,7 +65,27 @@ def test_priceless_offer_matched_but_not_ingested():
     with patch.object(lo.IngestionService, "persist_extracted") as pe:
         counters = lo.ingest_list_offers(db, offers=[_offer(known, price=None)])
     pe.assert_not_called()
-    assert counters == {"matched": 1, "saved": 0, "unknown": 0, "unpriced": 1}
+    assert counters == {"matched": 1, "saved": 0, "unknown": 0, "unpriced": 1, "suspicious": 0}
+
+
+def test_price_far_from_last_price_is_held_back():
+    known = "https://shop.example/p/known-1"
+    db = _db_with_listings([known], last_price=355.00)
+    with patch.object(lo.IngestionService, "persist_extracted") as pe:
+        counters = lo.ingest_list_offers(db, offers=[_offer(known, price=2942.0)])
+    pe.assert_not_called()
+    assert counters["suspicious"] == 1
+    assert counters["saved"] == 0
+
+
+def test_plausible_change_with_last_price_still_saves():
+    known = "https://shop.example/p/known-1"
+    db = _db_with_listings([known], last_price=355.00)
+    persisted = SimpleNamespace(persisted=True, log_status="success")
+    with patch.object(lo.IngestionService, "persist_extracted", return_value=persisted):
+        counters = lo.ingest_list_offers(db, offers=[_offer(known, price=299.0)])
+    assert counters["saved"] == 1
+    assert counters["suspicious"] == 0
 
 
 def test_empty_offers_short_circuit():
