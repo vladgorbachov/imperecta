@@ -18,6 +18,10 @@ sync_engine = create_engine(
     pool_size=3,
     max_overflow=5,
     pool_pre_ping=True,
+    # Celery workers run bulk statements (pipelined gate inserts, url_hash
+    # dedupe over a 1M+ pool) that outlive the server's default
+    # statement_timeout under load — raise it for worker connections only.
+    connect_args={"options": "-c statement_timeout=300000"},
 )
 sync_session_factory = sessionmaker(
     bind=sync_engine,
