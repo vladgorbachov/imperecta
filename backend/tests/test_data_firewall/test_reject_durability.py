@@ -26,7 +26,12 @@ def _data_firewall_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_reject_survives_business_savepoint_rollback() -> None:
-    """Gate reject commits on audit session while business nested txn rolls back."""
+    """Gate reject commits on the isolated audit session, not the business one.
+
+    Since the pipelined pool write, rejected pairs never open a business
+    savepoint at all — evaluation happens before anything is written — so the
+    durable part is simply that the audit session committed the reject row.
+    """
     product_id = uuid4()
     marketplace_id = uuid4()
     listing_fields = build_fact_listing_fields(
@@ -58,7 +63,6 @@ def test_reject_survives_business_savepoint_rollback() -> None:
 
     assert result.inserted == 0
     assert result.rejected == 1
-    nested.rollback.assert_called_once()
     audit_db.add.assert_called_once()
     audit_db.commit.assert_called_once()
     audit_db.close.assert_called_once()

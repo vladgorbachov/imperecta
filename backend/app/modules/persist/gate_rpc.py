@@ -95,6 +95,39 @@ def exec_write_record(db: Session, signed: SignedRecord) -> int:
     return int(rowcount)
 
 
+def exec_write_records(db: Session, signed_records: list[SignedRecord]) -> int:
+    """Execute many gate.exec_write calls in ONE statement (one round-trip).
+
+    The gate re-verifies every HMAC server-side exactly as with single calls;
+    this only pipelines the transport. One failing record aborts the whole
+    statement — callers fall back to per-record writes for that chunk.
+    """
+    if not signed_records:
+        return 0
+    params: dict[str, Any] = {}
+    calls: list[str] = []
+    for idx, signed in enumerate(signed_records):
+        pt, po, ps = f"r{idx}_t", f"r{idx}_o", f"r{idx}_s"
+        params[pt] = signed.table
+        params[po] = signed.operation
+        params[ps] = signed.signature
+        locator_sql = _field_entries_sql(
+            ordered_entries_from_mapping(signed.locator), params, f"r{idx}_lk"
+        )
+        fields_sql = _field_entries_sql(
+            ordered_entries_from_mapping(signed.fields), params, f"r{idx}_fk"
+        )
+        calls.append(
+            f"gate.exec_write(:{pt}, :{po}, {locator_sql}, {fields_sql}, :{ps})"
+        )
+    sql = text("SELECT " + ", ".join(calls))
+    try:
+        row = db.execute(sql, params).one()
+    except DBAPIError as exc:
+        _raise_gate_rpc_error(exc)
+    return sum(int(value) for value in row)
+
+
 def exec_write_batch(db: Session, signed: SignedBatch) -> int:
     """Call gate.exec_write_batch with ordered row payloads and return rows_affected."""
     locator_entries = ordered_entries_from_mapping(signed.locator)

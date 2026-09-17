@@ -126,14 +126,72 @@ def test_write_pool_dtos_sync_commits_successful_pair() -> None:
                 signature="sig",
             ),
         ),
-    ), patch("app.modules.discovery.gate_persist.write_sync", return_value=True):
+    ), patch(
+        "app.modules.discovery.gate_persist.exec_write_records", return_value=1
+    ) as fast:
         result = write_pool_dtos_sync([dto])
 
     assert result.inserted == 1
     assert result.rejected == 0
+    # One pipelined statement for products, one for listings (FK order).
+    assert fast.call_count == 2
     db.commit.assert_called_once()
     db.close.assert_called_once()
     assert nested.commit.call_count == 1
+
+
+def test_write_pool_dtos_sync_falls_back_per_pair_on_chunk_failure() -> None:
+    """A failing pipelined chunk rolls back and retries pair-by-pair."""
+    from app.modules.persist.gate_rpc import GateRpcError
+
+    product_id = uuid4()
+    marketplace_id = uuid4()
+    dto = PoolInsertDTO(
+        marketplace_id=marketplace_id,
+        dim_product=build_dim_product_fields(
+            product_id=product_id,
+            name="Item",
+            name_normalized="item",
+        ),
+        fact_listing=build_fact_listing_fields(
+            product_id=product_id,
+            marketplace_id=marketplace_id,
+            external_url="https://shop.example/p/1",
+            url_hash="hash1",
+        ),
+    )
+    db = MagicMock()
+    nested = MagicMock()
+    db.begin_nested.return_value = nested
+
+    with patch("app.modules.discovery.gate_persist.sync_session_factory", return_value=db), patch(
+        "app.modules.discovery.gate_persist.evaluate_market",
+        return_value=FirewallOutcome(
+            passed=True,
+            reject_reason=None,
+            failed_rules=[],
+            forced_log_status=None,
+            page_role_verdict=None,
+            signed_record=SignedRecord(
+                table="x",
+                operation="insert",
+                locator={},
+                fields={},
+                signature="sig",
+            ),
+        ),
+    ), patch(
+        "app.modules.discovery.gate_persist.exec_write_records",
+        side_effect=GateRpcError("rpc_error", "boom"),
+    ), patch(
+        "app.modules.discovery.gate_persist.write_sync", return_value=True
+    ) as slow:
+        result = write_pool_dtos_sync([dto])
+
+    assert result.inserted == 1
+    assert result.rejected == 0
+    assert slow.call_count == 2  # product + listing through the slow path
+    db.commit.assert_called_once()
 
 
 def test_write_pool_dtos_sync_rolls_back_batch_on_exception() -> None:
@@ -166,7 +224,6 @@ def test_write_pool_dtos_sync_rolls_back_batch_on_exception() -> None:
 
     db.rollback.assert_called_once()
     db.close.assert_called_once()
-    nested.rollback.assert_called_once()
 
 
 def test_write_pool_dtos_sync_rejects_pair_without_committing_orphan() -> None:
@@ -215,10 +272,14 @@ def test_write_pool_dtos_sync_rejects_pair_without_committing_orphan() -> None:
     with patch("app.modules.discovery.gate_persist.sync_session_factory", return_value=db), patch(
         "app.modules.discovery.gate_persist.evaluate_market",
         side_effect=[product_ok, listing_reject],
-    ), patch("app.modules.discovery.gate_persist.write_sync", return_value=True):
+    ), patch(
+        "app.modules.discovery.gate_persist.exec_write_records", return_value=1
+    ) as fast:
         result = write_pool_dtos_sync([dto])
 
     assert result.inserted == 0
     assert result.rejected == 1
-    nested.rollback.assert_called_once()
+    # Nothing signed for the pair → nothing ever reaches the gate, so a
+    # rejected listing cannot leave an orphan dim_product behind.
+    fast.assert_not_called()
     db.commit.assert_called_once()

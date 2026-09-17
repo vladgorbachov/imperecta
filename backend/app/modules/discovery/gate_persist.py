@@ -4,9 +4,18 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import DBAPIError
+
 from app.database import sync_session_factory
 from app.modules.data_firewall.firewall import evaluate_market
+from app.modules.data_firewall.signing import SignedRecord
+from app.modules.persist.gate_rpc import GateRpcError, exec_write_records
 from app.modules.persist.writer import PersistContext, write_sync
+
+# Pairs per pipelined gate statement: two round-trips (products, then
+# listings — FK order) instead of two per pair. Bounds statement size and
+# the blast radius of a mid-chunk failure.
+FAST_WRITE_CHUNK_PAIRS = 100
 
 
 @dataclass(frozen=True)
@@ -26,12 +35,85 @@ class PoolWriteResult:
     rejected: int
 
 
+@dataclass(frozen=True)
+class _SignedPair:
+    dto: PoolInsertDTO
+    product: SignedRecord
+    listing: SignedRecord
+
+
+def _evaluate_pairs(
+    db: Any,
+    dtos: list[PoolInsertDTO],
+) -> tuple[list[_SignedPair], int]:
+    """Run both firewall evaluations per DTO before anything is written.
+
+    Nothing touches the pool tables until a pair carries two signed records,
+    so a rejected listing can never leave an orphan dim_product behind.
+    """
+    pairs: list[_SignedPair] = []
+    rejected = 0
+    for dto in dtos:
+        outcome_product = evaluate_market(
+            dto.dim_product,
+            table="dim_product",
+            db=db,
+            reject_source="discovery",
+        )
+        if not outcome_product.passed or outcome_product.signed_record is None:
+            rejected += 1
+            continue
+        outcome_listing = evaluate_market(
+            dto.fact_listing,
+            table="fact_listing",
+            db=db,
+            reject_source="discovery",
+        )
+        if not outcome_listing.passed or outcome_listing.signed_record is None:
+            rejected += 1
+            continue
+        pairs.append(
+            _SignedPair(
+                dto=dto,
+                product=outcome_product.signed_record,
+                listing=outcome_listing.signed_record,
+            )
+        )
+    return pairs, rejected
+
+
+def _write_pair_slow(db: Any, pair: _SignedPair) -> bool:
+    """Per-pair savepoint write — the pre-pipelining path, kept as fallback."""
+    nested = db.begin_nested()
+    try:
+        ctx = PersistContext(
+            source="discovery",
+            marketplace_id=pair.dto.marketplace_id,
+        )
+        if not write_sync(db, pair.product, ctx=ctx):
+            nested.rollback()
+            return False
+        if not write_sync(db, pair.listing, ctx=ctx):
+            nested.rollback()
+            return False
+        nested.commit()
+        return True
+    except Exception:
+        nested.rollback()
+        raise
+
+
 def write_pool_dtos_sync(dtos: list[PoolInsertDTO]) -> PoolWriteResult:
-    """Persist discovery pool rows via evaluate_market -> write_sync on a sync Session.
+    """Persist discovery pool rows via evaluate_market -> gate.exec_write.
 
     Runs inside asyncio.to_thread — never on the orchestrator's AsyncSession.
-    One commit per batch; each DTO pair uses a nested savepoint so a failed
-    listing gate/write does not leave an orphan dim_product in the batch.
+    Every pair is evaluated (and signed) up front; signed chunks are then
+    pipelined through exec_write_records — two round-trips per chunk
+    (all products first, then all listings, preserving the FK order) instead
+    of two per pair. A chunk that fails mid-statement rolls back to its
+    savepoint and is retried pair-by-pair via write_sync, so one bad row
+    (e.g. a concurrent url_hash duplicate) only costs its own chunk speed.
+    One commit per batch.
     """
     if not dtos:
         return PoolWriteResult(inserted=0, rejected=0)
@@ -40,68 +122,23 @@ def write_pool_dtos_sync(dtos: list[PoolInsertDTO]) -> PoolWriteResult:
     inserted = 0
     rejected = 0
     try:
-        for dto in dtos:
+        pairs, rejected = _evaluate_pairs(db, dtos)
+
+        for start in range(0, len(pairs), FAST_WRITE_CHUNK_PAIRS):
+            chunk = pairs[start : start + FAST_WRITE_CHUNK_PAIRS]
             nested = db.begin_nested()
             try:
-                product_ctx = PersistContext(
-                    source="discovery",
-                    marketplace_id=dto.marketplace_id,
-                )
-                outcome_product = evaluate_market(
-                    dto.dim_product,
-                    table="dim_product",
-                    db=db,
-                    reject_source="discovery",
-                )
-                if (
-                    not outcome_product.passed
-                    or outcome_product.signed_record is None
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                if not write_sync(
-                    db,
-                    outcome_product.signed_record,
-                    ctx=product_ctx,
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                listing_ctx = PersistContext(
-                    source="discovery",
-                    marketplace_id=dto.marketplace_id,
-                )
-                outcome_listing = evaluate_market(
-                    dto.fact_listing,
-                    table="fact_listing",
-                    db=db,
-                    reject_source="discovery",
-                )
-                if (
-                    not outcome_listing.passed
-                    or outcome_listing.signed_record is None
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
-                if not write_sync(
-                    db,
-                    outcome_listing.signed_record,
-                    ctx=listing_ctx,
-                ):
-                    nested.rollback()
-                    rejected += 1
-                    continue
-
+                exec_write_records(db, [pair.product for pair in chunk])
+                exec_write_records(db, [pair.listing for pair in chunk])
                 nested.commit()
-                inserted += 1
-            except Exception:
+                inserted += len(chunk)
+            except (GateRpcError, DBAPIError):
                 nested.rollback()
-                raise
+                for pair in chunk:
+                    if _write_pair_slow(db, pair):
+                        inserted += 1
+                    else:
+                        rejected += 1
 
         db.commit()
         return PoolWriteResult(inserted=inserted, rejected=rejected)
