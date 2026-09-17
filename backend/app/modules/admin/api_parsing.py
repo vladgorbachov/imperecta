@@ -28,6 +28,13 @@ class RunPipelineRequest(BaseModel):
     )
 
 
+class SitemapEnumerateRequest(BaseModel):
+    """Sitemap-full onboarding trigger (SITEMAP_FIRST slice 1)."""
+
+    marketplace_codes: list[str] = Field(min_length=1, max_length=20)
+    max_urls: int = Field(default=500_000, ge=1_000, le=2_000_000)
+
+
 @router.get("/test-marketplaces")
 async def get_test_marketplaces(
     _current_user: CurrentSuperuser,
@@ -62,6 +69,29 @@ async def run_pipeline(
 ) -> dict:
     """Create parent job and enqueue full admin pipeline (manual data collection)."""
     return await _enqueue_pipeline_run(db, body)
+
+
+@router.post("/sitemap-enumerate")
+async def trigger_sitemap_enumerate(
+    body: SitemapEnumerateRequest,
+    _current_user: CurrentSuperuser,
+) -> dict:
+    """Dispatch sitemap-full catalog enumeration for the given shops.
+
+    One Celery task per marketplace (independent, idempotent — dedupe by
+    url_hash makes reruns pick up only what previous runs missed). Progress
+    is visible via pool counts (/pool/marketplace-stats) and worker logs.
+    """
+    from app.workers.onboarding_tasks import sitemap_enumerate_marketplace
+
+    dispatched = []
+    for code in body.marketplace_codes:
+        async_result = sitemap_enumerate_marketplace.apply_async(
+            [code.strip()],
+            kwargs={"max_urls": body.max_urls},
+        )
+        dispatched.append({"marketplace_code": code.strip(), "task_id": async_result.id})
+    return {"dispatched": dispatched, "max_urls": body.max_urls}
 
 
 @router.get("/pipeline-runs")

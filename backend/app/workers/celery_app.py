@@ -55,6 +55,7 @@ celery_app.conf.include = [
     "app.workers.maintenance_tasks",
     "app.workers.reaper_tasks",
     "app.workers.alert_tasks",
+    "app.workers.onboarding_tasks",
 ]
 
 # Load beat schedule from scheduler module

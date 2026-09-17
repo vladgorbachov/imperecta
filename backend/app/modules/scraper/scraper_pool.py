@@ -68,6 +68,54 @@ _NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit"}
 _SUPPORTED_SCRAPE_TIERS = frozenset({1})
 _KNOWN_SCRAPE_TIERS = frozenset({1, 2, 3})
 
+# Sitemap shard ordering for index walks: product shards first so a capped
+# walk spends its budget on PDP URLs, chrome/editorial shards last. Substring
+# hints are multilingual-structural (no per-shop branching).
+_SITEMAP_PRODUCT_SHARD_HINTS = (
+    "product",
+    "produkt",
+    "produs",
+    "prekes",
+    "preke",
+    "tovar",
+    "tavar",
+    "goods",
+    "item",
+    "offer",
+    "catalog",
+    "katalog",
+)
+_SITEMAP_LATE_SHARD_HINTS = (
+    "blog",
+    "news",
+    "article",
+    "review",
+    "static",
+    "stranky",
+    "pages",
+    "category",
+    "categories",
+    "kategor",
+    "brand",
+    "filter",
+    "image",
+    "video",
+)
+
+
+def _sitemap_shard_priority(sitemap_url: str) -> int:
+    """0 = product shard, 1 = neutral, 2 = editorial/navigation chrome.
+
+    Hints are matched against the shard's file name with the word "sitemap"
+    stripped — otherwise every shard matches the "item" hint via s-ITEM-ap.
+    """
+    name = sitemap_url.lower().rsplit("/", 1)[-1].replace("sitemap", "")
+    if any(hint in name for hint in _SITEMAP_PRODUCT_SHARD_HINTS):
+        return 0
+    if any(hint in name for hint in _SITEMAP_LATE_SHARD_HINTS):
+        return 2
+    return 1
+
 
 def _would_escalate_shell(
     *,
@@ -534,8 +582,15 @@ class ScraperPool:
         base_url: str,
         *,
         marketplace_locale: str | None = None,
+        max_subfiles: int | None = None,
+        max_urls: int | None = None,
     ) -> list[str]:
-        """Discover sitemap URLs with locale selection and canonical deduplication."""
+        """Discover sitemap URLs with locale selection and canonical deduplication.
+
+        ``max_subfiles`` / ``max_urls`` override the module defaults for the
+        sitemap-full onboarding path (quotas are floors, not ceilings); the
+        legacy discovery phase keeps the conservative defaults.
+        """
         from urllib.parse import urljoin
 
         from app.modules.scraper.extractors import (
@@ -544,6 +599,9 @@ class ScraperPool:
             parse_sitemap_xml,
         )
         from app.modules.scraper.locale_selection import select_locale_url
+
+        subfile_cap = max_subfiles if max_subfiles is not None else SITEMAP_MAX_SUBFILES
+        url_cap = max_urls if max_urls is not None else SITEMAP_MAX_URLS
 
         sitemap_urls_to_try: list[str] = []
 
@@ -575,7 +633,7 @@ class ScraperPool:
         visited_sitemaps: set[str] = set()
         pending_sitemaps: list[str] = list(sitemap_urls_to_try)
 
-        while pending_sitemaps and len(visited_sitemaps) < SITEMAP_MAX_SUBFILES:
+        while pending_sitemaps and len(visited_sitemaps) < subfile_cap:
             sitemap_url = pending_sitemaps.pop(0)
             if sitemap_url in visited_sitemaps:
                 continue
@@ -595,8 +653,9 @@ class ScraperPool:
             for nested in parsed["sitemaps"]:
                 if nested not in visited_sitemaps:
                     pending_sitemaps.append(nested)
+            pending_sitemaps.sort(key=_sitemap_shard_priority)
             for entry in parsed.get("url_entries", []):
-                if len(product_urls) >= SITEMAP_MAX_URLS:
+                if len(product_urls) >= url_cap:
                     break
                 loc = str(entry.get("loc") or "")
                 if not loc:
@@ -609,7 +668,7 @@ class ScraperPool:
                     continue
                 seen_hashes.add(url_hash)
                 product_urls.append(selected)
-            if len(product_urls) >= SITEMAP_MAX_URLS:
+            if len(product_urls) >= url_cap:
                 break
 
         return product_urls
