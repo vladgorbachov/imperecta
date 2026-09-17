@@ -52,10 +52,22 @@ def test_denorm_columns_in_gated_allowlists() -> None:
         {"name", "name_normalized", "image_url", "brand_id", "category_id", "attributes"},
     )
     assert SCRAPE_UPDATE_ALLOWLIST["fact_listing"]["listing_denorm_success"] == frozenset(
-        {"last_price", "last_currency_code", "last_price_changed_at", "last_price_eur"},
+        {
+            "last_price",
+            "last_currency_code",
+            "last_price_changed_at",
+            "last_price_eur",
+            "scrape_interval_minutes",
+        },
     )
     assert SCRAPE_UPDATE_ALLOWLIST["fact_listing"]["listing_denorm_no_change"] == frozenset(
-        {"last_checked_at", "last_price", "last_currency_code", "last_price_eur"},
+        {
+            "last_checked_at",
+            "last_price",
+            "last_currency_code",
+            "last_price_eur",
+            "scrape_interval_minutes",
+        },
     )
 
 
