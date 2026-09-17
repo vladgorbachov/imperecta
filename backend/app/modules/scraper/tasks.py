@@ -465,9 +465,7 @@ def _run_scrape_all_pool_impl(
         FactListing.last_checked_at.is_(None),
         FactListing.last_checked_at
         < func.now()
-        - func.make_interval(
-            0, 0, 0, 0, 0, func.coalesce(FactListing.scrape_interval_minutes, 360)
-        ),
+        - func.make_interval(0, 0, 0, 0, 0, FactListing.scrape_interval_minutes),
     )
     batch_size = max(int(settings.scrape_pool_batch_size or 1000), 1)
     max_listings_per_run = max(int(settings.scrape_pool_max_listings_per_run or 200000), 1)
