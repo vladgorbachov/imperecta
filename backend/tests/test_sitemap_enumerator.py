@@ -42,9 +42,14 @@ def _marketplace(base_url="https://shop.example"):
     )
 
 
-def _pool_returning(urls):
+NEUTRAL_SHARD = "https://shop.example/sitemap-main.xml"
+PRODUCT_SHARD = "https://shop.example/sitemap-products.xml"
+
+
+def _pool_returning(urls, shard=NEUTRAL_SHARD):
     pool = SimpleNamespace()
-    pool.fetch_sitemap_candidates = AsyncMock(return_value=urls)
+    entries = [u if isinstance(u, tuple) else (u, shard) for u in urls]
+    pool.fetch_sitemap_candidates = AsyncMock(return_value=entries)
     return pool
 
 
@@ -137,3 +142,41 @@ def test_admin_endpoint_registered():
     schema = app.openapi()
     entry = schema["paths"].get("/api/admin/parsing/sitemap-enumerate", {})
     assert "post" in entry
+
+
+@pytest.mark.asyncio
+class TestShardTrust:
+    async def test_product_shard_urls_trusted_without_structural_match(self):
+        """techmart-style one-segment slugs pass when listed in a product shard."""
+        urls = [("https://shop.example/krushka-philips-ecoclassic", PRODUCT_SHARD)]
+        with (
+            patch.object(
+                sitemap_enumerator,
+                "write_pool_dtos_sync",
+                lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0),
+            ),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value=set()),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(), _pool_returning(urls)
+            )
+        assert result.inserted == 1
+
+    async def test_neutral_shard_still_filters_but_accepts_slug_sku(self):
+        urls = [
+            ("https://shop.example/about-us", NEUTRAL_SHARD),          # rejected
+            ("https://shop.example/baterii-cr2016-1b-5020082", NEUTRAL_SHARD),  # slug SKU
+        ]
+        with (
+            patch.object(
+                sitemap_enumerator,
+                "write_pool_dtos_sync",
+                lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0),
+            ),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value=set()),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(), _pool_returning(urls)
+            )
+        assert result.inserted == 1
+        assert result.product_like == 1

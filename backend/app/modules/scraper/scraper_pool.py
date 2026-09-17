@@ -584,7 +584,8 @@ class ScraperPool:
         marketplace_locale: str | None = None,
         max_subfiles: int | None = None,
         max_urls: int | None = None,
-    ) -> list[str]:
+        with_shard_origin: bool = False,
+    ) -> list[str] | list[tuple[str, str]]:
         """Discover sitemap URLs with locale selection and canonical deduplication.
 
         ``max_subfiles`` / ``max_urls`` override the module defaults for the
@@ -626,7 +627,7 @@ class ScraperPool:
             if candidate not in sitemap_urls_to_try:
                 sitemap_urls_to_try.append(candidate)
 
-        product_urls: list[str] = []
+        product_urls: list = []
         seen_hashes: set[str] = set()
         from app.models.facts import FactListing
 
@@ -667,7 +668,10 @@ class ScraperPool:
                 if url_hash in seen_hashes:
                     continue
                 seen_hashes.add(url_hash)
-                product_urls.append(selected)
+                if with_shard_origin:
+                    product_urls.append((selected, sitemap_url))
+                else:
+                    product_urls.append(selected)
             if len(product_urls) >= url_cap:
                 break
 

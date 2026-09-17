@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -34,7 +35,18 @@ from app.modules.persist.writer import (
     build_fact_listing_fields,
 )
 from app.modules.scraper.extractors import _looks_like_product_url
-from app.modules.scraper.scraper_pool import ScraperPool
+from app.modules.scraper.scraper_pool import ScraperPool, _sitemap_shard_priority
+
+# Slug-style SKUs: a trailing (or dot-terminated) run of 3+ digits inside a
+# dash-separated slug — techmart's `/baterii-ansmann-cr2016-1b-5020082`
+# pattern, which `_looks_like_product_url` (path-segment oriented) misses.
+_SLUG_SKU_RE = re.compile(r"-\d{3,}(?:[./]|$)")
+
+
+def _url_is_product_like(path: str) -> bool:
+    if _looks_like_product_url(path):
+        return True
+    return bool(_SLUG_SKU_RE.search(path.lower()))
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
@@ -115,11 +127,12 @@ async def enumerate_sitemap_full(
         )
 
     try:
-        raw_urls = await pool.fetch_sitemap_candidates(
+        raw_entries = await pool.fetch_sitemap_candidates(
             marketplace.base_url,
             marketplace_locale=marketplace.locale,
             max_subfiles=max_subfiles,
             max_urls=max_urls,
+            with_shard_origin=True,
         )
     except Exception as exc:
         slog.error(
@@ -129,16 +142,19 @@ async def enumerate_sitemap_full(
         )
         return _result(f"error:{type(exc).__name__}")
 
-    if not raw_urls:
+    if not raw_entries:
         return _result("empty_sitemap")
 
     base_host = urlparse(marketplace.base_url).netloc.lower().removeprefix("www.")
     product_urls: list[str] = []
-    for url in raw_urls:
+    for url, shard_url in raw_entries:
         parsed = urlparse(url)
         if parsed.netloc.lower().removeprefix("www.") != base_host:
             continue
-        if _looks_like_product_url(parsed.path):
+        # A URL listed in a product-named shard IS a product URL — the shop
+        # said so (techmart's one-segment slugs taught us not to out-guess
+        # the shard). Structural filtering applies only to neutral shards.
+        if _sitemap_shard_priority(shard_url) == 0 or _url_is_product_like(parsed.path):
             product_urls.append(url)
 
     hash_by_url = {url: FactListing.compute_url_hash(url) for url in product_urls}
@@ -193,7 +209,7 @@ async def enumerate_sitemap_full(
 
     result = _result(
         "completed",
-        raw_urls=len(raw_urls),
+        raw_urls=len(raw_entries),
         product_like=len(product_urls),
         inserted=inserted,
         rejected=rejected,
