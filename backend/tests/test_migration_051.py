@@ -62,21 +62,22 @@ def test_migration_051_partial_indexes_match_pool_grain() -> None:
     assert "WHERE is_active = TRUE AND last_price IS NOT NULL" in source
 
 
-def test_migration_051_fact_listing_indexes_are_concurrent() -> None:
-    """Enumeration writes fact_listing continuously — its index builds must
-    be CONCURRENTLY inside an autocommit block (agreed with the scraper
-    session). fact_price is a partitioned parent (CONCURRENTLY unsupported)
-    and stays a plain build while the table is small."""
+def test_migration_051_index_builds_are_plain_in_transaction() -> None:
+    """CONCURRENTLY + autocommit_block is impossible in this project's alembic
+    env (async engine bridge; alembic never owns a committable transaction —
+    AssertionError on deploys e592d972/7fa6e57e/80094a3e, 2026-09-18). Index
+    builds must be plain in-transaction CREATE INDEX with a raised
+    statement_timeout: env.py's default is too tight for 1.4M-row builds."""
     source = MIGRATION_051.read_text(encoding="utf-8")
-    assert "autocommit_block" in source
+    # The docstring may mention autocommit_block as the forbidden variant;
+    # the code must not call it.
+    assert "op.get_context().autocommit_block()" not in source
+    assert "CREATE INDEX CONCURRENTLY" not in source
+    assert "SET LOCAL statement_timeout = '600s'" in source
     assert (
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_listing_pool_entry_created"
-        in source
+        "CREATE INDEX IF NOT EXISTS idx_listing_pool_entry_created" in source
     )
-    assert (
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_listing_active_priced"
-        in source
-    )
+    assert "CREATE INDEX IF NOT EXISTS idx_listing_active_priced" in source
     # New fact_price index must be created before the superseded one is dropped.
     assert source.index("idx_fact_price_listing_date_scraped") < source.index(
         "DROP INDEX IF EXISTS idx_fact_price_listing_date"
