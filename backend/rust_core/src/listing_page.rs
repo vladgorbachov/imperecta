@@ -220,10 +220,14 @@ pub fn extract_list_offers(html: &str, base_url: &str) -> Vec<ListOffer> {
         }
     }
 
-    // 2. Primary signature = the most-repeated one above the grid threshold,
-    //    preferring signatures whose cards contain links.
+    // 2. Primary signature: among repeated link-bearing signatures, prefer
+    //    the one whose cards carry currency-anchored prices — a product grid
+    //    has prices, a mega-menu (often the most-repeated structure on the
+    //    page, e.g. techmart.bg's ~245 nav links) does not. Fall back to the
+    //    most-repeated link signature when nothing on the page is priced.
     let link_sel = Selector::parse("a[href]").unwrap();
-    let mut best: Option<(usize, Vec<ElementRef>)> = None;
+    let mut best_priced: Option<(usize, Vec<ElementRef>)> = None;
+    let mut best_any: Option<(usize, Vec<ElementRef>)> = None;
     for (_sig, elements) in by_signature.into_iter() {
         if elements.len() < MIN_CARD_COUNT {
             continue;
@@ -235,12 +239,21 @@ pub fn extract_list_offers(html: &str, base_url: &str) -> Vec<ListOffer> {
         if with_links < MIN_CARD_COUNT {
             continue;
         }
+        let priced = elements
+            .iter()
+            .filter(|el| card_price(el).is_some())
+            .count();
+        if priced >= MIN_CARD_COUNT
+            && best_priced.as_ref().map_or(true, |(s, _)| priced > *s)
+        {
+            best_priced = Some((priced, elements.clone()));
+        }
         let score = elements.len();
-        if best.as_ref().map_or(true, |(s, _)| score > *s) {
-            best = Some((score, elements));
+        if best_any.as_ref().map_or(true, |(s, _)| score > *s) {
+            best_any = Some((score, elements));
         }
     }
-    let cards = match best {
+    let cards = match best_priced.or(best_any) {
         Some((_, cards)) => cards,
         None => return Vec::new(),
     };
@@ -351,6 +364,35 @@ mod tests {
         let offers = extract_list_offers(&html, "https://shop.example/c/tools");
         assert_eq!(offers.len(), 6);
         assert!(offers.iter().all(|o| o.url.starts_with("https://shop.example/p/")));
+    }
+
+    #[test]
+    fn priced_grid_beats_bigger_unpriced_menu() {
+        // Live incident 2026-09-17 (techmart.bg): a ~245-link mega-menu
+        // out-repeated the 24-card product grid, so every "offer" was a
+        // category link and none matched the pool.
+        let mut menu = String::new();
+        for i in 0..40 {
+            menu.push_str(&format!(
+                r#"<li class="nav-item"><a href="/category-{i}">Category {i}</a></li>"#
+            ));
+        }
+        let mut grid = String::new();
+        for i in 0..8 {
+            grid.push_str(&format!(
+                r#"<div class="product-card">
+                     <a href="/p/tv-{i}">TV Model {i}</a>
+                     <span class="price">499,00 €</span>
+                   </div>"#
+            ));
+        }
+        let html = format!(
+            r#"<html><body><ul class="menu">{menu}</ul><div class="grid">{grid}</div></body></html>"#
+        );
+        let offers = extract_list_offers(&html, "https://shop.example/c/tv");
+        assert_eq!(offers.len(), 8);
+        assert!(offers.iter().all(|o| o.url.contains("/p/tv-")));
+        assert!(offers.iter().all(|o| o.price == Some(499.00)));
     }
 
     #[test]
