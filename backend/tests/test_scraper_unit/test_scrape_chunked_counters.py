@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -18,8 +18,8 @@ from app.modules.scraper.pipeline.tick_orchestrator import run_tick
 
 
 def test_scrape_cohort_threshold_used(monkeypatch):
-    """stale_before overrides now-6h; None keeps the standalone default."""
-    captured: dict = {}
+    """Selection is per-listing interval; stale_before adds a cohort filter on top."""
+    captured: list = []
 
     class _FakeResult:
         def all(self):
@@ -27,7 +27,7 @@ def test_scrape_cohort_threshold_used(monkeypatch):
 
     class _FakeSession:
         def execute(self, stmt):
-            captured["stmt"] = stmt
+            captured.append(stmt)
             return _FakeResult()
 
         def close(self):
@@ -54,16 +54,18 @@ def test_scrape_cohort_threshold_used(monkeypatch):
         deadline_monotonic=time.monotonic() + 3600,
     )
     assert out["deadline_exhausted"] is False
-    assert captured.get("stmt") is not None
+    scraper_tasks._run_scrape_all_pool_impl()
 
-    with patch.object(scraper_tasks, "datetime") as dt_mock:
-        fixed_now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-        dt_mock.now.return_value = fixed_now
-        dt_mock.side_effect = lambda *a, **k: datetime(*a, **k)
-        scraper_tasks._run_scrape_all_pool_impl()
-        _expected_default = fixed_now - timedelta(hours=6)
-        # Second call uses default threshold path (no stale_before).
-        assert dt_mock.now.called
+    assert len(captured) == 2
+    sql_anchor = str(captured[0])
+    sql_default = str(captured[1])
+    # Adaptive backoff: both paths compare against the per-listing interval.
+    for sql in (sql_anchor, sql_default):
+        assert "make_interval" in sql
+        assert "scrape_interval_minutes" in sql
+    # The cohort anchor adds a second last_checked_at comparison, it does not
+    # replace the interval condition.
+    assert sql_anchor.count("last_checked_at <") == sql_default.count("last_checked_at <") + 1
 
 
 def test_scrape_deadline_exits_partial(monkeypatch):

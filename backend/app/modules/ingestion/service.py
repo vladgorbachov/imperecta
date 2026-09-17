@@ -57,6 +57,23 @@ logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
 
 
+# --- adaptive scrape interval (SITEMAP_FIRST slice 3) ------------------------
+
+BASE_SCRAPE_INTERVAL_MINUTES = 360
+MAX_SCRAPE_INTERVAL_MINUTES = 10_080  # 7 days
+
+
+def next_scrape_interval(current: int | None, *, price_changed: bool) -> int:
+    """Adaptive backoff: quiet listings double their interval (capped at a
+    week), a price change resets to the base cadence."""
+    if price_changed:
+        return BASE_SCRAPE_INTERVAL_MINUTES
+    base = int(current or BASE_SCRAPE_INTERVAL_MINUTES)
+    if base < BASE_SCRAPE_INTERVAL_MINUTES:
+        base = BASE_SCRAPE_INTERVAL_MINUTES
+    return min(base * 2, MAX_SCRAPE_INTERVAL_MINUTES)
+
+
 # --- ingestion-owned helpers (moved verbatim from scraper.service) -----------
 
 
@@ -356,6 +373,10 @@ class IngestionService:
                     "last_price": data.price,
                     "last_currency_code": normalized_currency,
                     "last_price_eur": scrape_price_eur,
+                    "scrape_interval_minutes": next_scrape_interval(
+                        getattr(listing, "scrape_interval_minutes", None),
+                        price_changed=False,
+                    ),
                 }
                 denorm_fields = build_listing_update_fields(
                     url_hash=listing.url_hash,
@@ -392,6 +413,10 @@ class IngestionService:
                         "last_currency_code": persist_fields["currency_code"],
                         "last_price_changed_at": persist_fields["scraped_at"],
                         "last_price_eur": scrape_price_eur,
+                        "scrape_interval_minutes": next_scrape_interval(
+                            getattr(listing, "scrape_interval_minutes", None),
+                            price_changed=True,
+                        ),
                     }
                     denorm_fields = build_listing_update_fields(
                         url_hash=listing.url_hash,

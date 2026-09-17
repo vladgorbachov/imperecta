@@ -4,12 +4,12 @@ import asyncio
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import Settings
@@ -457,10 +457,17 @@ def _run_scrape_all_pool_impl(
 ) -> dict:
     scraper_pool = ScraperPool()
     settings = Settings()
-    threshold = (
-        stale_before
-        if stale_before is not None
-        else datetime.now(timezone.utc) - timedelta(hours=6)
+    # Adaptive refresh (SITEMAP_FIRST slice 3): each listing carries its own
+    # scrape_interval_minutes (grown on unchanged price, reset on change), so
+    # "stale" is per-listing. An explicit stale_before (pipeline cohort
+    # anchor) additionally excludes listings already scraped in this run.
+    due_by_interval = or_(
+        FactListing.last_checked_at.is_(None),
+        FactListing.last_checked_at
+        < func.now()
+        - func.make_interval(
+            0, 0, 0, 0, 0, func.coalesce(FactListing.scrape_interval_minutes, 360)
+        ),
     )
     batch_size = max(int(settings.scrape_pool_batch_size or 1000), 1)
     max_listings_per_run = max(int(settings.scrape_pool_max_listings_per_run or 200000), 1)
@@ -482,13 +489,15 @@ def _run_scrape_all_pool_impl(
             stmt = (
                 select(FactListing.id)
                 .where(FactListing.is_active.is_(True))
-                .where(
+                .where(due_by_interval)
+            )
+            if stale_before is not None:
+                stmt = stmt.where(
                     or_(
                         FactListing.last_checked_at.is_(None),
-                        FactListing.last_checked_at < threshold,
+                        FactListing.last_checked_at < stale_before,
                     ),
                 )
-            )
             if marketplace_codes:
                 stmt = (
                     stmt.join(
