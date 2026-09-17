@@ -55,14 +55,14 @@ def _make_session_factory() -> tuple:
     return engine, factory
 
 
-def _ingest_offers_sync(offers: list[dict[str, Any]]) -> dict[str, int]:
+def _ingest_offers_sync(offers: list[dict[str, Any]], marketplace_id) -> dict[str, int]:
     """Own sync session per page (thread-safe under asyncio.to_thread)."""
     from app.database import sync_session_factory
     from app.modules.ingestion.list_offers import ingest_list_offers
 
     db = sync_session_factory()
     try:
-        return ingest_list_offers(db, offers=offers)
+        return ingest_list_offers(db, offers=offers, marketplace_id=marketplace_id)
     finally:
         db.close()
 
@@ -103,7 +103,16 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
 
     pool = ScraperPool()
     pages = 0
-    totals = {"matched": 0, "saved": 0, "unknown": 0, "unpriced": 0, "empty_pages": 0}
+    totals = {
+        "matched": 0,
+        "saved": 0,
+        "unknown": 0,
+        "unpriced": 0,
+        "suspicious": 0,
+        "onboarded": 0,
+        "empty_pages": 0,
+    }
+    marketplace_id = marketplace.id
     for url in category_urls[:limit]:
         fetch = await pool.fetch_listing_html(url)
         if not fetch.html:
@@ -114,8 +123,8 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
         if not offers:
             totals["empty_pages"] += 1
             continue
-        counters = await asyncio.to_thread(_ingest_offers_sync, offers)
-        for key in ("matched", "saved", "unknown", "unpriced"):
+        counters = await asyncio.to_thread(_ingest_offers_sync, offers, marketplace_id)
+        for key in ("matched", "saved", "unknown", "unpriced", "suspicious", "onboarded"):
             totals[key] += counters.get(key, 0)
 
     return {

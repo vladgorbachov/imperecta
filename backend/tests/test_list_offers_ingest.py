@@ -41,7 +41,14 @@ def test_matches_known_urls_and_counts_unknown():
             db,
             offers=[_offer(known), _offer("https://shop.example/p/stranger-2")],
         )
-    assert counters == {"matched": 1, "saved": 1, "unknown": 1, "unpriced": 0, "suspicious": 0}
+    assert counters == {
+        "matched": 1,
+        "saved": 1,
+        "unknown": 1,
+        "unpriced": 0,
+        "suspicious": 0,
+        "onboarded": 0,
+    }
     data = pe.call_args.kwargs["data"]
     assert data.title == "Widget"
     assert data.price == 99.5
@@ -65,7 +72,57 @@ def test_priceless_offer_matched_but_not_ingested():
     with patch.object(lo.IngestionService, "persist_extracted") as pe:
         counters = lo.ingest_list_offers(db, offers=[_offer(known, price=None)])
     pe.assert_not_called()
-    assert counters == {"matched": 1, "saved": 0, "unknown": 0, "unpriced": 1, "suspicious": 0}
+    assert counters == {
+        "matched": 1,
+        "saved": 0,
+        "unknown": 0,
+        "unpriced": 1,
+        "suspicious": 0,
+        "onboarded": 0,
+    }
+
+
+def test_unknown_card_offer_onboards_when_marketplace_known():
+    from uuid import uuid4 as _uuid4
+
+    db = _db_with_listings([])
+    mp_id = _uuid4()
+    pool_result = SimpleNamespace(inserted=1, rejected=0)
+    with patch.object(lo, "_normalize_name", wraps=lo._normalize_name), patch(
+        "app.modules.discovery.gate_persist.write_pool_dtos_sync",
+        return_value=pool_result,
+    ) as wp:
+        counters = lo.ingest_list_offers(
+            db,
+            offers=[_offer("https://shop.example/p/new-1")],
+            marketplace_id=mp_id,
+        )
+    assert counters["unknown"] == 1
+    assert counters["onboarded"] == 1
+    dto = wp.call_args.args[0][0]
+    assert dto.marketplace_id == mp_id
+    assert dto.dim_product["name"] == "Widget"
+    assert dto.fact_listing["external_url"] == "https://shop.example/p/new-1"
+
+
+def test_unknown_offer_without_title_or_price_not_onboarded():
+    from uuid import uuid4 as _uuid4
+
+    db = _db_with_listings([])
+    with patch(
+        "app.modules.discovery.gate_persist.write_pool_dtos_sync"
+    ) as wp:
+        counters = lo.ingest_list_offers(
+            db,
+            offers=[
+                _offer("https://shop.example/p/new-1", price=None),
+                {"url": "https://shop.example/p/new-2", "price": 9.0, "title": "  "},
+            ],
+            marketplace_id=_uuid4(),
+        )
+    wp.assert_not_called()
+    assert counters["unknown"] == 2
+    assert counters["onboarded"] == 0
 
 
 def test_price_far_from_last_price_is_held_back():

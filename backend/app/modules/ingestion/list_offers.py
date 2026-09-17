@@ -8,8 +8,11 @@ data_firewall, currency disambiguation, price_eur resolution, no-change
 dedupe and the quality gate all apply unchanged. A list offer is just a
 sparse ExtractedProduct: title+price+currency present, everything else None.
 
-Offers whose URL is not in the pool yet are counted (``unknown``) and
-skipped — onboarding is the sitemap enumerator's job, not the harvester's.
+Offers whose URL is not in the pool yet are counted (``unknown``) — and,
+when they carry both a title and a price (i.e. they sit in a real product
+card), onboarded as new pool pairs through the same discovery gate path the
+sitemap enumerator uses. List pages thus close the coverage gap sitemap
+filters leave (techmart: 5k of ~18k slugs), with better titles for free.
 """
 
 from __future__ import annotations
@@ -64,11 +67,71 @@ class ListOfferData:
     page_role: str | None = "product"
 
 
+def _normalize_name(name: str) -> str:
+    return " ".join((name or "").lower().split())[:500]
+
+
+def _onboard_unknown_offers(
+    unknown_offers: list[dict[str, Any]],
+    hash_by_url: dict[str, str],
+    marketplace_id,
+) -> int:
+    """Insert product-card offers the pool has never seen, via the gate.
+
+    Only offers with BOTH a title and a price qualify — that combination
+    only occurs inside a real product card, so this cannot onboard nav or
+    facet links. Returns the number of pairs the gate accepted.
+    """
+    from uuid import uuid4
+
+    from app.modules.discovery.gate_persist import PoolInsertDTO, write_pool_dtos_sync
+    from app.modules.persist.writer import (
+        build_dim_product_fields,
+        build_fact_listing_fields,
+    )
+
+    dtos: list[PoolInsertDTO] = []
+    seen: set[str] = set()
+    for offer in unknown_offers:
+        title = (offer.get("title") or "").strip()
+        if not title or offer.get("price") is None:
+            continue
+        url = str(offer["url"])
+        url_hash = hash_by_url[url]
+        if url_hash in seen:
+            continue
+        seen.add(url_hash)
+        product_id = uuid4()
+        dtos.append(
+            PoolInsertDTO(
+                marketplace_id=marketplace_id,
+                dim_product=build_dim_product_fields(
+                    product_id=product_id,
+                    name=title[:500],
+                    name_normalized=_normalize_name(title) or "product",
+                    is_active=True,
+                ),
+                fact_listing=build_fact_listing_fields(
+                    product_id=product_id,
+                    marketplace_id=marketplace_id,
+                    external_url=url,
+                    url_hash=url_hash,
+                    is_active=True,
+                    page_role="product",
+                ),
+            )
+        )
+    if not dtos:
+        return 0
+    return write_pool_dtos_sync(dtos).inserted
+
+
 def ingest_list_offers(
     db: Session,
     *,
     offers: list[dict[str, Any]],
     scrape_job_id=None,
+    marketplace_id=None,
 ) -> dict[str, int]:
     """Persist prices from list offers onto existing pool listings.
 
@@ -76,7 +139,14 @@ def ingest_list_offers(
     unpriced. Commits are owned by IngestionService per offer (decision A).
     """
     if not offers:
-        return {"matched": 0, "saved": 0, "unknown": 0, "unpriced": 0, "suspicious": 0}
+        return {
+            "matched": 0,
+            "saved": 0,
+            "unknown": 0,
+            "unpriced": 0,
+            "suspicious": 0,
+            "onboarded": 0,
+        }
 
     hash_by_url = {
         str(offer["url"]): FactListing.compute_url_hash(str(offer["url"]))
@@ -92,12 +162,15 @@ def ingest_list_offers(
 
     service = IngestionService(db)
     matched = saved = unknown = unpriced = suspicious = 0
+    unknown_offers: list[dict[str, Any]] = []
     for offer in offers:
         url = str(offer.get("url") or "")
         url_hash = hash_by_url.get(url)
         listing = listing_by_hash.get(url_hash) if url_hash else None
         if listing is None:
             unknown += 1
+            if url_hash is not None:
+                unknown_offers.append(offer)
             continue
         matched += 1
         if offer.get("price") is None:
@@ -127,12 +200,17 @@ def ingest_list_offers(
         if result.persisted or result.log_status == "no_change":
             saved += 1
 
+    onboarded = 0
+    if marketplace_id is not None and unknown_offers:
+        onboarded = _onboard_unknown_offers(unknown_offers, hash_by_url, marketplace_id)
+
     counters = {
         "matched": matched,
         "saved": saved,
         "unknown": unknown,
         "unpriced": unpriced,
         "suspicious": suspicious,
+        "onboarded": onboarded,
     }
     slog.info("list_offers_ingested", **counters)
     return counters
