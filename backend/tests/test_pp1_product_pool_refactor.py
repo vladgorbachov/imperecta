@@ -174,13 +174,22 @@ def test_pool_stats_response_is_canonical_only() -> None:
 
 
 def test_get_pool_stats_returns_canonical_only() -> None:
-    """Drive get_pool_stats with a fake db.scalar to assert the dict shape
-    without touching Postgres."""
+    """Drive get_pool_stats with a fake db.execute (mv_pool_stats row) to
+    assert the dict shape without touching Postgres."""
     import asyncio
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
 
+    mv_row = {
+        "total_products": 5,
+        "total_listings": 11,
+        "marketplaces_count": 3,
+        "listings_with_price": 2,
+        "last_updated": None,
+    }
+    fake_result = MagicMock()
+    fake_result.mappings.return_value.first.return_value = mv_row
     fake_db = AsyncMock()
-    fake_db.scalar = AsyncMock(side_effect=[11, 5, 3, 2, None])
+    fake_db.execute = AsyncMock(return_value=fake_result)
     svc = ProductPoolService.__new__(ProductPoolService)
     svc.db = fake_db
 
@@ -189,11 +198,35 @@ def test_get_pool_stats_returns_canonical_only() -> None:
     assert set(result.keys()) == REQUIRED_POOL_STATS_KEYS, (
         f"get_pool_stats returns drifted keys: {sorted(result.keys())}"
     )
+    assert result == mv_row
+
+
+def test_get_pool_stats_reads_preaggregated_view() -> None:
+    """The stats card must read mv_pool_stats, not count fact_listing live —
+    the per-request counts hit statement_timeout at 1.4M+ rows."""
+    source = inspect.getsource(ProductPoolService.get_pool_stats)
+    assert "_POOL_STATS_STMT" in source
+    assert "func.count" not in source
+
+
+def test_get_pool_stats_empty_view_returns_zeros() -> None:
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    fake_result = MagicMock()
+    fake_result.mappings.return_value.first.return_value = None
+    fake_db = AsyncMock()
+    fake_db.execute = AsyncMock(return_value=fake_result)
+    svc = ProductPoolService.__new__(ProductPoolService)
+    svc.db = fake_db
+
+    result = asyncio.run(svc.get_pool_stats())
+
     assert result == {
-        "total_products": 5,
-        "total_listings": 11,
-        "marketplaces_count": 3,
-        "listings_with_price": 2,
+        "total_products": 0,
+        "total_listings": 0,
+        "marketplaces_count": 0,
+        "listings_with_price": 0,
         "last_updated": None,
     }
 

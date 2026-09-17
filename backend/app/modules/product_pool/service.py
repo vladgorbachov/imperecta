@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select
+from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
@@ -26,6 +26,14 @@ _SORT_LOSERS = "losers"
 _SORT_VOLATILE = "volatile"
 BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
 SPARKLINE_POINTS_LIMIT = 14
+
+_POOL_STATS_STMT = text(
+    """
+    SELECT total_products, total_listings, marketplaces_count,
+           listings_with_price, last_updated
+    FROM mv_pool_stats
+    """
+)
 
 
 def _pool_product_visibility_filter():
@@ -517,27 +525,27 @@ class ProductPoolService:
         return out
 
     async def get_pool_stats(self) -> dict:
-        """Aggregate counts for the global pool dashboard card."""
-        total_listings = await self.db.scalar(
-            select(func.count()).select_from(FactListing).where(FactListing.is_active.is_(True)),
-        )
-        total_products = await self.db.scalar(select(func.count()).select_from(DimProduct))
-        marketplaces_count = await self.db.scalar(
-            select(func.count()).select_from(DimMarketplace).where(DimMarketplace.is_active.is_(True)),
-        )
-        listings_with_price = await self.db.scalar(
-            select(func.count())
-            .select_from(FactListing)
-            .where(FactListing.is_active.is_(True), FactListing.last_price.isnot(None)),
-        )
-        last_updated = await self.db.scalar(select(func.max(DimMarketplace.last_discovery_at)))
+        """Aggregate counts for the global pool dashboard card.
 
+        Reads the single-row mv_pool_stats (refreshed by pg_cron every 10
+        minutes, migration 051) instead of counting the 1.4M+ fact_listing
+        rows per request — the live counts were hitting statement_timeout.
+        """
+        row = (await self.db.execute(_POOL_STATS_STMT)).mappings().first()
+        if row is None:
+            return {
+                "total_products": 0,
+                "total_listings": 0,
+                "marketplaces_count": 0,
+                "listings_with_price": 0,
+                "last_updated": None,
+            }
         return {
-            "total_products": int(total_products or 0),
-            "total_listings": int(total_listings or 0),
-            "marketplaces_count": int(marketplaces_count or 0),
-            "listings_with_price": int(listings_with_price or 0),
-            "last_updated": last_updated,
+            "total_products": int(row["total_products"] or 0),
+            "total_listings": int(row["total_listings"] or 0),
+            "marketplaces_count": int(row["marketplaces_count"] or 0),
+            "listings_with_price": int(row["listings_with_price"] or 0),
+            "last_updated": row["last_updated"],
         }
 
 

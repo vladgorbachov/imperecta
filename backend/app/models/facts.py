@@ -121,6 +121,16 @@ class FactListing(Base):
         Index("idx_listing_active", "is_active", postgresql_where=text("is_active = true")),
         Index("idx_listing_last_checked", "last_checked_at"),
         Index("idx_listing_url_hash", "url_hash", unique=True),
+        Index(
+            "idx_listing_pool_entry_created",
+            "created_at",
+            postgresql_where=text("is_active = TRUE AND page_role = 'product'"),
+        ),
+        Index(
+            "idx_listing_active_priced",
+            "last_price",
+            postgresql_where=text("is_active = TRUE AND last_price IS NOT NULL"),
+        ),
     )
 
     @staticmethod
@@ -176,7 +186,12 @@ class FactPrice(Base):
         Index("idx_fact_price_listing", "listing_id"),
         Index("idx_fact_price_date", "date_id"),
         Index("idx_fact_price_scraped", "scraped_at"),
-        Index("idx_fact_price_listing_date", "listing_id", "date_id"),
+        Index(
+            "idx_fact_price_listing_date_scraped",
+            "listing_id",
+            "date_id",
+            text("scraped_at DESC"),
+        ),
         {"postgresql_partition_by": "RANGE (date_id)"},
     )
 
