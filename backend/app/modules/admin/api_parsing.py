@@ -94,6 +94,31 @@ async def trigger_sitemap_enumerate(
     return {"dispatched": dispatched, "max_urls": body.max_urls}
 
 
+class HarvestListsRequest(BaseModel):
+    """List-page price harvest trigger (SITEMAP_FIRST slice 2)."""
+
+    marketplace_codes: list[str] = Field(min_length=1, max_length=20)
+    pages_per_shop: int = Field(default=20, ge=1, le=500)
+
+
+@router.post("/harvest-lists")
+async def trigger_harvest_lists(
+    body: HarvestListsRequest,
+    _current_user: CurrentSuperuser,
+) -> dict:
+    """Dispatch list-page price harvesting for the given shops."""
+    from app.workers.harvest_tasks import harvest_list_pages
+
+    dispatched = []
+    for code in body.marketplace_codes:
+        async_result = harvest_list_pages.apply_async(
+            [code.strip()],
+            kwargs={"limit": body.pages_per_shop},
+        )
+        dispatched.append({"marketplace_code": code.strip(), "task_id": async_result.id})
+    return {"dispatched": dispatched, "pages_per_shop": body.pages_per_shop}
+
+
 @router.get("/pipeline-runs")
 async def get_pipeline_runs(
     _current_user: CurrentSuperuser,

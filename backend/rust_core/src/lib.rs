@@ -11,6 +11,7 @@
 //! implementation when this module is not built.
 
 mod jsonld;
+mod listing_page;
 mod pricing;
 mod quality;
 
@@ -120,6 +121,31 @@ fn assess_quality<'py>(
     Ok(out)
 }
 
+/// Extract (product_url, price, currency, title) offers from one
+/// category/list page. Returns a list of dicts; economic backbone of the
+/// list-page price harvesting path.
+#[pyfunction]
+#[pyo3(signature = (html, base_url))]
+fn extract_list_offers<'py>(
+    py: Python<'py>,
+    html: &str,
+    base_url: &str,
+) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    let offers = listing_page::extract_list_offers(html, base_url);
+    let mut out = Vec::with_capacity(offers.len());
+    for offer in offers {
+        let d = PyDict::new(py);
+        d.set_item("url", offer.url)?;
+        d.set_item("title", offer.title)?;
+        d.set_item("price", offer.price)?;
+        d.set_item("currency", offer.currency)?;
+        d.set_item("price_raw_text", offer.price_raw_text)?;
+        out.push(d);
+    }
+    Ok(out)
+}
+
+
 #[pymodule]
 fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_price_text, m)?)?;
@@ -128,6 +154,7 @@ fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(detect_currency, m)?)?;
     m.add_function(wrap_pyfunction!(currency_token_is_ambiguous, m)?)?;
     m.add_function(wrap_pyfunction!(extract_jsonld, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_list_offers, m)?)?;
     m.add_function(wrap_pyfunction!(assess_quality, m)?)?;
     m.add("__core_version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
