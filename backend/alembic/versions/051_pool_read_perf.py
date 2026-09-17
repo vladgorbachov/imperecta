@@ -29,12 +29,18 @@ dim_product) and read endpoints started hitting the 2-minute statement_timeout
    harvest volume grows; new partitions inherit it from the parent.
 
 Locking (agreed with the scraper session — enumeration writes fact_listing
-continuously): fact_listing index builds run CREATE INDEX CONCURRENTLY inside
-an autocommit block so inserts are never blocked. fact_price is a partitioned
-parent where CREATE/DROP INDEX CONCURRENTLY is not supported by Postgres; the
-table holds ~1k rows while harvest ramps up, so the brief lock of a plain
-build is safe, and the new index is created before the superseded one is
-dropped.
+continuously): index builds are plain in-transaction CREATE INDEX. The
+CONCURRENTLY + autocommit_block variant is impossible in this project's
+alembic env: migrations run through an async engine bridge where alembic
+does not own a committable transaction, and autocommit_block() dies with
+AssertionError (observed on deploys e592d972/7fa6e57e/80094a3e,
+2026-09-18). A plain build takes a SHARE lock for the build duration
+(seconds to low tens of seconds at 1.4M rows); worker writes queue behind
+it (their statement_timeout is 300s) instead of failing. fact_price is a
+partitioned parent where CONCURRENTLY is unsupported anyway; the new index
+is created before the superseded one is dropped. The migration session
+raises its own statement_timeout because env.py's default (60s) is too
+tight for the fact_listing builds.
 
 Client roles (anon/authenticated) are revoked on mv_pool_stats; imperecta_app
 gets SELECT. mv_pool_stats is intentionally NOT added to
@@ -53,19 +59,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.get_context().autocommit_block():
-        # -- kpi-history pool entries: count(created_at < start) + group by day.
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_listing_pool_entry_created "
-            "ON fact_listing (created_at) "
-            "WHERE is_active = TRUE AND page_role = 'product'"
-        )
-        # -- priced-listing counts / price sorts (tiny while harvest ramps up).
-        op.execute(
-            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_listing_active_priced "
-            "ON fact_listing (last_price) "
-            "WHERE is_active = TRUE AND last_price IS NOT NULL"
-        )
+    op.execute("SET LOCAL statement_timeout = '600s'")
+    # -- kpi-history pool entries: count(created_at < start) + group by day.
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_listing_pool_entry_created "
+        "ON fact_listing (created_at) "
+        "WHERE is_active = TRUE AND page_role = 'product'"
+    )
+    # -- priced-listing counts / price sorts (tiny while harvest ramps up).
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_listing_active_priced "
+        "ON fact_listing (last_price) "
+        "WHERE is_active = TRUE AND last_price IS NOT NULL"
+    )
 
     # -- latest-scrape-per-day dedupe order; supersedes the 2-column prefix.
     #    Partitioned parent: CONCURRENTLY unsupported, plain build is safe at
@@ -136,8 +142,5 @@ def downgrade() -> None:
         "ON fact_price (listing_id, date_id)"
     )
     op.execute("DROP INDEX IF EXISTS idx_fact_price_listing_date_scraped")
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_listing_active_priced")
-        op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS idx_listing_pool_entry_created"
-        )
+    op.execute("DROP INDEX IF EXISTS idx_listing_active_priced")
+    op.execute("DROP INDEX IF EXISTS idx_listing_pool_entry_created")

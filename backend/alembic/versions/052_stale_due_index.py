@@ -18,8 +18,9 @@ The worker's stale query (scraper/tasks.py) has two branches:
      ever dominates, the clean fix is a real next_due_at column maintained
      by the denorm gate writes — not an expression index.
 
-Both indexes build CONCURRENTLY inside an autocommit block: enumeration
-and harvest write fact_listing continuously and must not be blocked.
+Plain in-transaction builds (not CONCURRENTLY): autocommit_block() is
+broken under this project's async alembic env (see 051's docstring);
+worker writes queue behind the SHARE lock for the seconds the builds take.
 """
 
 from __future__ import annotations
@@ -33,24 +34,23 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute(
-            """
-            CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_listing_never_checked
-            ON fact_listing (marketplace_id)
-            WHERE is_active AND last_checked_at IS NULL
-            """
-        )
-        op.execute(
-            """
-            CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_listing_checked_active
-            ON fact_listing (last_checked_at)
-            WHERE is_active AND last_checked_at IS NOT NULL
-            """
-        )
+    op.execute("SET LOCAL statement_timeout = '600s'")
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_listing_never_checked
+        ON fact_listing (marketplace_id)
+        WHERE is_active AND last_checked_at IS NULL
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_listing_checked_active
+        ON fact_listing (last_checked_at)
+        WHERE is_active AND last_checked_at IS NOT NULL
+        """
+    )
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_listing_never_checked")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_listing_checked_active")
+    op.execute("DROP INDEX IF EXISTS idx_listing_never_checked")
+    op.execute("DROP INDEX IF EXISTS idx_listing_checked_active")
