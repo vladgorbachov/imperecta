@@ -117,6 +117,39 @@ def _redis_acquire_sync() -> bool:
     return int(result) == 1
 
 
+# Daily usage counters for the real-cost report (roadmap item 1): every
+# granted token increments proxy_provider:usage:<YYYYMMDD>. Best-effort —
+# an accounting failure never blocks a scrape; billing truth stays with the
+# provider's own dashboard, this is the operational estimate.
+PROXY_USAGE_KEY_PREFIX = "proxy_provider:usage:"
+_USAGE_TTL_SECONDS = 90 * 24 * 3600
+
+
+def _record_usage_sync() -> None:
+    try:
+        client = _get_redis()
+        key = PROXY_USAGE_KEY_PREFIX + time.strftime("%Y%m%d", time.gmtime())
+        client.incr(key)
+        client.expire(key, _USAGE_TTL_SECONDS)
+    except Exception:  # noqa: BLE001 - accounting must never fail a fetch
+        pass
+
+
+def read_usage_days_sync(days: int = 14) -> dict[str, int]:
+    """{YYYYMMDD: granted tokens} for the last `days` days (missing = 0)."""
+    client = _get_redis()
+    out: dict[str, int] = {}
+    now = time.time()
+    keys = [
+        time.strftime("%Y%m%d", time.gmtime(now - offset * 86400))
+        for offset in range(days)
+    ]
+    values = client.mget([PROXY_USAGE_KEY_PREFIX + day for day in keys])
+    for day, value in zip(keys, values):
+        out[day] = int(value) if value else 0
+    return out
+
+
 async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) -> bool:
     """Acquire one proxy-provider outbound token before issuing a provider POST.
 
@@ -131,6 +164,7 @@ async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) 
     try:
         acquired = await asyncio.to_thread(_redis_acquire_sync)
         if acquired:
+            await asyncio.to_thread(_record_usage_sync)
             return True
         wait_sec = 1.0 / proxy_provider_max_rps()
         if remaining is not None and wait_sec > remaining:
@@ -140,6 +174,8 @@ async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) 
             if _deadline_remaining(deadline_monotonic) <= 0:
                 return False
         acquired = await asyncio.to_thread(_redis_acquire_sync)
+        if acquired:
+            await asyncio.to_thread(_record_usage_sync)
         return acquired
     except Exception:
         return await _acquire_local_fallback(deadline_monotonic)

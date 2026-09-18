@@ -85,3 +85,23 @@ def test_beat_schedule_has_enrichment_tick():
         celery_app.conf.beat_schedule["taxonomy-enrich"]["task"]
         == "taxonomy_enrich_tick"
     )
+
+
+def test_proxy_usage_endpoint_registered():
+    from app.main import app
+
+    schema = app.openapi()
+    assert "get" in schema["paths"].get("/api/admin/parsing/proxy-usage", {})
+
+
+def test_usage_days_reader_shapes():
+    from unittest.mock import MagicMock, patch
+
+    from app.modules.scraper import proxy_provider_limiter as ppl
+
+    client = MagicMock()
+    client.mget.return_value = ["5", None, "12"]
+    with patch.object(ppl, "_get_redis", return_value=client):
+        out = ppl.read_usage_days_sync(3)
+    assert len(out) == 3
+    assert sorted(out.values()) == [0, 5, 12]

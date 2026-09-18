@@ -119,6 +119,42 @@ async def trigger_harvest_lists(
     return {"dispatched": dispatched, "pages_per_shop": body.pages_per_shop}
 
 
+@router.get("/proxy-usage")
+async def get_proxy_usage(
+    _current_user: CurrentSuperuser,
+    days: int = Query(14, ge=1, le=90),
+) -> dict:
+    """Real-cost estimate of proxy-provider usage (roadmap item 1).
+
+    Counts tokens GRANTED by our limiter per UTC day; the provider's own
+    dashboard remains the billing truth — this is the operational estimate
+    (cost = requests x PROXY_COST_PER_1K, default 1.9 USD).
+    """
+    import anyio
+
+    from app.config import Settings
+    from app.modules.scraper.proxy_provider_limiter import read_usage_days_sync
+
+    per_day = await anyio.to_thread.run_sync(read_usage_days_sync, days)
+    cost_per_1k = float(getattr(Settings(), "proxy_cost_per_1k", None) or 1.9)
+    total = sum(per_day.values())
+    return {
+        "days": days,
+        "per_day": [
+            {
+                "date": day,
+                "requests": count,
+                "est_cost_usd": round(count * cost_per_1k / 1000, 2),
+            }
+            for day, count in sorted(per_day.items(), reverse=True)
+        ],
+        "total_requests": total,
+        "est_total_cost_usd": round(total * cost_per_1k / 1000, 2),
+        "cost_per_1k_usd": cost_per_1k,
+        "note": "limiter-side estimate; provider dashboard is billing truth",
+    }
+
+
 @router.get("/pipeline-runs")
 async def get_pipeline_runs(
     _current_user: CurrentSuperuser,
