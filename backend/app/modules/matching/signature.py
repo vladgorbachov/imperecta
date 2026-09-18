@@ -78,6 +78,23 @@ def extract_match_signature(
     if not tokens:
         return None
 
+    # Brand FIRST: the brand token must never act as a model code — mixed
+    # alnum brands (a4tech, mi5) otherwise mint brand-wide mega-groups.
+    brand: str | None = None
+    confidence = CONFIDENCE_HEURISTIC_BRAND
+    for token in tokens:
+        if token in known_brands:
+            brand = token
+            confidence = CONFIDENCE_KNOWN_BRAND
+            break
+    if brand is None:
+        for token in tokens:
+            if _is_alpha(token) and len(token) >= 3 and token not in _STOPWORDS:
+                brand = token
+                break
+    if brand is None:
+        return None
+
     attrs: list[str] = []
     codes: list[str] = []
     seen_codes: set[str] = set()
@@ -88,7 +105,7 @@ def extract_match_signature(
             codes.append(code)
 
     for token in tokens:
-        if token in _STOPWORDS:
+        if token in _STOPWORDS or token == brand:
             continue
         if _is_unit_token(token):
             attrs.append(token)
@@ -104,16 +121,13 @@ def extract_match_signature(
     # Neighbor joins: "galaxy s24" -> "galaxys24", "sfd 950ss" -> "sfd950ss".
     # Same trick as numeric_edge_tokens in listing_page: shops disagree on
     # where the space goes inside a model name; the joined form does not.
-    # Never join off a brand-position token (known brand, or the first
-    # alphabetic token): "sencor sfd950ss" must not mint "sencorsfd950ss"
-    # while "sencor sfd 950ss" mints "sfd950ss" — the keys would diverge.
-    first_alpha = next(
-        (t for t in tokens if _is_alpha(t) and t not in _STOPWORDS), None
-    )
+    # Never join across the brand token (either side): "sencor sfd950ss"
+    # must not mint "sencorsfd950ss" while "sencor sfd 950ss" mints
+    # "sfd950ss" — the keys would diverge with word order.
     for left, right in zip(tokens, tokens[1:]):
         if not (_is_alpha(left) and len(left) >= 2 and left not in _STOPWORDS):
             continue
-        if left in known_brands or left == first_alpha:
+        if left == brand or right == brand:
             continue
         if _is_unit_token(right) or right in _STOPWORDS:
             continue
@@ -124,21 +138,6 @@ def extract_match_signature(
             _add_code(joined)
 
     if not codes:
-        return None
-
-    brand: str | None = None
-    confidence = CONFIDENCE_HEURISTIC_BRAND
-    for token in tokens:
-        if token in known_brands:
-            brand = token
-            confidence = CONFIDENCE_KNOWN_BRAND
-            break
-    if brand is None:
-        for token in tokens:
-            if _is_alpha(token) and len(token) >= 3 and token not in _STOPWORDS:
-                brand = token
-                break
-    if brand is None:
         return None
 
     # Strongest code: mixed beats pure-digit (more entropy), then longest,

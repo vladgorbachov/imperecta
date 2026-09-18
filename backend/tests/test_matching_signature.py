@@ -22,7 +22,7 @@ from app.modules.matching.signature import (
     match_group_id,
 )
 
-BRANDS = frozenset({"sencor", "samsung", "xiaomi"})
+BRANDS = frozenset({"sencor", "samsung", "xiaomi", "a4tech"})
 
 
 def test_junk_slug_names_are_unmatchable() -> None:
@@ -85,6 +85,17 @@ def test_style_number_is_weak_code() -> None:
     assert "1109226" in sig["codes"]
 
 
+def test_mixed_brand_token_never_becomes_the_code() -> None:
+    """Incident: mixed alnum brands (a4tech) minted brand-wide mega-groups."""
+    brands = frozenset({"a4tech"})
+    sig = extract_match_signature("a4tech bloody r73 ultra duo", brands)
+    assert sig is not None
+    assert sig["brand"] == "a4tech"
+    assert sig["code"] == "bloodyr73"
+    assert "a4tech" not in sig["codes"]
+    assert extract_match_signature("klaviatura a4tech kr 92", brands) is None
+
+
 def test_no_code_means_unmatchable_even_with_brand() -> None:
     assert extract_match_signature("rohelisest plastikust tuhatoos", BRANDS) is None
 
@@ -127,6 +138,8 @@ def test_rust_parity_when_built() -> None:
         "rohelisest plastikust tuhatoos",
         "colmi smartring colmi r12 20mm 10 czarny.bhtml",
         "haier sxi1c3bf2bt 01 d542718",
+        "a4tech bloody r73 ultra duo",
+        "klaviatura a4tech kr 92",
     ]
     for name in cases:
         py = extract_match_signature(name, BRANDS)

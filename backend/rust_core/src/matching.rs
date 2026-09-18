@@ -113,66 +113,8 @@ pub fn extract_match_signature(
         return None;
     }
 
-    let mut attrs: Vec<String> = Vec::new();
-    let mut codes: Vec<String> = Vec::new();
-    let mut add_code = |codes: &mut Vec<String>, code: String| {
-        if !codes.contains(&code) {
-            codes.push(code);
-        }
-    };
-
-    for token in &tokens {
-        if is_stopword(token) {
-            continue;
-        }
-        if is_unit_token(token) {
-            attrs.push(token.clone());
-            continue;
-        }
-        if is_mixed(token) && token.len() >= MIXED_MIN_LEN {
-            add_code(&mut codes, token.clone());
-        } else if is_digit(token)
-            && (PURE_DIGIT_MIN..=PURE_DIGIT_MAX).contains(&token.len())
-        {
-            add_code(&mut codes, token.clone());
-        }
-    }
-
-    // Neighbor joins: "galaxy s24" -> "galaxys24" (shops disagree on the
-    // space inside a model name; the joined form does not). Never join off
-    // a brand-position token (known brand, or the first alphabetic token):
-    // the group keys would diverge with word order otherwise.
-    let first_alpha = tokens
-        .iter()
-        .find(|t| is_alpha(t) && !is_stopword(t))
-        .cloned();
-    for pair in tokens.windows(2) {
-        let (left, right) = (&pair[0], &pair[1]);
-        if !(is_alpha(left) && left.len() >= 2 && !is_stopword(left)) {
-            continue;
-        }
-        if known_brands.iter().any(|b| b == left)
-            || first_alpha.as_deref() == Some(left.as_str())
-        {
-            continue;
-        }
-        if is_unit_token(right) || is_stopword(right) {
-            continue;
-        }
-        let starts_digit = right.bytes().next().is_some_and(|b| b.is_ascii_digit());
-        if !(starts_digit || is_mixed(right)) {
-            continue;
-        }
-        let joined = format!("{left}{right}");
-        if joined.len() >= JOINED_MIN_LEN && !is_unit_token(&joined) {
-            add_code(&mut codes, joined);
-        }
-    }
-
-    if codes.is_empty() {
-        return None;
-    }
-
+    // Brand FIRST: the brand token must never act as a model code — mixed
+    // alnum brands (a4tech, mi5) otherwise mint brand-wide mega-groups.
     let mut brand: Option<&str> = None;
     let mut confidence = CONFIDENCE_HEURISTIC_BRAND;
     for token in &tokens {
@@ -191,6 +133,60 @@ pub fn extract_match_signature(
         }
     }
     let brand = brand?;
+
+    let mut attrs: Vec<String> = Vec::new();
+    let mut codes: Vec<String> = Vec::new();
+    let mut add_code = |codes: &mut Vec<String>, code: String| {
+        if !codes.contains(&code) {
+            codes.push(code);
+        }
+    };
+
+    for token in &tokens {
+        if is_stopword(token) || token == brand {
+            continue;
+        }
+        if is_unit_token(token) {
+            attrs.push(token.clone());
+            continue;
+        }
+        if is_mixed(token) && token.len() >= MIXED_MIN_LEN {
+            add_code(&mut codes, token.clone());
+        } else if is_digit(token)
+            && (PURE_DIGIT_MIN..=PURE_DIGIT_MAX).contains(&token.len())
+        {
+            add_code(&mut codes, token.clone());
+        }
+    }
+
+    // Neighbor joins: "galaxy s24" -> "galaxys24" (shops disagree on the
+    // space inside a model name; the joined form does not). Never join
+    // across the brand token (either side): the group keys would diverge
+    // with word order otherwise.
+    for pair in tokens.windows(2) {
+        let (left, right) = (&pair[0], &pair[1]);
+        if !(is_alpha(left) && left.len() >= 2 && !is_stopword(left)) {
+            continue;
+        }
+        if left == brand || right == brand {
+            continue;
+        }
+        if is_unit_token(right) || is_stopword(right) {
+            continue;
+        }
+        let starts_digit = right.bytes().next().is_some_and(|b| b.is_ascii_digit());
+        if !(starts_digit || is_mixed(right)) {
+            continue;
+        }
+        let joined = format!("{left}{right}");
+        if joined.len() >= JOINED_MIN_LEN && !is_unit_token(&joined) {
+            add_code(&mut codes, joined);
+        }
+    }
+
+    if codes.is_empty() {
+        return None;
+    }
 
     // Strongest code: mixed beats pure-digit, then longest, then
     // lexicographic — identical ordering to the Python reference sort key
@@ -276,6 +272,18 @@ mod tests {
     fn style_number_is_weak_code() {
         let s = sig("tricou under armour ua big logo ss 1109226", &[]).unwrap();
         assert!(s.codes.contains(&"1109226".to_string()));
+    }
+
+    #[test]
+    fn mixed_brand_token_never_becomes_the_code() {
+        // Incident: "a4tech" (mixed alnum brand) minted brand-wide
+        // mega-groups keyed "a4tech|a4tech".
+        let s = sig("a4tech bloody r73 ultra duo", &["a4tech"]).unwrap();
+        assert_eq!(s.brand, "a4tech");
+        assert_eq!(s.code, "bloodyr73");
+        assert!(!s.codes.contains(&"a4tech".to_string()));
+        // No model code beyond the brand token -> honest unmatched.
+        assert_eq!(sig("klaviatura a4tech kr 92", &["a4tech"]), None);
     }
 
     #[test]
