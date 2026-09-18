@@ -48,6 +48,10 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
             },
         ),
     },
+    "dim_category": {
+        # P13 enrichment: EN translation of the category label.
+        "category_translate": frozenset({"name_en"}),
+    },
     "dim_product": {
         "product_enrich": frozenset(
             {

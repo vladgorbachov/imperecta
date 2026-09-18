@@ -44,4 +44,11 @@ celery_app.conf.beat_schedule = {
         "task": "scrape_all_pool_products",
         "schedule": crontab(minute="*/30"),
     },
+    # Taxonomy enrichment (P13): budget-capped Claude batches — categories →
+    # name_en, products → product_type(+en)/title_en, priced-first. Each tick
+    # spends at most 1 + PRODUCT_BATCHES_PER_TICK cheap-model calls.
+    "taxonomy-enrich": {
+        "task": "taxonomy_enrich_tick",
+        "schedule": crontab(minute="*/20"),
+    },
 }

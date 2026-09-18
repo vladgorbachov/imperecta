@@ -1,0 +1,87 @@
+"""P13 enrichment: prompt/reply parsing, gate doors, honest-null discipline."""
+
+from __future__ import annotations
+
+import json
+
+from app.modules.data_firewall.update_validator import SCRAPE_UPDATE_ALLOWLIST
+from app.modules.enrichment import taxonomy as tx
+
+
+def test_category_reply_parsing_tolerates_fences_and_garbage():
+    names = {"0": "LAPTOPURI", "1": "CEASURI INTELIGENTE"}
+    reply = '```json\n{"0": "Laptops", "1": "Smartwatches", "9": "Ghost"}\n```'
+    parsed = tx.parse_category_reply(reply, names)
+    assert parsed == {"0": "Laptops", "1": "Smartwatches"}
+    assert tx.parse_category_reply("not json at all", names) == {}
+
+
+def test_product_reply_requires_type_en_and_drops_unknown_indexes():
+    titles = {"0": "Laptop Lenovo IdeaPad 5", "1": "Hõbedane 925 ripats"}
+    reply = json.dumps(
+        {
+            "0": {"type": "laptop", "type_en": "laptop", "title_en": "Lenovo IdeaPad 5 Laptop"},
+            "1": {"type": "ripats", "type_en": ""},
+            "7": {"type_en": "ghost"},
+        }
+    )
+    parsed = tx.parse_product_reply(reply, titles)
+    assert set(parsed.keys()) == {"0"}
+    assert parsed["0"]["product_type_en"] == "laptop"
+    assert parsed["0"]["title_en"] == "Lenovo IdeaPad 5 Laptop"
+
+
+def test_prompts_embed_payload_json():
+    names = {"0": "Sülearvutid"}
+    assert "Sülearvutid" in tx.build_category_prompt(names)
+    assert "Sülearvutid" in tx.build_product_prompt(names)
+
+
+def test_gate_doors_cover_enrichment_columns():
+    assert SCRAPE_UPDATE_ALLOWLIST["dim_category"]["category_translate"] == frozenset(
+        {"name_en"}
+    )
+    enrich = SCRAPE_UPDATE_ALLOWLIST["dim_product"]["product_enrich"]
+    for col in ("product_type", "product_type_en", "title_en"):
+        assert col in enrich
+
+
+def test_reuse_pass_copies_donor_columns_through_gate():
+    from unittest.mock import MagicMock, patch
+    from uuid import uuid4
+
+    target_id, donor_type, donor_type_en, donor_title = (
+        uuid4(),
+        "sülearvuti",
+        "laptop",
+        "Lenovo IdeaPad 5 Laptop",
+    )
+    db = MagicMock()
+    db.execute.return_value.all.return_value = [
+        (target_id, donor_type, donor_type_en, donor_title),
+        (uuid4(), None, "smartwatch", None),
+    ]
+    with patch("app.database.sync_session_factory", return_value=db), patch.object(
+        tx, "write_product_types_sync", return_value=2
+    ) as wp:
+        written = tx.reuse_existing_enrichment_sync(500)
+    assert written == 2
+    updates = wp.call_args.args[0]
+    assert updates[str(target_id)] == {
+        "product_type_en": "laptop",
+        "product_type": "sülearvuti",
+        "title_en": "Lenovo IdeaPad 5 Laptop",
+    }
+    # Sparse donor: only the guaranteed column travels; nothing fabricated.
+    sparse = [v for v in updates.values() if v.get("product_type_en") == "smartwatch"][0]
+    assert "product_type" not in sparse and "title_en" not in sparse
+
+
+def test_beat_schedule_has_enrichment_tick():
+    from app.workers.celery_app import celery_app  # noqa: PLC0415
+
+    assert "taxonomy-enrich" in celery_app.conf.beat_schedule
+    assert (
+        celery_app.conf.beat_schedule["taxonomy-enrich"]["task"]
+        == "taxonomy_enrich_tick"
+    )
