@@ -24,12 +24,21 @@ table {
   border-spacing: 0;
 }
 thead th {
-  background: var(--surface-sunken-bg);
+  /* Sticky header: floats at the top of the scroll container while rows
+     scroll under it. Background must be OPAQUE (tint layered over the solid
+     surface color), otherwise rows bleed through. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background:
+    linear-gradient(var(--surface-sunken-bg), var(--surface-sunken-bg)),
+    var(--background-surface);
   color: var(--foreground-muted);
   font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
+  box-shadow: 0 1px 0 var(--border-strong);
 }
 /* Sign-based row tint (opt-in via data-trend on the row).
    Canon semantics: price up = red (alert), price down = green (opportunity). */
