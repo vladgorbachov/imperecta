@@ -369,6 +369,16 @@ class DimProduct(Base):
     title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sku_universal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mpn: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Cross-shop matching (migration 061): deterministic uuid5 group over
+    # (brand token, strongest model code); method 'brand_model'|'unmatched'
+    # (reserved: 'gtin','title_sim'); NULL method = not yet processed.
+    match_group_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    match_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    match_confidence: Mapped[float | None] = mapped_column(
+        Numeric(3, 2), nullable=True
+    )
     category_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("dim_category.id", ondelete="SET NULL"),

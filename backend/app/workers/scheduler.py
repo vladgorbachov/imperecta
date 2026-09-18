@@ -58,4 +58,11 @@ celery_app.conf.beat_schedule = {
         "task": "harvest_tick",
         "schedule": crontab(minute="*/30"),
     },
+    # Cross-shop matching (roadmap item 3): drains match_method IS NULL
+    # products into deterministic brand+model groups, 10k per tick — full
+    # 1.75M pool in ~30h, then incremental on new onboardings.
+    "product-match": {
+        "task": "product_match_tick",
+        "schedule": crontab(minute="*/10"),
+    },
 }

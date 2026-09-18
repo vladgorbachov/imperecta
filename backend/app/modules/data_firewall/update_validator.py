@@ -68,6 +68,15 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
                 "title_en",
             },
         ),
+        # Cross-shop matching (roadmap item 3): group id + method + score,
+        # written only by the matching engine (docs/MATCHING_PLAN.md).
+        "product_match": frozenset(
+            {
+                "match_group_id",
+                "match_method",
+                "match_confidence",
+            },
+        ),
     },
 }
 

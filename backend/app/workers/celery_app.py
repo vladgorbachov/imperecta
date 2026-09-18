@@ -65,6 +65,7 @@ celery_app.conf.include = [
     "app.workers.onboarding_tasks",
     "app.workers.harvest_tasks",
     "app.workers.enrichment_tasks",
+    "app.workers.matching_tasks",
 ]
 
 # Load beat schedule from scheduler module

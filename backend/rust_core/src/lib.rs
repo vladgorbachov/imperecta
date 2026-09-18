@@ -12,6 +12,7 @@
 
 mod jsonld;
 mod listing_page;
+mod matching;
 mod pricing;
 mod quality;
 
@@ -146,6 +147,33 @@ fn extract_list_offers<'py>(
 }
 
 
+/// Extract a cross-shop match signature from a normalized product name.
+/// Returns None when the name is unmatchable (no brand token or no model
+/// code); see docs/MATCHING_PLAN.md slice M1.
+#[pyfunction]
+#[pyo3(signature = (name_normalized, known_brands))]
+fn extract_match_signature<'py>(
+    py: Python<'py>,
+    name_normalized: Option<&str>,
+    known_brands: Vec<String>,
+) -> PyResult<Option<Bound<'py, PyDict>>> {
+    let Some(name) = name_normalized else {
+        return Ok(None);
+    };
+    match matching::extract_match_signature(name, &known_brands) {
+        None => Ok(None),
+        Some(sig) => {
+            let out = PyDict::new(py);
+            out.set_item("brand", sig.brand)?;
+            out.set_item("code", sig.code)?;
+            out.set_item("codes", PyList::new(py, &sig.codes)?)?;
+            out.set_item("attrs", PyList::new(py, &sig.attrs)?)?;
+            out.set_item("confidence", sig.confidence)?;
+            Ok(Some(out))
+        }
+    }
+}
+
 #[pymodule]
 fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_price_text, m)?)?;
@@ -155,6 +183,7 @@ fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(currency_token_is_ambiguous, m)?)?;
     m.add_function(wrap_pyfunction!(extract_jsonld, m)?)?;
     m.add_function(wrap_pyfunction!(extract_list_offers, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_match_signature, m)?)?;
     m.add_function(wrap_pyfunction!(assess_quality, m)?)?;
     m.add("__core_version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
