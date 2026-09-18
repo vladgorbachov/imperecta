@@ -1,6 +1,8 @@
 /**
- * Top bar: hamburger (mobile), theme toggle, notifications, avatar.
- * Market scope controls live in the dashboard ScopeBar, not here.
+ * Top bar: hamburger (mobile), page slot, theme toggle, notifications, avatar.
+ * The left side is a portal target (#header-page-slot) pages fill with their
+ * own controls — the dashboard mounts its ScopeBar there, so scope and chrome
+ * share one header row instead of stacking two bars.
  */
 
 import { useTranslation } from "react-i18next";
@@ -51,7 +53,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
     <header
       className="flex h-16 min-h-[44px] min-w-0 shrink-0 items-center gap-1.5 overflow-hidden border-b border-[var(--glass-border)] px-3 safe-area-top sm:gap-2 sm:px-4 md:px-5"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div id="header-page-slot" className="flex min-w-0 flex-1 items-center gap-2">
         {onMenuClick && (
           <Button
             variant="ghost"

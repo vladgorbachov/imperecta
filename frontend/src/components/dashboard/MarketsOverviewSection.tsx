@@ -1,7 +1,8 @@
 /**
  * Overview dashboard — the command center.
- * Answers "what changed and does it need action": scope bar, KPI band,
- * movers feed, price-trend hero, coverage, alerts stream, compact news.
+ * Answers "what changed and does it need action": scope bar (portaled into
+ * the header), KPI band, movers feed, price-trend hero, coverage,
+ * alerts + change distribution, market pulse.
  * The catalog lives on the Products page, not here.
  */
 
@@ -381,13 +382,15 @@ export function MarketsOverviewSection() {
         <div className="min-w-0 lg:col-span-8">
           <MarketTrendWidget countryCode={selectedCountry} chartHeight={300} />
         </div>
-        <div className="min-w-0 lg:col-span-4">
+        {/* Bottom row: fixed height so all three widgets cut at the same line;
+            each widget scrolls or loops internally instead of stretching. */}
+        <div className="min-w-0 lg:col-span-4 lg:h-[520px]">
           <MarketCoverageWidget countryCode={selectedCountry} />
         </div>
-        <div className="min-w-0 lg:col-span-4">
-          <AlertsStreamWidget />
+        <div className="min-w-0 lg:col-span-4 lg:h-[520px]">
+          <AlertsStreamWidget countryCode={selectedCountry} />
         </div>
-        <div className="min-w-0 lg:col-span-4">
+        <div className="min-w-0 lg:col-span-4 lg:h-[520px]">
           <MarketPulseWidget countryCode={selectedCountry} />
         </div>
       </div>

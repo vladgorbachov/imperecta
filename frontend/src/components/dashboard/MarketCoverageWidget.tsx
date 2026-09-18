@@ -151,7 +151,7 @@ export function MarketCoverageWidget({
           className="py-8"
         />
       ) : (
-        <ul className="space-y-3">
+        <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {sortedRows.map((row) => (
             <CoverageRowBar key={row.key} row={row} mode={data?.mode ?? "countries"} />
           ))}

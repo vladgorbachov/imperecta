@@ -24,8 +24,10 @@ import { cn } from "@/lib/utils";
 
 const TOP_MARKETPLACES = 6;
 const STREAM_LIMIT = 14;
-/** Auto-scroll only when the list is long enough to loop believably. */
-const STREAM_MIN_FOR_LOOP = 6;
+/** Loop whenever there is anything to cycle — the stream must never sit still. */
+const STREAM_MIN_FOR_LOOP = 2;
+/** Rows one animation half must span so no blank gap shows during the loop. */
+const STREAM_TARGET_ROWS = 14;
 
 function PulseRow({ item, locale }: { item: MoverItem; locale: string }) {
   const change = safeNumber(item.price_change_pct);
@@ -113,6 +115,12 @@ export function MarketPulseWidget({ countryCode }: { countryCode: string | null 
 
   const moves = movers?.items ?? [];
   const loop = moves.length >= STREAM_MIN_FOR_LOOP;
+  /* The -50% translate loop is seamless only when the list is an even number
+     of identical copies; enough copies also guarantee the visible window is
+     always covered, however short the feed. */
+  const streamCopies = loop
+    ? 2 * Math.max(1, Math.ceil(STREAM_TARGET_ROWS / moves.length))
+    : 1;
 
   return (
     <div
@@ -158,29 +166,28 @@ export function MarketPulseWidget({ countryCode }: { countryCode: string | null 
           {t("movements.emptyHint")}
         </p>
       ) : (
-        <div
-          className="relative min-h-0 flex-1 overflow-hidden"
-          style={{ maskImage: "linear-gradient(#000 82%, transparent)" }}
-        >
-          <ul className={cn(loop && "pulse-stream")}>
-            {moves.map((item) => (
-              <PulseRow
-                key={`${item.product_name}-${item.changed_at}`}
-                item={item}
-                locale={locale}
-              />
-            ))}
-            {/* Second copy makes the loop seamless (translateY(-50%)). */}
-            {loop
-              ? moves.map((item) => (
+        <div className="relative min-h-0 flex-1">
+          {/* Absolute fill: the duplicated loop content must never define the
+              widget (and therefore the grid row) height. */}
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={{
+              maskImage:
+                "linear-gradient(transparent, #000 6%, #000 88%, transparent)",
+            }}
+          >
+            <ul className={cn(loop && "pulse-stream")}>
+              {Array.from({ length: streamCopies }, (_, copy) =>
+                moves.map((item) => (
                   <PulseRow
-                    key={`dup-${item.product_name}-${item.changed_at}`}
+                    key={`${copy}-${item.product_name}-${item.changed_at}`}
                     item={item}
                     locale={locale}
                   />
-                ))
-              : null}
-          </ul>
+                )),
+              )}
+            </ul>
+          </div>
         </div>
       )}
     </div>
