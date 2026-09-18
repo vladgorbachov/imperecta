@@ -3,10 +3,9 @@
  * catalog row without leaving the page (peek → page pattern).
  *
  * Shows everything the pool item already carries (image, description,
- * price, 24h change, recent-prices mini chart). Sections that need new
- * backend (full price history, cross-marketplace listings, alert rules)
- * render honest pending states — contracts are documented in
- * docs/FRONTEND_BACKEND_REQUESTS.md.
+ * price, 24h change), the fact_price history (P1), and the cross-shop
+ * price comparison from the data-ops service (P6,
+ * docs/P6_FRONTEND_SPEC.md).
  */
 
 import { useMemo, useState } from "react";
@@ -27,6 +26,7 @@ import {
   type PriceHistoryPeriod,
 } from "@/api/products";
 import { CreateAlertDialog } from "@/components/alerts/CreateAlertDialog";
+import { ComparisonSection } from "@/components/products/ComparisonSection";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { Button } from "@/components/ui/button";
@@ -295,13 +295,8 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
             )}
           </div>
 
-          {/* Cross-marketplace listings — backend pending */}
-          <div>
-            <p className="label-mono mb-1.5">{t("products.peek.listings")}</p>
-            <p className="text-sm text-muted-foreground">
-              {t("products.peek.listingsPending")}
-            </p>
-          </div>
+          {/* Cross-shop price comparison (P6, data-ops service) */}
+          <ComparisonSection listingId={item.id} enabled={open} />
 
           {/* Meta */}
           {item.last_checked_at ? (
