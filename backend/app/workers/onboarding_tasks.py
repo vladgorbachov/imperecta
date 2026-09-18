@@ -86,7 +86,10 @@ async def _enumerate(marketplace_code: str, max_urls: int) -> dict:
         await engine.dispose()
 
 
-@celery_app.task(name="sitemap_enumerate_marketplace", bind=True)
+# acks_late: a deploy's SIGTERM must not eat a queued/running enumeration —
+# url_hash dedupe makes reruns idempotent, so a visibility-timeout redelivery
+# after a worker death only picks up what the dead run missed.
+@celery_app.task(name="sitemap_enumerate_marketplace", bind=True, acks_late=True)
 def sitemap_enumerate_marketplace(
     self,
     marketplace_code: str,

@@ -135,7 +135,10 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
     }
 
 
-@celery_app.task(name="harvest_list_pages", bind=True)
+# acks_late: a deploy's SIGTERM must not eat a queued/running harvest — the
+# task is idempotent (no_change dedupe + url_hash onboarding dedupe), so a
+# visibility-timeout redelivery after a worker death is safe and desired.
+@celery_app.task(name="harvest_list_pages", bind=True, acks_late=True)
 def harvest_list_pages(
     self,
     marketplace_code: str,
