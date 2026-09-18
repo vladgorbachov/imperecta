@@ -113,44 +113,40 @@ fn encode_cursor(direction: &str, value: &Option<String>, id: &Uuid) -> String {
 }
 
 /// Keyset predicate with NULLS LAST semantics on both directions.
+/// `value_bind`/`id_bind` are the 1-based bind positions assigned by the
+/// caller (value bind is absent for NULL-valued cursors).
 fn keyset_where(
     spec: &SortSpec,
     cur: &CursorPayload,
-    args: &mut Vec<String>,
+    value_bind: Option<usize>,
+    id_bind: usize,
 ) -> String {
     let col = spec.key_expr;
     // Forward = continue in the sort's own direction; backwards inverts.
     let forward = !cur.backwards;
     let after_op = if spec.desc == forward { "<" } else { ">" };
     let id_op = if forward { ">" } else { "<" };
-    match &cur.value {
-        Some(v) => {
-            args.push(v.clone());
-            let n = args.len() + 3; // first 3 binds are reserved (see caller)
+    match value_bind {
+        Some(n) => {
             let cast = spec.bind_cast;
             if forward {
                 // values first, NULL block after
                 format!(
-                    "(({col} {after_op} ${n}{cast}) OR ({col} = ${n}{cast} AND fl.id {id_op} ${id}) OR ({col} IS NULL))",
-                    id = n + 1
+                    "(({col} {after_op} ${n}{cast}) OR ({col} = ${n}{cast} AND fl.id {id_op} ${id_bind}) OR ({col} IS NULL))"
                 )
             } else {
                 format!(
-                    "(({col} {after_op} ${n}{cast}) OR ({col} = ${n}{cast} AND fl.id {id_op} ${id}))",
-                    id = n + 1
+                    "(({col} {after_op} ${n}{cast}) OR ({col} = ${n}{cast} AND fl.id {id_op} ${id_bind}))"
                 )
             }
         }
         None => {
-            args.push(String::new()); // placeholder, unused bind kept for shape
-            let n = args.len() + 3;
             if forward {
-                format!("(({col} IS NULL) AND fl.id {id_op} ${id})", id = n + 1)
+                format!("(({col} IS NULL) AND fl.id {id_op} ${id_bind})")
             } else {
-                // going back from the NULL tail: either earlier NULLs or any value
+                // going back from the NULL tail: earlier NULLs or any value
                 format!(
-                    "((({col} IS NULL) AND fl.id {id_op} ${id}) OR ({col} IS NOT NULL))",
-                    id = n + 1
+                    "((({col} IS NULL) AND fl.id {id_op} ${id_bind}) OR ({col} IS NOT NULL))"
                 )
             }
         }
@@ -182,7 +178,6 @@ SELECT fl.id,
        fl.is_active,
        dp.match_group_id,
        dp.match_method,
-       sp.points AS recent_prices,
        CAST(NULL AS text) AS keyset_dummy
 "#;
 
@@ -192,20 +187,26 @@ JOIN dim_product dp ON dp.id = fl.product_id
 JOIN dim_marketplace m ON m.id = fl.marketplace_id
 LEFT JOIN dim_brand b ON b.id = dp.brand_id
 LEFT JOIN dim_category c ON c.id = dp.category_id
-LEFT JOIN LATERAL (
-    SELECT jsonb_agg(jsonb_build_object(
-               'date', to_char(p.scraped_at, 'YYYY-MM-DD'),
-               'price', p.price::float8,
-               'currency', p.currency_code
-           ) ORDER BY p.scraped_at ASC) AS points
-    FROM (
-        SELECT fp.scraped_at, fp.price, fp.currency_code
-        FROM fact_price fp
-        WHERE fp.listing_id = fl.id
-        ORDER BY fp.scraped_at DESC
-        LIMIT 8
-    ) p
-) sp ON true
+"#;
+
+/// Sparklines for exactly the page's listings — the Python endpoint does
+/// the same second-query pattern: a LATERAL inside the top-N page query
+/// was observed to defeat the planner's early stop on the 2.4M table.
+const SPARKLINE_SQL: &str = r#"
+SELECT l.id AS listing_id,
+       (SELECT jsonb_agg(jsonb_build_object(
+                   'date', to_char(p.scraped_at, 'YYYY-MM-DD'),
+                   'price', p.price::float8,
+                   'currency', p.currency_code
+               ) ORDER BY p.scraped_at ASC)
+        FROM (
+            SELECT fp.scraped_at, fp.price, fp.currency_code
+            FROM fact_price fp
+            WHERE fp.listing_id = l.id
+            ORDER BY fp.scraped_at DESC
+            LIMIT 8
+        ) p) AS points
+FROM unnest($1::uuid[]) AS l(id)
 "#;
 
 fn row_to_item(r: &PgRow, display_currency: &str) -> Value {
@@ -217,7 +218,7 @@ fn row_to_item(r: &PgRow, display_currency: &str) -> Value {
         _ => (price, currency.clone(), price.is_some()),
     };
     let last_checked: Option<chrono::DateTime<chrono::Utc>> = r.get("last_checked_at");
-    let recent: Option<Value> = r.get("recent_prices");
+    let recent: Option<Value> = None;
     json!({
         "id": r.get::<Uuid, _>("id"),
         "product_id": r.get::<Uuid, _>("product_id"),
@@ -325,24 +326,51 @@ pub async fn pool_products(
         }
     }
 
-    // --- WHERE assembly ($1 listing-ids, $2 marketplace, $3 category) ----
-    let mut wheres: Vec<String> = vec!["fl.is_active".into(), "dp.is_active".into()];
-    wheres.push("($1::uuid[] IS NULL OR fl.id = ANY($1))".into());
-    wheres.push("($2::uuid IS NULL OR fl.marketplace_id = $2)".into());
-    wheres.push(
-        "($3::text IS NULL OR c.name ILIKE $3 OR c.name_en ILIKE $3 OR m.domain ILIKE $3)"
-            .into(),
-    );
+    // --- WHERE assembly: conditional clauses only — a "$n IS NULL OR ..."
+    // disjunction defeats partial-index proofs and generic plans on the
+    // 2.17M-row table (observed 25s scans). Bind indices are sequential.
+    let mut wheres: Vec<String> = vec!["fl.is_active".into()];
+    let mut bind_no = 0usize;
+    let ids_bind = search_listing_ids.as_ref().map(|_| {
+        bind_no += 1;
+        bind_no
+    });
+    if let Some(n) = ids_bind {
+        wheres.push(format!("fl.id = ANY(${n})"));
+    }
+    let mp_bind = params.marketplace_id.map(|_| {
+        bind_no += 1;
+        bind_no
+    });
+    if let Some(n) = mp_bind {
+        wheres.push(format!("fl.marketplace_id = ${n}"));
+    }
+    let cat_bind = params.category.as_ref().map(|_| {
+        bind_no += 1;
+        bind_no
+    });
+    if let Some(n) = cat_bind {
+        wheres.push(format!(
+            "(c.name ILIKE ${n} OR c.name_en ILIKE ${n} OR m.domain ILIKE ${n})"
+        ));
+    }
 
     let cursor = params
         .cursor
         .as_deref()
         .filter(|_| spec.keyset)
         .and_then(decode_cursor);
-    let mut extra_args: Vec<String> = Vec::new();
     let backwards = cursor.as_ref().map(|c| c.backwards).unwrap_or(false);
+    let mut keyset_value_bind: Option<usize> = None;
     if let Some(cur) = &cursor {
-        wheres.push(keyset_where(&spec, cur, &mut extra_args));
+        let vb = cur.value.as_ref().map(|_| {
+            bind_no += 1;
+            bind_no
+        });
+        keyset_value_bind = vb;
+        bind_no += 1;
+        let idb = bind_no;
+        wheres.push(keyset_where(&spec, cur, vb, idb));
     }
 
     let base_dir = if spec.desc { "DESC" } else { "ASC" };
@@ -370,21 +398,21 @@ pub async fn pool_products(
         sql.push_str(&format!(" OFFSET {offset}"));
     }
 
-    let mut query = sqlx::query(&sql)
-        .bind(&search_listing_ids)
-        .bind(params.marketplace_id)
-        .bind(params.category.as_ref().map(|c| format!("%{c}%")));
-    for (i, arg) in extra_args.iter().enumerate() {
-        // bind 4.. : keyset value (text-comparable) then cursor id
-        if cursor.as_ref().and_then(|c| c.value.as_ref()).is_some() || !arg.is_empty()
-        {
-            query = query.bind(arg.clone());
-        } else {
-            query = query.bind(Option::<String>::None);
+    let mut query = sqlx::query(&sql);
+    if let Some(ids) = &search_listing_ids {
+        query = query.bind(ids);
+    }
+    if let Some(mp) = params.marketplace_id {
+        query = query.bind(mp);
+    }
+    if let Some(cat) = &params.category {
+        query = query.bind(format!("%{cat}%"));
+    }
+    if let Some(cur) = &cursor {
+        if keyset_value_bind.is_some() {
+            query = query.bind(cur.value.clone().unwrap_or_default());
         }
-        if i == extra_args.len() - 1 {
-            query = query.bind(cursor.as_ref().map(|c| c.id));
-        }
+        query = query.bind(cur.id);
     }
     let rows = query.fetch_all(pool).await?;
     let mut items: Vec<Value> = rows
@@ -393,6 +421,33 @@ pub async fn pool_products(
         .collect();
     if backwards {
         items.reverse();
+    }
+
+    // Sparklines for the page (second bounded query, python-parity).
+    if !items.is_empty() {
+        let page_ids: Vec<Uuid> = items
+            .iter()
+            .filter_map(|i| i["id"].as_str().and_then(|s| s.parse().ok()))
+            .collect();
+        if let Ok(spark_rows) = sqlx::query(SPARKLINE_SQL)
+            .bind(&page_ids)
+            .fetch_all(pool)
+            .await
+        {
+            use std::collections::HashMap;
+            let mut by_id: HashMap<Uuid, Value> = HashMap::new();
+            for r in &spark_rows {
+                let id: Uuid = r.get("listing_id");
+                let points: Option<Value> = r.get("points");
+                by_id.insert(id, points.unwrap_or_else(|| json!([])));
+            }
+            for item in items.iter_mut() {
+                if let Some(id) = item["id"].as_str().and_then(|s| s.parse::<Uuid>().ok()) {
+                    item["recent_prices"] =
+                        by_id.remove(&id).unwrap_or_else(|| json!([]));
+                }
+            }
+        }
     }
 
     // --- totals ----------------------------------------------------------
@@ -414,16 +469,27 @@ pub async fn pool_products(
             }
         }
         if total.is_none() {
+            // Count over the FILTER clauses only (index of the first keyset
+            // clause == 2 base + number of present filters).
+            let filter_clause_end = 1
+                + ids_bind.map(|_| 1).unwrap_or(0)
+                + mp_bind.map(|_| 1).unwrap_or(0)
+                + cat_bind.map(|_| 1).unwrap_or(0);
             let count_sql = format!(
                 "SELECT count(*) AS t FROM (SELECT fl.id {ITEM_FROM} WHERE {} LIMIT {COUNT_CAP}) s",
-                wheres[..5].join(" AND ")
+                wheres[..filter_clause_end].join(" AND ")
             );
-            let row = sqlx::query(&count_sql)
-                .bind(&search_listing_ids)
-                .bind(params.marketplace_id)
-                .bind(params.category.as_ref().map(|c| format!("%{c}%")))
-                .fetch_one(pool)
-                .await?;
+            let mut cq = sqlx::query(&count_sql);
+            if let Some(ids) = &search_listing_ids {
+                cq = cq.bind(ids);
+            }
+            if let Some(mp) = params.marketplace_id {
+                cq = cq.bind(mp);
+            }
+            if let Some(cat) = &params.category {
+                cq = cq.bind(format!("%{cat}%"));
+            }
+            let row = cq.fetch_one(pool).await?;
             let t: i64 = row.get("t");
             total_is_estimate = t >= COUNT_CAP || search_capped;
             total = Some(t.min(COUNT_CAP - 1));

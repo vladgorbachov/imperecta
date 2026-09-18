@@ -26,7 +26,10 @@ use axum::{
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    ConnectOptions, PgPool, Row,
+};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
@@ -434,6 +437,15 @@ async fn main() {
     let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET is required");
     let port: u16 = env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8090);
 
+    // Supabase pooler (pgbouncer, transaction mode) does not survive named
+    // prepared statements across transactions — the same reason the Python
+    // stack runs asyncpg with statement_cache_size=0. Cache capacity 0
+    // makes sqlx use unnamed statements everywhere.
+    let connect_opts: PgConnectOptions = db_url
+        .parse::<PgConnectOptions>()
+        .expect("invalid DATABASE_URL")
+        .statement_cache_capacity(0)
+        .log_slow_statements(tracing::log::LevelFilter::Warn, Duration::from_secs(5));
     let pool = PgPoolOptions::new()
         .max_connections(
             env::var("DATA_OPS_POOL_SIZE")
@@ -442,7 +454,7 @@ async fn main() {
                 .unwrap_or(5),
         )
         .acquire_timeout(Duration::from_secs(10))
-        .connect(&db_url)
+        .connect_with(connect_opts)
         .await
         .expect("database connection failed");
 

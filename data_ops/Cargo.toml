@@ -27,6 +27,7 @@ rayon = "1"
 memchr = "2"
 arc-swap = "1"
 base64 = "0.22"
+futures-util = "0.3"
 
 [profile.release]
 lto = true

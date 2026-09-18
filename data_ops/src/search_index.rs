@@ -19,7 +19,6 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 pub const REFRESH_SECS: u64 = 60;
-const SNAPSHOT_PAGE: i64 = 100_000;
 const REBUILD_RATIO: f64 = 0.10;
 /// Names are truncated for the arena: substring UX never needs more.
 const MAX_NAME_BYTES: usize = 120;
@@ -137,36 +136,27 @@ impl SearchIndex {
     }
 
     pub async fn build_full(&self, pool: &PgPool) -> Result<usize, sqlx::Error> {
-        let mut names: Vec<(String, Uuid)> = Vec::new();
-        let mut last: Option<Uuid> = None;
+        use futures_util::TryStreamExt as _;
+
+        // One streamed pass (no ORDER BY — entry order is irrelevant to a
+        // substring scan): a single sequential read instead of 20+ sorted
+        // page queries hammering the shared instance.
+        let mut names: Vec<(String, Uuid)> = Vec::with_capacity(2_200_000);
         let mut watermark = chrono::DateTime::<chrono::Utc>::MIN_UTC;
-        loop {
-            let rows = sqlx::query(
-                r#"SELECT id, name, updated_at FROM dim_product
-                   WHERE is_active AND ($1::uuid IS NULL OR id > $1)
-                   ORDER BY id LIMIT $2"#,
-            )
-            .bind(last)
-            .bind(SNAPSHOT_PAGE)
-            .fetch_all(pool)
-            .await?;
-            if rows.is_empty() {
-                break;
+        let mut stream = sqlx::query(
+            "SELECT id, name, updated_at FROM dim_product WHERE is_active",
+        )
+        .fetch(pool);
+        while let Some(r) = stream.try_next().await? {
+            let id: Uuid = r.get("id");
+            let name: String = r.get("name");
+            let ts: chrono::DateTime<chrono::Utc> = r.get("updated_at");
+            if ts > watermark {
+                watermark = ts;
             }
-            for r in &rows {
-                let id: Uuid = r.get("id");
-                let name: String = r.get("name");
-                let ts: chrono::DateTime<chrono::Utc> = r.get("updated_at");
-                if ts > watermark {
-                    watermark = ts;
-                }
-                names.push((clip_lower(&name), id));
-                last = Some(id);
-            }
-            if rows.len() < SNAPSHOT_PAGE as usize {
-                break;
-            }
+            names.push((clip_lower(&name), id));
         }
+        drop(stream);
         let total = names.len();
         let index = assemble(names, watermark);
         self.current.store(Arc::new(Some(index)));
@@ -227,7 +217,9 @@ impl SearchIndex {
 }
 
 fn clip_lower(name: &str) -> String {
-    let lower = name.to_lowercase().replace('\n', " ");
+    let lower = name
+        .to_lowercase()
+        .replace(['\n', '\u{0}'], " ");
     if lower.len() <= MAX_NAME_BYTES {
         lower
     } else {
