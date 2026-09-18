@@ -199,8 +199,21 @@ pipeline fills them:
   classifier / breadcrumb leaf).
 - `product_type_en: string|null`, `category_en: string|null`,
   `title_en: string|null` — English layer ("one language everyone reads").
-  Machine translation at scrape/enrichment time is fine; batch backfill as
-  budget allows. Do not translate on the fly per request.
+  Machine translation at scrape/enrichment time for NEW records. Do not
+  translate on the fly per request.
+
+**Backfill of the existing pool is REQUIRED, not optional** (the ~1.4M rows
+already in the DB must get the EN layer too — the user asked explicitly).
+Suggested shape, backend's call on specifics:
+- A batched worker task (idle-priority, rate/budget-capped) walking
+  `dim_product` where `title_en IS NULL`, oldest-favorites/most-viewed first
+  if cheap to order, otherwise plain id order.
+- Categories and product types are a tiny distinct set compared to titles —
+  translate the DISTINCT category/type values first (thousands of strings,
+  covers every row instantly), then grind titles.
+- Idempotent and resumable; translations written through the gate like any
+  other dim update; progress observable (service_alert info on batch
+  completion or a counter in admin stats).
 
 Frontend rendering (already live, no FE redeploy needed): Type column shows
 `product_type_en ?? product_type`; Category chip shows
