@@ -43,6 +43,7 @@ celery_app.conf.beat_schedule = {
     "scrape-stale-pool-products": {
         "task": "scrape_all_pool_products",
         "schedule": crontab(minute="*/30"),
+        "options": {"priority": 2},
     },
     # Taxonomy enrichment (P13): budget-capped Claude batches — categories →
     # name_en, products → product_type(+en)/title_en, priced-first. Each tick
@@ -52,6 +53,7 @@ celery_app.conf.beat_schedule = {
         # */30 + 1 batch/tick: the $20/month Claude budget (see
         # enrichment_tasks.PRODUCT_BATCHES_PER_TICK).
         "schedule": crontab(minute="*/30"),
+        "options": {"priority": 2},
     },
     # Permanent list-page price collection: 4 stalest category-bearing shops
     # per tick, 20 pages each — the economic backbone (one page ≈ 20-30
@@ -59,6 +61,7 @@ celery_app.conf.beat_schedule = {
     "harvest-lists": {
         "task": "harvest_tick",
         "schedule": crontab(minute="*/30"),
+        "options": {"priority": 2},
     },
     # Cross-shop matching (roadmap item 3): drains match_method IS NULL
     # products into deterministic brand+model groups, 10k per tick — full
@@ -66,5 +69,6 @@ celery_app.conf.beat_schedule = {
     "product-match": {
         "task": "product_match_tick",
         "schedule": crontab(minute="*/10"),
+        "options": {"priority": 2},
     },
 }

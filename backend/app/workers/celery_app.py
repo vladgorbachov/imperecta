@@ -39,13 +39,19 @@ celery_app.conf.update(
     # its RSS exceeds the cap; a long discovery task is never interrupted.
     worker_max_tasks_per_child=20,
     worker_max_memory_per_child=400_000,  # KB = ~400MB
-    # DB-pressure incident 2026-09-18: default concurrency (=CPU count) let
-    # several bulk writers (enumeration/harvest/enrichment) run in parallel
-    # and starve the storefront's database. Two children keep collection
-    # moving while the shared Postgres stays responsive; raise via env when
-    # the database instance grows.
+    # DB-pressure incident 2026-09-18: default concurrency (=CPU count) once
+    # starved the Micro storefront database. After the 2026-09-19 compute
+    # upgrade the env pins 6 children; queue priorities below keep bulk
+    # enumerations from monopolizing them.
     worker_concurrency=int(os.environ.get("CELERYD_CONCURRENCY", "2")),
+    # Queue priorities (2026-09-19): bulk enumerations/discovery must never
+    # starve the short periodic ticks (harvest pricing, PDP scrape, matching,
+    # enrichment). Redis priorities: 0 = highest; ticks ship at 2, bulk jobs
+    # at 8, everything else defaults to 5.
+    task_default_priority=5,
     broker_transport_options={
+        "priority_steps": list(range(10)),
+        "queue_order_strategy": "priority",
         "retry_policy": {
             "timeout": 30.0,
             "max_retries": 10,

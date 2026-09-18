@@ -89,6 +89,7 @@ async def trigger_sitemap_enumerate(
         async_result = sitemap_enumerate_marketplace.apply_async(
             [code.strip()],
             kwargs={"max_urls": body.max_urls},
+            priority=8,  # bulk: never ahead of the pricing/matching ticks
         )
         dispatched.append({"marketplace_code": code.strip(), "task_id": async_result.id})
     return {"dispatched": dispatched, "max_urls": body.max_urls}
@@ -114,6 +115,7 @@ async def trigger_harvest_lists(
         async_result = harvest_list_pages.apply_async(
             [code.strip()],
             kwargs={"limit": body.pages_per_shop},
+            priority=4,  # manual harvest: below ticks, above bulk
         )
         dispatched.append({"marketplace_code": code.strip(), "task_id": async_result.id})
     return {"dispatched": dispatched, "pages_per_shop": body.pages_per_shop}

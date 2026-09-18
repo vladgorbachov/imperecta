@@ -233,7 +233,7 @@ async def _reconcile_pending_children(
     from app.modules.scraper.tasks import discover_one_marketplace
 
     for child_id in ids:
-        discover_one_marketplace.apply_async([str(child_id)])
+        discover_one_marketplace.apply_async([str(child_id)], priority=8)
     slog.info(
         "tick_reconciled_pending_children",
         parent_id=str(parent_id),
@@ -368,7 +368,7 @@ async def _reconcile_pending_scrape_children(
     from app.modules.scraper.tasks import scrape_one_marketplace
 
     for child_id in ids:
-        scrape_one_marketplace.apply_async([str(child_id)])
+        scrape_one_marketplace.apply_async([str(child_id)], priority=8)
     slog.info(
         "tick_reconciled_pending_scrape_children",
         parent_id=str(parent_id),
@@ -607,7 +607,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 if child_id is None:
                     continue
                 await db.commit()
-                discover_one_marketplace.apply_async([str(child_id)])
+                discover_one_marketplace.apply_async([str(child_id)], priority=8)
                 active += 1
                 dispatched = True
 
@@ -691,7 +691,7 @@ async def run_tick(db: AsyncSession, parent_job_id: UUID) -> dict[str, Any]:
                 if child_id is None:
                     continue
                 await db.commit()
-                scrape_one_marketplace.apply_async([str(child_id)])
+                scrape_one_marketplace.apply_async([str(child_id)], priority=8)
                 last_dispatched[code] = datetime.now(timezone.utc).isoformat()
                 active += 1
                 dispatched = True
