@@ -360,6 +360,10 @@ class DimProduct(Base):
     )
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     name_normalized: Mapped[str] = mapped_column(String(500), nullable=False)
+    # P13: type + universal-language layer; filled by enrichment, null until then.
+    product_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    product_type_en: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    title_en: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sku_universal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mpn: Mapped[str | None] = mapped_column(String(100), nullable=True)
     category_id: Mapped[UUID | None] = mapped_column(

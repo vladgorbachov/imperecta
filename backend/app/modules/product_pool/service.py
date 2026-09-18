@@ -169,6 +169,11 @@ class ProductPoolService:
                 # P10: taxonomy labels on the list grain (detail shares them).
                 DimBrand.name.label("brand"),
                 DimCategory.name.label("category"),
+                # P13: type + universal-language layer (null until enriched).
+                DimProduct.product_type,
+                DimProduct.product_type_en,
+                DimProduct.title_en,
+                DimCategory.name_en.label("category_en"),
             )
             .select_from(FactListing)
             .join(DimProduct, FactListing.product_id == DimProduct.id)
@@ -750,6 +755,10 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "country_code": row.get("country_code"),
         "brand": row.get("brand"),
         "category": row.get("category"),
+        "product_type": row.get("product_type"),
+        "product_type_en": row.get("product_type_en"),
+        "category_en": row.get("category_en"),
+        "title_en": row.get("title_en"),
         "price": float(row["price"]) if row.get("price") is not None else None,
         "currency": row.get("currency"),
         "price_eur": float(row["price_eur"]) if row.get("price_eur") is not None else None,

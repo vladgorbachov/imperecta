@@ -46,6 +46,11 @@ class PoolProductItem(BaseModel):
     # P10: taxonomy labels on the list grain (null until extraction matures).
     brand: str | None = None
     category: str | None = None
+    # P13: type + universal-language (EN) layer; null until enrichment fills.
+    product_type: str | None = None
+    product_type_en: str | None = None
+    category_en: str | None = None
+    title_en: str | None = None
     price: float | None = None
     currency: str | None = None
     price_eur: float | None = None

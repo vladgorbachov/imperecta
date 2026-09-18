@@ -50,7 +50,18 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
     },
     "dim_product": {
         "product_enrich": frozenset(
-            {"name", "name_normalized", "image_url", "brand_id", "category_id", "attributes"},
+            {
+                "name",
+                "name_normalized",
+                "image_url",
+                "brand_id",
+                "category_id",
+                "attributes",
+                # P13: type + universal-language layer, written at enrichment.
+                "product_type",
+                "product_type_en",
+                "title_en",
+            },
         ),
     },
 }
