@@ -207,6 +207,167 @@ pub fn extract_match_signature(
     })
 }
 
+// --- M2b: title_en normalization + similarity (docs/MATCHING_PLAN.md) ------
+
+/// Glue-units: a pure number followed by one of these becomes one token
+/// ("1.7" + "l" -> "1.7l"); also the suffixes checked for attribute
+/// conflicts. Deterministic constant — mirror of the Python reference.
+const GLUE_UNITS: [&str; 40] = [
+    "gb", "tb", "mb", "kb", "mm", "cm", "m", "km", "kg", "g", "mg", "l",
+    "ml", "cl", "dl", "w", "kw", "mw", "v", "mv", "kv", "a", "ah", "mah",
+    "hz", "khz", "mhz", "ghz", "k", "p", "mp", "px", "in", "inch", "lm",
+    "nm", "bar", "rpm", "pcs", "szt",
+];
+
+/// English glue-words dropped from title keys (marketing/noise-neutral).
+const TITLE_STOPWORDS: [&str; 12] = [
+    "the", "a", "an", "and", "or", "with", "for", "of", "in", "to", "on",
+    "by",
+];
+
+fn is_number_token(t: &str) -> bool {
+    !t.is_empty()
+        && t.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        && t.bytes().any(|b| b.is_ascii_digit())
+        && !t.starts_with('.')
+        && !t.ends_with('.')
+}
+
+/// Normalize an EN title into a sorted, deduped token set.
+pub fn normalize_title_tokens(title: &str) -> Vec<String> {
+    let lower = title.to_lowercase();
+    let mut raw: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in lower.chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' {
+            current.push(ch);
+        } else if !current.is_empty() {
+            raw.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        raw.push(current);
+    }
+    // strip stray dots, drop empties
+    let raw: Vec<String> = raw
+        .into_iter()
+        .map(|t| t.trim_matches('.').to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    // glue "1.7" + "l" -> "1.7l"
+    let mut glued: Vec<String> = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if i + 1 < raw.len()
+            && is_number_token(&raw[i])
+            && GLUE_UNITS.contains(&raw[i + 1].as_str())
+        {
+            glued.push(format!("{}{}", raw[i], raw[i + 1]));
+            i += 2;
+        } else {
+            glued.push(raw[i].clone());
+            i += 1;
+        }
+    }
+
+    let mut out: Vec<String> = glued
+        .into_iter()
+        .filter(|t| !TITLE_STOPWORDS.contains(&t.as_str()))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn unit_attr(token: &str) -> Option<(&str, &str)> {
+    let digits_dot = token
+        .bytes()
+        .take_while(|b| b.is_ascii_digit() || *b == b'.')
+        .count();
+    if digits_dot == 0 || digits_dot == token.len() {
+        return None;
+    }
+    let (value, suffix) = token.split_at(digits_dot);
+    if GLUE_UNITS.contains(&suffix) && value.bytes().any(|b| b.is_ascii_digit()) {
+        Some((value, suffix))
+    } else {
+        None
+    }
+}
+
+/// Jaccard similarity over normalized token sets, forced to 0.0 when the
+/// two titles carry CONFLICTING unit attributes (same unit, different
+/// value: 256gb vs 512gb are different products, however similar).
+pub fn title_similarity(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    for ta in a {
+        if let Some((va, sa)) = unit_attr(ta) {
+            for tb in b {
+                if let Some((vb, sb)) = unit_attr(tb) {
+                    if sa == sb && va != vb {
+                        return 0.0;
+                    }
+                }
+            }
+        }
+    }
+    let mut inter = 0usize;
+    for t in a {
+        if b.binary_search(t).is_ok() {
+            inter += 1;
+        }
+    }
+    let union = a.len() + b.len() - inter;
+    if union == 0 {
+        0.0
+    } else {
+        inter as f64 / union as f64
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    fn toks(s: &str) -> Vec<String> {
+        normalize_title_tokens(s)
+    }
+
+    #[test]
+    fn normalization_glues_units_drops_stopwords_and_sorts() {
+        assert_eq!(
+            toks("Sencor Electric Kettle 1.7 l, White"),
+            vec!["1.7l", "electric", "kettle", "sencor", "white"]
+        );
+        assert_eq!(toks("Kettle with the Lid"), vec!["kettle", "lid"]);
+        assert_eq!(toks("1.7L kettle"), toks("Kettle 1.7 l"));
+    }
+
+    #[test]
+    fn similarity_near_identical_titles_high() {
+        let a = toks("Sencor Electric Kettle 1.7 l White");
+        let b = toks("Sencor Kettle 1.7l white");
+        assert!(title_similarity(&a, &b) >= 0.8, "{:?} {:?}", a, b);
+    }
+
+    #[test]
+    fn conflicting_unit_attrs_force_zero() {
+        let a = toks("Samsung Galaxy S24 256gb Black");
+        let b = toks("Samsung Galaxy S24 512gb Black");
+        assert_eq!(title_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn unrelated_titles_low() {
+        let a = toks("Green plastic ashtray");
+        let b = toks("Sencor kettle 1.7l");
+        assert!(title_similarity(&a, &b) < 0.2);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

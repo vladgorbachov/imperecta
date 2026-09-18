@@ -176,6 +176,18 @@ fn extract_match_signature<'py>(
     }
 }
 
+/// Normalize an EN title into the sorted token key used by title matching.
+#[pyfunction]
+fn normalize_title_tokens(title: &str) -> Vec<String> {
+    matching::normalize_title_tokens(title)
+}
+
+/// Jaccard similarity of two normalized token sets (0.0 on unit conflict).
+#[pyfunction]
+fn title_similarity(a: Vec<String>, b: Vec<String>) -> f64 {
+    matching::title_similarity(&a, &b)
+}
+
 #[pymodule]
 fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_price_text, m)?)?;
@@ -186,6 +198,8 @@ fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_jsonld, m)?)?;
     m.add_function(wrap_pyfunction!(extract_list_offers, m)?)?;
     m.add_function(wrap_pyfunction!(extract_match_signature, m)?)?;
+    m.add_function(wrap_pyfunction!(normalize_title_tokens, m)?)?;
+    m.add_function(wrap_pyfunction!(title_similarity, m)?)?;
     m.add_function(wrap_pyfunction!(assess_quality, m)?)?;
     m.add("__core_version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

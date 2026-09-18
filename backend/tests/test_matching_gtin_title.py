@@ -117,3 +117,85 @@ def test_gtin_and_brandmodel_group_id_spaces_disjoint() -> None:
     from app.modules.matching.signature import match_group_id
 
     assert gtin_group_id("12345670") != match_group_id("gtin", "12345670")
+
+
+# --- M2b: title normalization + similarity + merge determinism --------------
+
+from app.modules.matching.engine import (  # noqa: E402
+    CONFIDENCE_TITLE_SIM,
+    METHOD_TITLE_SIM,
+    TITLE_SIM_THRESHOLD,
+)
+from app.modules.matching.signature import (  # noqa: E402
+    normalize_title_tokens,
+    title_similarity,
+)
+
+
+def test_title_normalization_glues_units_drops_stopwords_sorts() -> None:
+    assert normalize_title_tokens("Sencor Electric Kettle 1.7 l, White") == [
+        "1.7l",
+        "electric",
+        "kettle",
+        "sencor",
+        "white",
+    ]
+    assert normalize_title_tokens("Kettle with the Lid") == ["kettle", "lid"]
+    assert normalize_title_tokens("1.7L kettle") == normalize_title_tokens(
+        "Kettle 1.7 l"
+    )
+
+
+def test_title_key_v2_ignores_word_order_and_glue_words() -> None:
+    a = title_group_id("Sencor Kettle 1.7 l White", "Kettle")
+    b = title_group_id("White 1.7l Kettle Sencor", "Kettle")
+    assert a == b
+
+
+def test_title_similarity_near_identical_high() -> None:
+    a = normalize_title_tokens("Sencor Electric Kettle 1.7 l White")
+    b = normalize_title_tokens("Sencor Kettle 1.7l white")
+    assert title_similarity(a, b) >= TITLE_SIM_THRESHOLD
+
+
+def test_title_similarity_unit_conflict_forces_zero() -> None:
+    a = normalize_title_tokens("Samsung Galaxy S24 256gb Black")
+    b = normalize_title_tokens("Samsung Galaxy S24 512gb Black")
+    assert title_similarity(a, b) == 0.0
+
+
+def test_title_similarity_unrelated_low() -> None:
+    a = normalize_title_tokens("Green plastic ashtray")
+    b = normalize_title_tokens("Sencor kettle 1.7l")
+    assert title_similarity(a, b) < 0.2
+
+
+def test_title_sim_constants_sane() -> None:
+    assert METHOD_TITLE_SIM == "title_sim"
+    assert 0 < CONFIDENCE_TITLE_SIM < CONFIDENCE_GTIN
+
+
+def test_title_facades_parity_when_built() -> None:
+    import pytest as _pytest
+
+    rust = _pytest.importorskip("imperecta_core")
+    if not hasattr(rust, "normalize_title_tokens"):
+        _pytest.skip("imperecta_core built without title support")
+    cases = [
+        "Sencor Electric Kettle 1.7 l, White",
+        "Kettle with the Lid",
+        "Samsung Galaxy S24 256gb Black",
+        "Green plastic ashtray",
+        "White 1.7l Kettle Sencor",
+    ]
+    for title in cases:
+        assert list(rust.normalize_title_tokens(title)) == normalize_title_tokens(
+            title
+        ), title
+    for ta in cases:
+        for tb in cases:
+            a_py = normalize_title_tokens(ta)
+            b_py = normalize_title_tokens(tb)
+            assert abs(
+                rust.title_similarity(a_py, b_py) - title_similarity(a_py, b_py)
+            ) < 1e-9

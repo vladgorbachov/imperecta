@@ -157,6 +157,90 @@ def match_group_id(brand: str, code: str) -> uuid.UUID:
     return uuid.uuid5(MATCH_NAMESPACE, f"{brand}|{code}")
 
 
+# --- M2b: title_en normalization + similarity (docs/MATCHING_PLAN.md) -------
+
+# Glue-units: a pure number followed by one of these becomes one token
+# ("1.7" + "l" -> "1.7l"); also the suffixes checked for attribute
+# conflicts. Deterministic constant — mirror of the Rust twin.
+_GLUE_UNITS = (
+    "gb", "tb", "mb", "kb", "mm", "cm", "m", "km", "kg", "g", "mg", "l",
+    "ml", "cl", "dl", "w", "kw", "mw", "v", "mv", "kv", "a", "ah", "mah",
+    "hz", "khz", "mhz", "ghz", "k", "p", "mp", "px", "in", "inch", "lm",
+    "nm", "bar", "rpm", "pcs", "szt",
+)
+_GLUE_UNIT_SET = frozenset(_GLUE_UNITS)
+
+# English glue-words dropped from title keys (marketing/noise-neutral).
+_TITLE_STOPWORDS = frozenset(
+    {"the", "a", "an", "and", "or", "with", "for", "of", "in", "to", "on", "by"}
+)
+
+_TITLE_TOKEN_RE = re.compile(r"[a-z0-9.]+")
+
+
+def _is_number_token(t: str) -> bool:
+    return (
+        bool(t)
+        and all(c.isdigit() or c == "." for c in t)
+        and any(c.isdigit() for c in t)
+        and not t.startswith(".")
+        and not t.endswith(".")
+    )
+
+
+def normalize_title_tokens(title: str) -> list[str]:
+    """Normalize an EN title into a sorted, deduped token set."""
+    raw = [
+        t
+        for t in (m.strip(".") for m in _TITLE_TOKEN_RE.findall(title.lower()))
+        if t
+    ]
+    glued: list[str] = []
+    i = 0
+    while i < len(raw):
+        if (
+            i + 1 < len(raw)
+            and _is_number_token(raw[i])
+            and raw[i + 1] in _GLUE_UNIT_SET
+        ):
+            glued.append(raw[i] + raw[i + 1])
+            i += 2
+        else:
+            glued.append(raw[i])
+            i += 1
+    return sorted({t for t in glued if t not in _TITLE_STOPWORDS})
+
+
+def _unit_attr(token: str) -> tuple[str, str] | None:
+    idx = 0
+    while idx < len(token) and (token[idx].isdigit() or token[idx] == "."):
+        idx += 1
+    if idx == 0 or idx == len(token):
+        return None
+    value, suffix = token[:idx], token[idx:]
+    if suffix in _GLUE_UNIT_SET and any(c.isdigit() for c in value):
+        return value, suffix
+    return None
+
+
+def title_similarity(a: list[str], b: list[str]) -> float:
+    """Jaccard over normalized token sets; 0.0 on conflicting unit attrs
+    (same unit, different value: 256gb vs 512gb are different products)."""
+    if not a or not b:
+        return 0.0
+    for ta in a:
+        ua = _unit_attr(ta)
+        if ua is None:
+            continue
+        for tb in b:
+            ub = _unit_attr(tb)
+            if ub is not None and ua[1] == ub[1] and ua[0] != ub[0]:
+                return 0.0
+    sa, sb = set(a), set(b)
+    union = len(sa | sb)
+    return len(sa & sb) / union if union else 0.0
+
+
 def _use_rust() -> bool:
     return (
         _rust_core is not None
@@ -173,3 +257,17 @@ def extract_signature(
     if _use_rust():
         return _rust_core.extract_match_signature(name_normalized, list(known_brands))
     return extract_match_signature(name_normalized, known_brands)
+
+
+def title_tokens(title: str) -> list[str]:
+    """Engine-dispatching facade for title normalization."""
+    if _use_rust() and hasattr(_rust_core, "normalize_title_tokens"):
+        return list(_rust_core.normalize_title_tokens(title))
+    return normalize_title_tokens(title)
+
+
+def score_titles(a: list[str], b: list[str]) -> float:
+    """Engine-dispatching facade for the title pair scorer."""
+    if _use_rust() and hasattr(_rust_core, "title_similarity"):
+        return float(_rust_core.title_similarity(list(a), list(b)))
+    return title_similarity(a, b)

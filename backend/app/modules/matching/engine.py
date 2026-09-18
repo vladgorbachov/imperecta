@@ -24,6 +24,8 @@ from app.modules.matching.signature import (
     MATCH_NAMESPACE,
     extract_signature,
     match_group_id,
+    score_titles,
+    title_tokens,
 )
 from app.modules.persist.gate_rpc import (
     GateRpcError,
@@ -40,9 +42,14 @@ TITLE_SWEEP_ROWS = 1_000
 METHOD_GTIN = "gtin"
 METHOD_BRAND_MODEL = "brand_model"
 METHOD_TITLE_EXACT = "title_exact"
+METHOD_TITLE_SIM = "title_sim"
 METHOD_UNMATCHED = "unmatched"
 CONFIDENCE_GTIN = 0.99
 CONFIDENCE_TITLE_EXACT = 0.85
+CONFIDENCE_TITLE_SIM = 0.80
+TITLE_SIM_THRESHOLD = 0.80
+TITLE_MERGE_GROUPS_CAP = 2_000
+TITLE_MERGE_WINDOW = 3
 REJECT_SOURCE = "product_match"
 
 
@@ -140,8 +147,10 @@ def fetch_title_sweep_sync(limit: int) -> list[tuple[str, str, str | None]]:
 
 
 def _normalize_title_key(title_en: str) -> str:
-    """Deterministic key text for title_exact groups."""
-    return " ".join(title_en.lower().split())[:500]
+    """Deterministic key text for title_exact groups (M2b: normalized token
+    set — stopwords dropped, units glued, sorted — so word order and glue
+    words no longer split groups)."""
+    return " ".join(title_tokens(title_en))[:500]
 
 
 def gtin_group_id(gtin: str) -> uuid.UUID:
@@ -151,10 +160,10 @@ def gtin_group_id(gtin: str) -> uuid.UUID:
 
 
 def title_group_id(title_en: str, product_type_en: str | None) -> uuid.UUID:
-    """Deterministic group id for an exact normalized EN title within a type."""
+    """Deterministic group id for the normalized EN title key within a type."""
     type_key = (product_type_en or "").strip().lower()
     return uuid.uuid5(
-        MATCH_NAMESPACE, f"title:{type_key}:{_normalize_title_key(title_en)}"
+        MATCH_NAMESPACE, f"title2:{type_key}:{_normalize_title_key(title_en)}"
     )
 
 
@@ -248,6 +257,121 @@ def write_match_results_sync(payloads: list[dict[str, Any]]) -> int:
         db.close()
 
 
+def fetch_title_groups_sync(
+    limit: int,
+) -> list[tuple[str, str | None, str]]:
+    """(group_id, product_type_en, representative title_en) per title-method
+    group — deterministic representative (min title_en) and ordering."""
+    from sqlalchemy import func as sa_func
+
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            select(
+                DimProduct.match_group_id,
+                DimProduct.product_type_en,
+                sa_func.min(DimProduct.title_en).label("rep"),
+            )
+            .where(
+                DimProduct.is_active,
+                DimProduct.match_method.in_(
+                    [METHOD_TITLE_EXACT, METHOD_TITLE_SIM]
+                ),
+            )
+            .group_by(DimProduct.match_group_id, DimProduct.product_type_en)
+            .order_by(DimProduct.product_type_en, DimProduct.match_group_id)
+            .limit(limit)
+        ).all()
+        return [(str(gid), type_en, rep) for gid, type_en, rep in rows if rep]
+    finally:
+        db.close()
+
+
+def fetch_group_member_ids_sync(group_id: str) -> list[str]:
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            select(DimProduct.id).where(
+                DimProduct.match_group_id == uuid.UUID(group_id)
+            )
+        ).scalars()
+        return [str(pid) for pid in rows]
+    finally:
+        db.close()
+
+
+def run_title_merge_pass() -> dict[str, int]:
+    """M2b: merge near-identical title groups within a type block.
+
+    Sorted-neighborhood over the normalized token key (window
+    TITLE_MERGE_WINDOW); a pair scoring >= TITLE_SIM_THRESHOLD with no unit
+    conflict merges into min(group_id) — the deterministic merge target, so
+    repeated passes over the same data converge to the same groups.
+    """
+    groups = fetch_title_groups_sync(TITLE_MERGE_GROUPS_CAP)
+    if len(groups) < 2:
+        return {"title_groups": len(groups), "merged_groups": 0, "moved_rows": 0}
+
+    # (type, token_key, tokens, group_id) sorted for neighborhood scanning
+    keyed = sorted(
+        (
+            (
+                (type_en or "").strip().lower(),
+                " ".join(title_tokens(rep)),
+                title_tokens(rep),
+                gid,
+            )
+            for gid, type_en, rep in groups
+        ),
+        key=lambda item: (item[0], item[1], item[3]),
+    )
+
+    merged_into: dict[str, str] = {}
+
+    def _resolve(gid: str) -> str:
+        while gid in merged_into:
+            gid = merged_into[gid]
+        return gid
+
+    for i, (type_a, _key_a, toks_a, gid_a) in enumerate(keyed):
+        for j in range(i + 1, min(i + 1 + TITLE_MERGE_WINDOW, len(keyed))):
+            type_b, _key_b, toks_b, gid_b = keyed[j]
+            if type_b != type_a:
+                break
+            ra, rb = _resolve(gid_a), _resolve(gid_b)
+            if ra == rb:
+                continue
+            if score_titles(toks_a, toks_b) >= TITLE_SIM_THRESHOLD:
+                winner, loser = (ra, rb) if ra < rb else (rb, ra)
+                merged_into[loser] = winner
+
+    moved = 0
+    payloads: list[dict[str, Any]] = []
+    for loser in merged_into:
+        winner = _resolve(loser)
+        for product_id in fetch_group_member_ids_sync(loser):
+            payloads.append(
+                {
+                    "id": product_id,
+                    "match_group_id": winner,
+                    "match_method": METHOD_TITLE_SIM,
+                    "match_confidence": CONFIDENCE_TITLE_SIM,
+                }
+            )
+            moved += 1
+    if payloads:
+        write_match_results_sync(payloads)
+    return {
+        "title_groups": len(groups),
+        "merged_groups": len(merged_into),
+        "moved_rows": moved,
+    }
+
+
 def run_match_tick(batch_size: int = MATCH_BATCH_SIZE) -> dict[str, int]:
     """One incremental matching pass; returns counters for the beat log.
 
@@ -283,6 +407,7 @@ def run_match_tick(batch_size: int = MATCH_BATCH_SIZE) -> dict[str, int]:
         payloads.append(build_title_fields(product_id, title_en, type_en))
 
     written = write_match_results_sync(payloads)
+    merge_stats = run_title_merge_pass()
     summary = {
         "scanned": len(pending),
         "matched": matched,
@@ -290,6 +415,7 @@ def run_match_tick(batch_size: int = MATCH_BATCH_SIZE) -> dict[str, int]:
         "gtin_swept": len(gtin_swept),
         "title_swept": len(title_swept),
         "written": written,
+        **merge_stats,
     }
     slog.info("product_match_tick_done", **summary)
     return summary
