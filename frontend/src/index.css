@@ -521,6 +521,23 @@
   animation: shimmer 2s infinite;
 }
 
+/* Market Pulse vertical stream — list duplicated once, loops seamlessly. */
+@keyframes pulse-stream {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.pulse-stream {
+  animation: pulse-stream 36s linear infinite;
+  will-change: transform;
+}
+.pulse-stream:hover {
+  animation-play-state: paused;
+}
+
 @keyframes ticker {
   from {
     transform: translateX(0);
@@ -550,7 +567,8 @@
   .glow-pulse,
   .animate-shimmer,
   .animate-grid-pulse,
-  .animate-bounce {
+  .animate-bounce,
+  .pulse-stream {
     animation: none !important;
   }
 }

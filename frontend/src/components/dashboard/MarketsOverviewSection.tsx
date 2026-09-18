@@ -14,7 +14,7 @@ import { AlertsStreamWidget } from "@/components/dashboard/AlertsStreamWidget";
 import { MarketMoversWidget } from "@/components/dashboard/MarketMoversWidget";
 import { MarketCoverageWidget } from "@/components/dashboard/MarketCoverageWidget";
 import { MarketTrendWidget } from "@/components/dashboard/MarketTrendWidget";
-import { MarketNewsWidget } from "@/components/dashboard/MarketNewsWidget";
+import { MarketPulseWidget } from "@/components/dashboard/MarketPulseWidget";
 import { ScopeBar } from "@/components/dashboard/ScopeBar";
 import { useDisplayCurrency } from "@/hooks/useDisplayCurrency";
 import { formatRelativeTime } from "@/lib/formatters";
@@ -388,7 +388,7 @@ export function MarketsOverviewSection() {
           <AlertsStreamWidget />
         </div>
         <div className="min-w-0 lg:col-span-4">
-          <MarketNewsWidget countryCode={selectedCountry} />
+          <MarketPulseWidget countryCode={selectedCountry} />
         </div>
       </div>
     </section>
