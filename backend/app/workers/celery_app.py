@@ -1,5 +1,6 @@
 """Celery application configuration."""
 
+import os
 import ssl
 
 from celery import Celery
@@ -38,6 +39,12 @@ celery_app.conf.update(
     # its RSS exceeds the cap; a long discovery task is never interrupted.
     worker_max_tasks_per_child=20,
     worker_max_memory_per_child=400_000,  # KB = ~400MB
+    # DB-pressure incident 2026-09-18: default concurrency (=CPU count) let
+    # several bulk writers (enumeration/harvest/enrichment) run in parallel
+    # and starve the storefront's database. Two children keep collection
+    # moving while the shared Postgres stays responsive; raise via env when
+    # the database instance grows.
+    worker_concurrency=int(os.environ.get("CELERYD_CONCURRENCY", "2")),
     broker_transport_options={
         "retry_policy": {
             "timeout": 30.0,
