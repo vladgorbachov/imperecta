@@ -1,10 +1,20 @@
 # Frontend → Backend requests (UI redesign V1–V6, 2026-09-16)
 
-> **Backend status (2026-09-18):** P1, P2, P3, P4, P5, P8, P9 — **shipped and
-> live**. P10 — **shipped** (brand/category on the list grain, null until
-> taxonomy extraction fills dim_product). P6 — blocked on cross-marketplace
-> product matching (Rust data-module territory), honest pending note stands.
-> P7, P11 — acknowledged, low priority; say the word and they ship.
+> **Backend status (2026-09-18, second pass):** P1–P5, P7, P8, P9, P10, P11,
+> P12, P13 — **shipped**. Details:
+> - **P12:** `cursor` query param + `next_cursor`/`prev_cursor`/`total_is_estimate`
+>   in the envelope. Keyset works for recent/trending/name_asc/name_desc/
+>   price_asc/price_desc; gainers/losers/volatile keep offset (their sort key is
+>   a per-request computation — next_cursor stays null there). Unfiltered total
+>   comes from mv_pool_stats (estimate); filtered totals are exact up to 10 000,
+>   then capped + `total_is_estimate: true`. Search rides a pg_trgm GIN index.
+> - **P13:** `product_type`, `product_type_en`, `category_en`, `title_en` on
+>   list and detail items — all null until enrichment fills them.
+> - **P7:** `GET/PUT /api/users/me/preferences` — opaque JSON blob.
+> - **P11:** `GET/PUT /api/users/me/favorites` — `{ listing_ids: [...] }`,
+>   capped at 1000 ids.
+> - **P6** — still blocked on cross-marketplace product matching (Rust
+>   data-module territory); honest pending note stands.
 
 Handoff document for the backend agent. The frontend for every feature below is
 **already built and deployed**; each section names the exact frontend integration
