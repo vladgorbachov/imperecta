@@ -301,6 +301,35 @@ class FactSearchTrend(Base):
     )
 
 
+class FactPriceWeekly(Base):
+    """Eternal weekly price aggregate (retention tier 2, migration 059).
+
+    Raw fact_price partitions older than 12 months roll up here and are
+    dropped; written ONLY by maintenance.rollup_price_month (DB-side,
+    postgres-owned) — the application never inserts.
+    """
+
+    __tablename__ = "fact_price_weekly"
+
+    listing_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("fact_listing.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    week_start: Mapped[date] = mapped_column(Date, primary_key=True)
+    currency_code: Mapped[str] = mapped_column(String(3), primary_key=True)
+    price_open: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    price_close: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    price_min: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    price_max: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    price_avg: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    price_eur_close: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    n_changes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class FactCurrencyRate(Base):
     """Daily FX rates."""
 

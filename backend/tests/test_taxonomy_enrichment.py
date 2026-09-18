@@ -131,3 +131,23 @@ def test_usage_days_reader_shapes():
         out = ppl.read_usage_days_sync(3)
     assert len(out) == 3
     assert sorted(out.values()) == [0, 5, 12]
+
+
+def test_fact_price_weekly_model_matches_retention_contract():
+    from app.models.facts import FactPriceWeekly
+
+    cols = {c.name for c in FactPriceWeekly.__table__.columns}
+    assert {
+        "listing_id",
+        "week_start",
+        "currency_code",
+        "price_open",
+        "price_close",
+        "price_min",
+        "price_max",
+        "price_avg",
+        "price_eur_close",
+        "n_changes",
+    } <= cols
+    pk = {c.name for c in FactPriceWeekly.__table__.primary_key.columns}
+    assert pk == {"listing_id", "week_start", "currency_code"}
