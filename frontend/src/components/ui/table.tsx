@@ -1,8 +1,11 @@
 import { type HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
+/* NOTE: no overflow on this wrapper — an overflow-auto div here becomes the
+   sticky-header's scroll ancestor and kills `position: sticky` on thead th.
+   Scrolling is owned by the surrounding <Scrollable> (or the page). */
 const Table = ({ className, ...props }: HTMLAttributes<HTMLTableElement>) => (
-  <div className="relative w-full overflow-auto">
+  <div className="relative w-full">
     <table
       className={cn("w-full caption-bottom text-sm", className)}
       {...props}
