@@ -82,3 +82,36 @@ CORS разрешён для `https://imperecta.pages.dev` и `http://localhost*
 
 `{"detail": "..."}` + статус: 401 (токен), 404 (нет данных),
 500 (наша сторона — просто показать «попробуйте позже»).
+
+
+## Дополнение (R3/R4): листинг и поиск в data-ops
+
+### GET `/v1/pool/products`
+
+Контракт-паритет с бэкендовым `/api/pool/products` — те же параметры
+(`search`, `marketplace_id`, `category`, `sort`
+recent|trending|name_asc|name_desc|price_asc|price_desc|gainers|losers|volatile,
+`limit`, `offset`, `cursor`, `skip_total`, `display_currency`), тот же
+конверт (`items`, `total`, `limit`, `offset`, `total_is_estimate`,
+`next_cursor`, `prev_cursor`), курсоры взаимозаменяемы с бэкендовыми.
+Item несёт все поля грида, включая `recent_prices` (спарклайн, 8 точек)
+и бонусом `match_group_id`/`match_method` (бейдж «N магазинов» без
+доп. запроса — group_id есть прямо в строке).
+
+Отличия от Python-версии (осознанные):
+- `display_currency`: "local" и "EUR"; "USD" пока отдаёт local
+  (`conversion_available:false` не выставляется — просто local).
+- `local_currency_resolution` всегда null.
+
+### GET `/v1/pool/search?q=`
+
+Тот же поиск, но через **in-memory индекс имён** (2M+ имён в RAM,
+параллельный скан): тёплый ответ — десятки миллисекунд, ноль нагрузки на
+Postgres. `/health` показывает `search_index.ready/products` — до
+прогрева (первые ~30 c после деплоя сервиса) поиск работает через SQL-фоллбек.
+
+### Рекомендация по переключению
+
+Переключайте Products-грид и тайпахед на data-ops базу с фолбеком на
+старый `/api/pool/products` при 5xx/сетевой ошибке. Основной API
+остаётся источником мутаций (алерты, избранное, префы).

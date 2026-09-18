@@ -11,6 +11,9 @@
 //! idx_listing_url_hash-family). Auth mirrors the FastAPI backend: HS256
 //! bearer tokens signed with the shared JWT_SECRET.
 
+mod pool_products;
+mod search_index;
+
 use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
@@ -28,13 +31,14 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 #[derive(Clone)]
-struct AppState {
-    pool: PgPool,
-    jwt_secret: Arc<String>,
+pub struct AppState {
+    pub pool: PgPool,
+    pub jwt_secret: Arc<String>,
+    pub index: Arc<search_index::SearchIndex>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Claims {
+pub struct Claims {
     #[allow(dead_code)]
     sub: String,
     #[allow(dead_code)]
@@ -68,7 +72,7 @@ struct GroupOffers {
     max_price_eur: Option<f64>,
 }
 
-enum ApiError {
+pub enum ApiError {
     Unauthorized(&'static str),
     NotFound(&'static str),
     Internal(String),
@@ -97,7 +101,7 @@ impl From<sqlx::Error> for ApiError {
     }
 }
 
-fn require_jwt(state: &AppState, headers: &HeaderMap) -> Result<Claims, ApiError> {
+pub fn require_jwt(state: &AppState, headers: &HeaderMap) -> Result<Claims, ApiError> {
     let raw = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -262,6 +266,36 @@ ORDER BY fl.last_checked_at DESC NULLS LAST, fl.id ASC
 OFFSET $2 LIMIT $3
 "#;
 
+const SEARCH_BY_IDS_SQL: &str = r#"
+WITH cand AS MATERIALIZED (
+  SELECT fl.id FROM fact_listing fl
+  WHERE fl.product_id = ANY($1) AND fl.is_active
+  LIMIT 4000
+)
+SELECT fl.id AS listing_id,
+       dp.id AS product_id,
+       m.marketplace_code,
+       m.name AS marketplace_name,
+       m.country_code,
+       dp.name,
+       dp.title_en,
+       dp.product_type_en,
+       dp.image_url,
+       dp.match_group_id,
+       fl.external_url,
+       fl.last_price::float8 AS last_price,
+       fl.last_currency_code,
+       fl.last_price_eur::float8 AS last_price_eur,
+       fl.last_checked_at,
+       (SELECT count(*) FROM cand) AS cand_total
+FROM cand
+JOIN fact_listing fl ON fl.id = cand.id
+JOIN dim_product dp ON dp.id = fl.product_id
+JOIN dim_marketplace m ON m.id = fl.marketplace_id
+ORDER BY fl.last_checked_at DESC NULLS LAST, fl.id ASC
+OFFSET $2 LIMIT $3
+"#;
+
 #[derive(Debug, Serialize)]
 struct SearchItem {
     listing_id: Uuid,
@@ -304,16 +338,30 @@ async fn pool_search(
     if q.len() < 2 {
         return Err(ApiError::NotFound("query too short (min 2 chars)"));
     }
-    let like = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
     let offset = params.offset.unwrap_or(0).clamp(0, 9_900);
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
 
-    let rows = sqlx::query(SEARCH_SQL)
-        .bind(&like)
-        .bind(offset)
-        .bind(limit)
-        .fetch_all(&state.pool)
-        .await?;
+    // Warm path: the in-memory name index replaces the cold trgm bitmap.
+    let rows = if let Some(hits) = state.index.search(q, 1_500) {
+        if hits.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query(SEARCH_BY_IDS_SQL)
+                .bind(&hits)
+                .bind(offset)
+                .bind(limit)
+                .fetch_all(&state.pool)
+                .await?
+        }
+    } else {
+        let like = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
+        sqlx::query(SEARCH_SQL)
+            .bind(&like)
+            .bind(offset)
+            .bind(limit)
+            .fetch_all(&state.pool)
+            .await?
+    };
 
     let total: i64 = rows
         .first()
@@ -355,7 +403,14 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         .await
         .is_ok();
     let status = if db_ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
-    (status, Json(json!({ "status": if db_ok { "ok" } else { "degraded" }, "db": db_ok })))
+    (
+        status,
+        Json(json!({
+            "status": if db_ok { "ok" } else { "degraded" },
+            "db": db_ok,
+            "search_index": { "ready": state.index.ready(), "products": state.index.len() },
+        })),
+    )
 }
 
 fn normalize_db_url(raw: &str) -> String {
@@ -405,15 +460,20 @@ async fn main() {
         .allow_methods([Method::GET])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
 
+    let index = Arc::new(search_index::SearchIndex::new());
+    search_index::spawn_refresher(index.clone(), pool.clone());
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/groups/:group_id/offers", get(group_offers))
         .route("/v1/pool/search", get(pool_search))
+        .route("/v1/pool/products", get(pool_products::pool_products))
         .route("/v1/listings/:listing_id/comparison", get(listing_comparison))
         .layer(cors)
         .with_state(AppState {
             pool,
             jwt_secret: Arc::new(jwt_secret),
+            index,
         });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

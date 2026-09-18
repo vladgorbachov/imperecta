@@ -199,3 +199,30 @@ def test_title_facades_parity_when_built() -> None:
             assert abs(
                 rust.title_similarity(a_py, b_py) - title_similarity(a_py, b_py)
             ) < 1e-9
+
+
+# --- Quality wave: type-split determinism + resweep upgrade rule ------------
+
+def test_type_split_subgroup_key_deterministic_and_distinct() -> None:
+    import uuid as _uuid
+
+    from app.modules.matching.signature import MATCH_NAMESPACE
+
+    gid = "5bed6208-1219-5571-9715-72e7cc628f3e"
+    a = _uuid.uuid5(MATCH_NAMESPACE, f"split:{gid}:keyboard")
+    b = _uuid.uuid5(MATCH_NAMESPACE, f"split:{gid}:keyboard")
+    c = _uuid.uuid5(MATCH_NAMESPACE, f"split:{gid}:tablet")
+    assert a == b
+    assert a != c
+    assert str(a) != gid
+
+
+def test_resweep_only_rewrites_rows_that_now_match() -> None:
+    """The upgrade rule: junk stays unmatched (no write), a renamed row
+    with a real title produces a non-unmatched payload."""
+    junk = build_match_fields(str(uuid.uuid4()), None)
+    assert junk["match_method"] == METHOD_UNMATCHED
+
+    sig = extract_match_signature("sencor sfd 950ss", frozenset({"sencor"}))
+    renamed = build_match_fields(str(uuid.uuid4()), sig)
+    assert renamed["match_method"] == METHOD_BRAND_MODEL

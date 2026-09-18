@@ -19,7 +19,11 @@ from app.workers.celery_app import celery_app
 slog = structlog.get_logger(__name__)
 
 # Per-tick budget: at most 1 category batch + N product batches of LLM calls.
-PRODUCT_BATCHES_PER_TICK = 8
+# Budget throttle (user decision 2026-09-18): ~$20/month for Claude API.
+# 1 batch x 60 products every 30 min = ~2 880/day = ~$0.7/day at
+# ~19 in + ~45 out tokens per product on Haiku. The reuse pass stays big —
+# it inherits enrichment for identical names and costs nothing.
+PRODUCT_BATCHES_PER_TICK = 1
 # Free duplicate-copy pass cap per tick (DB writes only, zero LLM spend).
 REUSE_ROWS_PER_TICK = 500
 ENRICH_MODEL_FALLBACK = "claude-haiku-4-5-20251001"

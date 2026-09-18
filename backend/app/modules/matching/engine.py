@@ -304,6 +304,176 @@ def fetch_group_member_ids_sync(group_id: str) -> list[str]:
         db.close()
 
 
+UNMATCHED_RESWEEP_ROWS = 1_000
+_RESWEEP_CURSOR_KEY = "match:resweep:cursor"
+
+
+def fetch_unmatched_after_sync(
+    cursor_id: str | None, limit: int
+) -> list[tuple[str, str | None, str | None, str | None, str | None]]:
+    """Page of 'unmatched' rows after the cursor id (wrapping full cycle)."""
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        stmt = (
+            select(
+                DimProduct.id,
+                DimProduct.name_normalized,
+                DimProduct.sku_universal,
+                DimProduct.title_en,
+                DimProduct.product_type_en,
+            )
+            .where(DimProduct.is_active, DimProduct.match_method == METHOD_UNMATCHED)
+            .order_by(DimProduct.id)
+            .limit(limit)
+        )
+        if cursor_id:
+            stmt = stmt.where(DimProduct.id > uuid.UUID(cursor_id))
+        rows = db.execute(stmt).all()
+        return [
+            (str(pid), name, sku, title_en, type_en)
+            for pid, name, sku, title_en, type_en in rows
+        ]
+    finally:
+        db.close()
+
+
+def run_unmatched_resweep(known_brands: frozenset[str]) -> dict[str, int]:
+    """Re-extract signatures for 'unmatched' rows in a wrapping cycle.
+
+    Harvest keeps replacing slug-junk names ("pb00613262.html") with real
+    card titles via product_enrich — rows written off as unmatched become
+    matchable later. 1000 rows/tick cycles the whole unmatched set every
+    ~1-2 days; only rows that now match are rewritten.
+    """
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
+
+    cursor: str | None = None
+    client = None
+    try:
+        client = _get_redis()
+        raw = client.get(_RESWEEP_CURSOR_KEY)
+        cursor = raw.decode() if isinstance(raw, bytes) else raw
+    except Exception:
+        client = None
+
+    rows = fetch_unmatched_after_sync(cursor, UNMATCHED_RESWEEP_ROWS)
+    wrapped = False
+    if not rows and cursor:
+        wrapped = True
+        rows = fetch_unmatched_after_sync(None, UNMATCHED_RESWEEP_ROWS)
+
+    payloads: list[dict[str, Any]] = []
+    for product_id, name, sku, title_en, type_en in rows:
+        signature = extract_signature(name, known_brands)
+        fields = build_match_fields(
+            product_id,
+            signature,
+            sku_universal=sku,
+            title_en=title_en,
+            product_type_en=type_en,
+        )
+        if fields["match_method"] != METHOD_UNMATCHED:
+            payloads.append(fields)
+
+    upgraded = 0
+    if payloads:
+        upgraded = write_match_results_sync(payloads)
+    if client is not None and rows:
+        try:
+            client.set(_RESWEEP_CURSOR_KEY, rows[-1][0])
+        except Exception:
+            pass
+    return {
+        "resweep_scanned": len(rows),
+        "resweep_upgraded": upgraded,
+        "resweep_wrapped": int(wrapped),
+    }
+
+
+TYPE_SPLIT_GROUPS_CAP = 300
+
+
+def run_type_split_pass() -> dict[str, int]:
+    """Split groups whose members carry CONFLICTING product_type_en.
+
+    Accessories mentioning a device ("Magic Keyboard fur iPad Air 11")
+    join the device's group through a code like air11. Once enrichment
+    types both sides, the conflict is visible: minority types get the
+    deterministic sub-group uuid5("split:<gid>:<type>") — repeated passes
+    converge, and a future member of either type lands consistently.
+    """
+    from sqlalchemy import func as sa_func
+
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            select(
+                DimProduct.match_group_id,
+                DimProduct.product_type_en,
+                sa_func.count().label("n"),
+            )
+            .where(
+                DimProduct.is_active,
+                DimProduct.match_group_id.isnot(None),
+                DimProduct.product_type_en.isnot(None),
+            )
+            .group_by(DimProduct.match_group_id, DimProduct.product_type_en)
+        ).all()
+    finally:
+        db.close()
+
+    by_group: dict[str, list[tuple[str, int]]] = {}
+    for gid, type_en, n in rows:
+        by_group.setdefault(str(gid), []).append(
+            ((type_en or "").strip().lower(), int(n))
+        )
+
+    conflicted = {
+        gid: types for gid, types in by_group.items() if len(types) >= 2
+    }
+    payloads: list[dict[str, Any]] = []
+    split_groups = 0
+    for gid in sorted(conflicted)[:TYPE_SPLIT_GROUPS_CAP]:
+        types = conflicted[gid]
+        # Dominant: max member count, tie -> lexicographic min (deterministic).
+        dominant = sorted(types, key=lambda t: (-t[1], t[0]))[0][0]
+        split_groups += 1
+        for type_key, _n in types:
+            if type_key == dominant:
+                continue
+            new_gid = uuid.uuid5(MATCH_NAMESPACE, f"split:{gid}:{type_key}")
+            member_ids = _fetch_group_type_member_ids(gid, type_key)
+            for product_id in member_ids:
+                payloads.append(
+                    {"id": product_id, "match_group_id": str(new_gid)}
+                )
+    moved = write_match_results_sync(payloads) if payloads else 0
+    return {"split_groups": split_groups, "split_moved": moved}
+
+
+def _fetch_group_type_member_ids(group_id: str, type_key: str) -> list[str]:
+    from sqlalchemy import func as sa_func
+
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            select(DimProduct.id).where(
+                DimProduct.match_group_id == uuid.UUID(group_id),
+                sa_func.lower(sa_func.btrim(DimProduct.product_type_en))
+                == type_key,
+            )
+        ).scalars()
+        return [str(pid) for pid in rows]
+    finally:
+        db.close()
+
+
 def run_title_merge_pass() -> dict[str, int]:
     """M2b: merge near-identical title groups within a type block.
 
@@ -408,6 +578,8 @@ def run_match_tick(batch_size: int = MATCH_BATCH_SIZE) -> dict[str, int]:
 
     written = write_match_results_sync(payloads)
     merge_stats = run_title_merge_pass()
+    resweep_stats = run_unmatched_resweep(known_brands)
+    split_stats = run_type_split_pass()
     summary = {
         "scanned": len(pending),
         "matched": matched,
@@ -416,6 +588,8 @@ def run_match_tick(batch_size: int = MATCH_BATCH_SIZE) -> dict[str, int]:
         "title_swept": len(title_swept),
         "written": written,
         **merge_stats,
+        **resweep_stats,
+        **split_stats,
     }
     slog.info("product_match_tick_done", **summary)
     return summary

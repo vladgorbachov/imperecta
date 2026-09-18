@@ -29,8 +29,11 @@ DEFAULT_PAGES_PER_RUN = 20
 # Rotation state is operational, not business data — it lives in a Redis
 # ZSET (code -> last-run epoch), same store the worker log relay uses.
 HARVEST_ROTATION_KEY = "harvest:rotation"
-HARVEST_SHOPS_PER_TICK = 4
-HARVEST_PAGES_PER_SHOP = 20
+# Pool pricing ramp (2026-09-18): prices exist for ~2k of 2.17M listings —
+# 6 shops x 25 pages per */30 tick ~= 7.2k page fetches/day, within the
+# Decodo envelope (mixed direct/proxy; limiter caps the provider fleet-wide).
+HARVEST_SHOPS_PER_TICK = 6
+HARVEST_PAGES_PER_SHOP = 25
 
 
 def _run_async(coro):
