@@ -24,6 +24,14 @@ slog = structlog.get_logger(__name__)
 
 DEFAULT_PAGES_PER_RUN = 20
 
+# Permanent collection (approved roadmap item 1): every beat tick harvests
+# the least-recently-harvested shops that have discovered category pages.
+# Rotation state is operational, not business data — it lives in a Redis
+# ZSET (code -> last-run epoch), same store the worker log relay uses.
+HARVEST_ROTATION_KEY = "harvest:rotation"
+HARVEST_SHOPS_PER_TICK = 4
+HARVEST_PAGES_PER_SHOP = 20
+
 
 def _run_async(coro):
     try:
@@ -157,3 +165,63 @@ def harvest_list_pages(
         )
         capture_exception_if_initialized(exc)
         return {"status": f"error:{type(exc).__name__}", "code": marketplace_code}
+
+
+def _shops_with_categories_sync() -> list[str]:
+    """Active marketplace codes that have discovered category pages."""
+    from sqlalchemy import func as sa_func
+
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            select(DimMarketplace.marketplace_code)
+            .where(DimMarketplace.is_active)
+            .where(
+                sa_func.jsonb_array_length(DimMarketplace.discovered_category_urls) > 0
+            )
+        ).all()
+        return [r[0] for r in rows]
+    finally:
+        db.close()
+
+
+def _pick_rotation_shops(codes: list[str], count: int) -> list[str]:
+    """Least-recently-harvested `count` codes; missing score = never = first."""
+    import time as _time
+
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
+
+    client = _get_redis()
+    scores = client.zmscore(HARVEST_ROTATION_KEY, codes) if codes else []
+    ranked = sorted(zip(codes, scores), key=lambda cs: cs[1] or 0.0)
+    picked = [code for code, _ in ranked[:count]]
+    if picked:
+        now = _time.time()
+        client.zadd(HARVEST_ROTATION_KEY, {code: now for code in picked})
+    return picked
+
+
+# acks_late: idempotent — a redelivered tick just advances the rotation.
+@celery_app.task(name="harvest_tick", bind=True, acks_late=True)
+def harvest_tick(self) -> dict:
+    """Dispatch list-page harvesting for the stalest shops (beat-driven)."""
+    try:
+        codes = _shops_with_categories_sync()
+        picked = _pick_rotation_shops(codes, HARVEST_SHOPS_PER_TICK)
+        for code in picked:
+            harvest_list_pages.apply_async(
+                [code], kwargs={"limit": HARVEST_PAGES_PER_SHOP}
+            )
+        summary = {
+            "status": "completed",
+            "eligible": len(codes),
+            "dispatched": picked,
+        }
+        slog.info("harvest_tick_done", **summary)
+        return summary
+    except Exception as exc:
+        capture_exception_if_initialized(exc)
+        slog.error("harvest_tick_failed", error=str(exc)[:500])
+        return {"status": f"error:{type(exc).__name__}"}

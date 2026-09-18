@@ -51,4 +51,11 @@ celery_app.conf.beat_schedule = {
         "task": "taxonomy_enrich_tick",
         "schedule": crontab(minute="*/20"),
     },
+    # Permanent list-page price collection: 4 stalest category-bearing shops
+    # per tick, 20 pages each — the economic backbone (one page ≈ 20-30
+    # prices vs 20-30 card fetches). Rotation state lives in Redis.
+    "harvest-lists": {
+        "task": "harvest_tick",
+        "schedule": crontab(minute="*/30"),
+    },
 }

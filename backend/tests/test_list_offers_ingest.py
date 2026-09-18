@@ -176,3 +176,27 @@ def test_rust_list_offers_parity_shape():
     assert first["price"] == 1299.0
     assert first["currency"] == "EUR"
     assert first["title"] == "Widget 0"
+
+
+def test_harvest_rotation_picks_stalest_and_bumps():
+    from unittest.mock import MagicMock
+    from unittest.mock import patch as _patch
+
+    from app.workers import harvest_tasks as ht
+
+    client = MagicMock()
+    client.zmscore.return_value = [100.0, None, 50.0]
+    with _patch(
+        "app.modules.scraper.pipeline.worker_log_relay._get_redis", return_value=client
+    ):
+        picked = ht._pick_rotation_shops(["a", "b", "c"], 2)
+    # b never ran (None -> 0), c is older than a.
+    assert picked == ["b", "c"]
+    assert set(client.zadd.call_args.args[1].keys()) == {"b", "c"}
+
+
+def test_harvest_tick_scheduled():
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule.get("harvest-lists")
+    assert entry and entry["task"] == "harvest_tick"
