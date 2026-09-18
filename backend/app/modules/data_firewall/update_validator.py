@@ -66,6 +66,9 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
                 "product_type",
                 "product_type_en",
                 "title_en",
+                # Cross-shop identity from PDP JSON-LD (matching 'gtin').
+                "sku_universal",
+                "mpn",
             },
         ),
         # Cross-shop matching (roadmap item 3): group id + method + score,

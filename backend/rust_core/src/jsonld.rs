@@ -29,8 +29,50 @@ pub struct JsonLdProduct {
     pub currency_raw: Option<String>,
     pub brand: Option<String>,
     pub category_path: Option<Vec<String>>,
+    /// Cross-shop identity (matching method 'gtin'): first valid gtin* key
+    /// (8-14 digits after separator strip); mpn as manufacturer part number.
+    pub gtin: Option<String>,
+    pub mpn: Option<String>,
     /// True when at least one schema.org Product node was found.
     pub found: bool,
+}
+
+const GTIN_KEYS: [&str; 5] = ["gtin13", "gtin", "gtin14", "gtin12", "gtin8"];
+
+fn gtin_from_product_node(product: &Value) -> Option<String> {
+    for key in GTIN_KEYS {
+        let raw = match product.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Number(n)) => n.to_string(),
+            _ => continue,
+        };
+        let digits: String = raw
+            .trim()
+            .chars()
+            .filter(|c| *c != ' ' && *c != '-')
+            .collect();
+        if !digits.is_empty()
+            && digits.bytes().all(|b| b.is_ascii_digit())
+            && (8..=14).contains(&digits.len())
+        {
+            return Some(digits);
+        }
+    }
+    None
+}
+
+fn mpn_from_product_node(product: &Value) -> Option<String> {
+    let raw = match product.get("mpn") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => return None,
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(truncate_chars(value, 100))
+    }
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {
@@ -364,6 +406,8 @@ pub fn extract_from_jsonld_scripts(scripts: &[String], page_url: &str) -> JsonLd
                 currency_raw,
                 brand: brand_name_from_node(product.get("brand")),
                 category_path,
+                gtin: gtin_from_product_node(product),
+                mpn: mpn_from_product_node(product),
                 found: true,
             };
         }
@@ -419,5 +463,41 @@ mod tests {
         let out = extract_from_jsonld_scripts(&scripts, "");
         assert_eq!(out.price, Some(100.0));
         assert_eq!(out.original_price, Some(150.0));
+    }
+}
+
+#[cfg(test)]
+mod gtin_tests {
+    use super::*;
+
+    #[test]
+    fn gtin13_preferred_and_separators_stripped() {
+        let scripts = vec![r#"{"@type":"Product","name":"Widget",
+            "gtin13":"590-1234 123457","gtin8":"12345670",
+            "offers":{"price":"9.99","priceCurrency":"EUR"}}"#
+            .to_string()];
+        let p = extract_from_jsonld_scripts(&scripts, "");
+        assert_eq!(p.gtin.as_deref(), Some("5901234123457"));
+    }
+
+    #[test]
+    fn invalid_gtin_rejected_mpn_kept() {
+        let scripts = vec![r#"{"@type":"Product","name":"Widget",
+            "gtin":"not-a-number","mpn":"BQ2942W",
+            "offers":{"price":"9.99","priceCurrency":"EUR"}}"#
+            .to_string()];
+        let p = extract_from_jsonld_scripts(&scripts, "");
+        assert_eq!(p.gtin, None);
+        assert_eq!(p.mpn.as_deref(), Some("BQ2942W"));
+    }
+
+    #[test]
+    fn numeric_gtin_value_accepted() {
+        let scripts = vec![r#"{"@type":"Product","name":"Widget",
+            "gtin":4006381333931,
+            "offers":{"price":"9.99","priceCurrency":"EUR"}}"#
+            .to_string()];
+        let p = extract_from_jsonld_scripts(&scripts, "");
+        assert_eq!(p.gtin.as_deref(), Some("4006381333931"));
     }
 }

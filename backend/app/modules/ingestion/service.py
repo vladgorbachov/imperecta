@@ -548,6 +548,24 @@ class IngestionService:
         if image_url and not product.image_url:
             delta["image_url"] = image_url
 
+        # Cross-shop identity: gtin -> sku_universal, mpn -> mpn. Write-once
+        # (first PDP scrape wins); the matching tick's gtin sweep upgrades
+        # match groups from these later.
+        gtin = getattr(data, "gtin", None)
+        if (
+            isinstance(gtin, str)
+            and gtin.strip()
+            and not getattr(product, "sku_universal", None)
+        ):
+            delta["sku_universal"] = gtin.strip()[:100]
+        mpn = getattr(data, "mpn", None)
+        if (
+            isinstance(mpn, str)
+            and mpn.strip()
+            and not getattr(product, "mpn", None)
+        ):
+            delta["mpn"] = mpn.strip()[:100]
+
         brand_name = getattr(data, "brand", None)
         if (
             isinstance(brand_name, str)

@@ -70,3 +70,18 @@ M1 кладёт матчинг-ядро в `rust_core` (PyO3) — оно пер�
 data-ops сервис вместе с read-path (поиск p95, retention-union чтения,
 P6 API). Контракты проектируем так, чтобы сервис читал те же таблицы и
 писал через те же gate.exec_write двери (HMAC языко-агностичен).
+
+
+## Прогресс
+
+- 2026-09-18: M1 live — 84k+ товаров в группах за первые часы, 3.6k+
+  кросс-групп. GTIN-захват live (JSON-LD gtin13/gtin/gtin14/gtin12/gtin8 →
+  sku_universal, mpn → mpn; оба write-once через product_enrich). Метод
+  'gtin' (conf 0.99, ключ "gtin:<digits>") бьёт brand_model; апгрейд-свип
+  1000/тик (индекс 063). M2a live: 'title_exact' (conf 0.85, ключ
+  "title:<type>:<normalized title_en>") для товаров без кода; свип
+  unmatched-строк, получивших title_en позже (1000/тик, индекс 063).
+  Ключи трёх методов дизъюнктны (':' vs '|').
+- Rust data-ops сервис (R1): axum+sqlx, JWT HS256 (общий JWT_SECRET),
+  GET /v1/groups/{id}/offers и /v1/listings/{id}/comparison — P6
+  read-path; деплой отдельным Railway-сервисом data-ops.

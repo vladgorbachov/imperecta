@@ -59,6 +59,8 @@ def test_denorm_columns_in_gated_allowlists() -> None:
             "product_type",
             "product_type_en",
             "title_en",
+            "sku_universal",
+            "mpn",
         },
     )
     assert SCRAPE_UPDATE_ALLOWLIST["fact_listing"]["listing_denorm_success"] == frozenset(

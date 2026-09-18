@@ -159,6 +159,10 @@ class ExtractedProduct:
     product_name: str | None = None
     brand: str | None = None
     category_path: list[str] | None = None
+    # Cross-shop identity (matching method 'gtin'): schema.org gtin* keys,
+    # validated 8-14 digits; mpn as the manufacturer part number fallback.
+    gtin: str | None = None
+    mpn: str | None = None
 
     @property
     def completeness(self) -> float:
@@ -246,6 +250,34 @@ def _brand_name_from_node(raw: object) -> str | None:
         name = raw.strip()
         if name:
             return name[:_MAX_TAXONOMY_SEGMENT_LEN]
+    return None
+
+
+_GTIN_KEYS = ("gtin13", "gtin", "gtin14", "gtin12", "gtin8")
+
+
+def _gtin_from_product_node(product: dict) -> str | None:
+    """First valid gtin* value (8-14 digits after stripping separators)."""
+    for key in _GTIN_KEYS:
+        raw = product.get(key)
+        if isinstance(raw, (int, float)):
+            raw = str(raw)
+        if not isinstance(raw, str):
+            continue
+        digits = raw.strip().replace(" ", "").replace("-", "")
+        if digits.isdigit() and 8 <= len(digits) <= 14:
+            return digits
+    return None
+
+
+def _mpn_from_product_node(product: dict) -> str | None:
+    raw = product.get("mpn")
+    if isinstance(raw, (int, float)):
+        raw = str(raw)
+    if isinstance(raw, str):
+        value = raw.strip()
+        if value:
+            return value[:100]
     return None
 
 
@@ -358,6 +390,8 @@ def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedPro
             currency_raw=data["currency_raw"],
             brand=data["brand"],
             category_path=data["category_path"],
+            gtin=data.get("gtin"),
+            mpn=data.get("mpn"),
         )
         _ensure_title(ep, soup, page_url)
         return ep
@@ -440,6 +474,8 @@ def extract_from_jsonld(soup: BeautifulSoup, page_url: str = "") -> ExtractedPro
                 currency_raw=currency_raw_val,
                 brand=_brand_name_from_node(product.get("brand")),
                 category_path=category_path,
+                gtin=_gtin_from_product_node(product),
+                mpn=_mpn_from_product_node(product),
             )
             _ensure_title(ep, soup, page_url)
             return ep

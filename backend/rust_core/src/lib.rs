@@ -64,6 +64,8 @@ fn extract_jsonld<'py>(
     out.set_item("currency_raw", product.currency_raw)?;
     out.set_item("brand", product.brand)?;
     out.set_item("category_path", product.category_path)?;
+    out.set_item("gtin", product.gtin)?;
+    out.set_item("mpn", product.mpn)?;
     out.set_item("found", product.found)?;
     Ok(out)
 }
