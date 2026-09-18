@@ -86,7 +86,14 @@ def test_self_router_owns_only_users_me() -> None:
     pairs = sorted(
         {(",".join(sorted(r.methods - {"HEAD"})), r.path) for r in self_router.routes if isinstance(r, APIRoute)}
     )
-    assert pairs == [("GET", "/users/me"), ("PUT", "/users/me")]
+    assert pairs == [
+        ("GET", "/users/me"),
+        ("GET", "/users/me/favorites"),
+        ("GET", "/users/me/preferences"),
+        ("PUT", "/users/me"),
+        ("PUT", "/users/me/favorites"),
+        ("PUT", "/users/me/preferences"),
+    ]
 
 
 def test_admin_router_owns_only_admin_users() -> None:
