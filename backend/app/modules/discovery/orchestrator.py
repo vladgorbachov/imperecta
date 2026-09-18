@@ -980,7 +980,8 @@ class DiscoveryOrchestrator:
             pool_count = await self.db.scalar(
                 select(func.count(FactListing.id)).where(
                     FactListing.marketplace_id == mp_id,
-                    FactListing.is_active.is_(True),
+                    # Bare column: "IS TRUE" defeats partial-index matching.
+                    FactListing.is_active,
                 ),
             )
             cursor_store.assign_clean(marketplace, "products_in_pool", int(pool_count or 0))

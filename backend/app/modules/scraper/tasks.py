@@ -486,7 +486,9 @@ def _run_scrape_all_pool_impl(
                 break
             stmt = (
                 select(FactListing.id)
-                .where(FactListing.is_active.is_(True))
+                # Bare column, not .is_(True): "IS TRUE" defeats the planner's
+                # predicate proof for the partial indexes of migration 052.
+                .where(FactListing.is_active)
                 .where(due_by_interval)
             )
             if stale_before is not None:
