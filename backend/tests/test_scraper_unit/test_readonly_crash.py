@@ -150,6 +150,9 @@ def test_scrape_listing_readonly_does_not_advance_last_checked(monkeypatch):
 
 @pytest.mark.integration
 def test_scrape_listing_success_advances_last_checked(monkeypatch):
+    from fixtures.scraper_fixtures import patch_resolve_price_eur_for_unit
+
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()

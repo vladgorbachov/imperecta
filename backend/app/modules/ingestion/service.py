@@ -25,6 +25,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.common.ops_alerts import emit_ops_alert
 from app.database import invalidate_sync_session, is_read_only_sql_error
@@ -203,6 +204,7 @@ class IngestionService:
         listing: FactListing,
         source: str,
         date_id: int | None = None,
+        sync_instance: Any | None = None,
     ) -> bool:
         """Authorize a scrape UPDATE delta and write via persist on this session."""
         outcome = authorize_scrape_update(
@@ -224,6 +226,21 @@ class IngestionService:
                 date_id=date_id,
             ),
         )
+        if result.ok:
+            # Seam-3 contract (mirrors scraper service): same-session readers
+            # must see the gated UPDATE on the ORM instance immediately;
+            # committed-value assignment avoids a shadow ORM UPDATE.
+            target = sync_instance
+            if target is None and table == "fact_listing":
+                target = listing
+            if target is not None:
+                for key, value in fields.items():
+                    if key in ("url_hash", "id") or not hasattr(target, key):
+                        continue
+                    try:
+                        set_committed_value(target, key, value)
+                    except Exception:  # non-ORM stub in unit tests
+                        setattr(target, key, value)
         return result.ok
 
     def persist_extracted(
@@ -575,6 +592,7 @@ class IngestionService:
             fields=enrich_fields,
             listing=listing,
             source="ingestion_product_enrich",
+            sync_instance=product,
         )
 
     @staticmethod

@@ -13,6 +13,8 @@ from app.main import app
 from app.modules.visualisation_calc.trend.schemas import TrendPoint, TrendSeries
 from app.modules.visualisation_calc.trend.service import build_trend_series
 
+from tests.route_flatten import iter_app_routes
+
 
 @pytest.fixture
 def trend_auth_override():
@@ -108,7 +110,7 @@ def test_build_trend_series_preserves_none_avg() -> None:
 
 @pytest.mark.integration
 def test_trend_route_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_app_routes(app)}
     assert "/api/markets/trend" in paths
 
 

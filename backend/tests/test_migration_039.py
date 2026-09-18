@@ -92,5 +92,13 @@ def test_alembic_single_head_includes_039() -> None:
 
     referenced = {down for down in revisions.values() if down}
     heads = [rev for rev in revisions if rev not in referenced]
-    assert heads == ["039_gate_security_definer_functions"], f"unexpected heads: {heads}"
+    # Single-head invariant: 039 was head when written; assert it stays an
+    # ancestor of the one chain head instead of freezing head identity.
+    assert len(heads) == 1, f"multiple heads: {heads}"
+    node = heads[0]
+    seen = set()
+    while node is not None and node not in seen:
+        seen.add(node)
+        node = revisions.get(node)
+    assert "039_gate_security_definer_functions" in seen
     assert revisions["039_gate_security_definer_functions"] == "038_create_imperecta_app_role"

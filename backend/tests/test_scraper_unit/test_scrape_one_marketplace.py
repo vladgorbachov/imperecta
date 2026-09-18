@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 
+from fixtures.scraper_fixtures import wire_write_meta
+
 from app.modules.scraper import tasks as scraper_tasks
 
 
@@ -63,6 +65,7 @@ async def test_scrape_one_marketplace_runs_and_owns_job(monkeypatch):
     engine, db = _wire_session_factory(
         monkeypatch, get_results=[pending_job, marketplace]
     )
+    wire_write_meta(monkeypatch, scraper_tasks, {child_id: pending_job})
 
     captured: dict = {}
 
@@ -133,6 +136,7 @@ async def test_scrape_one_marketplace_partial_aware_status(
     engine, db = _wire_session_factory(
         monkeypatch, get_results=[pending_job, marketplace]
     )
+    wire_write_meta(monkeypatch, scraper_tasks, {child_id: pending_job})
 
     def fake_run_scrape_all_pool(
         scrape_job_id,
@@ -215,6 +219,7 @@ async def test_scrape_one_marketplace_marketplace_not_found(monkeypatch):
     engine, db = _wire_session_factory(
         monkeypatch, get_results=[pending_job, None]
     )
+    wire_write_meta(monkeypatch, scraper_tasks, {child_id: pending_job})
 
     scrape_mock = MagicMock()
     monkeypatch.setattr(scraper_tasks, "_run_scrape_all_pool", scrape_mock)
@@ -225,5 +230,6 @@ async def test_scrape_one_marketplace_marketplace_not_found(monkeypatch):
     assert out["child_job_id"] == str(child_id)
     assert pending_job.status == "failed"
     scrape_mock.assert_not_called()
-    db.commit.assert_awaited()
+    # The failed-status write commits inside the gated META session; the
+    # task session itself has nothing to commit on this path.
     engine.dispose.assert_awaited_once()

@@ -34,10 +34,11 @@ def _data_firewall_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
     captured: list = []
 
-    def _execute(stmt):
-        captured.append(stmt)
+    def _execute(stmt, params=None):
+        captured.append((stmt, params))
         result = MagicMock()
         result.rowcount = rowcount
+        result.scalar_one.return_value = rowcount
         return result
 
     db.execute.side_effect = _execute
@@ -81,7 +82,12 @@ def test_each_housekeeping_kind_routes_by_url_hash(kind: str, delta: dict) -> No
     db = MagicMock()
     captured = _capture_execute(db)
     write_sync(db, outcome.signed_record, ctx=PersistContext(source="test"))
-    assert isinstance(captured[0], Update)
+    # Updates flow through the gate RPC (one gate.exec_write call carrying
+    # the signed locator+fields), not a direct ORM Update anymore.
+    stmt, params = captured[0]
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "fact_listing"
+    assert params["op"] == "update"
 
 
 def test_deactivate_rejects_is_active_true() -> None:

@@ -14,6 +14,29 @@ from app.models.facts import FactListing
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 
 
+import pytest_asyncio
+from sqlalchemy import text as sa_text
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_pipeline_artifacts():
+    """Fixed-URL seeds collide across runs in the persistent test DB."""
+    async with async_session_maker() as session:
+        await session.execute(
+            sa_text(
+                "DELETE FROM fact_listing WHERE external_url LIKE '%/pipeline-test' "
+                "OR external_url LIKE '%/seedless-test'"
+            )
+        )
+        await session.execute(
+            sa_text(
+                "DELETE FROM dim_product WHERE name_normalized = 'pipeline product'"
+            )
+        )
+        await session.commit()
+    yield
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_pipeline_job_updates_metadata_and_duration():
@@ -113,7 +136,9 @@ async def test_complete_pipeline_job_updates_metadata_and_duration():
         assert len(metadata["per_marketplace"]) == 1
         assert metadata["per_marketplace"][0]["domain"] == marketplace.domain
 
-        refreshed = await session.get(ScrapeJob, job.id)
+        # Status lands via the gated META write (own session); re-read past
+        # the identity map.
+        refreshed = await session.get(ScrapeJob, job.id, populate_existing=True)
         assert refreshed is not None
         assert refreshed.status == "completed"
         assert refreshed.duration_ms == 5000
@@ -147,7 +172,9 @@ async def test_complete_pipeline_job_failed_sets_error_payload():
         assert metadata["error"] == "pipeline failed"
         assert metadata["timings"]["total_ms"] == 350
 
-        refreshed = await session.get(ScrapeJob, job.id)
+        # Status lands via the gated META write (own session); re-read past
+        # the identity map.
+        refreshed = await session.get(ScrapeJob, job.id, populate_existing=True)
         assert refreshed is not None
         assert refreshed.status == "failed"
         assert refreshed.failed == 0

@@ -139,5 +139,9 @@ def test_repair_sites_import_canonical_status_tuple():
 
     assert "_SCRAPE_LOG_STATUSES" not in scraper_tasks.__dict__
     assert "_SCRAPE_LOG_STATUSES" not in scraper_service.__dict__
-    assert scraper_tasks.CANONICAL_SCRAPE_LOG_STATUSES is CANONICAL_SCRAPE_LOG_STATUSES
-    assert scraper_service.CANONICAL_SCRAPE_LOG_STATUSES is CANONICAL_SCRAPE_LOG_STATUSES
+    # The duplicated module-level tuples stay gone; the canonical tuple
+    # lives in outcome_buckets (tasks/service stopped re-importing it when
+    # status mapping moved into _determine_log_status).
+    assert CANONICAL_SCRAPE_LOG_STATUSES
+    assert list(CANONICAL_SCRAPE_LOG_STATUSES) == sorted(CANONICAL_SCRAPE_LOG_STATUSES)
+    assert "success" in CANONICAL_SCRAPE_LOG_STATUSES

@@ -27,6 +27,8 @@ from app.main import app
 from app.modules.market_data.facade import MarketsService
 from app.modules.product_pool.api import router as pool_router
 
+from tests.route_flatten import iter_app_routes
+
 DELETED_PATHS: set[str] = {
     "/api/markets/overview",
     "/api/markets/ticker",
@@ -73,7 +75,7 @@ def test_main_does_not_import_dashboard_router() -> None:
 
 def test_deleted_routes_absent_from_app() -> None:
     """All six retired handlers are unmounted."""
-    actual_paths = {getattr(route, "path", None) for route in app.routes}
+    actual_paths = {getattr(route, "path", None) for route in iter_app_routes(app)}
     still_present = DELETED_PATHS & actual_paths
     assert not still_present, (
         f"D1 deletion failed - these routes are still registered: {sorted(still_present)}"

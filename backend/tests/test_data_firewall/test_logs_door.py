@@ -81,6 +81,7 @@ def test_evaluate_logs_well_typed_batch_inserts_on_stub() -> None:
     assert len(outcome.signed_batch.rows) == 2
 
     session = MagicMock()
+    session.execute.return_value.scalar_one.return_value = 2
     result = write_batch_sync(
         session,
         outcome.signed_batch,
@@ -88,7 +89,9 @@ def test_evaluate_logs_well_typed_batch_inserts_on_stub() -> None:
     )
     assert result.ok is True
     assert result.rows_affected == 2
-    assert session.add_all.call_count == 1
+    # Batch inserts flow through one gate.exec_write_batch RPC call.
+    stmt = session.execute.call_args.args[0]
+    assert "gate.exec_write_batch" in str(stmt)
 
 
 def test_tamper_on_any_row_invalidates_batch_signature() -> None:

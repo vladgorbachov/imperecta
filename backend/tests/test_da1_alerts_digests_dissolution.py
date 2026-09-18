@@ -38,10 +38,13 @@ from app.modules.alerts.notifications import (
 )
 from app.workers.celery_app import celery_app
 
+from tests.route_flatten import iter_app_routes
+
 ALERTS_DELETED_PATHS: set[str] = {
     "/api/alerts/",
     "/api/alerts/{id}",
-    "/api/alerts/events",
+    # "/api/alerts/events" was re-mounted by the NEW alerts module (W6+):
+    # only the dissolved module's unique paths stay asserted-absent.
     "/api/alerts/events/{event_id}/explanation",
     "/api/alerts/events/{event_id}/auto-response",
 }
@@ -124,11 +127,13 @@ def test_digests_package_is_bare_skeleton() -> None:
 
 
 def test_no_alerts_routes_mounted() -> None:
-    actual_paths = {getattr(route, "path", None) for route in app.routes}
-    leftover_alerts = {p for p in actual_paths if p and p.startswith("/api/alerts")}
-    assert not leftover_alerts, (
-        f"DA1 deletion failed - alerts routes still mounted: {sorted(leftover_alerts)}"
-    )
+    """The DISSOLVED module's unique paths stay gone.
+
+    A blanket "no /api/alerts*" assert is no longer valid: the NEW alerts
+    module (W6+, analytic alert rules) legitimately mounts /api/alerts,
+    /api/alerts/{rule_id} and /api/alerts/events on different handlers.
+    """
+    actual_paths = {getattr(route, "path", None) for route in iter_app_routes(app)}
     still_present = ALERTS_DELETED_PATHS & actual_paths
     assert not still_present, (
         f"Specific deleted alerts paths still mounted: {sorted(still_present)}"
@@ -136,7 +141,7 @@ def test_no_alerts_routes_mounted() -> None:
 
 
 def test_no_digests_routes_mounted() -> None:
-    actual_paths = {getattr(route, "path", None) for route in app.routes}
+    actual_paths = {getattr(route, "path", None) for route in iter_app_routes(app)}
     leftover_digests = {p for p in actual_paths if p and p.startswith("/api/digests")}
     assert not leftover_digests, (
         f"DA1 deletion failed - digests routes still mounted: {sorted(leftover_digests)}"

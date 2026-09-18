@@ -21,7 +21,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("ck_scrape_jobs_status", "scrape_jobs", type_="check")
+    # Fresh-replay hygiene: drop the default-named inline twin too (no-op on
+    # prod) so the widened CHECK below is the only status constraint left.
+    op.execute(
+        "ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS scrape_jobs_status_check"
+    )
+    # IF EXISTS: fresh-replay safe (the constraint predates 019 only on
+    # DBs created before it; prod already applied this — no-op there).
+    op.execute("ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_status")
     op.create_check_constraint(
         "ck_scrape_jobs_status",
         "scrape_jobs",
@@ -35,7 +42,9 @@ def downgrade() -> None:
     op.execute(
         "UPDATE scrape_jobs SET status = 'failed' WHERE status = 'partial'"
     )
-    op.drop_constraint("ck_scrape_jobs_status", "scrape_jobs", type_="check")
+    # IF EXISTS: fresh-replay safe (the constraint predates 019 only on
+    # DBs created before it; prod already applied this — no-op there).
+    op.execute("ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS ck_scrape_jobs_status")
     op.create_check_constraint(
         "ck_scrape_jobs_status",
         "scrape_jobs",

@@ -46,8 +46,10 @@ async def test_removed_market_endpoints_not_registered(client, auth_headers):
 @pytest.mark.asyncio
 async def test_markets_overview_returns_stored_data(client, auth_headers):
     """Overview endpoint returns paginated payload from pool data source."""
+    # The /markets/overview alias was retired with the visualisation split;
+    # /pool/products is the single pages-on-one-source route.
     resp = await client.get(
-        "/api/markets/overview",
+        "/api/pool/products",
         params={"sort": "volatile", "limit": 50},
         headers=auth_headers,
     )

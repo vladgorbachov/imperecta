@@ -34,6 +34,7 @@ async def test_login_returns_tokens_and_flags(client):
             "email": "logintest@test.com",
             "password": "TestPass123!",
             "name": "Login Test",
+            "language": "en",
         },
     )
     resp = await client.post(
@@ -59,6 +60,7 @@ async def test_login_wrong_password_401(client):
             "email": "logintest@test.com",
             "password": "TestPass123!",
             "name": "Login Test",
+            "language": "en",
         },
     )
     resp = await client.post(

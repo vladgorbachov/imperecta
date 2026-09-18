@@ -15,6 +15,7 @@ from app.modules.visualisation_calc.coverage.service import (
     build_country_rollup,
     build_marketplace_breakdown,
 )
+from tests.route_flatten import iter_app_routes
 
 _MP_A = UUID("11111111-1111-4111-8111-111111111111")
 _MP_B = UUID("22222222-2222-4222-8222-222222222222")
@@ -91,7 +92,7 @@ def test_build_marketplace_breakdown_empty_honest() -> None:
 
 @pytest.mark.integration
 def test_geo_coverage_route_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_app_routes(app)}
     assert "/api/markets/geo-coverage" in paths
 
 

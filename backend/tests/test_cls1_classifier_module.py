@@ -322,7 +322,11 @@ class TestConsumersRepointed:
 
     @pytest.mark.integration
     def test_discovery_module_imports_classifier(self):
-        mods = _read_imports(BACKEND_APP / "modules" / "scraper" / "discovery.py")
+        # Discovery moved from scraper/discovery.py into its own package;
+        # the classifier edge now lives in classifier_adapter.py.
+        mods = _read_imports(
+            BACKEND_APP / "modules" / "discovery" / "classifier_adapter.py"
+        )
         assert "app.modules.classifier" in mods
 
 

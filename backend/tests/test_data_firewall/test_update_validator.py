@@ -176,10 +176,11 @@ def test_isolated_reject_on_allowlist_failure() -> None:
 def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
     captured: list = []
 
-    def _execute(stmt):
-        captured.append(stmt)
+    def _execute(stmt, params=None):
+        captured.append((stmt, params))
         result = MagicMock()
         result.rowcount = rowcount
+        result.scalar_one.return_value = rowcount
         return result
 
     db.execute.side_effect = _execute
@@ -199,7 +200,9 @@ def test_prune_listing_delete_by_url_hash() -> None:
     captured = _capture_execute(db, rowcount=1)
     result = write_sync(db, outcome.signed_record, ctx=PersistContext(source="scraper_prune"))
     assert result.ok is True
-    assert isinstance(captured[0], Delete)
+    stmt, params = captured[0]
+    assert "gate.exec_write" in str(stmt)
+    assert params["op"] == "delete"
 
 
 @pytest.mark.integration
@@ -218,13 +221,14 @@ def test_prune_product_delete_gated_by_orphan_count() -> None:
     db = MagicMock()
     execute_calls: list = []
 
-    def _execute(stmt):
-        execute_calls.append(stmt)
+    def _execute(stmt, params=None):
+        execute_calls.append((stmt, params))
         result = MagicMock()
         if hasattr(stmt, "columns_clause_froms"):
             result.scalar.return_value = 0
         else:
             result.rowcount = 1
+            result.scalar_one.return_value = 1
         return result
 
     db.execute.side_effect = _execute
@@ -256,5 +260,9 @@ def test_prune_product_delete_gated_by_orphan_count() -> None:
 
     assert other_listings == 0
     assert product_deleted is True
-    delete_stmts = [stmt for stmt in execute_calls if isinstance(stmt, Delete)]
-    assert len(delete_stmts) == 2
+    delete_calls = [
+        (stmt, params)
+        for stmt, params in execute_calls
+        if params and params.get("op") == "delete"
+    ]
+    assert len(delete_calls) == 2

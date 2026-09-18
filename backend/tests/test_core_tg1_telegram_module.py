@@ -20,6 +20,8 @@ from fastapi.routing import APIRoute
 
 from app.main import app
 
+from tests.route_flatten import iter_app_routes
+
 # ---------------------------------------------------------------------------
 # 1. telegram/ surface
 # ---------------------------------------------------------------------------
@@ -43,8 +45,8 @@ def test_telegram_router_mounts_canonical_three_routes() -> None:
     inventory = sorted(
         {
             (",".join(sorted(r.methods - {"HEAD"})), r.path)
-            for r in app.routes
-            if isinstance(r, APIRoute) and r.path.startswith("/api/telegram/")
+            for r in iter_app_routes(app)
+            if getattr(r, "methods", None) and r.path.startswith("/api/telegram/")
         }
     )
     assert inventory == [
@@ -61,7 +63,7 @@ def test_telegram_router_mounts_canonical_three_routes() -> None:
 
 def test_auth_telegram_routes_absent() -> None:
     """The duplicated /api/auth/telegram-link|disconnect routes are deleted."""
-    paths = {r.path for r in app.routes if isinstance(r, APIRoute)}
+    paths = {r.path for r in iter_app_routes(app) if getattr(r, "methods", None)}
     assert "/api/auth/telegram-link" not in paths
     assert "/api/auth/telegram-disconnect" not in paths
 
@@ -89,8 +91,8 @@ def test_generate_link_code_response_model_is_typed() -> None:
 
     route = next(
         r
-        for r in app.routes
-        if isinstance(r, APIRoute) and r.path == "/api/telegram/generate-link-code"
+        for r in iter_app_routes(app)
+        if getattr(r, "methods", None) and r.path == "/api/telegram/generate-link-code"
     )
     assert route.response_model is TelegramLinkCodeResponse
 
@@ -107,8 +109,8 @@ def test_generate_link_code_handler_flushes_and_uses_alnum_code() -> None:
     src = inspect.getsource(telegram_api.generate_link_code)
     assert "LINK_CODE_LENGTH" in src
     assert "LINK_CODE_ALPHABET" in src
-    assert "await db.flush()" in src, (
-        "generate_link_code must persist telegram_link_code via db.flush()"
+    assert "write_user_async" in src, (
+        "generate_link_code must persist telegram_link_code via the USER gate"
     )
     assert "message" not in src, (
         "generate-link-code must not return the Russian `message` field"
@@ -122,14 +124,14 @@ def test_unlink_response_is_typed() -> None:
 
     routes = {
         r.path: r
-        for r in app.routes
-        if isinstance(r, APIRoute) and r.path.startswith("/api/telegram/")
+        for r in iter_app_routes(app)
+        if getattr(r, "methods", None) and r.path.startswith("/api/telegram/")
     }
     assert routes["/api/telegram/unlink"].response_model is TelegramUnlinkResponse
 
 
 def test_telegram_status_route_removed() -> None:
-    paths = {r.path for r in app.routes if isinstance(r, APIRoute)}
+    paths = {r.path for r in iter_app_routes(app) if getattr(r, "methods", None)}
     assert "/api/telegram/status" not in paths
 
 

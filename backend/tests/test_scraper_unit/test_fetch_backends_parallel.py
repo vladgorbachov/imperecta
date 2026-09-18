@@ -215,8 +215,12 @@ async def test_proxy_provider_gated_direct_http_not_gated(monkeypatch):
             proxy_provider_api_url="http://proxy-provider",
         ),
     )
+    from app.modules.scraper import fetch_backends as fb
     from app.modules.scraper.fetch_backends import DirectHttpBackend, ProxyProviderBackend
 
+    # The per-loop pooled client survives across tests under the session
+    # event loop — drop it so the patched AsyncClient class is used.
+    fb._loop_http_clients.clear()
     direct = DirectHttpBackend()
     with patch(
         "app.modules.scraper.fetch_backends.httpx.AsyncClient",
@@ -225,6 +229,7 @@ async def test_proxy_provider_gated_direct_http_not_gated(monkeypatch):
         response.status_code = 200
         response.text = "<html>ok</html>"
         client = MagicMock()
+        client.is_closed = False  # pooled-client liveness check
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
         client.get = AsyncMock(return_value=response)

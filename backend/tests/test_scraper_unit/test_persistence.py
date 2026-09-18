@@ -12,6 +12,7 @@ from fixtures.scraper_fixtures import (
     _fake_run_coro,
     _seed_listing,
     patch_resolve_price_eur_for_unit,
+    pg_session,  # noqa: F401 — fixture registration via import
 )
 from sqlalchemy import select, text
 
@@ -20,6 +21,17 @@ from app.models.facts import FactListing, FactPrice
 from app.modules.scraper.extractors import ExtractedProduct
 from app.modules.scraper.scraper_pool import PoolScrapeResult, ScraperPool
 from app.modules.scraper.service import GlobalScrapeService, _today_date_id
+
+
+def _gate_fact_price_params(session) -> list[dict]:
+    """Gate-RPC fact_price writes captured off the mock session (inserts no
+    longer go through session.add — they are one gate.exec_write call)."""
+    out = []
+    for c in session.execute.call_args_list:
+        if len(c.args) >= 2 and isinstance(c.args[1], dict):
+            if c.args[1].get("table") == "fact_price":
+                out.append(c.args[1])
+    return out
 
 
 def _patch_commit_flush(session) -> None:
@@ -122,10 +134,9 @@ def test_scrape_product_full_success(monkeypatch):
     assert product.name == "Widget A"
     assert res.log_status == "success"
 
-    added = [c.args[0] for c in session.add.call_args_list]
-    assert any(isinstance(x, FactPrice) for x in added)
-    fp = next(x for x in added if isinstance(x, FactPrice))
-    assert float(fp.price) == pytest.approx(19.99)
+    price_calls = _gate_fact_price_params(session)
+    assert price_calls, "fact_price gate write missing"
+    assert "19.99" in {str(v) for v in price_calls[0].values()}
     assert session.commit.called
 
 
@@ -202,8 +213,7 @@ def test_scrape_product_missing_product_name_fallback_to_title(monkeypatch):
     res = svc.scrape_product(listing_id)
     assert res.success is True
     assert product.name == "Title Only"
-    added = [c.args[0] for c in session.add.call_args_list]
-    assert any(isinstance(x, FactPrice) for x in added)
+    assert _gate_fact_price_params(session), "fact_price gate write missing"
 
 
 def test_today_date_id_deadlock_safe():
@@ -276,8 +286,7 @@ def test_fact_price_written_only_when_all_required_fields(monkeypatch):
         )
         svc = GlobalScrapeService(session, MagicMock(spec=ScraperPool))
         svc.scrape_product(lid)
-        added = [c.args[0] for c in session.add.call_args_list]
-        has_fp = any(isinstance(x, FactPrice) for x in added)
+        has_fp = bool(_gate_fact_price_params(session))
         assert has_fp is expect_fp, (payload, expect_fp)
 
     schema_path = Path(__file__).resolve().parents[2] / "alembic/versions/001_v2_schema.py"

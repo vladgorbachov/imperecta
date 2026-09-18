@@ -6,7 +6,7 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from fixtures.scraper_fixtures import _fake_run_coro
+from fixtures.scraper_fixtures import _fake_run_coro, patch_resolve_price_eur_for_unit
 
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing
@@ -52,6 +52,7 @@ def test_run_coro_in_worker_ignores_shutdown_asyncgen_error(monkeypatch):
 
 @pytest.mark.integration
 def test_persist_commit_failure(monkeypatch):
+    patch_resolve_price_eur_for_unit(monkeypatch)
     listing_id = uuid.uuid4()
     product_id = uuid.uuid4()
     marketplace_id = uuid.uuid4()

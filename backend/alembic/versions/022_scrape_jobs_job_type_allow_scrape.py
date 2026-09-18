@@ -29,6 +29,12 @@ _ALLOWED_WITHOUT_SCRAPE = (
 
 def upgrade() -> None:
     op.drop_constraint("ck_scrape_jobs_job_type", "scrape_jobs", type_="check")
+    # Fresh-replay hygiene: a default-named inline twin (from the ORM-built
+    # table on rebuilt DBs) would keep rejecting 'scrape'; prod has no such
+    # twin, so this is a no-op there.
+    op.execute(
+        "ALTER TABLE scrape_jobs DROP CONSTRAINT IF EXISTS scrape_jobs_job_type_check"
+    )
     op.create_check_constraint(
         "ck_scrape_jobs_job_type",
         "scrape_jobs",

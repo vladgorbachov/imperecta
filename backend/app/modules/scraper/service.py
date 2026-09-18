@@ -22,6 +22,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.common.ops_alerts import emit_ops_alert
 from app.database import invalidate_sync_session, is_read_only_sql_error
@@ -252,6 +253,18 @@ class GlobalScrapeService:
                 listing_id=listing.id,
             ),
         )
+        if result.ok:
+            # Seam-3 contract: the in-memory instance must reflect the gated
+            # UPDATE immediately — downstream logic in the same scrape pass
+            # reads listing.consecutive_errors / last_error / last_checked_at
+            # and must not act on stale pre-update values. Committed-value
+            # assignment keeps the instance clean (no shadow ORM UPDATE).
+            for key, value in fields.items():
+                if key != "url_hash" and hasattr(listing, key):
+                    try:
+                        set_committed_value(listing, key, value)
+                    except Exception:  # non-ORM stub in unit tests
+                        setattr(listing, key, value)
         return result.ok
 
     def _route_listing_scrape_start_reset(self, listing: FactListing) -> bool:

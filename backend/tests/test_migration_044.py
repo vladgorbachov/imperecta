@@ -77,7 +77,15 @@ def test_alembic_single_head_includes_044() -> None:
 
     referenced = {down for down in revisions.values() if down}
     heads = [rev for rev in revisions if rev not in referenced]
-    assert heads == ["044_widen_scrape_logs_status"], f"unexpected heads: {heads}"
+    # Single-head invariant: assert 044 is an ancestor of the one chain
+    # head instead of freezing head identity at write time.
+    assert len(heads) == 1, f"multiple heads: {heads}"
+    node = heads[0]
+    seen = set()
+    while node is not None and node not in seen:
+        seen.add(node)
+        node = revisions.get(node)
+    assert "044_widen_scrape_logs_status" in seen
     assert (
         revisions["044_widen_scrape_logs_status"]
         == "043_pgcron_refresh_mviews"

@@ -34,6 +34,7 @@ from app.modules.marketplaces.service import (
     MarketplacePoolService,
     MarketplaceService,
 )
+from tests.route_flatten import iter_app_routes
 
 MARKETPLACES_DIR = (
     Path(__file__).resolve().parents[1]
@@ -75,6 +76,7 @@ FORBIDDEN_UPDATE_KEYS: tuple[str, ...] = (
 EXPECTED_UPDATE_KEYS: frozenset[str] = frozenset(
     {
         "requires_js",
+        "access_mode",
         "is_active",
         "product_quota",
         "name",
@@ -111,7 +113,7 @@ REMOVED_ROUTE_PATH = "/api/admin/marketplaces/{marketplace_id}/logs"
 
 def _live_routes() -> set[tuple[str, str]]:
     out: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for route in iter_app_routes(app):
         path = getattr(route, "path", "")
         methods = getattr(route, "methods", None) or set()
         if not path.startswith("/api/admin/marketplaces"):

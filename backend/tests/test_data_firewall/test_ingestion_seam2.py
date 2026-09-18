@@ -46,10 +46,11 @@ def test_dim_date_registered_in_all_four_maps() -> None:
 def _capture_execute(db: MagicMock, *, rowcount: int = 1) -> list:
     captured: list = []
 
-    def _execute(stmt):
-        captured.append(stmt)
+    def _execute(stmt, params=None):
+        captured.append((stmt, params))
         result = MagicMock()
         result.rowcount = rowcount
+        result.scalar_one.return_value = rowcount
         return result
 
     db.execute.side_effect = _execute
@@ -74,9 +75,11 @@ def test_dim_date_insert_uses_on_conflict_do_nothing() -> None:
     assert result.ok is True
     assert result.no_target is True
     assert len(captured) == 1
-    stmt = captured[0]
-    assert isinstance(stmt, Insert)
-    assert stmt._post_values_clause is not None  # noqa: SLF001 ON CONFLICT clause present
+    stmt, params = captured[0]
+    # Inserts flow through the gate RPC; conflict handling lives server-side.
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "dim_date"
+    assert params["op"] == "insert"
 
 
 @pytest.mark.integration
@@ -100,10 +103,12 @@ def test_enrich_update_only_allowed_columns() -> None:
     db = MagicMock()
     captured = _capture_execute(db)
     write_sync(db, outcome.signed_record, ctx=PersistContext(source="test"))
-    assert isinstance(captured[0], Update)
-    value_keys = {key.key for key in captured[0]._values.keys()}  # noqa: SLF001
-    assert "id" not in value_keys
-    assert value_keys == {"name", "name_normalized"}
+    stmt, params = captured[0]
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "dim_product"
+    assert params["op"] == "update"
+    # The signed record carries exactly the allowed columns plus locator.
+    assert set(outcome.signed_record.fields) - {"id"} == {"name", "name_normalized"}
 
 
 def test_enrich_skips_when_nothing_changed() -> None:
@@ -153,7 +158,11 @@ def test_denorm_success_routed_by_url_hash() -> None:
     db = MagicMock()
     captured = _capture_execute(db)
     write_sync(db, outcome.signed_record, ctx=PersistContext(source="test"))
-    assert isinstance(captured[0], Update)
+    stmt, params = captured[0]
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "fact_listing"
+    assert params["op"] == "update"
+    assert "listinghash" in {str(v) for v in params.values()}
 
 
 def test_denorm_no_change_uses_normalized_currency_code() -> None:

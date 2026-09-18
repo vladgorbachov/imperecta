@@ -9,8 +9,11 @@ from uuid import uuid4
 
 import pytest
 
+from fixtures.scraper_fixtures import wire_write_meta
+
 from app.modules.scraper import tasks as scraper_tasks
 from app.modules.scraper.pipeline import tick_orchestrator as tick_mod
+from app.modules.scraper.pipeline import job_completion as jc_mod
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 from app.modules.scraper.pipeline.tick_orchestrator import run_tick
 
@@ -158,6 +161,7 @@ async def test_scrape_child_partial_on_deadline(monkeypatch):
     engine, _db = _wire_session_factory(
         monkeypatch, get_results=[pending_job, marketplace, parent_job]
     )
+    wire_write_meta(monkeypatch, scraper_tasks, {child_id: pending_job})
 
     def fake_run_scrape_all_pool(
         scrape_job_id,
@@ -338,7 +342,7 @@ async def test_tick_completes_when_all_cohorts_drained(monkeypatch):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_counter_scope_child_ids():
+async def test_counter_scope_child_ids(monkeypatch):
     """ScrapeLog rows under child scrape ids roll up to parent.successful."""
     parent_id = uuid4()
     child_id = uuid4()
@@ -370,6 +374,7 @@ async def test_counter_scope_child_ids():
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[child_result, log_result])
     db.commit = AsyncMock()
+    wire_write_meta(monkeypatch, jc_mod, {parent_id: job})
 
     captured_queries: list = []
 

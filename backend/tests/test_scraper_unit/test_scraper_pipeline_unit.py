@@ -6,7 +6,11 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from fixtures.scraper_fixtures import _pg_available, patch_resolve_price_eur_for_unit
+from fixtures.scraper_fixtures import (  # noqa: F401 - pg_session fixture registration
+    _pg_available,
+    patch_resolve_price_eur_for_unit,
+    pg_session,
+)
 
 from app.models.dimensions import DimMarketplace, DimProduct
 from app.models.facts import FactListing

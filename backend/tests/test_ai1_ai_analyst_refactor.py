@@ -36,6 +36,8 @@ from app.main import app
 from app.modules.ai_analyst import api as ai_api
 from app.modules.ai_analyst import claude_client, schemas, service
 
+from tests.route_flatten import iter_app_routes
+
 AI_ANALYST_DIR = Path(__file__).resolve().parents[1] / "app" / "modules" / "ai_analyst"
 
 
@@ -49,11 +51,11 @@ def test_monitor_module_gone() -> None:
 @pytest.mark.integration
 def test_only_chat_route_under_ai() -> None:
     pairs: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for route in iter_app_routes(app):
         path = getattr(route, "path", "")
         if not path.startswith("/api/ai/"):
             continue
-        if isinstance(route, APIRoute):
+        if getattr(route, "methods", None):
             for method in sorted(route.methods - {"HEAD"}):
                 pairs.add((method, path))
 
@@ -194,8 +196,8 @@ def test_chat_persists_session_message_and_apilog() -> None:
     """A-keep semantics: chat() writes AIChatSession + AIChatMessage + api_logs via LOGS door."""
     src = (AI_ANALYST_DIR / "service.py").read_text(encoding="utf-8")
     chat_section = src.split("async def chat(", 1)[1]
-    assert "AIChatSession(" in chat_section, "chat() must persist AIChatSession"
-    assert "AIChatMessage(" in chat_section, "chat() must persist AIChatMessage"
+    # Sessions/messages now persist through the CHAT door (gate), not ORM adds.
+    assert "write_chat_async" in chat_section, "chat() must persist via CHAT door"
     assert "write_logs_async" in chat_section, "chat() must log Anthropic call via LOGS door"
 
 

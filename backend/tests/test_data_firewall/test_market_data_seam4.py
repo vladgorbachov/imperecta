@@ -61,7 +61,11 @@ def test_migration_trim_single_statement_and_fixed_boundary() -> None:
     source = (BACKEND_ROOT / "alembic/versions/037_trim_dim_date_preseed.py").read_text(
         encoding="utf-8",
     )
-    assert 'op.execute("DELETE FROM dim_date WHERE date_id > 20260627")' in source
+    # The trim became a guarded multi-line DELETE (only unreferenced preseed
+    # dates go); the fixed boundary and FK-safety documentation remain.
+    assert "DELETE FROM dim_date" in source
+    assert "20260627" in source
+    assert "NOT EXISTS" in source
     assert "CURRENT_DATE" not in source
     assert "FK-safe" in source or "FK sources" in source
 
@@ -115,10 +119,11 @@ def test_dim_date_insert_uses_on_conflict_do_nothing() -> None:
 
     captured: list = []
 
-    def _execute(stmt):
-        captured.append(stmt)
+    def _execute(stmt, params=None):
+        captured.append((stmt, params))
         result = MagicMock()
         result.rowcount = 1
+        result.scalar_one.return_value = 1
         return result
 
     db = MagicMock()
@@ -129,8 +134,10 @@ def test_dim_date_insert_uses_on_conflict_do_nothing() -> None:
         ctx=PersistContext(source="test", date_id=fields["date_id"]),
     )
     assert len(captured) == 1
-    assert isinstance(captured[0], Insert)
-    assert captured[0]._post_values_clause is not None  # noqa: SLF001
+    stmt, params = captured[0]
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "dim_date"
+    assert params["op"] == "insert"
 
 
 @patch("app.modules.market_data.ingestion.write_sync")

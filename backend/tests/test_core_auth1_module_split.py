@@ -31,6 +31,8 @@ from fastapi.routing import APIRoute
 
 from app.main import app
 
+from tests.route_flatten import iter_app_routes
+
 CORE_DIR = Path(__file__).resolve().parents[1] / "app" / "modules" / "core"
 
 
@@ -76,8 +78,8 @@ def test_auth_paths_preserved_under_api() -> None:
     inventory = sorted(
         {
             (",".join(sorted(r.methods - {"HEAD"})), r.path)
-            for r in app.routes
-            if isinstance(r, APIRoute) and r.path.startswith("/api/auth/")
+            for r in iter_app_routes(app)
+            if getattr(r, "methods", None) and r.path.startswith("/api/auth/")
         }
     )
     assert inventory == [

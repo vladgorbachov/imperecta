@@ -52,6 +52,8 @@ from fastapi.routing import APIRoute
 from app.entitlements.plan import UserPlan
 from app.main import app
 
+from tests.route_flatten import iter_app_routes
+
 USERS_DIR = Path(__file__).resolve().parents[1] / "app" / "modules" / "users"
 PARSING_ADMIN_PATH = (
     Path(__file__).resolve().parents[1] / "app" / "modules" / "admin" / "parsing_admin.py"
@@ -127,12 +129,16 @@ def test_admin_router_superuser_gated() -> None:
 def test_live_app_routes_after_migration() -> None:
     inventory = {
         (",".join(sorted(r.methods - {"HEAD"})), r.path)
-        for r in app.routes
-        if isinstance(r, APIRoute) and r.path.startswith(("/api/users", "/api/admin/users", "/api/auth/me", "/api/admin/parsing/users"))
+        for r in iter_app_routes(app)
+        if getattr(r, "methods", None) and r.path.startswith(("/api/users", "/api/admin/users", "/api/auth/me", "/api/admin/parsing/users"))
     }
     assert inventory == {
         ("GET", "/api/users/me"),
         ("PUT", "/api/users/me"),
+        ("GET", "/api/users/me/preferences"),
+        ("PUT", "/api/users/me/preferences"),
+        ("GET", "/api/users/me/favorites"),
+        ("PUT", "/api/users/me/favorites"),
         ("GET", "/api/admin/users"),
         ("POST", "/api/admin/users"),
         ("PATCH", "/api/admin/users/{user_id}"),

@@ -208,8 +208,12 @@ def test_ingestion_persist_extracted_leaves_listing_denorm_unmutated_in_memory()
         svc.persist_extracted(data=data, listing=listing)  # type: ignore[arg-type]
 
     db.commit.assert_called_once()
-    assert listing.last_price is None
-    assert listing.last_price_eur is None
+    # Post-seam-7 contract v2: the gated UPDATE is mirrored onto the instance
+    # via committed-value assignment — same-session readers see fresh denorm
+    # values while the ORM never emits an echo UPDATE (nothing is dirtied).
+    assert float(listing.last_price) == 19.99
+    # Denorm mirrors persist_fields' NORMALIZED currency, not the raw one.
+    assert listing.last_currency_code == "EUR"
 
 
 def test_scraper_housekeeping_commit_without_cache_sync() -> None:

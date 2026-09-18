@@ -33,6 +33,8 @@ from app.main import app
 from app.modules.entitlements.api import router as entitlements_router
 from app.modules.entitlements.service import UsageService
 
+from tests.route_flatten import iter_app_routes
+
 ANALYTICS_PATHS_DELETED: set[str] = {
     "/api/analytics/products/{product_id}/price-history",
     "/api/analytics/products/{product_id}/comparison",
@@ -75,7 +77,7 @@ def test_analytics_module_dissolved(module_path: str) -> None:
 
 def test_no_analytics_routes_mounted_on_app() -> None:
     """Every previously-mounted analytics path is gone from the live app."""
-    actual_paths = {getattr(route, "path", None) for route in app.routes}
+    actual_paths = {getattr(route, "path", None) for route in iter_app_routes(app)}
     still_present = ANALYTICS_PATHS_DELETED & actual_paths
     assert not still_present, (
         f"A1 deletion failed - these analytics routes still exist: {sorted(still_present)}"
@@ -106,7 +108,7 @@ def test_no_dead_analytics_symbols_in_backend_source() -> None:
 @pytest.mark.integration
 def test_entitlements_usage_mounted_under_api_prefix() -> None:
     """`/api/entitlements/usage` is registered exactly once."""
-    paths = [getattr(r, "path", None) for r in app.routes]
+    paths = [getattr(r, "path", None) for r in iter_app_routes(app)]
     assert paths.count("/api/entitlements/usage") == 1, (
         f"Expected exactly one /api/entitlements/usage mount, paths={sorted(p for p in paths if p)}"
     )

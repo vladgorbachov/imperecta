@@ -40,6 +40,8 @@ from app.modules.product_pool.schemas import (
 )
 from app.modules.product_pool.service import ProductPoolService, _row_to_pool_item
 
+from tests.route_flatten import iter_app_routes
+
 POOL_DIR = (
     Path(__file__).resolve().parents[1]
     / "app"
@@ -267,7 +269,7 @@ def test_artefacts_replaced_with_proper_package_init() -> None:
 
 
 def _route_for(path: str, method: str = "GET"):
-    for route in app.routes:
+    for route in iter_app_routes(app):
         if getattr(route, "path", "") == path and method in getattr(route, "methods", set()):
             return route
     return None
@@ -276,7 +278,6 @@ def _route_for(path: str, method: str = "GET"):
 @pytest.mark.parametrize(
     "path,expected_class_name",
     [
-        ("/api/markets/overview", "PoolProductsResponse"),
         ("/api/pool/products", "PoolProductsResponse"),
         ("/api/pool/categories", "PoolCategoryItem"),
         ("/api/pool/marketplace-stats", "PoolCategorySummary"),
@@ -297,19 +298,18 @@ def test_routes_are_typed(path: str, expected_class_name: str) -> None:
 
 
 @pytest.mark.integration
-def test_overview_and_pool_products_both_live() -> None:
-    """Both pages-on-one-source pattern: /markets/overview and /pool/products
-    must coexist and both delegate to list_products."""
-    assert _route_for("/api/markets/overview") is not None
+def test_pool_products_delegates_to_list_products() -> None:
+    """/pool/products is the single pages-on-one-source route (the
+    /markets/overview alias was retired with the visualisation split)."""
     assert _route_for("/api/pool/products") is not None
+    assert _route_for("/api/markets/overview") is None
 
-    from app.modules.product_pool.api import get_overview, list_pool_products
+    from app.modules.product_pool.api import list_pool_products
 
-    for handler in (get_overview, list_pool_products):
-        src = inspect.getsource(handler)
-        assert "list_products(" in src, (
-            f"{handler.__name__} no longer delegates to list_products."
-        )
+    src = inspect.getsource(list_pool_products)
+    assert "list_products(" in src, (
+        "list_pool_products no longer delegates to list_products."
+    )
 
 
 def test_pool_search_route_removed() -> None:

@@ -189,9 +189,15 @@ async def test_markets_overview_limit_bounds(client, auth_headers):
         headers=auth_headers,
         params={"limit": 999999},
     )
+    # The bound is enforced by validation now (le=500), not by clamping.
+    assert resp.status_code == 422
+    resp = await client.get(
+        "/api/pool/products",
+        headers=auth_headers,
+        params={"limit": 500},
+    )
     assert resp.status_code == 200
-    data = resp.json()
-    assert len(data.get("items", [])) <= 100
+    assert len(resp.json().get("items", [])) <= 500
 
 
 @pytest.mark.integration

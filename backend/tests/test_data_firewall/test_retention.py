@@ -271,7 +271,7 @@ def test_write_sync_retention_delete_executes_cutoff_predicate() -> None:
     )
     session = MagicMock()
     execute_result = MagicMock()
-    execute_result.rowcount = 7
+    execute_result.scalar_one.return_value = 7
     session.execute.return_value = execute_result
 
     result = write_sync(session, signed, ctx=PersistContext(source="test"))
@@ -279,11 +279,15 @@ def test_write_sync_retention_delete_executes_cutoff_predicate() -> None:
     assert result.ok is True
     assert result.rows_affected == 7
     session.execute.assert_called_once()
-    delete_stmt = session.execute.call_args.args[0]
-    compiled = str(delete_stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "reject_data" in compiled.lower()
-    assert "created_at" in compiled.lower()
-    assert cutoff.isoformat()[:19] in compiled or str(cutoff.date()) in compiled
+    # Deletes flow through the gate RPC: one gate.exec_write call whose
+    # signed fields carry the cutoff predicate verbatim.
+    stmt, params = session.execute.call_args.args
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "reject_data"
+    assert params["op"] == "retention_delete"
+    values = {str(v) for v in params.values()}
+    assert "created_at" in values
+    assert cutoff.isoformat() in values
 
 
 @patch("app.modules.persist.retention.run_retention_pass")

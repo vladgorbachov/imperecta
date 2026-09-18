@@ -673,7 +673,9 @@ async def test_create_pending_child_returns_none_for_unknown_code():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_create_pending_child_inserts_and_returns_id():
+async def test_create_pending_child_inserts_and_returns_id(monkeypatch):
+    from fixtures.scraper_fixtures import wire_write_meta
+
     parent_id = uuid4()
     mp = MagicMock()
     mp.id = uuid4()
@@ -683,29 +685,22 @@ async def test_create_pending_child_inserts_and_returns_id():
     exec_result.scalar_one_or_none = MagicMock(return_value=mp)
     db.execute = AsyncMock(return_value=exec_result)
 
-    # ScrapeJob.id is populated by SQLAlchemy during a real flush (via
-    # ``default=uuid.uuid4`` on the column). The mocked flush would otherwise
-    # leave it None and the helper would return None — simulate the real
-    # behavior by assigning a fresh UUID inside flush's side_effect.
-    async def _flush_side_effect():
-        if db.add.call_args is not None:
-            added = db.add.call_args.args[0]
-            if added.id is None:
-                added.id = uuid4()
-
-    db.flush = AsyncMock(side_effect=_flush_side_effect)
+    # The child row is created through a gated META insert (no ORM add/flush);
+    # the helper generates the id itself and returns it on write ok.
+    calls = wire_write_meta(monkeypatch, tick_mod, {})
 
     out = await tick_mod._create_pending_child(db, parent_id, "shop")
 
     assert isinstance(out, type(uuid4()))
-    db.add.assert_called_once()
-    added_job = db.add.call_args.args[0]
-    assert added_job.parent_job_id == parent_id
-    assert added_job.marketplace_id == mp.id
-    assert added_job.status == "pending"
-    assert added_job.config == {"domain": "shop.example"}
-    assert added_job.id == out
-    db.flush.assert_awaited_once()
+    assert len(calls) == 1
+    table, operation, fields = calls[0]
+    assert table == "scrape_jobs"
+    assert operation == "insert"
+    assert str(fields["parent_job_id"]) == str(parent_id)
+    assert str(fields["marketplace_id"]) == str(mp.id)
+    assert fields["status"] == "pending"
+    assert fields["config"] == {"domain": "shop.example"}
+    assert str(fields["id"]) == str(out)
 
 
 # ---------- _reenqueue uses apply_async with countdown ---------------------

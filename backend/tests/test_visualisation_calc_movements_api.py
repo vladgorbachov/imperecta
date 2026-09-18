@@ -18,6 +18,7 @@ from app.modules.visualisation_calc.movements.schemas import (
     MoversSummary,
     MoversSummaryBucket,
 )
+from tests.route_flatten import iter_app_routes
 
 
 @pytest.fixture
@@ -36,7 +37,7 @@ def movements_auth_override():
 
 @pytest.mark.integration
 def test_movements_routes_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_app_routes(app)}
     assert "/api/markets/movements" in paths
     assert "/api/markets/movements/kpi" in paths
     assert "/api/markets/movements/summary" in paths

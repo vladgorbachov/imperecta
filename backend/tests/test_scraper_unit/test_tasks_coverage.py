@@ -67,7 +67,7 @@ def test_fast_scrape_all_pool_one_listing(monkeypatch):
 
     lid = rows[0].id
 
-    def _one_only():
+    def _one_only(**_kw):
         db = sync_session_factory()
         scraper_pool = ScraperPool()
         try:

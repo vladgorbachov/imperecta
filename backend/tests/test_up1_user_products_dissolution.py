@@ -28,6 +28,8 @@ import pytest
 
 from app.main import app
 
+from tests.route_flatten import iter_app_routes
+
 BACKEND_APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
 DELETED_USER_PRODUCTS_SUBMODULES: tuple[str, ...] = (
@@ -71,7 +73,7 @@ PRESERVED_ROUTES: tuple[str, ...] = (
     "/api/pool/products",
     "/api/pool/categories",
     "/api/admin/marketplaces",
-    "/api/markets/overview",
+    "/api/markets/movements",
     "/api/entitlements/usage",
 )
 
@@ -93,7 +95,7 @@ def _list_source_files() -> list[Path]:
 
 
 def _registered_paths() -> set[str]:
-    return {getattr(route, "path", "") for route in app.routes}
+    return {getattr(route, "path", "") for route in iter_app_routes(app)}
 
 
 def test_user_products_submodules_emptied() -> None:

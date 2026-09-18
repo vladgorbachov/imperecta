@@ -108,7 +108,7 @@ def _gate_record_bytes(
         f"{_pg_field_entries(fields)}"
         ")"
     )
-    row = conn.execute(text(sql)).one()
+    row = conn.exec_driver_sql(sql).one()
     return bytes(row[0])
 
 
@@ -128,7 +128,7 @@ def _gate_batch_bytes(
         f"{_pg_row_payloads(rows)}"
         ")"
     )
-    row = conn.execute(text(sql)).one()
+    row = conn.exec_driver_sql(sql).one()
     return bytes(row[0])
 
 

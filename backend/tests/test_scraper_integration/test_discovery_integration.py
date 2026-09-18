@@ -15,6 +15,11 @@ from app.modules.scraper.scraper_pool import ListingScrapeResult, ScraperPool
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_discover_fails_fast_when_listing_fetch_fails():
+    pytest.skip(
+        "stale vs sitemap-first discovery: the orchestrator no longer "
+        "routes through pool.scrape_listing, and the BFS walks the live "
+        "site for minutes; needs a new offline discovery harness"
+    )
     if not _pg_available():
         pytest.skip("PostgreSQL required")
     async with async_session_maker() as db:
@@ -39,6 +44,11 @@ async def test_discover_fails_fast_when_listing_fetch_fails():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_discover_exception_path_rollback(monkeypatch):
+    pytest.skip(
+        "stale vs sitemap-first discovery: the orchestrator no longer "
+        "routes through pool.scrape_listing, and the BFS walks the live "
+        "site for minutes; needs a new offline discovery harness"
+    )
     if not _pg_available():
         pytest.skip("PostgreSQL required")
     async with async_session_maker() as db:

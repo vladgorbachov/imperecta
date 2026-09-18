@@ -244,8 +244,15 @@ def test_scrape_prunes_nonproduct() -> None:
     )
     out = svc._persist_scrape_pool_result(listing_id, listing, result, now=MagicMock())
     assert out.log_status == "not_a_product"
-    db.delete.assert_any_call(listing)
-    db.delete.assert_any_call(product)
+    # Prune deletes flow through the gate RPC (listing by url_hash, then the
+    # orphaned product by id) — inspect the exec_write calls.
+    delete_params = [
+        c.args[1]
+        for c in db.execute.call_args_list
+        if len(c.args) >= 2 and isinstance(c.args[1], dict)
+        and c.args[1].get("op") == "delete"
+    ]
+    assert {p["table"] for p in delete_params} == {"fact_listing", "dim_product"}
 
 
 def test_scrape_does_not_prune_transient_price_not_found() -> None:

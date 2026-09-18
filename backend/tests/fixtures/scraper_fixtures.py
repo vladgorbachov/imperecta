@@ -171,3 +171,26 @@ def _seed_listing(session) -> uuid.UUID:
     session.add(listing)
     session.flush()
     return listing_id
+
+
+def wire_write_meta(monkeypatch, module, objects: dict) -> list:
+    """Patch ``module.write_meta_async`` with a fake that records calls and
+    mirrors the written fields onto the matching test object (looked up by
+    ``fields["id"]``) — the async twin of the seam-3 in-memory contract:
+    status transitions flow through gated META writes, and tests assert the
+    instance state those writes represent."""
+    calls: list = []
+    by_str = {str(k): v for k, v in objects.items()}
+
+    async def _fake(*, table, operation, fields, reject_source=""):
+        calls.append((table, operation, dict(fields)))
+        target = by_str.get(str(fields.get("id")))
+        if target is not None:
+            for k, v in fields.items():
+                if k != "id":
+                    setattr(target, k, v)
+        result = type("MetaWriteResult", (), {"ok": True, "rows_affected": 1})()
+        return result
+
+    monkeypatch.setattr(module, "write_meta_async", _fake)
+    return calls

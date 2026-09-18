@@ -18,6 +18,12 @@ select = ["E", "F", "I", "N", "W"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# One event loop for the whole session: the app's module-level async engine
+# pools asyncpg connections bound to the loop that first used them —
+# per-test loops (the pytest-asyncio 1.x default) hit "Future attached to a
+# different loop" on every test that shares that engine.
+asyncio_default_test_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = [".", "tests"]
 markers = [

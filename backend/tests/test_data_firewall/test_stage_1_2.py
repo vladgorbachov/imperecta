@@ -216,11 +216,14 @@ def test_persist_writes_verbatim_no_mutation() -> None:
         ctx=PersistContext(source="ecommerce_scrape", listing_id=listing_id),
     )
     assert wrote
-    fact_rows = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], FactPrice)]
-    assert len(fact_rows) == 1
-    row = fact_rows[0]
-    assert float(row.price) == 12.34
-    assert row.currency_code == "EUR"
+    # Inserts flow through the gate RPC; the signed field values reach the
+    # statement verbatim (no truncation/mutation on the way).
+    stmt, params = db.execute.call_args.args
+    assert "gate.exec_write" in str(stmt)
+    assert params["table"] == "fact_price"
+    values = {str(v) for v in params.values()}
+    assert "12.34" in values
+    assert "EUR" in values
 
 
 def test_data_firewall_rejects_long_currency_no_truncate() -> None:

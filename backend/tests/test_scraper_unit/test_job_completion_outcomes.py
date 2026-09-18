@@ -8,12 +8,15 @@ from uuid import uuid4
 
 import pytest
 
+from fixtures.scraper_fixtures import wire_write_meta
+
+from app.modules.scraper.pipeline import job_completion as jc_mod
 from app.modules.scraper.pipeline.job_completion import complete_pipeline_job
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_complete_pipeline_job_honest_failed_excludes_filtered_and_unchanged():
+async def test_complete_pipeline_job_honest_failed_excludes_filtered_and_unchanged(monkeypatch):
     """job.failed counts only real failures; not_a_product and no_change are separate."""
     parent_id = uuid4()
     child_id = uuid4()
@@ -40,6 +43,7 @@ async def test_complete_pipeline_job_honest_failed_excludes_filtered_and_unchang
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[child_result, log_result])
     db.commit = AsyncMock()
+    wire_write_meta(monkeypatch, jc_mod, {parent_id: job})
 
     metadata = await complete_pipeline_job(
         db,
@@ -84,7 +88,7 @@ async def test_complete_pipeline_job_honest_failed_excludes_filtered_and_unchang
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_complete_pipeline_job_preserves_discovery_errors_in_errors_count():
+async def test_complete_pipeline_job_preserves_discovery_errors_in_errors_count(monkeypatch):
     """Discovery-phase errors stay in errors_count; job.failed is scrape failures only."""
     parent_id = uuid4()
     child_id = uuid4()
@@ -108,6 +112,7 @@ async def test_complete_pipeline_job_preserves_discovery_errors_in_errors_count(
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[child_result, log_result])
     db.commit = AsyncMock()
+    wire_write_meta(monkeypatch, jc_mod, {parent_id: job})
 
     metadata = await complete_pipeline_job(
         db,

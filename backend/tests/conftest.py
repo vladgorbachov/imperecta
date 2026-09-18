@@ -64,12 +64,33 @@ from app.database import async_session_maker, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _clean_test_artifacts():
+    """Reset per-run artifacts in the persistent local test DB.
+
+    The docker test DB (imperecta-pg-test) lives across runs; registration
+    tests assume their fixture user does not exist yet. Best-effort: with
+    no reachable DB the suite still runs its unit portion.
+    """
+    from sqlalchemy import text as sa_text
+
+    from app.database import engine
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                sa_text(
+                    "DELETE FROM users WHERE email = 'test@imperecta.com' "
+                    "OR email LIKE '%@test.com'"
+                )
+            )
+            # Pipeline-run tests refuse to start while a 'running' job row
+            # exists; job rows are pure test artifacts in this DB.
+            await conn.execute(sa_text("DELETE FROM scrape_logs"))
+            await conn.execute(sa_text("DELETE FROM scrape_jobs"))
+    except Exception:
+        pass
+    yield
 
 
 @pytest_asyncio.fixture

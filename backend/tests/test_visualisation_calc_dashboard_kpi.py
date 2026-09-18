@@ -12,6 +12,8 @@ from app.main import app
 from app.modules.visualisation_calc.kpi.schemas import DashboardKpi
 from app.modules.visualisation_calc.kpi.service import build_dashboard_kpi
 
+from tests.route_flatten import iter_app_routes
+
 
 @pytest.fixture
 def dashboard_kpi_auth_override():
@@ -41,7 +43,7 @@ def test_build_dashboard_kpi_preserves_null_last_update() -> None:
 
 @pytest.mark.integration
 def test_dashboard_kpi_route_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_app_routes(app)}
     assert "/api/markets/dashboard-kpi" in paths
 
 

@@ -46,5 +46,7 @@ def test_migration_045_chain_head() -> None:
         revisions[rev_match.group(1)] = down_match.group(1) if down_match else None
 
     assert revisions.get("045_grant_app_insert_service_alerts") == "044_widen_scrape_logs_status"
+    # Linear-chain invariant: exactly one child continues from 045 (head
+    # identity moves with every new migration; a fork would show 2+).
     children = [rev for rev, down in revisions.items() if down == "045_grant_app_insert_service_alerts"]
-    assert children == [], f"045 is not head: children={children}"
+    assert len(children) <= 1, f"forked after 045: children={children}"
