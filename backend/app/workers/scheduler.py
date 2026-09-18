@@ -49,7 +49,7 @@ celery_app.conf.beat_schedule = {
     # spends at most 1 + PRODUCT_BATCHES_PER_TICK cheap-model calls.
     "taxonomy-enrich": {
         "task": "taxonomy_enrich_tick",
-        "schedule": crontab(minute="*/20"),
+        "schedule": crontab(minute="*/15"),
     },
     # Permanent list-page price collection: 4 stalest category-bearing shops
     # per tick, 20 pages each — the economic backbone (one page ≈ 20-30
