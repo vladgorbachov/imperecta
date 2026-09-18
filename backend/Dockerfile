@@ -7,7 +7,9 @@ COPY rust_core/ .
 RUN maturin build --release
 
 # --- Stage 2: application runtime -------------------------------------------
-FROM python:3.12-slim
+# 3.14: evidence-based switch 2026-09-18 — the full dependency set and the
+# abi3 rust wheel (>=3.12) run the 1630-test suite green on 3.14 locally.
+FROM python:3.14-slim
 
 # Pull all pending Debian security fixes (base image tags lag behind the
 # archive: perl-base CVE-2026-8376/13221/42496, sqlite3, gzip et al. ship as
