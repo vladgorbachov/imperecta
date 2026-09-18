@@ -1,5 +1,11 @@
 # Frontend → Backend requests (UI redesign V1–V6, 2026-09-16)
 
+> **Backend status (2026-09-18):** P1, P2, P3, P4, P5, P8, P9 — **shipped and
+> live**. P10 — **shipped** (brand/category on the list grain, null until
+> taxonomy extraction fills dim_product). P6 — blocked on cross-marketplace
+> product matching (Rust data-module territory), honest pending note stands.
+> P7, P11 — acknowledged, low priority; say the word and they ship.
+
 Handoff document for the backend agent. The frontend for every feature below is
 **already built and deployed**; each section names the exact frontend integration
 point that is waiting for the endpoint. Until an endpoint lands, the UI renders an
