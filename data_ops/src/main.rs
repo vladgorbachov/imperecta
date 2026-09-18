@@ -226,6 +226,126 @@ async fn listing_comparison(
     }
 }
 
+const SEARCH_SQL: &str = r#"
+WITH prod AS MATERIALIZED (
+  SELECT id FROM dim_product WHERE name ILIKE $1 LIMIT 5000
+), cand AS MATERIALIZED (
+  SELECT fl.id FROM fact_listing fl
+  JOIN prod ON fl.product_id = prod.id
+  WHERE fl.is_active
+  LIMIT 10000
+)
+SELECT fl.id AS listing_id,
+       dp.id AS product_id,
+       m.marketplace_code,
+       m.name AS marketplace_name,
+       m.country_code,
+       dp.name,
+       dp.title_en,
+       dp.product_type_en,
+       dp.image_url,
+       dp.match_group_id,
+       fl.external_url,
+       fl.last_price::float8 AS last_price,
+       fl.last_currency_code,
+       fl.last_price_eur::float8 AS last_price_eur,
+       fl.last_checked_at,
+       (SELECT count(*) FROM cand) AS cand_total
+FROM cand
+JOIN fact_listing fl ON fl.id = cand.id
+JOIN dim_product dp ON dp.id = fl.product_id
+JOIN dim_marketplace m ON m.id = fl.marketplace_id
+ORDER BY fl.last_checked_at DESC NULLS LAST, fl.id ASC
+OFFSET $2 LIMIT $3
+"#;
+
+#[derive(Debug, Serialize)]
+struct SearchItem {
+    listing_id: Uuid,
+    product_id: Uuid,
+    marketplace_code: String,
+    marketplace_name: String,
+    country_code: String,
+    name: String,
+    title_en: Option<String>,
+    product_type_en: Option<String>,
+    image_url: Option<String>,
+    match_group_id: Option<Uuid>,
+    external_url: String,
+    last_price: Option<f64>,
+    last_currency_code: Option<String>,
+    last_price_eur: Option<f64>,
+    last_checked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchParams {
+    q: String,
+    #[serde(default)]
+    offset: Option<i64>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+/// Pool search (R2): the Python two-bounded-phases pattern in ONE statement.
+/// MATERIALIZED CTEs pin the plan: trgm-capped product ids (5000), then a
+/// capped unordered candidate-listing bitmap (10000), then the bounded
+/// top-N sort over primary keys — no full-pool scan on any path.
+async fn pool_search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<SearchParams>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_jwt(&state, &headers)?;
+    let q = params.q.trim();
+    if q.len() < 2 {
+        return Err(ApiError::NotFound("query too short (min 2 chars)"));
+    }
+    let like = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
+    let offset = params.offset.unwrap_or(0).clamp(0, 9_900);
+    let limit = params.limit.unwrap_or(20).clamp(1, 100);
+
+    let rows = sqlx::query(SEARCH_SQL)
+        .bind(&like)
+        .bind(offset)
+        .bind(limit)
+        .fetch_all(&state.pool)
+        .await?;
+
+    let total: i64 = rows
+        .first()
+        .map(|r| r.get::<i64, _>("cand_total"))
+        .unwrap_or(0);
+    let items: Vec<SearchItem> = rows
+        .iter()
+        .map(|r| SearchItem {
+            listing_id: r.get("listing_id"),
+            product_id: r.get("product_id"),
+            marketplace_code: r.get("marketplace_code"),
+            marketplace_name: r.get("marketplace_name"),
+            country_code: r.get("country_code"),
+            name: r.get("name"),
+            title_en: r.get("title_en"),
+            product_type_en: r.get("product_type_en"),
+            image_url: r.get("image_url"),
+            match_group_id: r.get("match_group_id"),
+            external_url: r.get("external_url"),
+            last_price: r.get("last_price"),
+            last_currency_code: r.get("last_currency_code"),
+            last_price_eur: r.get("last_price_eur"),
+            last_checked_at: r.get("last_checked_at"),
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "items": items,
+        "total": total,
+        "total_is_estimate": total >= 10_000,
+        "offset": offset,
+        "limit": limit,
+    })))
+}
+
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let db_ok = sqlx::query("SELECT 1")
         .fetch_one(&state.pool)
@@ -285,6 +405,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/groups/:group_id/offers", get(group_offers))
+        .route("/v1/pool/search", get(pool_search))
         .route("/v1/listings/:listing_id/comparison", get(listing_comparison))
         .layer(cors)
         .with_state(AppState {
