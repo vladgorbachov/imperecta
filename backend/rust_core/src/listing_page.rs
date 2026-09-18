@@ -39,6 +39,10 @@ pub struct ListOffer {
     pub price: Option<f64>,
     pub currency: Option<String>,
     pub price_raw_text: Option<String>,
+    /// Card thumbnail (src / data-src / first srcset URL), absolutized.
+    /// Mass image fill for sitemap-onboarded products whose PDP was never
+    /// scraped — 99.9% of the pool had no image before this.
+    pub image_url: Option<String>,
 }
 
 /// Minimal absolute-URL resolution (enough for href joining; no dot-segment
@@ -203,6 +207,44 @@ fn card_price(card: &ElementRef) -> Option<(f64, &'static str, String)> {
     None
 }
 
+/// Card thumbnail: first <img> with a usable source. Lazy-loaded grids put
+/// the real URL in data-src/data-lazy-src/data-original or srcset while src
+/// holds a placeholder — prefer the data-* attributes.
+fn card_image(card: &ElementRef, base_url: &str) -> Option<String> {
+    let img_sel = Selector::parse("img").unwrap();
+    for img in card.select(&img_sel) {
+        let v = img.value();
+        let mut candidate: Option<&str> = None;
+        for attr in ["data-src", "data-lazy-src", "data-original", "src"] {
+            if let Some(raw) = v.attr(attr) {
+                let raw = raw.trim();
+                if !raw.is_empty() && !raw.starts_with("data:") {
+                    candidate = Some(raw);
+                    break;
+                }
+            }
+        }
+        if candidate.is_none() {
+            if let Some(srcset) = v.attr("srcset") {
+                let first = srcset
+                    .split(',')
+                    .next()
+                    .map(|e| e.trim().split_whitespace().next().unwrap_or(""))
+                    .unwrap_or("");
+                if !first.is_empty() && !first.starts_with("data:") {
+                    candidate = Some(first);
+                }
+            }
+        }
+        if let Some(raw) = candidate {
+            if let Some(full) = join_url(base_url, raw) {
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
 /// Extract (product_url, price, title) offers from a category/list page.
 pub fn extract_list_offers(html: &str, base_url: &str) -> Vec<ListOffer> {
     let document = Html::parse_document(html);
@@ -310,9 +352,56 @@ pub fn extract_list_offers(html: &str, base_url: &str) -> Vec<ListOffer> {
             price,
             currency,
             price_raw_text,
+            image_url: card_image(&card, base_url),
         });
     }
     offers
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    #[test]
+    fn card_image_prefers_lazy_data_src_and_absolutizes() {
+        let mut items = String::new();
+        for i in 0..6 {
+            items.push_str(&format!(
+                r#"<div class="card">
+                     <a href="/p/w-{i}"><span>Widget model {i}</span></a>
+                     <img src="data:image/gif;base64,R0lGOD" data-src="/img/w-{i}.jpg"/>
+                     <span class="price">19,99 €</span>
+                   </div>"#
+            ));
+        }
+        let html = format!("<html><body><div id=g>{items}</div></body></html>");
+        let offers = extract_list_offers(&html, "https://shop.example/cat");
+        assert!(!offers.is_empty());
+        assert_eq!(
+            offers[0].image_url.as_deref(),
+            Some("https://shop.example/img/w-0.jpg")
+        );
+    }
+
+    #[test]
+    fn card_image_srcset_fallback() {
+        let mut items = String::new();
+        for i in 0..6 {
+            items.push_str(&format!(
+                r#"<div class="card">
+                     <a href="/p/w-{i}"><span>Widget model {i}</span></a>
+                     <img srcset="https://cdn.example/w-{i}-small.jpg 1x, https://cdn.example/w-{i}.jpg 2x"/>
+                     <span class="price">19,99 €</span>
+                   </div>"#
+            ));
+        }
+        let html = format!("<html><body><div id=g>{items}</div></body></html>");
+        let offers = extract_list_offers(&html, "https://shop.example/cat");
+        assert_eq!(
+            offers[0].image_url.as_deref(),
+            Some("https://cdn.example/w-0-small.jpg")
+        );
+    }
 }
 
 #[cfg(test)]

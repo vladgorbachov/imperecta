@@ -143,6 +143,7 @@ fn extract_list_offers<'py>(
         d.set_item("price", offer.price)?;
         d.set_item("currency", offer.currency)?;
         d.set_item("price_raw_text", offer.price_raw_text)?;
+        d.set_item("image_url", offer.image_url)?;
         out.push(d);
     }
     Ok(out)

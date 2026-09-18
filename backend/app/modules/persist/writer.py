@@ -718,14 +718,18 @@ def build_dim_product_fields(
     name: str,
     name_normalized: str,
     is_active: bool = True,
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the exact dim_product columns that the firewall signs."""
-    return {
+    fields: dict[str, Any] = {
         "id": product_id,
         "name": name,
         "name_normalized": name_normalized,
         "is_active": is_active,
     }
+    if image_url:
+        fields["image_url"] = image_url
+    return fields
 
 
 def build_fact_listing_fields(

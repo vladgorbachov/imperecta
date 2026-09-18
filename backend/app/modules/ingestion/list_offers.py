@@ -102,14 +102,20 @@ def _onboard_unknown_offers(
             continue
         seen.add(url_hash)
         product_id = uuid4()
+        product_fields: dict[str, Any] = {
+            "name": title[:500],
+            "name_normalized": _normalize_name(title) or "product",
+            "is_active": True,
+        }
+        image_url = offer.get("image_url")
+        if isinstance(image_url, str) and image_url.strip():
+            product_fields["image_url"] = image_url.strip()[:2000]
         dtos.append(
             PoolInsertDTO(
                 marketplace_id=marketplace_id,
                 dim_product=build_dim_product_fields(
                     product_id=product_id,
-                    name=title[:500],
-                    name_normalized=_normalize_name(title) or "product",
-                    is_active=True,
+                    **product_fields,
                 ),
                 fact_listing=build_fact_listing_fields(
                     product_id=product_id,
@@ -191,6 +197,9 @@ def ingest_list_offers(
             currency=offer.get("currency"),
             currency_raw=offer.get("currency"),
             price_raw_text=offer.get("price_raw_text"),
+            # Card thumbnail: write-once image fill for products whose PDP
+            # was never scraped (99.9% of the sitemap-onboarded pool).
+            image_url=offer.get("image_url"),
         )
         result = service.persist_extracted(
             data=data,
