@@ -14,7 +14,6 @@ from typing import Any
 
 import structlog
 from sqlalchemy import select
-from sqlalchemy.orm import aliased
 
 from app.models.dimensions import DimCategory, DimProduct
 from app.models.facts import FactListing
@@ -127,39 +126,50 @@ def fetch_untranslated_categories_sync(limit: int) -> list[tuple[str, str]]:
         db.close()
 
 
+REUSE_DONOR_BATCH = 400
+
+
 def reuse_existing_enrichment_sync(limit: int) -> int:
     """Copy type/EN fields from an already-enriched identical product — free.
 
     Identity = same name_normalized. Runs BEFORE any LLM batch so duplicate
-    products (multi-shop overlap, re-onboarded URLs) never spend AI credits;
-    with ~1.07M distinct names over 1.45M products roughly a quarter of the
-    pool enriches this way. Each copy still goes through the product_enrich
-    gate door.
+    products never spend AI credits. Two bounded phases (the single
+    self-join let the planner drive from the 1.45M untyped side — observed
+    statement timeout live): phase 1 reads a slice of DONORS off the tiny
+    partial index (migration 058), phase 2 fetches untyped twins for those
+    exact names. Each copy still goes through the product_enrich gate door.
     """
     from app.database import sync_session_factory
 
-    donor = aliased(DimProduct)
     db = sync_session_factory()
     try:
-        rows = db.execute(
+        donors = db.execute(
             select(
-                DimProduct.id,
-                donor.product_type,
-                donor.product_type_en,
-                donor.title_en,
+                DimProduct.name_normalized,
+                DimProduct.product_type,
+                DimProduct.product_type_en,
+                DimProduct.title_en,
             )
-            .join(donor, donor.name_normalized == DimProduct.name_normalized)
+            .where(DimProduct.product_type_en.isnot(None))
+            .distinct(DimProduct.name_normalized)
+            .order_by(DimProduct.name_normalized)
+            .limit(REUSE_DONOR_BATCH)
+        ).all()
+        if not donors:
+            return 0
+        by_name = {row[0]: row for row in donors}
+        targets = db.execute(
+            select(DimProduct.id, DimProduct.name_normalized)
+            .where(DimProduct.name_normalized.in_(list(by_name)))
             .where(DimProduct.product_type_en.is_(None))
-            .where(donor.product_type_en.isnot(None))
-            .where(donor.id != DimProduct.id)
-            .distinct(DimProduct.id)
             .limit(limit)
         ).all()
     finally:
         db.close()
 
     updates: dict[str, dict[str, str]] = {}
-    for product_id, ptype, ptype_en, title_en in rows:
+    for product_id, name_norm in targets:
+        _, ptype, ptype_en, title_en = by_name[name_norm]
         columns: dict[str, str] = {"product_type_en": ptype_en}
         if ptype:
             columns["product_type"] = ptype
@@ -178,36 +188,46 @@ def fetch_untyped_products_sync(limit: int) -> list[tuple[str, str]]:
     """
     from app.database import sync_session_factory
 
-    priced_exists = (
-        select(FactListing.id)
-        .where(FactListing.product_id == DimProduct.id)
-        .where(FactListing.last_price.isnot(None))
-        .exists()
-    )
     db = sync_session_factory()
     try:
-        # DISTINCT ON name_normalized: identical titles never spend two LLM
-        # slots — the reuse pass propagates the answer to the twins for free.
-        rows = db.execute(
-            select(DimProduct.id, DimProduct.name)
-            .where(DimProduct.product_type_en.is_(None))
-            .where(priced_exists)
-            .distinct(DimProduct.name_normalized)
-            .order_by(DimProduct.name_normalized)
-            .limit(limit)
-        ).all()
-        if len(rows) < limit:
-            more = db.execute(
-                select(DimProduct.id, DimProduct.name)
+        # Bounded phases (a DISTINCT ON over the 1.45M untyped set sorts the
+        # world): drive from priced listings, dedupe names in Python so
+        # identical titles never spend two LLM slots — the reuse pass
+        # propagates the answer to the twins.
+        priced_ids = [
+            r[0]
+            for r in db.execute(
+                select(FactListing.product_id)
+                .where(FactListing.is_active)
+                .where(FactListing.last_price.isnot(None))
+                .limit(20_000)
+            )
+        ]
+        rows: list = []
+        if priced_ids:
+            rows = db.execute(
+                select(DimProduct.id, DimProduct.name, DimProduct.name_normalized)
+                .where(DimProduct.id.in_(priced_ids))
                 .where(DimProduct.product_type_en.is_(None))
-                .where(DimProduct.category_id.isnot(None))
-                .where(~priced_exists)
-                .distinct(DimProduct.name_normalized)
-                .order_by(DimProduct.name_normalized)
-                .limit(limit - len(rows))
+                .limit(limit * 4)
             ).all()
-            rows = list(rows) + list(more)
-        return [(str(r[0]), r[1]) for r in rows]
+        if len(rows) < limit:
+            rows += db.execute(
+                select(DimProduct.id, DimProduct.name, DimProduct.name_normalized)
+                .where(DimProduct.category_id.isnot(None))
+                .where(DimProduct.product_type_en.is_(None))
+                .limit(limit * 4)
+            ).all()
+        seen_names: set[str] = set()
+        out: list[tuple[str, str]] = []
+        for pid, name, name_norm in rows:
+            if name_norm in seen_names:
+                continue
+            seen_names.add(name_norm)
+            out.append((str(pid), name))
+            if len(out) >= limit:
+                break
+        return out
     finally:
         db.close()
 

@@ -50,17 +50,21 @@ def test_reuse_pass_copies_donor_columns_through_gate():
     from unittest.mock import MagicMock, patch
     from uuid import uuid4
 
-    target_id, donor_type, donor_type_en, donor_title = (
-        uuid4(),
-        "sülearvuti",
-        "laptop",
-        "Lenovo IdeaPad 5 Laptop",
-    )
-    db = MagicMock()
-    db.execute.return_value.all.return_value = [
-        (target_id, donor_type, donor_type_en, donor_title),
-        (uuid4(), None, "smartwatch", None),
+    target_id, twin_id = uuid4(), uuid4()
+    donors = [
+        ("lenovo ideapad 5", "sülearvuti", "laptop", "Lenovo IdeaPad 5 Laptop"),
+        ("apple watch se", None, "smartwatch", None),
     ]
+    targets = [
+        (target_id, "lenovo ideapad 5"),
+        (twin_id, "apple watch se"),
+    ]
+    db = MagicMock()
+    donors_result = MagicMock()
+    donors_result.all.return_value = donors
+    targets_result = MagicMock()
+    targets_result.all.return_value = targets
+    db.execute.side_effect = [donors_result, targets_result]
     with patch("app.database.sync_session_factory", return_value=db), patch.object(
         tx, "write_product_types_sync", return_value=2
     ) as wp:
@@ -73,8 +77,19 @@ def test_reuse_pass_copies_donor_columns_through_gate():
         "title_en": "Lenovo IdeaPad 5 Laptop",
     }
     # Sparse donor: only the guaranteed column travels; nothing fabricated.
-    sparse = [v for v in updates.values() if v.get("product_type_en") == "smartwatch"][0]
-    assert "product_type" not in sparse and "title_en" not in sparse
+    assert updates[str(twin_id)] == {"product_type_en": "smartwatch"}
+
+
+def test_reuse_pass_no_donors_short_circuits():
+    from unittest.mock import MagicMock, patch
+
+    db = MagicMock()
+    empty = MagicMock()
+    empty.all.return_value = []
+    db.execute.return_value = empty
+    with patch("app.database.sync_session_factory", return_value=db):
+        assert tx.reuse_existing_enrichment_sync(500) == 0
+    assert db.execute.call_count == 1  # never touches the untyped side
 
 
 def test_beat_schedule_has_enrichment_tick():
