@@ -9,6 +9,18 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.common.validation import validate_ai_tone, validate_language
 
 
+class UiPreferencesBlob(BaseModel):
+    """P7: opaque UI preferences blob (products_views, products_density, …)."""
+
+    model_config = {"extra": "allow"}
+
+
+class FavoritesPayload(BaseModel):
+    """P11: server-side favorites — capped list of listing ids."""
+
+    listing_ids: list[UUID] = Field(default_factory=list, max_length=1000)
+
+
 class UserUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     company_name: str | None = Field(None, max_length=255)

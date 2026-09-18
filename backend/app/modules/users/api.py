@@ -19,6 +19,8 @@ from app.modules.users.schemas import (
     AdminUserRoleRequest,
     AdminUserStatusRequest,
     AdminUserUpdateRequest,
+    FavoritesPayload,
+    UiPreferencesBlob,
     UserResponse,
     UserUpdate,
 )
@@ -57,6 +59,62 @@ async def update_me(
 ) -> UserResponse:
     service = UsersService(db)
     return await service.update_me(current_user, data.model_dump(exclude_unset=True))
+
+
+# ---- /users/me/preferences + /users/me/favorites (P7 / P11) -----------------
+
+_UI_PREFS_NAMESPACE = "ui"
+_FAVORITES_NAMESPACE = "favorites"
+
+
+@self_router.get("/me/preferences")
+async def get_my_preferences(current_user: CurrentUser, db: DbSession) -> dict:
+    """P7: opaque UI-preferences blob (cross-device saved views)."""
+    service = UsersService(db)
+    return await service.get_preferences_namespace(current_user, _UI_PREFS_NAMESPACE)
+
+
+@self_router.put("/me/preferences")
+async def put_my_preferences(
+    blob: UiPreferencesBlob,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    service = UsersService(db)
+    try:
+        return await service.put_preferences_namespace(
+            current_user,
+            _UI_PREFS_NAMESPACE,
+            blob.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@self_router.get("/me/favorites", response_model=FavoritesPayload)
+async def get_my_favorites(current_user: CurrentUser, db: DbSession) -> FavoritesPayload:
+    """P11: server-side favorites for cross-device sync."""
+    service = UsersService(db)
+    stored = await service.get_preferences_namespace(current_user, _FAVORITES_NAMESPACE)
+    return FavoritesPayload(listing_ids=stored.get("listing_ids") or [])
+
+
+@self_router.put("/me/favorites", response_model=FavoritesPayload)
+async def put_my_favorites(
+    payload: FavoritesPayload,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> FavoritesPayload:
+    service = UsersService(db)
+    try:
+        stored = await service.put_preferences_namespace(
+            current_user,
+            _FAVORITES_NAMESPACE,
+            {"listing_ids": [str(x) for x in payload.listing_ids]},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FavoritesPayload(listing_ids=stored["listing_ids"])
 
 
 # ---- /admin/users/* (admin user CRUD) ---------------------------------------

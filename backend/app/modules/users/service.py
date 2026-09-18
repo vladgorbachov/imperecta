@@ -127,6 +127,37 @@ class UsersService:
             await self.db.refresh(current_user)
         return self.build_user_response(current_user)
 
+    async def get_preferences_namespace(self, current_user: User, namespace: str) -> dict:
+        """One namespaced sub-object of users.preferences ({} when unset)."""
+        prefs = getattr(current_user, "preferences", None) or {}
+        value = prefs.get(namespace)
+        return value if isinstance(value, dict) else {}
+
+    async def put_preferences_namespace(
+        self,
+        current_user: User,
+        namespace: str,
+        blob: dict[str, Any],
+    ) -> dict:
+        """Replace ONE namespace inside users.preferences, preserving the rest.
+
+        P7 ("ui") and P11 ("favorites") both live inside the existing
+        preferences JSONB and ride the USER gate's self_update door — no new
+        columns, no new gate kinds. The blob is opaque to the backend.
+        """
+        prefs = dict(getattr(current_user, "preferences", None) or {})
+        prefs[namespace] = blob
+        result = await write_user_async(
+            operation="update",
+            kind="self_update",
+            fields=build_user_fields(id=current_user.id, preferences=prefs),
+            reject_source="users_self_update",
+        )
+        if not result.ok:
+            raise ValueError("Preferences update failed")
+        await self.db.refresh(current_user)
+        return blob
+
 
 class UsersAdminService:
     """Admin user CRUD for /admin/users/* routes.
