@@ -109,6 +109,7 @@ async def enumerate_sitemap_full(
     *,
     max_subfiles: int = ENUMERATE_MAX_SUBFILES,
     max_urls: int = ENUMERATE_MAX_URLS,
+    explicit_sitemaps: list[str] | None = None,
 ) -> EnumerateResult:
     """Walk the full sitemap tree and gate-insert product URL skeletons."""
     started = time.perf_counter()
@@ -133,6 +134,7 @@ async def enumerate_sitemap_full(
             max_subfiles=max_subfiles,
             max_urls=max_urls,
             with_shard_origin=True,
+            explicit_sitemaps=explicit_sitemaps,
         )
     except Exception as exc:
         slog.error(

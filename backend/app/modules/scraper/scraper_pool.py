@@ -577,6 +577,53 @@ class ScraperPool:
             return html
         return None
 
+    async def resolve_sitemap_shards(self, base_url: str) -> dict:
+        """Resolve the sitemap tree's FIRST level for enumeration fan-out.
+
+        Returns {"shards": [nested sitemap urls...], "entry": <url|None>}
+        where shards are the sub-sitemaps of the first index document that
+        parses. An empty shard list means the entry document carries URL
+        entries directly (no useful fan-out seam).
+        """
+        from urllib.parse import urljoin
+
+        from app.modules.scraper.extractors import parse_sitemap_xml
+
+        candidates: list[str] = []
+        robots_url = urljoin(base_url, "/robots.txt")
+        try:
+            robots_text = await self._fetch_static(
+                robots_url, log_url_hint=f"{base_url} robots.txt"
+            )
+            if robots_text:
+                for line in robots_text.splitlines():
+                    line = line.strip()
+                    if line.lower().startswith("sitemap:"):
+                        ref = line.split(":", 1)[1].strip()
+                        if ref:
+                            candidates.append(ref)
+        except Exception:
+            pass
+        for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap/sitemap.xml"):
+            candidate = urljoin(base_url, path)
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        for entry in candidates:
+            try:
+                content = await self._fetch_sitemap_document(
+                    entry, log_hint=f"{base_url} sitemap index"
+                )
+            except Exception:
+                continue
+            if not content:
+                continue
+            parsed = parse_sitemap_xml(content, base_url)
+            nested = [u for u in parsed.get("sitemaps", []) if u]
+            if nested or parsed.get("url_entries"):
+                return {"shards": nested, "entry": entry}
+        return {"shards": [], "entry": None}
+
     async def fetch_sitemap_candidates(
         self,
         base_url: str,
@@ -585,6 +632,7 @@ class ScraperPool:
         max_subfiles: int | None = None,
         max_urls: int | None = None,
         with_shard_origin: bool = False,
+        explicit_sitemaps: list[str] | None = None,
     ) -> list[str] | list[tuple[str, str]]:
         """Discover sitemap URLs with locale selection and canonical deduplication.
 
@@ -632,7 +680,13 @@ class ScraperPool:
         from app.models.facts import FactListing
 
         visited_sitemaps: set[str] = set()
-        pending_sitemaps: list[str] = list(sitemap_urls_to_try)
+        # Fan-out shards walk ONLY their assigned subtree (nested indexes
+        # under a shard are still followed).
+        pending_sitemaps: list[str] = (
+            list(explicit_sitemaps)
+            if explicit_sitemaps is not None
+            else list(sitemap_urls_to_try)
+        )
 
         while pending_sitemaps and len(visited_sitemaps) < subfile_cap:
             sitemap_url = pending_sitemaps.pop(0)

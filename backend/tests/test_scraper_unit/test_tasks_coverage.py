@@ -43,7 +43,7 @@ def test_run_scrape_all_pool_outer_technical_error(monkeypatch):
     monkeypatch.setattr(
         scraper_tasks,
         "_run_scrape_all_pool_impl",
-        lambda scrape_job_id=None, *, marketplace_codes=None, stale_before=None, deadline_monotonic=None, parent_job_id=None: (
+        lambda scrape_job_id=None, *, marketplace_codes=None, stale_before=None, deadline_monotonic=None, parent_job_id=None, only_listing_ids=None: (
             _ for _ in ()
         ).throw(RuntimeError("boom")),
     )

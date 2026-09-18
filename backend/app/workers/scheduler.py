@@ -40,8 +40,10 @@ celery_app.conf.beat_schedule = {
     # older than 6h). Self-dosing — a tick with no stale listings is a no-op,
     # so the 30-min cadence controls latency, not volume. Direct-HTTP shops
     # only spend their own rate budget (host_throttle); no proxy credits.
+    # Fan-out dispatcher (2026-09-19): shards the due frontier so several
+    # worker children price PDPs in parallel instead of one marathon task.
     "scrape-stale-pool-products": {
-        "task": "scrape_all_pool_products",
+        "task": "scrape_stale_fanout",
         "schedule": crontab(minute="*/30"),
         "options": {"priority": 2},
     },

@@ -412,6 +412,7 @@ def _run_scrape_all_pool(
     stale_before: datetime | None = None,
     deadline_monotonic: float | None = None,
     parent_job_id: UUID | None = None,
+    only_listing_ids: list[UUID] | None = None,
 ) -> dict:
     """Scrape stale pool listings using sync Session (avoids async greenlet in Celery workers).
 
@@ -434,6 +435,7 @@ def _run_scrape_all_pool(
             stale_before=stale_before,
             deadline_monotonic=deadline_monotonic,
             parent_job_id=parent_job_id,
+            only_listing_ids=only_listing_ids,
         )
     except Exception:
         tb = traceback.format_exc()
@@ -454,6 +456,7 @@ def _run_scrape_all_pool_impl(
     stale_before: datetime | None = None,
     deadline_monotonic: float | None = None,
     parent_job_id: UUID | None = None,
+    only_listing_ids: list[UUID] | None = None,
 ) -> dict:
     scraper_pool = ScraperPool()
     settings = Settings()
@@ -506,8 +509,12 @@ def _run_scrape_all_pool_impl(
                     )
                     .where(DimMarketplace.marketplace_code.in_(marketplace_codes))
                 )
-            result = db.execute(stmt.limit(batch_size))
-            batch_ids = [r[0] for r in result.all()]
+            if only_listing_ids is not None:
+                # Fan-out shard: scrape exactly the assigned ids once.
+                batch_ids = list(only_listing_ids)
+            else:
+                result = db.execute(stmt.limit(batch_size))
+                batch_ids = [r[0] for r in result.all()]
             if not batch_ids:
                 break
 
@@ -980,6 +987,78 @@ def _scrape_pool_product_impl(listing_id: str) -> dict:
         }
     finally:
         db.close()
+
+
+SCRAPE_FANOUT_SHARDS = 4
+SCRAPE_FANOUT_SHARD_SIZE = 250
+
+
+@celery_app.task(name="scrape_stale_fanout", bind=True)
+def scrape_stale_fanout(
+    self,
+    shards: int = SCRAPE_FANOUT_SHARDS,
+    shard_size: int = SCRAPE_FANOUT_SHARD_SIZE,
+) -> dict:
+    """Beat dispatcher: split the due-listing frontier into shard tasks.
+
+    The single-task pass kept PDP pricing on ONE worker child; this
+    dispatcher selects the stalest due ids once (cheap index read) and
+    fans them out so several children scrape in parallel — combined with
+    queue priorities the pricing path now scales with worker_concurrency.
+    """
+    from app.database import sync_session_factory
+
+    due_by_interval = or_(
+        FactListing.last_checked_at.is_(None),
+        FactListing.last_checked_at
+        < func.now()
+        - func.make_interval(0, 0, 0, 0, 0, FactListing.scrape_interval_minutes),
+    )
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            select(FactListing.id)
+            .where(FactListing.is_active)
+            .where(due_by_interval)
+            .order_by(FactListing.last_checked_at.asc().nulls_first())
+            .limit(shards * shard_size)
+        ).all()
+    finally:
+        db.close()
+    ids = [str(r[0]) for r in rows]
+    dispatched = 0
+    for i in range(0, len(ids), shard_size):
+        scrape_listing_batch.apply_async([ids[i : i + shard_size]], priority=2)
+        dispatched += 1
+    summary = {"due": len(ids), "shards_dispatched": dispatched}
+    slog.info("scrape_stale_fanout_done", **summary)
+    return summary
+
+
+@celery_app.task(
+    name="scrape_listing_batch",
+    bind=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    soft_time_limit=840,
+    time_limit=900,
+)
+def scrape_listing_batch(self, listing_ids: list[str]) -> dict:
+    """Scrape exactly the assigned listings (fan-out shard; idempotent)."""
+    try:
+        uuids = [UUID(x) for x in listing_ids]
+        result = _run_scrape_all_pool(only_listing_ids=uuids)
+        slog.info(
+            "scrape_listing_batch_done",
+            assigned=len(uuids),
+            scraped_ok=result.get("scraped_ok"),
+            scraped_failed=result.get("scraped_failed"),
+        )
+        return result
+    except Exception as exc:
+        capture_exception_if_initialized(exc)
+        slog.error("scrape_listing_batch_failed", error=str(exc)[:500])
+        return {"status": f"error:{type(exc).__name__}"}
 
 
 @celery_app.task(name="check_pool_completeness")

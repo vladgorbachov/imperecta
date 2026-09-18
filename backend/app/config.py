@@ -81,7 +81,9 @@ class Settings(BaseSettings):
         validation_alias="MV_REFRESH_WORK_MEM_MB",
     )
     forex_allowed_currencies: str = Field(
-        default="USD,EUR,GBP,JPY,CHF,MDL,RON,PLN,TRY",
+        # Every currency the pool's shops price in (UAH/KZT/CZK/HUF/BGN added
+        # 2026-09-19 — ~450k listings had no EUR conversion without them).
+        default="USD,EUR,GBP,JPY,CHF,MDL,RON,PLN,TRY,UAH,KZT,CZK,HUF,BGN",
         validation_alias="FOREX_ALLOWED_CURRENCIES",
     )
     allowed_origins: str
