@@ -315,3 +315,23 @@ Requests:
 
 Frontend is deployed and forward-compatible; no FE redeploy needed when
 this lands.
+
+
+## P6 UNBLOCKED (2026-09-18): кросс-шоп сравнение цен — data-ops сервис
+
+База: `https://data-ops-production-8962.up.railway.app`. Auth: тот же
+Bearer JWT, что и для основного API (HS256, общий секрет).
+
+- `GET /v1/listings/{listing_id}/comparison` — по листингу из пула:
+  `{listing_id, match_method, group: {group_id, shops, min_price_eur,
+  max_price_eur, offers: [...]}}`; `group: null`, если товар ещё не
+  смэтчен. offers отсортированы по last_price_eur ASC NULLS LAST.
+- `GET /v1/groups/{group_id}/offers` — то же по group_id (404, если
+  группа пуста/не существует).
+- Offer: {listing_id, product_id, marketplace_code, marketplace_name,
+  country_code, name, title_en, external_url, last_price,
+  last_currency_code, last_price_eur, last_checked_at, match_method,
+  match_confidence}.
+- CORS: https://imperecta.pages.dev и localhost разрешены.
+- Данные наполняются: мэтчинг перепроходит пул после фикса точности v2
+  (~34ч на полный проход), приценённость растёт от harvest-тика.
