@@ -64,12 +64,19 @@ class PoolProductItem(BaseModel):
 
 
 class PoolProductsResponse(BaseModel):
-    """Shared envelope for /pool/products and /markets/overview."""
+    """Shared envelope for /pool/products and /markets/overview.
+
+    P12: total may be an estimate (mv_pool_stats or capped count);
+    next_cursor/prev_cursor enable keyset paging for keyset-capable sorts.
+    """
 
     items: list[PoolProductItem]
     total: int
     limit: int
     offset: int
+    total_is_estimate: bool = False
+    next_cursor: str | None = None
+    prev_cursor: str | None = None
 
 
 class PoolStatsResponse(BaseModel):

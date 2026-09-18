@@ -33,20 +33,31 @@ async def list_pool_products(
     ),
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    cursor: str | None = Query(
+        None,
+        description="Keyset cursor from next_cursor/prev_cursor; overrides offset.",
+    ),
     display_currency: str = Query("local", description="local|EUR|USD"),
 ) -> PoolProductsResponse:
     service = ProductPoolService(db)
-    items, total = await service.list_products(
+    items, total, page_meta = await service.list_products(
         sort=sort,
         search=search,
         marketplace_id=marketplace_id,
         category=category,
         limit=limit,
         offset=offset,
+        cursor=cursor,
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
         display_currency=display_currency,
     )
-    return PoolProductsResponse(items=items, total=total, limit=limit, offset=offset)
+    return PoolProductsResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        **page_meta,
+    )
 
 
 _EXPORT_COLUMNS = [

@@ -1,10 +1,12 @@
 """Global product pool: listings joined to dim_product and dim_marketplace."""
 
+import base64
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, asc, case, desc, func, nullslast, or_, select, text
+from sqlalchemy import and_, asc, case, desc, func, nullsfirst, nullslast, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
@@ -26,6 +28,82 @@ _SORT_LOSERS = "losers"
 _SORT_VOLATILE = "volatile"
 BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
 SPARKLINE_POINTS_LIMIT = 14
+
+# P12: exact counts are capped — beyond this the total is an estimate.
+COUNT_CAP = 10_000
+
+
+def _keyset_columns(sort: str):
+    """(column, direction) for sorts that support keyset pagination.
+
+    Sorts ordered by a computed price-change (gainers/losers/volatile) keep
+    offset pagination: their key lives in a per-request subquery.
+    """
+    mapping = {
+        _SORT_RECENT: (FactListing.last_checked_at, "desc"),
+        _SORT_TRENDING: (FactListing.last_checked_at, "desc"),
+        _SORT_NAME_ASC: (DimProduct.name, "asc"),
+        _SORT_NAME_DESC: (DimProduct.name, "desc"),
+        _SORT_PRICE_ASC: (FactListing.last_price, "asc"),
+        _SORT_PRICE_DESC: (FactListing.last_price, "desc"),
+    }
+    return mapping.get(sort)
+
+
+def _encode_cursor(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, separators=(",", ":"), default=str)
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> dict[str, Any] | None:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict) or "id" not in payload:
+        return None
+    return payload
+
+
+def _cursor_sort_value(sort: str, row_value: Any) -> Any:
+    """Serialize a row's sort key into the cursor (None survives as None)."""
+    if row_value is None:
+        return None
+    if isinstance(row_value, datetime):
+        return row_value.isoformat()
+    return str(row_value) if not isinstance(row_value, str) else row_value
+
+
+def _parse_cursor_value(sort: str, value: Any) -> Any:
+    if value is None:
+        return None
+    if sort in (_SORT_RECENT, _SORT_TRENDING):
+        return datetime.fromisoformat(value)
+    if sort in (_SORT_PRICE_ASC, _SORT_PRICE_DESC):
+        return float(value)
+    return value
+
+
+def _keyset_where(column, direction: str, value: Any, last_id, *, backwards: bool):
+    """Predicate selecting rows strictly after (or before) (value, id).
+
+    Ordering contract: ASC/DESC with NULLS LAST, id ASC as the tiebreaker.
+    """
+    if not backwards:
+        if value is None:
+            return and_(column.is_(None), FactListing.id > last_id)
+        ahead = column < value if direction == "desc" else column > value
+        return or_(
+            ahead,
+            and_(column == value, FactListing.id > last_id),
+            column.is_(None),
+        )
+    if value is None:
+        # Before a NULL row: every non-null row, plus earlier NULL rows.
+        return or_(column.isnot(None), and_(column.is_(None), FactListing.id < last_id))
+    behind = column > value if direction == "desc" else column < value
+    return or_(behind, and_(column == value, FactListing.id < last_id))
 
 _POOL_STATS_STMT = text(
     """
@@ -171,9 +249,17 @@ class ProductPoolService:
         country_code: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        cursor: str | None = None,
         include_blocked_countries: bool = False,
         display_currency: str = DISPLAY_LOCAL,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+        """List pool rows; returns (items, total, page_meta).
+
+        page_meta: total_is_estimate, next_cursor, prev_cursor. P12: a valid
+        `cursor` replaces offset for keyset-capable sorts; computed-pct sorts
+        (gainers/losers/volatile) silently keep offset (next_cursor stays
+        None, the frontend keeps its offset pager for them).
+        """
         latest_pc = _latest_price_change_subquery()
         stmt = self._base_listing_stmt(latest_pc)
         stmt = self._apply_filters(
@@ -187,39 +273,133 @@ class ProductPoolService:
             stmt,
             include_blocked_countries=include_blocked_countries,
         )
-        stmt = self._apply_sort(stmt, sort, latest_pc)
-        stmt = stmt.limit(limit).offset(offset)
 
-        count_base = (
-            select(func.count())
-            .select_from(FactListing)
-            .join(DimProduct, FactListing.product_id == DimProduct.id)
-            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
-            .where(FactListing.is_active)
-            .where(_pool_product_visibility_filter())
-        )
-        count_base = self._apply_filters(
-            count_base,
+        keyset = _keyset_columns(sort)
+        cursor_payload = _decode_cursor(cursor) if (cursor and keyset) else None
+        backwards = bool(cursor_payload and cursor_payload.get("d") == "prev")
+        if keyset is not None:
+            column, direction = keyset
+            if cursor_payload is not None:
+                stmt = stmt.where(
+                    _keyset_where(
+                        column,
+                        direction,
+                        _parse_cursor_value(sort, cursor_payload.get("v")),
+                        cursor_payload["id"],
+                        backwards=backwards,
+                    )
+                )
+            order = desc(column) if direction == "desc" else asc(column)
+            if backwards:
+                # Walk the ordering in reverse; rows are re-reversed below.
+                rev = asc(column) if direction == "desc" else desc(column)
+                stmt = stmt.order_by(nullsfirst(rev), desc(FactListing.id))
+            else:
+                stmt = stmt.order_by(nullslast(order), asc(FactListing.id))
+            stmt = stmt.limit(limit)
+            if cursor_payload is None:
+                stmt = stmt.offset(offset)
+        else:
+            stmt = self._apply_sort(stmt, sort, latest_pc)
+            stmt = stmt.limit(limit).offset(offset)
+
+        total, total_is_estimate = await self._count_pool(
             search=search,
             marketplace_id=marketplace_id,
             category=category,
             country_code=country_code,
-        )
-        count_base = self._apply_country_visibility_filter(
-            count_base,
             include_blocked_countries=include_blocked_countries,
         )
-
-        total = await self.db.scalar(count_base) or 0
         result = await self.db.execute(stmt)
         rows = result.mappings().all()
+        if backwards:
+            rows = list(reversed(rows))
         items = [_row_to_pool_item(dict(r)) for r in rows]
         listing_ids = [item["id"] for item in items]
         recent_prices_by_listing = await self._get_recent_prices_map(listing_ids)
         for item in items:
             item["recent_prices"] = recent_prices_by_listing.get(item["id"], [])
         await self._apply_display_currency(items, display_currency)
-        return items, int(total)
+
+        next_cursor = prev_cursor = None
+        if keyset is not None and rows:
+            raw_first, raw_last = dict(rows[0]), dict(rows[-1])
+            key = "last_checked_at" if sort in (_SORT_RECENT, _SORT_TRENDING) else (
+                "title" if sort in (_SORT_NAME_ASC, _SORT_NAME_DESC) else "price"
+            )
+            full_page = len(rows) == limit
+            # First page forward has nothing before it; otherwise both edges
+            # get cursors (an empty neighbour page just returns no rows).
+            if full_page or backwards:
+                next_cursor = _encode_cursor({
+                    "d": "next",
+                    "v": _cursor_sort_value(sort, raw_last.get(key)),
+                    "id": str(raw_last["id"]),
+                })
+            if cursor_payload is not None or offset > 0:
+                prev_cursor = _encode_cursor({
+                    "d": "prev",
+                    "v": _cursor_sort_value(sort, raw_first.get(key)),
+                    "id": str(raw_first["id"]),
+                })
+        page_meta = {
+            "total_is_estimate": total_is_estimate,
+            "next_cursor": next_cursor,
+            "prev_cursor": prev_cursor,
+        }
+        return items, int(total), page_meta
+
+    async def _count_pool(
+        self,
+        *,
+        search: str | None,
+        marketplace_id: UUID | None,
+        category: str | None,
+        country_code: str | None,
+        include_blocked_countries: bool,
+    ) -> tuple[int, bool]:
+        """P12: pool totals without a 1.4M-row count(*) per request.
+
+        Unfiltered → mv_pool_stats (pg_cron keeps it fresh; estimate=True).
+        Filtered → exact count capped at COUNT_CAP+1 rows; beyond the cap the
+        total is COUNT_CAP and flagged as an estimate.
+        """
+        unfiltered = (
+            search is None
+            and marketplace_id is None
+            and category is None
+            and country_code is None
+            and include_blocked_countries
+        )
+        if unfiltered:
+            row = (await self.db.execute(_POOL_STATS_STMT)).mappings().first()
+            if row is not None:
+                return int(row["total_listings"] or 0), True
+
+        inner = (
+            select(FactListing.id)
+            .select_from(FactListing)
+            .join(DimProduct, FactListing.product_id == DimProduct.id)
+            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
+            .where(FactListing.is_active)
+            .where(_pool_product_visibility_filter())
+        )
+        inner = self._apply_filters(
+            inner,
+            search=search,
+            marketplace_id=marketplace_id,
+            category=category,
+            country_code=country_code,
+        )
+        inner = self._apply_country_visibility_filter(
+            inner,
+            include_blocked_countries=include_blocked_countries,
+        )
+        capped = inner.limit(COUNT_CAP + 1).subquery()
+        counted = await self.db.scalar(select(func.count()).select_from(capped)) or 0
+        if counted > COUNT_CAP:
+            return COUNT_CAP, True
+        return int(counted), False
 
 
     async def get_product_detail(
