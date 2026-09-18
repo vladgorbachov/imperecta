@@ -23,8 +23,8 @@ use uuid::Uuid;
 
 use crate::{require_jwt, ApiError, AppState};
 
-const SEARCH_PRODUCT_CAP: usize = 1_500;
-const SEARCH_LISTING_CAP: i64 = 4_000;
+const SEARCH_PRODUCT_CAP: usize = 500;
+const SEARCH_LISTING_CAP: i64 = 1_500;
 const COUNT_CAP: i64 = 10_001;
 
 #[derive(Debug, Deserialize)]

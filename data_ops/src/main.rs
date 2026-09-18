@@ -345,7 +345,9 @@ async fn pool_search(
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
 
     // Warm path: the in-memory name index replaces the cold trgm bitmap.
-    let rows = if let Some(hits) = state.index.search(q, 1_500) {
+    // 500 matched products cap: a search PAGE never needs more, and the
+    // SQL phase over ANY(ids) scales linearly with the cap.
+    let rows = if let Some(hits) = state.index.search(q, 500) {
         if hits.is_empty() {
             Vec::new()
         } else {
