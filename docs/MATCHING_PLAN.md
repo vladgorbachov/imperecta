@@ -85,3 +85,11 @@ P6 API). Контракты проектируем так, чтобы серви
 - Rust data-ops сервис (R1): axum+sqlx, JWT HS256 (общий JWT_SECRET),
   GET /v1/groups/{id}/offers и /v1/listings/{id}/comparison — P6
   read-path; деплой отдельным Railway-сервисом data-ops.
+- 2026-09-18 (вечер): M2b live — title-ключ v2 (нормализованный токен-сет:
+  стоп-слова EN, склейка числа+юнита, сортировка; префикс "title2:") +
+  merge-pass 'title_sim' (conf 0.80): sorted-neighborhood внутри типа,
+  Jaccard >= 0.80 c guard'ом конфликта юнит-атрибутов (256gb vs 512gb -> 0),
+  слияние в min(group_id) — детерминированная сходимость. Скоринг в
+  rust_core (+Python reference, паритет). Harvest теперь заполняет
+  картинки карточек (data-src/srcset, write-once) — закрытие дыры
+  "товары без картинок" на скорости harvest-тика.
