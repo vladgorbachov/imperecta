@@ -48,7 +48,10 @@ def test_sql_dedupes_to_latest_scrape_per_listing_day() -> None:
 
 
 def test_sql_keeps_visible_product_pool_grain() -> None:
-    assert "fl.is_active IS TRUE" in _VOLATILITY_SQL
+    # Bare `fl.is_active`, not `IS TRUE`: the planner cannot prove the
+    # IS TRUE form against `WHERE is_active = TRUE` partial-index predicates.
+    assert "WHERE fl.is_active\n" in _VOLATILITY_SQL
+    assert "IS TRUE" not in _VOLATILITY_SQL
     assert "fl.page_role = 'product'" in _VOLATILITY_SQL
     assert "fp.price_eur IS NOT NULL" in _VOLATILITY_SQL
 

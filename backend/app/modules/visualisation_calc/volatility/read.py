@@ -46,7 +46,7 @@ _VOLATILITY_SQL = """
         SELECT l.listing_id, l.date_id, l.price_eur
         FROM latest l
         JOIN fact_listing fl ON fl.id = l.listing_id{country_join}
-        WHERE fl.is_active IS TRUE
+        WHERE fl.is_active
           AND fl.page_role = 'product'{extra_filters}
     ),
     series AS (

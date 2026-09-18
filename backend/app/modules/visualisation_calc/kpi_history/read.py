@@ -30,9 +30,17 @@ def _date_from_date_id(date_id: int) -> date:
 
 
 def _visible_product_pool_predicate():
-    """Same grain as dashboard KPI / geo-coverage / trend."""
+    """Same grain as dashboard KPI / geo-coverage / trend.
+
+    Bare boolean column, NOT ``.is_(True)``: SQLAlchemy renders the latter as
+    ``is_active IS TRUE``, and the planner cannot prove that form against the
+    ``WHERE is_active = TRUE`` predicate of idx_listing_pool_entry_created —
+    the partial index is then skipped and the query seq-scans 1.4M rows
+    (verified on prod, 2026-09-18). The bare column renders as ``is_active``
+    and matches the index predicate exactly.
+    """
     return (
-        FactListing.is_active.is_(True),
+        FactListing.is_active,
         FactListing.page_role == "product",
     )
 

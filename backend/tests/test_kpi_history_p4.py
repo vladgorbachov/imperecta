@@ -39,3 +39,17 @@ def test_empty_window_is_honest_empty():
     assert out.series.updated_24h == []
     assert out.series.changed_gt5 == []
     assert out.series.avg_volatility == []
+
+
+def test_visible_pool_predicate_matches_partial_index_form() -> None:
+    """The reads must render bare ``is_active`` (not ``.is_(True)`` ->
+    ``IS TRUE``): the planner cannot prove IS TRUE against the
+    ``WHERE is_active = TRUE`` predicate of idx_listing_pool_entry_created
+    and falls back to a 1.4M-row seq scan (verified on prod, 2026-09-18)."""
+    import inspect
+
+    from app.modules.visualisation_calc.kpi_history import read as kpi_read
+
+    source = inspect.getsource(kpi_read)
+    assert "is_active.is_(True)" not in source
+    assert "FactListing.is_active," in source
