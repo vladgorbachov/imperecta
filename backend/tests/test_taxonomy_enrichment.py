@@ -27,8 +27,19 @@ def test_product_reply_requires_type_en_and_drops_unknown_indexes():
     )
     parsed = tx.parse_product_reply(reply, titles)
     assert set(parsed.keys()) == {"0"}
-    assert parsed["0"]["product_type_en"] == "laptop"
+    # Type names are capitalized at write time (user rule for the Type column).
+    assert parsed["0"]["product_type_en"] == "Laptop"
+    assert parsed["0"]["product_type"] == "Laptop"
     assert parsed["0"]["title_en"] == "Lenovo IdeaPad 5 Laptop"
+
+
+def test_type_capitalization_preserves_inner_casing():
+    titles = {"0": "iPhone 15 case"}
+    reply = json.dumps({"0": {"type": "чехол", "type_en": "iPhone case"}})
+    parsed = tx.parse_product_reply(reply, titles)
+    # First letter uppercased, inner casing untouched (no str.capitalize).
+    assert parsed["0"]["product_type_en"] == "IPhone case"
+    assert parsed["0"]["product_type"] == "Чехол"
 
 
 def test_prompts_embed_payload_json():

@@ -86,10 +86,21 @@ def parse_category_reply(text: str, names_by_index: dict[str, str]) -> dict[str,
     return out
 
 
+def _capitalize_first(value: str) -> str:
+    """Uppercase only the first letter — 'macbook stand' → 'Macbook stand',
+    but 'iPhone case' keeps its inner casing (str.capitalize would not)."""
+    return value[:1].upper() + value[1:]
+
+
 def parse_product_reply(
     text: str, titles_by_index: dict[str, str]
 ) -> dict[str, dict[str, str]]:
-    """index -> {product_type, product_type_en, title_en}; partial rows dropped."""
+    """index -> {product_type, product_type_en, title_en}; partial rows dropped.
+
+    Type names are stored with a leading capital (user rule: the Type column
+    always shows a capitalized name) — normalized at write time so every
+    consumer (list API, CSV export, future readers) agrees.
+    """
     parsed = _extract_json(text)
     out: dict[str, dict[str, str]] = {}
     for idx, value in parsed.items():
@@ -100,9 +111,9 @@ def parse_product_reply(
         title_en = str(value.get("title_en") or "").strip()
         if not type_en:
             continue
-        row: dict[str, str] = {"product_type_en": type_en[:200]}
+        row: dict[str, str] = {"product_type_en": _capitalize_first(type_en[:200])}
         if type_local:
-            row["product_type"] = type_local[:200]
+            row["product_type"] = _capitalize_first(type_local[:200])
         if title_en:
             row["title_en"] = title_en[:500]
         out[idx] = row
