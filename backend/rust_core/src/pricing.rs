@@ -31,7 +31,6 @@ pub const CURRENCY_SYMBOLS: &[(&str, &str)] = &[
     ("сўм", "UZS"),
     ("сом", "KGS"),
     ("br", "BYN"),
-    ("sm", "TJS"),
 ];
 
 /// Textual ISO codes / abbreviations near prices.

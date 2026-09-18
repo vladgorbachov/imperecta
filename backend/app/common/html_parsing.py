@@ -59,7 +59,9 @@ _CURRENCY_SYMBOLS: dict[str, str] = {
     "сўм": "UZS",
     "сом": "KGS",
     "br": "BYN",
-    "sm": "TJS",
+    # "sm" (TJS, Tajik Somoni) deliberately omitted: it word-boundary-matches
+    # Samsung "SM-xxxx" model codes near the price and no shop in the fleet
+    # sells in TJS. "tjs" (the ISO text code) is still matched below.
 }
 
 # Tokens shared by several national currencies: "lei" is both the Romanian
