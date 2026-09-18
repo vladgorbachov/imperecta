@@ -38,6 +38,12 @@ COUNT_CAP = 10_000
 # product ids first (trgm bitmap, strictly capped) bounds the work.
 SEARCH_MATCH_CAP = 5_000
 
+# Second phase cap: candidate LISTINGS fetched by product_id (bitmap, no
+# ordering) before the bounded top-N sort. Without this the planner may
+# still walk a sort index testing ANY(5000 ids) per row — observed 125s
+# timeout live. Two bounded phases give a deterministic plan.
+SEARCH_LISTING_CAP = 10_000
+
 
 def _keyset_columns(sort: str):
     """(column, direction) for sorts that support keyset pagination.
@@ -259,16 +265,29 @@ class ProductPoolService:
         (gainers/losers/volatile) silently keep offset (next_cursor stays
         None, the frontend keeps its offset pager for them).
         """
-        search_ids: list | None = None
+        search_listing_ids: list | None = None
         search_capped = False
         if search:
-            search_ids, search_capped = await self._search_product_ids(search)
+            search_ids, ids_capped = await self._search_product_ids(search)
             if not search_ids:
                 return [], 0, {
                     "total_is_estimate": False,
                     "next_cursor": None,
                     "prev_cursor": None,
                 }
+            # Phase 2: candidate listings by product_id — bitmap, unordered,
+            # capped. The final query then filters on ≤SEARCH_LISTING_CAP
+            # primary keys: bounded top-N sort, deterministic plan.
+            search_listing_ids, listings_capped = await self._search_listing_ids(
+                search_ids
+            )
+            if not search_listing_ids:
+                return [], 0, {
+                    "total_is_estimate": False,
+                    "next_cursor": None,
+                    "prev_cursor": None,
+                }
+            search_capped = ids_capped or listings_capped
 
         stmt = self._base_listing_stmt()
         stmt = self._apply_filters(
@@ -278,8 +297,8 @@ class ProductPoolService:
             category=category,
             country_code=country_code,
         )
-        if search_ids is not None:
-            stmt = stmt.where(FactListing.product_id.in_(search_ids))
+        if search_listing_ids is not None:
+            stmt = stmt.where(FactListing.id.in_(search_listing_ids))
         stmt = self._apply_country_visibility_filter(
             stmt,
             include_blocked_countries=include_blocked_countries,
@@ -315,7 +334,7 @@ class ProductPoolService:
             stmt = stmt.limit(limit).offset(offset)
 
         total, total_is_estimate = await self._count_pool(
-            search_ids=search_ids,
+            search_listing_ids=search_listing_ids,
             marketplace_id=marketplace_id,
             category=category,
             country_code=country_code,
@@ -372,10 +391,21 @@ class ProductPoolService:
         ids = [r[0] for r in rows]
         return ids, len(ids) == SEARCH_MATCH_CAP
 
+    async def _search_listing_ids(self, product_ids: list) -> tuple[list, bool]:
+        """Candidate listing ids for matched products — bitmap scan, capped."""
+        rows = await self.db.execute(
+            select(FactListing.id)
+            .where(FactListing.product_id.in_(product_ids))
+            .where(FactListing.is_active)
+            .limit(SEARCH_LISTING_CAP)
+        )
+        ids = [r[0] for r in rows]
+        return ids, len(ids) == SEARCH_LISTING_CAP
+
     async def _count_pool(
         self,
         *,
-        search_ids: list | None,
+        search_listing_ids: list | None,
         marketplace_id: UUID | None,
         category: str | None,
         country_code: str | None,
@@ -388,7 +418,7 @@ class ProductPoolService:
         total is COUNT_CAP and flagged as an estimate.
         """
         unfiltered = (
-            search_ids is None
+            search_listing_ids is None
             and marketplace_id is None
             and category is None
             and country_code is None
@@ -414,8 +444,8 @@ class ProductPoolService:
             category=category,
             country_code=country_code,
         )
-        if search_ids is not None:
-            inner = inner.where(FactListing.product_id.in_(search_ids))
+        if search_listing_ids is not None:
+            inner = inner.where(FactListing.id.in_(search_listing_ids))
         inner = self._apply_country_visibility_filter(
             inner,
             include_blocked_countries=include_blocked_countries,
