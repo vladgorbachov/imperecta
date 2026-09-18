@@ -743,6 +743,7 @@
   "products.favorite.toggle": "切换收藏",
   "products.favorites.empty": "暂无收藏",
   "products.favorites.emptyHint": "点击商品旁的星标，它将固定在此处及列表顶部。",
+  "products.type": "类型",
   "forcePassword.title": "更改管理员密码",
   "forcePassword.subtitle": "必须更改默认凭据以确保安全",
   "forcePassword.newEmail": "新邮箱",

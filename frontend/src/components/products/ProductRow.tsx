@@ -117,15 +117,29 @@ export function ProductRow({ item, onOpen }: ProductRowProps) {
       <TableCell className="w-[76px]">
         <ProductThumb item={item} />
       </TableCell>
+      <TableCell className="w-32">
+        {item.product_type_en || item.product_type ? (
+          <span className="line-clamp-2 text-sm leading-snug">
+            {item.product_type_en ?? item.product_type}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </TableCell>
       <TableCell className="min-w-[220px]">
         <span className="line-clamp-2 text-[0.9375rem] font-medium leading-snug">
           {item.title || "—"}
         </span>
+        {item.title_en && item.title_en !== item.title ? (
+          <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
+            {item.title_en}
+          </span>
+        ) : null}
       </TableCell>
       <TableCell className="w-36">
-        {item.category ? (
+        {item.category_en || item.category ? (
           <span className="label-mono inline-block max-w-full truncate rounded border border-[var(--glass-border)] px-1.5 py-0.5 align-middle">
-            {item.category}
+            {item.category_en ?? item.category}
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -193,6 +207,7 @@ export function ProductsTableHead() {
       <TableRow className="hover:bg-transparent">
         <TableHead className="w-10" />
         <TableHead className="w-[76px]" />
+        <TableHead className="w-32 whitespace-nowrap">{t("products.type")}</TableHead>
         <TableHead className="min-w-[220px] whitespace-nowrap">{t("products.name")}</TableHead>
         <TableHead className="w-36 whitespace-nowrap">{t("products.category")}</TableHead>
         <TableHead className="w-40 whitespace-nowrap">{t("products.marketplace")}</TableHead>

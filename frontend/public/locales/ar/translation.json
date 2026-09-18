@@ -743,6 +743,7 @@
   "products.favorite.toggle": "تبديل المفضلة",
   "products.favorites.empty": "لا توجد مفضلات بعد",
   "products.favorites.emptyHint": "انقر على النجمة بجوار أي منتج لتثبيته هنا وفي أعلى القائمة.",
+  "products.type": "النوع",
   "forcePassword.title": "تغيير كلمة مرور المسؤول",
   "forcePassword.subtitle": "يجب تغيير بيانات الدخول الافتراضية للأمان",
   "forcePassword.newEmail": "البريد الجديد",

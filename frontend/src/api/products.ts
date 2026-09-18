@@ -58,9 +58,14 @@ export interface PoolProductItem {
   price_change_pct?: number | null;
   in_stock?: boolean | null;
   /** Taxonomy fields — present once the backend adds them to the LIST
-      response (P10 in docs/FRONTEND_BACKEND_REQUESTS.md); detail has them. */
+      response (P10/P13 in docs/FRONTEND_BACKEND_REQUESTS.md); detail has
+      brand/category already. EN variants are the universal-language layer. */
   brand?: string | null;
   category?: string | null;
+  category_en?: string | null;
+  product_type?: string | null;
+  product_type_en?: string | null;
+  title_en?: string | null;
   status: string;
   is_active?: boolean | null;
   last_checked_at?: string | null;

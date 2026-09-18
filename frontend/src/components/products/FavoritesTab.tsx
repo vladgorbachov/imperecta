@@ -44,7 +44,7 @@ export function FavoritesTab() {
             axis="both"
             className="max-h-[calc(100vh-16rem)] overflow-auto"
           >
-            <Table className="min-w-[880px]">
+            <Table className="min-w-[980px]">
               <ProductsTableHead />
               <TableBody>
                 {items.map((item) => (

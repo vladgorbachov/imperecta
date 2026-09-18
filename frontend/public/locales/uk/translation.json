@@ -765,6 +765,7 @@
   "products.favorite.toggle": "До обраного",
   "products.favorites.empty": "В обраному поки порожньо",
   "products.favorites.emptyHint": "Натисніть зірочку біля товару — він закріпиться тут і вгорі списку.",
+  "products.type": "Тип",
   "forcePassword.title": "Змінити пароль адміністратора",
   "forcePassword.subtitle": "Пароль за замовчуванням потрібно змінити з міркувань безпеки",
   "forcePassword.newEmail": "Новий email",

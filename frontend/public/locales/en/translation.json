@@ -852,6 +852,7 @@
   "products.favorite.toggle": "Toggle favorite",
   "products.favorites.empty": "No favorites yet",
   "products.favorites.emptyHint": "Click the star next to any product to pin it here and to the top of the list.",
+  "products.type": "Type",
   "forcePassword.title": "Change administrator password",
   "forcePassword.subtitle": "Default credentials must be changed for security",
   "forcePassword.newEmail": "New email",

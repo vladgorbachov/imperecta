@@ -163,6 +163,50 @@ Nice-to-have (not required): `POST /api/admin/service_alerts/resolve` with
 `{ "ids": [...] }` for bulk resolve after an incident storm — the UI would
 grow a "resolve all filtered" action only after this exists.
 
+## P12 — URGENT: /pool/products performance at 1.4M rows (2026-09-18)
+
+The Products page is visibly slow for a single user; it will not survive
+concurrency. Frontend has shipped its side (keepPreviousData page flips,
+20-row pages, 500ms debounced search). The wins are all backend:
+
+1. **Kill the per-request `count(*)`.** `total` over 1.4M rows on every list
+   call is the classic killer. Options: return `total` from `mv_pool_stats`
+   (already refreshed by pg_cron) or reltuples estimate; exact count only
+   when a search/filter is active AND capped (`count(*) ... LIMIT 10001` →
+   `total_is_estimate: true`). The frontend can render "≈ 1.4M" happily —
+   say the word and it will read `total_is_estimate`.
+2. **Keyset pagination.** Offset 100k+ scans everything before it. Add
+   `cursor` (opaque, from the last row's sort key + id) alongside
+   limit/offset; frontend will switch its pager to prev/next cursors —
+   contract: response gains `next_cursor: string|null`,
+   `prev_cursor: string|null`.
+3. **Search:** `pg_trgm` GIN index on the searched title expression (mind
+   the SQLAlchemy `.is_(True)` partial-index lesson — bare boolean in WHERE).
+4. **Sort paths:** each sort key needs a matching (partial) index at this
+   scale; `recent` should be the cheapest and is the default.
+5. Target: p95 < 300ms for the default page at 10k concurrent readers —
+   this endpoint is the storefront. Long-term home per architecture: the
+   Rust data-ops read layer.
+
+## P13 — Product type + universal-language (EN) fields (2026-09-18)
+
+The UI now has a **Type** column ("laptop", "vacuum cleaner" — one or a few
+words, narrower than category) and renders EN variants wherever they exist.
+Requested on both list and detail items, all nullable, honest null until the
+pipeline fills them:
+
+- `product_type: string|null` — source-language type (from taxonomy /
+  classifier / breadcrumb leaf).
+- `product_type_en: string|null`, `category_en: string|null`,
+  `title_en: string|null` — English layer ("one language everyone reads").
+  Machine translation at scrape/enrichment time is fine; batch backfill as
+  budget allows. Do not translate on the fly per request.
+
+Frontend rendering (already live, no FE redeploy needed): Type column shows
+`product_type_en ?? product_type`; Category chip shows
+`category_en ?? category`; the Name cell shows the original title with a
+muted `title_en` subtitle when it differs.
+
 ## P10 — Taxonomy fields on the products LIST response (2026-09-18)
 
 `GET /pool/products` items: please include `category: string|null` and

@@ -843,6 +843,7 @@
   "products.favorite.toggle": "В избранное",
   "products.favorites.empty": "В избранном пока пусто",
   "products.favorites.emptyHint": "Нажмите звёздочку у товара — он закрепится здесь и вверху списка.",
+  "products.type": "Тип",
   "forcePassword.title": "Смените пароль администратора",
   "forcePassword.subtitle": "Дефолтные credentials должны быть заменены для безопасности",
   "forcePassword.newEmail": "Новый email",

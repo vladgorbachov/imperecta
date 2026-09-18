@@ -743,6 +743,7 @@
   "products.favorite.toggle": "Alternar favorito",
   "products.favorites.empty": "Aún no hay favoritos",
   "products.favorites.emptyHint": "Haz clic en la estrella junto a un producto para fijarlo aquí y en la parte superior de la lista.",
+  "products.type": "Tipo",
   "forcePassword.title": "Cambiar contraseña del administrador",
   "forcePassword.subtitle": "Las credenciales por defecto deben cambiarse por seguridad",
   "forcePassword.newEmail": "Nuevo email",

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { PoolProductsParams } from "@/api/products";
 import { productsApi } from "@/api/products";
 import { useDisplayCurrencyStore } from "@/stores/displayCurrencyStore";
@@ -17,6 +17,9 @@ export function usePoolProducts(
       return data;
     },
     staleTime: 30_000,
+    /* Page flips render instantly over the previous page instead of a
+       skeleton — perceived latency win while the next page loads. */
+    placeholderData: keepPreviousData,
     enabled: options?.enabled ?? true,
   });
 }

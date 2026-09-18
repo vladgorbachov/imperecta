@@ -454,7 +454,7 @@ export function PoolProductsTab() {
             >
               <Table
                 className={cn(
-                  "min-w-[880px]",
+                  "min-w-[980px]",
                   density === "compact" &&
                     "[&_td]:py-1.5 [&_th]:py-2 [&_td]:text-xs",
                 )}
