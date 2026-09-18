@@ -88,12 +88,18 @@ class ProductPoolService:
                 FactListing.last_checked_at,
                 FactListing.is_active,
                 latest_pc.c.price_change_pct.label("price_change_pct"),
+                # P10: taxonomy labels on the list grain (detail shares them).
+                DimBrand.name.label("brand"),
+                DimCategory.name.label("category"),
             )
             .select_from(FactListing)
             .join(DimProduct, FactListing.product_id == DimProduct.id)
             .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
             .outerjoin(latest_pc, latest_pc.c.listing_id == FactListing.id)
-            .where(FactListing.is_active.is_(True))
+            .outerjoin(DimBrand, DimProduct.brand_id == DimBrand.id)
+            .outerjoin(DimCategory, DimProduct.category_id == DimCategory.id)
+            # Bare column, not .is_(True): "IS TRUE" defeats partial-index matching.
+            .where(FactListing.is_active)
             .where(_pool_product_visibility_filter())
         )
 
@@ -189,7 +195,7 @@ class ProductPoolService:
             .select_from(FactListing)
             .join(DimProduct, FactListing.product_id == DimProduct.id)
             .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
-            .where(FactListing.is_active.is_(True))
+            .where(FactListing.is_active)
             .where(_pool_product_visibility_filter())
         )
         count_base = self._apply_filters(
@@ -230,13 +236,7 @@ class ProductPoolService:
         """
         latest_pc = _latest_price_change_subquery()
         stmt = self._base_listing_stmt(latest_pc).where(FactListing.id == listing_id)
-        stmt = stmt.add_columns(
-            DimProduct.attributes.label("attributes"),
-            DimBrand.name.label("brand"),
-            DimCategory.name.label("category"),
-        )
-        stmt = stmt.outerjoin(DimBrand, DimProduct.brand_id == DimBrand.id)
-        stmt = stmt.outerjoin(DimCategory, DimProduct.category_id == DimCategory.id)
+        stmt = stmt.add_columns(DimProduct.attributes.label("attributes"))
         stmt = self._apply_country_visibility_filter(
             stmt,
             include_blocked_countries=include_blocked_countries,
@@ -246,8 +246,6 @@ class ProductPoolService:
             return None
         raw = dict(row)
         attributes = raw.pop("attributes", None)
-        brand = raw.pop("brand", None)
-        category = raw.pop("category", None)
         item = _row_to_pool_item(raw)
         prices_map = await self._get_recent_prices_map([item["id"]])
         item["recent_prices"] = prices_map.get(item["id"], [])
@@ -256,8 +254,6 @@ class ProductPoolService:
         item["description"] = (
             attributes.get("description") if isinstance(attributes, dict) else None
         )
-        item["brand"] = brand
-        item["category"] = category
         return item
 
     async def get_price_history(
@@ -456,7 +452,7 @@ class ProductPoolService:
             )
             .select_from(FactListing)
             .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
-            .where(FactListing.is_active.is_(True))
+            .where(FactListing.is_active)
             .group_by(
                 DimMarketplace.id,
                 DimMarketplace.marketplace_code,
@@ -572,6 +568,8 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "marketplace_domain": row.get("marketplace_domain"),
         "marketplace_code": row.get("marketplace_code"),
         "country_code": row.get("country_code"),
+        "brand": row.get("brand"),
+        "category": row.get("category"),
         "price": float(row["price"]) if row.get("price") is not None else None,
         "currency": row.get("currency"),
         "price_eur": float(row["price_eur"]) if row.get("price_eur") is not None else None,

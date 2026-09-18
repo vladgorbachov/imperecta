@@ -69,6 +69,8 @@ REQUIRED_POOL_ITEM_FIELDS: tuple[str, ...] = (
     "marketplace_domain",
     "marketplace_code",
     "country_code",
+    "brand",
+    "category",
     "price",
     "currency",
     "price_eur",

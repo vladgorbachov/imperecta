@@ -43,6 +43,9 @@ class PoolProductItem(BaseModel):
     marketplace_domain: str | None = None
     marketplace_code: str | None = None
     country_code: str | None = None
+    # P10: taxonomy labels on the list grain (null until extraction matures).
+    brand: str | None = None
+    category: str | None = None
     price: float | None = None
     currency: str | None = None
     price_eur: float | None = None
@@ -101,12 +104,13 @@ class PoolCategorySummary(BaseModel):
 
 
 class PoolProductDetail(PoolProductItem):
-    """Full product card for /pool/products/{listing_id} (P2)."""
+    """Full product card for /pool/products/{listing_id} (P2).
+
+    brand/category are inherited from the list item since P10.
+    """
 
     description: str | None = None
     attributes: dict | None = None
-    brand: str | None = None
-    category: str | None = None
 
 
 class PriceHistoryPoint(BaseModel):
