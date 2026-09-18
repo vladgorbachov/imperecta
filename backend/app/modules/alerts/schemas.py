@@ -9,7 +9,9 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 AlertType = Literal["price_drop", "price_rise", "availability"]
-AlertChannel = Literal["email", "telegram", "webhook"]
+# in_app: no external delivery — the alert_events row IS the delivery
+# (header bell / dashboard stream render it).
+AlertChannel = Literal["email", "telegram", "webhook", "in_app"]
 
 
 class AlertRuleCreate(BaseModel):
@@ -19,6 +21,8 @@ class AlertRuleCreate(BaseModel):
     alert_type: AlertType
     threshold_pct: float | None = Field(default=None, gt=0, le=100)
     channel: AlertChannel = "email"
+    # Full enabled set (P15); legacy payloads without it get [channel].
+    channels: list[AlertChannel] | None = Field(default=None, min_length=1)
     webhook_url: str | None = None
     cooldown_minutes: int = Field(default=60, ge=0, le=10_080)
 
@@ -27,6 +31,7 @@ class AlertRuleUpdate(BaseModel):
     alert_type: AlertType | None = None
     threshold_pct: float | None = Field(default=None, gt=0, le=100)
     channel: AlertChannel | None = None
+    channels: list[AlertChannel] | None = Field(default=None, min_length=1)
     webhook_url: str | None = None
     cooldown_minutes: int | None = Field(default=None, ge=0, le=10_080)
     is_active: bool | None = None
@@ -40,6 +45,7 @@ class AlertRule(BaseModel):
     alert_type: str
     threshold_pct: float | None = None
     channel: str
+    channels: list[str] = Field(default_factory=list)
     webhook_url: str | None = None
     cooldown_minutes: int
     is_active: bool

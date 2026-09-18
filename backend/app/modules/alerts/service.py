@@ -26,6 +26,24 @@ _RULE_LABEL_COLUMNS = (
 )
 
 
+def rule_channels(rule: Alert) -> list[str]:
+    """Effective enabled channel set: `channels` when set, else [channel].
+
+    Shared with the trigger engine so delivery fan-out and API responses
+    agree on the fallback for pre-P15 rows.
+    """
+    raw = rule.channels
+    if isinstance(raw, list) and raw:
+        return [str(name) for name in raw]
+    return [rule.channel or "email"]
+
+
+def normalize_channels(payload: dict[str, Any]) -> list[str]:
+    """Deduped (order-preserving) channel set from a create payload."""
+    raw = payload.get("channels") or [payload.get("channel") or "email"]
+    return list(dict.fromkeys(str(name) for name in raw))
+
+
 class AlertRulesService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -53,6 +71,7 @@ class AlertRulesService:
             "alert_type": rule.alert_type,
             "threshold_pct": float(rule.threshold_pct) if rule.threshold_pct is not None else None,
             "channel": rule.channel or "email",
+            "channels": rule_channels(rule),
             "webhook_url": rule.webhook_url,
             "cooldown_minutes": int(rule.cooldown_minutes or 60),
             "is_active": bool(rule.is_active),
@@ -99,6 +118,7 @@ class AlertRulesService:
             alert_type=payload["alert_type"],
             threshold_pct=payload.get("threshold_pct"),
             channel=payload.get("channel") or "email",
+            channels=normalize_channels(payload),
             webhook_url=payload.get("webhook_url"),
             cooldown_minutes=int(payload.get("cooldown_minutes") or 60),
             is_active=True,
@@ -124,6 +144,10 @@ class AlertRulesService:
         changes = {k: v for k, v in delta.items() if v is not None}
         if not changes:
             return owned
+        if changes.get("channels"):
+            changes["channels"] = list(
+                dict.fromkeys(str(name) for name in changes["channels"])
+            )
         fields = build_alert_rule_fields(id=rule_id, **changes)
         result = await write_alert_async(
             kind="rule_update",

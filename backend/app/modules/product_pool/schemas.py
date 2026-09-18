@@ -73,10 +73,12 @@ class PoolProductsResponse(BaseModel):
 
     P12: total may be an estimate (mv_pool_stats or capped count);
     next_cursor/prev_cursor enable keyset paging for keyset-capable sorts.
+    With skip_total=true the count is not computed at all and total is null
+    (typeahead callers ignore totals).
     """
 
     items: list[PoolProductItem]
-    total: int
+    total: int | None
     limit: int
     offset: int
     total_is_estimate: bool = False

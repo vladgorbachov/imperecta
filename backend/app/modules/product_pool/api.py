@@ -37,6 +37,10 @@ async def list_pool_products(
         None,
         description="Keyset cursor from next_cursor/prev_cursor; overrides offset.",
     ),
+    skip_total: bool = Query(
+        False,
+        description="Skip the count query entirely; total comes back null (P12 typeahead).",
+    ),
     display_currency: str = Query("local", description="local|EUR|USD"),
 ) -> PoolProductsResponse:
     service = ProductPoolService(db)
@@ -48,6 +52,7 @@ async def list_pool_products(
         limit=limit,
         offset=offset,
         cursor=cursor,
+        skip_total=skip_total,
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
         display_currency=display_currency,
     )

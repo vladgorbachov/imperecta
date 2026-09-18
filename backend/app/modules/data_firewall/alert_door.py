@@ -18,7 +18,8 @@ ALERTS_TABLE = "alerts"
 ALERT_EVENTS_TABLE = "alert_events"
 
 ALERT_TYPES = frozenset({"price_drop", "price_rise", "availability"})
-ALERT_CHANNELS = frozenset({"email", "telegram", "webhook"})
+# in_app: no external delivery — the alert_events row is the delivery.
+ALERT_CHANNELS = frozenset({"email", "telegram", "webhook", "in_app"})
 EVENT_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 REJECT_UNKNOWN_ALERT_KIND = "unknown_alert_kind"
@@ -39,6 +40,7 @@ ALERT_WRITE_ALLOWLIST: dict[str, frozenset[str]] = {
             "threshold_pct",
             "threshold_value",
             "channel",
+            "channels",
             "webhook_url",
             "cooldown_minutes",
             "is_active",
@@ -53,6 +55,7 @@ ALERT_WRITE_ALLOWLIST: dict[str, frozenset[str]] = {
             "threshold_pct",
             "threshold_value",
             "channel",
+            "channels",
             "webhook_url",
             "cooldown_minutes",
             "is_active",
@@ -133,11 +136,25 @@ def _semantic_failures(kind: str, fields: dict[str, Any]) -> list[str]:
     if channel is not None and channel not in ALERT_CHANNELS:
         failed.append("channel_invalid")
 
+    channels = fields.get("channels")
+    if channels is not None:
+        if not isinstance(channels, list) or not channels:
+            failed.append("channels_invalid")
+        elif any(name not in ALERT_CHANNELS for name in channels):
+            failed.append("channels_value_invalid")
+        elif len(set(channels)) != len(channels):
+            failed.append("channels_duplicate")
+
+    # webhook_url pairs with the EFFECTIVE channel set: `channels` when the
+    # payload carries it, else the legacy single `channel`.
+    effective = channels if isinstance(channels, list) and channels else (
+        [channel] if channel is not None else None
+    )
     webhook_url = fields.get("webhook_url")
-    if channel == "webhook":
+    if effective is not None and "webhook" in effective:
         if not (isinstance(webhook_url, str) and webhook_url.startswith("https://")):
             failed.append("webhook_url_https_required")
-    elif webhook_url is not None and channel is not None:
+    elif webhook_url is not None and effective is not None:
         failed.append("webhook_url_only_for_webhook_channel")
 
     threshold_pct = fields.get("threshold_pct")

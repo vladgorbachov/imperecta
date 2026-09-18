@@ -16,9 +16,11 @@ Trigger semantics (v1, listing-bound rules only):
   state recorded by the rule's most recent availability event (a rule with
   no events assumes "available", so a dead listing alerts immediately).
 
-Cooldown gates the whole rule; delivery (email/telegram/webhook) is
-fail-soft: the event is recorded either way, sent_via/delivered_at only on
-confirmed delivery.
+Cooldown gates the whole rule; delivery fans out over the rule's enabled
+channel set (email/telegram/webhook/in_app — P15) and is fail-soft per
+channel: the event is recorded either way, sent_via/delivered_at only on
+confirmed delivery. in_app needs no external send — the event row is the
+delivery.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from app.modules.alerts.notifications import (
     TelegramChannel,
     WebhookChannel,
 )
+from app.modules.alerts.service import rule_channels
 from app.modules.persist.alerts_write import (
     build_alert_event_fields,
     build_alert_rule_fields,
@@ -197,23 +200,24 @@ async def _previous_availability_map(
     return {alert_id: float(value) >= 1.0 for alert_id, value in result.all()}
 
 
-def _recipient_for(rule: Alert, user: User) -> str | None:
-    channel = rule.channel or "email"
-    if channel == "email":
+def _recipient_for(channel_name: str, rule: Alert, user: User) -> str | None:
+    if channel_name == "email":
         return user.email
-    if channel == "telegram":
+    if channel_name == "telegram":
         return str(user.telegram_chat_id) if user.telegram_chat_id is not None else None
-    if channel == "webhook":
+    if channel_name == "webhook":
         return rule.webhook_url
     return None
 
 
-async def _deliver(rule: Alert, user: User, decision: TriggerDecision) -> bool:
-    channel_name = rule.channel or "email"
-    channel = _CHANNELS.get(channel_name)
-    recipient = _recipient_for(rule, user)
-    if channel is None or not recipient:
-        return False
+async def _deliver(rule: Alert, user: User, decision: TriggerDecision) -> list[str]:
+    """Fan the firing out to every enabled channel; returns the delivered ones.
+
+    One event per fire regardless of channel count (P15 §1.3). ``in_app``
+    needs no external send — the alert_events row IS the delivery — so it
+    always counts as delivered. External sends stay fail-soft per channel.
+    """
+    delivered: list[str] = []
     message = NotificationMessage(
         body=decision.message,
         title="Imperecta price alert",
@@ -227,16 +231,32 @@ async def _deliver(rule: Alert, user: User, decision: TriggerDecision) -> bool:
             "severity": decision.severity,
         },
     )
-    try:
-        return await channel.send(recipient, message)
-    except Exception as exc:
-        logger.warning("Alert delivery failed for rule %s: %s", rule.id, exc)
-        return False
+    for channel_name in rule_channels(rule):
+        if channel_name == "in_app":
+            delivered.append("in_app")
+            continue
+        channel = _CHANNELS.get(channel_name)
+        recipient = _recipient_for(channel_name, rule, user)
+        if channel is None or not recipient:
+            continue
+        try:
+            if await channel.send(recipient, message):
+                delivered.append(channel_name)
+        except Exception as exc:
+            logger.warning(
+                "Alert delivery via %s failed for rule %s: %s",
+                channel_name,
+                rule.id,
+                exc,
+            )
+    return delivered
 
 
 async def _persist_firing(
-    rule: Alert, decision: TriggerDecision, now: datetime, delivered: bool
+    rule: Alert, decision: TriggerDecision, now: datetime, delivered_via: list[str]
 ) -> bool:
+    # sent_via is a single-channel column; record the first delivered channel
+    # (delivery order follows the rule's channel order).
     event_fields = build_alert_event_fields(
         alert_id=rule.id,
         alert_class="analytic",
@@ -247,8 +267,8 @@ async def _persist_firing(
         change_pct=decision.change_pct,
         message=decision.message,
         severity=decision.severity,
-        sent_via=(rule.channel or "email") if delivered else None,
-        delivered_at=now if delivered else None,
+        sent_via=delivered_via[0] if delivered_via else None,
+        delivered_at=now if delivered_via else None,
         triggered_at=now,
     )
     event_result = await write_alert_async(
@@ -336,10 +356,10 @@ async def evaluate_alert_rules(db: AsyncSession) -> dict[str, int]:
 
         if not decision.fire:
             continue
-        delivered = await _deliver(rule, user, decision)
-        if await _persist_firing(rule, decision, now, delivered):
+        delivered_via = await _deliver(rule, user, decision)
+        if await _persist_firing(rule, decision, now, delivered_via):
             fired += 1
-            if delivered:
+            if delivered_via:
                 delivered_count += 1
 
     return {

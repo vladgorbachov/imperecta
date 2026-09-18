@@ -314,3 +314,41 @@ def test_overview_and_pool_products_both_live() -> None:
 
 def test_pool_search_route_removed() -> None:
     assert _route_for("/api/pool/search") is None
+
+
+def test_list_products_skip_total_skips_count_query() -> None:
+    """P12 typeahead: skip_total=True must not run _count_pool at all and
+    must surface total=None in the envelope."""
+    import asyncio
+    import inspect
+
+    source = inspect.getsource(ProductPoolService.list_products)
+    assert "skip_total" in source
+
+    async def _run() -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        empty_result = MagicMock()
+        empty_result.mappings.return_value.all.return_value = []
+        fake_db = AsyncMock()
+        fake_db.execute = AsyncMock(return_value=empty_result)
+        svc = ProductPoolService.__new__(ProductPoolService)
+        svc.db = fake_db
+
+        with patch.object(
+            ProductPoolService, "_count_pool", new=AsyncMock()
+        ) as count_mock:
+            items, total, meta = await svc.list_products(skip_total=True)
+        count_mock.assert_not_awaited()
+        assert items == []
+        assert total is None
+        assert meta["total_is_estimate"] is False
+
+    asyncio.run(_run())
+
+
+def test_pool_products_response_total_is_nullable() -> None:
+    annotation = PoolProductsResponse.model_fields["total"].annotation
+    assert annotation == (int | None), (
+        "skip_total callers receive total=null; the schema must allow it"
+    )

@@ -88,6 +88,9 @@ class Alert(Base):
     threshold_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     threshold_value: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     channel: Mapped[str] = mapped_column(String(20), default="email", nullable=False)
+    # Full enabled channel set as a JSON array (migration 061); jsonb, not
+    # text[], so the gate's canonical-string cast round-trips a Python list.
+    channels: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     cooldown_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     last_triggered_at: Mapped[datetime | None] = mapped_column(
@@ -128,8 +131,17 @@ class Alert(Base):
             name="ck_alerts_alert_type",
         ),
         CheckConstraint(
-            "channel IN ('email','telegram','push','webhook','all')",
+            "channel IN ('email','telegram','push','webhook','all','in_app')",
             name="ck_alerts_channel",
+        ),
+        CheckConstraint(
+            "channels IS NULL OR ("
+            "jsonb_typeof(channels) = 'array' "
+            "AND jsonb_array_length(channels) >= 1 "
+            "AND channels <@ "
+            "'[\"email\",\"telegram\",\"push\",\"webhook\",\"all\",\"in_app\"]'::jsonb"
+            ")",
+            name="ck_alerts_channels",
         ),
         Index("idx_alerts_user", "user_id"),
         Index("idx_alerts_active", "is_active", postgresql_where=text("is_active = true")),

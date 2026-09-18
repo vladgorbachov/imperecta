@@ -255,15 +255,18 @@ class ProductPoolService:
         limit: int = 20,
         offset: int = 0,
         cursor: str | None = None,
+        skip_total: bool = False,
         include_blocked_countries: bool = False,
         display_currency: str = DISPLAY_LOCAL,
-    ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], int | None, dict[str, Any]]:
         """List pool rows; returns (items, total, page_meta).
 
         page_meta: total_is_estimate, next_cursor, prev_cursor. P12: a valid
         `cursor` replaces offset for keyset-capable sorts; computed-pct sorts
         (gainers/losers/volatile) silently keep offset (next_cursor stays
-        None, the frontend keeps its offset pager for them).
+        None, the frontend keeps its offset pager for them). skip_total=True
+        skips the count query entirely and returns total=None — the alert
+        dialog's typeahead (limit=6) ignores totals.
         """
         search_listing_ids: list | None = None
         search_capped = False
@@ -333,14 +336,18 @@ class ProductPoolService:
             stmt = self._apply_sort(stmt, sort)
             stmt = stmt.limit(limit).offset(offset)
 
-        total, total_is_estimate = await self._count_pool(
-            search_listing_ids=search_listing_ids,
-            marketplace_id=marketplace_id,
-            category=category,
-            country_code=country_code,
-            include_blocked_countries=include_blocked_countries,
-        )
-        total_is_estimate = total_is_estimate or search_capped
+        total: int | None
+        if skip_total:
+            total, total_is_estimate = None, False
+        else:
+            total, total_is_estimate = await self._count_pool(
+                search_listing_ids=search_listing_ids,
+                marketplace_id=marketplace_id,
+                category=category,
+                country_code=country_code,
+                include_blocked_countries=include_blocked_countries,
+            )
+            total_is_estimate = total_is_estimate or search_capped
         result = await self.db.execute(stmt)
         rows = result.mappings().all()
         if backwards:
@@ -378,7 +385,7 @@ class ProductPoolService:
             "next_cursor": next_cursor,
             "prev_cursor": prev_cursor,
         }
-        return items, int(total), page_meta
+        return items, (int(total) if total is not None else None), page_meta
 
     async def _search_product_ids(self, search: str) -> tuple[list, bool]:
         """Matching dim_product ids via the trgm index, capped (P12)."""
