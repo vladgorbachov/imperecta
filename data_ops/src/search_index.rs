@@ -18,7 +18,10 @@ use rayon::prelude::*;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-pub const REFRESH_SECS: u64 = 60;
+// 300s: the delta pull is correctness-uncritical (search lags new
+// products by minutes at worst) and the shared instance is write-heavy —
+// keep our background pressure minimal.
+pub const REFRESH_SECS: u64 = 300;
 const REBUILD_RATIO: f64 = 0.10;
 /// Names are truncated for the arena: substring UX never needs more.
 const MAX_NAME_BYTES: usize = 120;
@@ -171,7 +174,7 @@ impl SearchIndex {
         let rows = sqlx::query(
             r#"SELECT id, name, updated_at FROM dim_product
                WHERE is_active AND updated_at > $1
-               ORDER BY updated_at LIMIT 200000"#,
+               ORDER BY updated_at LIMIT 20000"#,
         )
         .bind(cur.watermark)
         .fetch_all(pool)
