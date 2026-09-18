@@ -228,12 +228,15 @@ async fn listing_comparison(
 
 const SEARCH_SQL: &str = r#"
 WITH prod AS MATERIALIZED (
-  SELECT id FROM dim_product WHERE name ILIKE $1 LIMIT 5000
+  -- Search-page recall cap: 1500 matched products is plenty for a search
+  -- UX (offset paging tops out far earlier) and costs a third of the
+  -- backend's 5000-cap analytics variant on the cold trgm bitmap.
+  SELECT id FROM dim_product WHERE name ILIKE $1 LIMIT 1500
 ), cand AS MATERIALIZED (
   SELECT fl.id FROM fact_listing fl
   JOIN prod ON fl.product_id = prod.id
   WHERE fl.is_active
-  LIMIT 10000
+  LIMIT 4000
 )
 SELECT fl.id AS listing_id,
        dp.id AS product_id,
@@ -340,7 +343,7 @@ async fn pool_search(
     Ok(Json(json!({
         "items": items,
         "total": total,
-        "total_is_estimate": total >= 10_000,
+        "total_is_estimate": total >= 4_000,
         "offset": offset,
         "limit": limit,
     })))
