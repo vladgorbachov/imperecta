@@ -32,6 +32,12 @@ SPARKLINE_POINTS_LIMIT = 14
 # P12: exact counts are capped — beyond this the total is an estimate.
 COUNT_CAP = 10_000
 
+# P12 search: matched-product prefilter cap. An inline ILIKE inside the
+# ordered list query lets the planner walk the sort index filtering names
+# per row — unbounded for rare terms (observed 30s+). Resolving matching
+# product ids first (trgm bitmap, strictly capped) bounds the work.
+SEARCH_MATCH_CAP = 5_000
+
 
 def _keyset_columns(sort: str):
     """(column, direction) for sorts that support keyset pagination.
@@ -265,15 +271,28 @@ class ProductPoolService:
         (gainers/losers/volatile) silently keep offset (next_cursor stays
         None, the frontend keeps its offset pager for them).
         """
+        search_ids: list | None = None
+        search_capped = False
+        if search:
+            search_ids, search_capped = await self._search_product_ids(search)
+            if not search_ids:
+                return [], 0, {
+                    "total_is_estimate": False,
+                    "next_cursor": None,
+                    "prev_cursor": None,
+                }
+
         latest_pc = _latest_price_change_subquery()
         stmt = self._base_listing_stmt(latest_pc)
         stmt = self._apply_filters(
             stmt,
-            search=search,
+            search=None,
             marketplace_id=marketplace_id,
             category=category,
             country_code=country_code,
         )
+        if search_ids is not None:
+            stmt = stmt.where(FactListing.product_id.in_(search_ids))
         stmt = self._apply_country_visibility_filter(
             stmt,
             include_blocked_countries=include_blocked_countries,
@@ -309,12 +328,13 @@ class ProductPoolService:
             stmt = stmt.limit(limit).offset(offset)
 
         total, total_is_estimate = await self._count_pool(
-            search=search,
+            search_ids=search_ids,
             marketplace_id=marketplace_id,
             category=category,
             country_code=country_code,
             include_blocked_countries=include_blocked_countries,
         )
+        total_is_estimate = total_is_estimate or search_capped
         result = await self.db.execute(stmt)
         rows = result.mappings().all()
         if backwards:
@@ -354,10 +374,21 @@ class ProductPoolService:
         }
         return items, int(total), page_meta
 
+    async def _search_product_ids(self, search: str) -> tuple[list, bool]:
+        """Matching dim_product ids via the trgm index, capped (P12)."""
+        like = f"%{search}%"
+        rows = await self.db.execute(
+            select(DimProduct.id)
+            .where(DimProduct.name.ilike(like))
+            .limit(SEARCH_MATCH_CAP)
+        )
+        ids = [r[0] for r in rows]
+        return ids, len(ids) == SEARCH_MATCH_CAP
+
     async def _count_pool(
         self,
         *,
-        search: str | None,
+        search_ids: list | None,
         marketplace_id: UUID | None,
         category: str | None,
         country_code: str | None,
@@ -370,7 +401,7 @@ class ProductPoolService:
         total is COUNT_CAP and flagged as an estimate.
         """
         unfiltered = (
-            search is None
+            search_ids is None
             and marketplace_id is None
             and category is None
             and country_code is None
@@ -391,11 +422,13 @@ class ProductPoolService:
         )
         inner = self._apply_filters(
             inner,
-            search=search,
+            search=None,
             marketplace_id=marketplace_id,
             category=category,
             country_code=country_code,
         )
+        if search_ids is not None:
+            inner = inner.where(FactListing.product_id.in_(search_ids))
         inner = self._apply_country_visibility_filter(
             inner,
             include_blocked_countries=include_blocked_countries,
