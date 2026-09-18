@@ -80,7 +80,13 @@ export function CreateAlertDialog({ open, onOpenChange, prefill }: CreateAlertDi
   const debouncedQuery = useDebounce(productQuery, 300);
   const searchEnabled = open && !prefill && debouncedQuery.trim().length >= 2;
   const { data: searchData } = usePoolProducts(
-    { search: searchEnabled ? debouncedQuery.trim() : undefined, limit: 6, offset: 0 },
+    {
+      search: searchEnabled ? debouncedQuery.trim() : undefined,
+      limit: 6,
+      offset: 0,
+      /* Typeahead never needs totals — lets the backend skip the count(*). */
+      skip_total: true,
+    },
     { enabled: searchEnabled },
   );
 

@@ -27,6 +27,8 @@ export interface PoolProductsParams {
   limit?: number;
   offset?: number;
   display_currency?: DisplayCurrency;
+  /** Skip the count(*) entirely (typeahead paths); the response total is null. */
+  skip_total?: boolean;
 }
 
 /**
@@ -78,7 +80,8 @@ export interface PoolProductItem {
 
 export interface PoolProductsResponse {
   items: PoolProductItem[];
-  total: number;
+  /** null when the request passed skip_total=true (no count executed). */
+  total: number | null;
   limit: number;
   offset: number;
 }
