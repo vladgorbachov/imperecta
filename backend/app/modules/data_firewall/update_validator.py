@@ -35,6 +35,7 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
                 "last_currency_code",
                 "last_price_changed_at",
                 "last_price_eur",
+                "last_price_change_pct",
                 "scrape_interval_minutes",
             },
         ),

@@ -413,6 +413,9 @@ class IngestionService:
                         "last_currency_code": persist_fields["currency_code"],
                         "last_price_changed_at": persist_fields["scraped_at"],
                         "last_price_eur": scrape_price_eur,
+                        # Mirror of this fact_price row's pct: list endpoints
+                        # read it O(1) instead of windowing all of fact_price.
+                        "last_price_change_pct": persist_fields["price_change_pct"],
                         "scrape_interval_minutes": next_scrape_interval(
                             getattr(listing, "scrape_interval_minutes", None),
                             price_changed=True,

@@ -67,6 +67,7 @@ def test_denorm_columns_in_gated_allowlists() -> None:
             "last_currency_code",
             "last_price_changed_at",
             "last_price_eur",
+            "last_price_change_pct",
             "scrape_interval_minutes",
         },
     )

@@ -27,6 +27,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -158,29 +159,42 @@ def decide_availability_trigger(
     )
 
 
-async def _latest_price_row(
-    db: AsyncSession, listing_id, watermark: datetime
-) -> FactPrice | None:
+async def _latest_price_rows_map(
+    db: AsyncSession, listing_ids: list
+) -> dict[Any, FactPrice]:
+    """Latest fact_price row per listing in ONE query (was one per rule).
+
+    Watermarks are applied by the caller in Python: "the latest row newer
+    than the watermark" equals "the latest row overall, unless it is older
+    than the watermark" — same semantics, O(1) round trips per run.
+    """
+    if not listing_ids:
+        return {}
     result = await db.execute(
         select(FactPrice)
-        .where(FactPrice.listing_id == listing_id, FactPrice.scraped_at > watermark)
-        .order_by(FactPrice.scraped_at.desc())
-        .limit(1)
+        .where(FactPrice.listing_id.in_(listing_ids))
+        .order_by(FactPrice.listing_id, FactPrice.scraped_at.desc())
+        .distinct(FactPrice.listing_id)
     )
-    return result.scalar_one_or_none()
+    return {row.listing_id: row for row in result.scalars()}
 
 
-async def _previous_availability_state(db: AsyncSession, rule_id) -> bool:
+async def _previous_availability_map(
+    db: AsyncSession, rule_ids: list
+) -> dict[Any, bool]:
+    """rule_id -> previous availability state, ONE query for all rules.
+
+    Rules without any prior event default to True (same as before).
+    """
+    if not rule_ids:
+        return {}
     result = await db.execute(
-        select(AlertEvent.new_value)
-        .where(AlertEvent.alert_id == rule_id)
-        .order_by(AlertEvent.triggered_at.desc())
-        .limit(1)
+        select(AlertEvent.alert_id, AlertEvent.new_value)
+        .where(AlertEvent.alert_id.in_(rule_ids))
+        .order_by(AlertEvent.alert_id, AlertEvent.triggered_at.desc())
+        .distinct(AlertEvent.alert_id)
     )
-    last_event_value = result.scalar_one_or_none()
-    if last_event_value is None:
-        return True
-    return float(last_event_value) >= 1.0
+    return {alert_id: float(value) >= 1.0 for alert_id, value in result.all()}
 
 
 def _recipient_for(rule: Alert, user: User) -> str | None:
@@ -281,6 +295,15 @@ async def evaluate_alert_rules(db: AsyncSession) -> dict[str, int]:
     considered = len(rows)
     fired = delivered_count = cooldown_skips = 0
 
+    # Batch the per-rule lookups: two queries for the whole run instead of
+    # one or two per rule (N+1 audit, 2026-09-18).
+    price_rows = await _latest_price_rows_map(
+        db, [rule.listing_id for rule, *_ in rows if rule.alert_type != "availability"]
+    )
+    availability_states = await _previous_availability_map(
+        db, [rule.id for rule, *_ in rows if rule.alert_type == "availability"]
+    )
+
     for rule, listing, user, product_name in rows:
         if _in_cooldown(rule, now):
             cooldown_skips += 1
@@ -290,13 +313,15 @@ async def evaluate_alert_rules(db: AsyncSession) -> dict[str, int]:
         if rule.alert_type == "availability":
             decision = decide_availability_trigger(
                 listing_is_active=bool(listing.is_active),
-                previous_state_active=await _previous_availability_state(db, rule.id),
+                previous_state_active=availability_states.get(rule.id, True),
                 product_title=title,
             )
         else:
             if rule.threshold_pct is None:
                 continue
-            price_row = await _latest_price_row(db, rule.listing_id, _price_watermark(rule))
+            price_row = price_rows.get(rule.listing_id)
+            if price_row is not None and price_row.scraped_at <= _price_watermark(rule):
+                price_row = None
             if price_row is None:
                 continue
             decision = decide_price_trigger(

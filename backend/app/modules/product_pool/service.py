@@ -128,31 +128,19 @@ def _pool_product_visibility_filter():
     )
 
 
-def _latest_price_change_subquery():
-    """Latest fact_price row per listing (for price_change_pct and sorting)."""
-    rn = func.row_number().over(
-        partition_by=FactPrice.listing_id,
-        order_by=desc(FactPrice.date_id),
-    ).label("rn")
-    inner = (
-        select(
-            FactPrice.listing_id,
-            FactPrice.price_change_pct,
-            rn,
-        )
-    ).subquery()
-    return (
-        select(inner.c.listing_id, inner.c.price_change_pct).where(inner.c.rn == 1)
-    ).subquery()
-
-
 class ProductPoolService:
-    """List and aggregate global pool rows from v2 star schema."""
+    """List and aggregate global pool rows from v2 star schema.
+
+    price_change_pct reads the denormalized fact_listing.last_price_change_pct
+    (migration 057) — O(1) per row. The previous implementation windowed ALL
+    of fact_price into every list/detail/export query: O(price history) per
+    request, a scaling cliff the load rule forbids.
+    """
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def _base_listing_stmt(self, latest_pc):
+    def _base_listing_stmt(self):
         """Shared SELECT for pool listings with optional price-change join."""
         return (
             select(
@@ -171,7 +159,7 @@ class ProductPoolService:
                 FactListing.last_price_eur.label("price_eur"),
                 FactListing.last_checked_at,
                 FactListing.is_active,
-                latest_pc.c.price_change_pct.label("price_change_pct"),
+                FactListing.last_price_change_pct.label("price_change_pct"),
                 # P10: taxonomy labels on the list grain (detail shares them).
                 DimBrand.name.label("brand"),
                 DimCategory.name.label("category"),
@@ -184,7 +172,6 @@ class ProductPoolService:
             .select_from(FactListing)
             .join(DimProduct, FactListing.product_id == DimProduct.id)
             .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
-            .outerjoin(latest_pc, latest_pc.c.listing_id == FactListing.id)
             .outerjoin(DimBrand, DimProduct.brand_id == DimBrand.id)
             .outerjoin(DimCategory, DimProduct.category_id == DimCategory.id)
             # Bare column, not .is_(True): "IS TRUE" defeats partial-index matching.
@@ -221,28 +208,29 @@ class ProductPoolService:
             )
         return stmt
 
-    def _apply_sort(self, stmt, sort: str, latest_pc):
-        """Apply ordering for pool list (uses latest price-change when relevant)."""
-        pct = latest_pc.c.price_change_pct
-        abs_pct = func.abs(pct)
+    def _apply_sort(self, stmt, sort: str):
+        """Apply ordering for pool list; id ASC tiebreaker matches the
+        (sort key, id) order indexes of migrations 056/057."""
+        pct = FactListing.last_price_change_pct
+        tiebreak = asc(FactListing.id)
         if sort == _SORT_NAME_ASC:
-            return stmt.order_by(asc(DimProduct.name))
+            return stmt.order_by(asc(DimProduct.name), tiebreak)
         if sort == _SORT_NAME_DESC:
-            return stmt.order_by(desc(DimProduct.name))
+            return stmt.order_by(desc(DimProduct.name), tiebreak)
         if sort == _SORT_PRICE_ASC:
-            return stmt.order_by(nullslast(asc(FactListing.last_price)))
+            return stmt.order_by(nullslast(asc(FactListing.last_price)), tiebreak)
         if sort == _SORT_PRICE_DESC:
-            return stmt.order_by(nullslast(desc(FactListing.last_price)))
+            return stmt.order_by(nullslast(desc(FactListing.last_price)), tiebreak)
         if sort == _SORT_GAINERS:
-            return stmt.order_by(nullslast(desc(pct)))
+            return stmt.order_by(nullslast(desc(pct)), tiebreak)
         if sort == _SORT_LOSERS:
-            return stmt.order_by(nullslast(asc(pct)))
+            return stmt.order_by(nullslast(asc(pct)), tiebreak)
         if sort in (_SORT_VOLATILE, "volatile"):
-            return stmt.order_by(nullslast(desc(abs_pct)))
+            return stmt.order_by(nullslast(desc(func.abs(pct))), tiebreak)
         if sort in (_SORT_TRENDING, "trending"):
-            return stmt.order_by(nullslast(desc(FactListing.last_checked_at)))
+            return stmt.order_by(nullslast(desc(FactListing.last_checked_at)), tiebreak)
         # recent and unknown
-        return stmt.order_by(nullslast(desc(FactListing.last_checked_at)))
+        return stmt.order_by(nullslast(desc(FactListing.last_checked_at)), tiebreak)
 
     @staticmethod
     def _apply_country_visibility_filter(stmt, *, include_blocked_countries: bool):
@@ -282,8 +270,7 @@ class ProductPoolService:
                     "prev_cursor": None,
                 }
 
-        latest_pc = _latest_price_change_subquery()
-        stmt = self._base_listing_stmt(latest_pc)
+        stmt = self._base_listing_stmt()
         stmt = self._apply_filters(
             stmt,
             search=None,
@@ -324,7 +311,7 @@ class ProductPoolService:
             if cursor_payload is None:
                 stmt = stmt.offset(offset)
         else:
-            stmt = self._apply_sort(stmt, sort, latest_pc)
+            stmt = self._apply_sort(stmt, sort)
             stmt = stmt.limit(limit).offset(offset)
 
         total, total_is_estimate = await self._count_pool(
@@ -452,8 +439,7 @@ class ProductPoolService:
         Same visibility rules as the list (active gated product + blocked-country
         filter), so a hidden/blocked listing is indistinguishable from absent.
         """
-        latest_pc = _latest_price_change_subquery()
-        stmt = self._base_listing_stmt(latest_pc).where(FactListing.id == listing_id)
+        stmt = self._base_listing_stmt().where(FactListing.id == listing_id)
         stmt = stmt.add_columns(DimProduct.attributes.label("attributes"))
         stmt = self._apply_country_visibility_filter(
             stmt,
@@ -552,8 +538,7 @@ class ProductPoolService:
         batch_size: int = 500,
     ):
         """Yield the FULL filtered pool (no pagination) for CSV export."""
-        latest_pc = _latest_price_change_subquery()
-        stmt = self._base_listing_stmt(latest_pc)
+        stmt = self._base_listing_stmt()
         stmt = self._apply_filters(
             stmt,
             search=search,
@@ -565,7 +550,7 @@ class ProductPoolService:
             stmt,
             include_blocked_countries=include_blocked_countries,
         )
-        stmt = self._apply_sort(stmt, sort, latest_pc)
+        stmt = self._apply_sort(stmt, sort)
         offset = 0
         while True:
             page = (

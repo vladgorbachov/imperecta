@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import (
@@ -82,6 +83,11 @@ class FactListing(Base):
         server_default=text("'{}'::jsonb"),
     )
     scrape_interval_minutes: Mapped[int] = mapped_column(Integer, default=360, nullable=False)
+    # Denormalized copy of the latest fact_price.price_change_pct: the list
+    # endpoints read/sort it O(1) instead of a window over all of fact_price.
+    last_price_change_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 4), nullable=True
+    )
     consecutive_errors: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     failure_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(
