@@ -157,6 +157,24 @@ Nice-to-have (not required): `POST /api/admin/service_alerts/resolve` with
 `{ "ids": [...] }` for bulk resolve after an incident storm — the UI would
 grow a "resolve all filtered" action only after this exists.
 
+## P10 — Taxonomy fields on the products LIST response (2026-09-18)
+
+`GET /pool/products` items: please include `category: string|null` and
+`brand: string|null` (same values the detail endpoint already returns from
+`dim_product` taxonomy). The Products table now has a Category column
+(`frontend/src/components/products/ProductRow.tsx`) rendering an honest "—"
+until the field arrives; the frontend type already carries the optional
+fields, so no FE redeploy is needed.
+
+## P11 — Optional: server-side product favorites (2026-09-18)
+
+Favorites shipped client-side (star on each row, favorites pinned to top,
+a Favorites tab; localStorage snapshots in
+`frontend/src/stores/favoritesStore.ts`). For cross-device sync later:
+`GET/PUT /api/users/me/favorites` with `{ listing_ids: [...] }` (user-scoped,
+same pattern as P7 preferences). Low priority; say when wanted and the store
+gains a sync layer without UI changes.
+
 ## P8 — Data-consistency report: products_in_pool in the parsing registry (2026-09-16)
 
 `GET /admin/parsing/…marketplaces-detailed` returns `products_in_pool: 0` while the

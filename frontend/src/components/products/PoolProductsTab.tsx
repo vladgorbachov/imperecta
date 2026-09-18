@@ -13,11 +13,9 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bookmark, Download, Rows2, Rows4, Search, Trash2 } from "lucide-react";
-import { PriceDisplay } from "@/components/ui-custom/PriceDisplay";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePoolProducts, usePoolCategories } from "@/hooks/usePoolProducts";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
-import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
 import { Scrollable } from "@/components/ui/Scrollable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,14 +26,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody } from "@/components/ui/table";
+import { ProductRow, ProductsTableHead } from "@/components/products/ProductRow";
+import { useFavoritesStore } from "@/stores/favoritesStore";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -139,30 +132,6 @@ function exportCsv(items: PoolProductItem[]) {
   URL.revokeObjectURL(url);
 }
 
-function ProductThumbnail({ item }: { item: PoolProductItem }) {
-  const letter = (item.title || "?")[0].toUpperCase();
-  if (item.image_url) {
-    return (
-      <img
-        src={item.image_url}
-        alt=""
-        className="size-10 shrink-0 rounded-md object-cover"
-      />
-    );
-  }
-  return (
-    <div
-      className="flex size-10 shrink-0 items-center justify-center rounded-md text-sm font-semibold"
-      style={{
-        background: "var(--glass-bg)",
-        border: "1px solid var(--glass-border)",
-        color: "var(--foreground-muted)",
-      }}
-    >
-      {letter}
-    </div>
-  );
-}
 
 export function PoolProductsTab() {
   const { t } = useTranslation();
@@ -250,6 +219,22 @@ export function PoolProductsTab() {
   });
 
   const items = data?.items ?? [];
+  const favorites = useFavoritesStore((state) => state.favorites);
+  const refreshSnapshots = useFavoritesStore((state) => state.refreshSnapshots);
+
+  /* Keep favorite snapshots fresh with the latest fetched data. */
+  useEffect(() => {
+    if (items.length > 0) {
+      refreshSnapshots(items);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  /* Favorites float to the top of the current page (stable within groups). */
+  const orderedItems = [
+    ...items.filter((item) => favorites[item.id]),
+    ...items.filter((item) => !favorites[item.id]),
+  ];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize) || 1;
   const clampedPage = Math.min(page, totalPages) || 1;
@@ -469,85 +454,22 @@ export function PoolProductsTab() {
             >
               <Table
                 className={cn(
+                  "min-w-[880px]",
                   density === "compact" &&
                     "[&_td]:py-1.5 [&_th]:py-2 [&_td]:text-xs",
                 )}
               >
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-14" />
-                    <TableHead>{t("products.name")}</TableHead>
-                    <TableHead className="w-44">{t("products.marketplace")}</TableHead>
-                    <TableHead className="w-32 text-right">{t("products.price")}</TableHead>
-                    <TableHead className="w-32 text-right">{t("products.change24h")}</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <ProductsTableHead />
                 <TableBody>
-                  {items.map((item) => (
-                    <TableRow
+                  {orderedItems.map((item) => (
+                    <ProductRow
                       key={item.id}
-                      className="cursor-pointer transition-colors"
-                      data-trend={
-                        item.price_change_pct != null && item.price_change_pct > 0
-                          ? "up"
-                          : item.price_change_pct != null && item.price_change_pct < 0
-                            ? "down"
-                            : undefined
-                      }
-                      onClick={() => {
-                        setPeekItem(item);
+                      item={item}
+                      onOpen={(opened) => {
+                        setPeekItem(opened);
                         setPeekOpen(true);
                       }}
-                    >
-                      <TableCell className="w-14">
-                        <ProductThumbnail item={item} />
-                      </TableCell>
-                      <TableCell>
-                        <span className="line-clamp-2 text-[0.9375rem] font-medium leading-snug">
-                          {item.title || "—"}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <MarketplaceBadge
-                          marketplace={
-                            item.marketplace_domain ||
-                            item.marketplace_name ||
-                            String(item.marketplace_id)
-                          }
-                          label={formatMarketplaceLabel({
-                            name: item.marketplace_name,
-                            domain: item.marketplace_domain,
-                            countryCode: item.country_code,
-                          })}
-                          size="sm"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <PriceDisplay
-                          localAmount={item.price}
-                          localCurrency={item.currency}
-                          displayAmount={item.display_price}
-                          displayCurrency={item.display_currency}
-                          conversionAvailable={item.conversion_available}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {item.price_change_pct != null ? (
-                          <span
-                            className={cn(
-                              "font-medium font-mono tabular-nums text-right",
-                              item.price_change_pct > 0 && "text-[var(--color-price-up)]",
-                              item.price_change_pct < 0 && "text-[var(--color-price-down)]"
-                            )}
-                          >
-                            {item.price_change_pct > 0 ? "+" : ""}
-                            {item.price_change_pct.toFixed(2)}%
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                    </TableRow>
+                    />
                   ))}
                 </TableBody>
               </Table>

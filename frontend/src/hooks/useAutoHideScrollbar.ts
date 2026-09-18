@@ -6,9 +6,10 @@
  * state plus pointer-drag bindings consumed by `Scrollable`.
  *
  * Behavior:
- * - Thumbs are invisible at rest, shown on scroll and on container hover.
- * - A 2s idle timer (reset on each scroll) hides them once the cursor is not
- *   over the container and no drag is in progress.
+ * - Thumbs appear ONLY when the cursor hovers the edge zone of the container
+ *   (right edge for vertical, bottom edge for horizontal). Wheel/touch
+ *   scrolling never reveals them; leaving the zone hides them immediately.
+ * - A drag in progress keeps its thumb visible until release.
  * - Per axis, the thumb is enabled only when that axis actually overflows.
  * - Re-measures via `ResizeObserver` on the container and its first child.
  * - Reduced-motion is honored via CSS (the JS does not animate).
@@ -16,7 +17,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 
-const HIDE_DELAY_MS = 2000;
+const EDGE_ZONE_PX = 18;
 const MIN_THUMB_SIZE = 24;
 const OVERFLOW_EPSILON = 1;
 
@@ -122,52 +123,37 @@ export function useAutoHideScrollbar(
       });
     };
 
-    const clearHideTimer = () => {
-      if (hideTimerRef.current != null) {
-        window.clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = null;
-      }
-    };
-
-    const show = () => {
-      if (wantVertical) setVertical((prev) => (prev.visible ? prev : { ...prev, visible: true }));
-      if (wantHorizontal) {
-        setHorizontal((prev) => (prev.visible ? prev : { ...prev, visible: true }));
-      }
-    };
-
-    const hide = () => {
-      setVertical((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      setHorizontal((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-    };
-
-    const scheduleHide = () => {
-      clearHideTimer();
-      hideTimerRef.current = window.setTimeout(() => {
-        hideTimerRef.current = null;
-        if (hoveringRef.current || draggingRef.current) return;
-        hide();
-      }, HIDE_DELAY_MS);
+    /* Reveal a thumb only while the cursor is inside its edge zone. */
+    const setAxisVisible = (kind: "v" | "h", visible: boolean) => {
+      const setter = kind === "v" ? setVertical : setHorizontal;
+      setter((prev) =>
+        prev.visible === visible || (prev.dragging && !visible)
+          ? prev
+          : { ...prev, visible },
+      );
     };
 
     const onScroll = () => {
       scheduleMeasure();
-      show();
-      scheduleHide();
     };
-    const onEnter = () => {
+    const onPointerMove = (event: globalThis.PointerEvent) => {
       hoveringRef.current = true;
-      clearHideTimer();
-      scheduleMeasure();
-      show();
+      const rect = container.getBoundingClientRect();
+      if (wantVertical) {
+        setAxisVisible("v", rect.right - event.clientX <= EDGE_ZONE_PX);
+      }
+      if (wantHorizontal) {
+        setAxisVisible("h", rect.bottom - event.clientY <= EDGE_ZONE_PX);
+      }
     };
     const onLeave = () => {
       hoveringRef.current = false;
-      scheduleHide();
+      if (draggingRef.current !== "v") setAxisVisible("v", false);
+      if (draggingRef.current !== "h") setAxisVisible("h", false);
     };
 
     container.addEventListener("scroll", onScroll, { passive: true });
-    container.addEventListener("mouseenter", onEnter);
+    container.addEventListener("pointermove", onPointerMove, { passive: true });
     container.addEventListener("mouseleave", onLeave);
 
     const resizeObserver = new ResizeObserver(() => scheduleMeasure());
@@ -181,10 +167,13 @@ export function useAutoHideScrollbar(
 
     return () => {
       container.removeEventListener("scroll", onScroll);
-      container.removeEventListener("mouseenter", onEnter);
+      container.removeEventListener("pointermove", onPointerMove);
       container.removeEventListener("mouseleave", onLeave);
       resizeObserver.disconnect();
-      clearHideTimer();
+      if (hideTimerRef.current != null) {
+        window.clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
       if (rafRef.current != null) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -239,15 +228,12 @@ export function useAutoHideScrollbar(
       if (isVertical) setVertical((prev) => ({ ...prev, dragging: false }));
       else setHorizontal((prev) => ({ ...prev, dragging: false }));
 
-      if (hideTimerRef.current != null) {
-        window.clearTimeout(hideTimerRef.current);
-      }
-      hideTimerRef.current = window.setTimeout(() => {
-        hideTimerRef.current = null;
-        if (hoveringRef.current || draggingRef.current) return;
+      /* Hide right away unless the cursor is still over the container's
+         edge zone (the next pointermove will re-show it there). */
+      if (!hoveringRef.current) {
         setVertical((prev) => (prev.visible ? { ...prev, visible: false } : prev));
         setHorizontal((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      }, HIDE_DELAY_MS);
+      }
     };
 
     target.addEventListener("pointermove", onMove);

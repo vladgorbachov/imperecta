@@ -57,6 +57,10 @@ export interface PoolProductItem {
   local_currency_unavailable?: boolean;
   price_change_pct?: number | null;
   in_stock?: boolean | null;
+  /** Taxonomy fields — present once the backend adds them to the LIST
+      response (P10 in docs/FRONTEND_BACKEND_REQUESTS.md); detail has them. */
+  brand?: string | null;
+  category?: string | null;
   status: string;
   is_active?: boolean | null;
   last_checked_at?: string | null;
