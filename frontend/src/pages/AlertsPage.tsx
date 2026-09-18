@@ -33,6 +33,7 @@ const ALERT_TYPE_LABELS: Record<AlertRule["alert_type"], string> = {
   availability: "alerts.type.availability",
 };
 const CHANNEL_LABELS: Record<AlertRule["channel"], string> = {
+  in_app: "alerts.channel.inApp",
   email: "alerts.channel.email",
   telegram: "alerts.channel.telegram",
   webhook: "alerts.channel.webhook",
@@ -62,7 +63,9 @@ function RuleRow({ rule }: { rule: AlertRule }) {
         {rule.threshold_pct != null ? ` ≥ ${rule.threshold_pct}%` : ""}
       </span>
       <span className="label-mono hidden shrink-0 sm:inline">
-        {t(CHANNEL_LABELS[rule.channel])}
+        {(rule.channels && rule.channels.length > 0 ? rule.channels : [rule.channel])
+          .map((channel) => t(CHANNEL_LABELS[channel]))
+          .join(" · ")}
       </span>
       <Switch
         checked={rule.is_active}

@@ -198,8 +198,11 @@ export function MarketTrendWidget({
           className="py-8"
         />
       ) : showChart ? (
-        <div className="min-w-0 w-full" style={{ minHeight: chartHeight }} data-testid="trend-chart">
-          <ResponsiveContainer width="100%" height={chartHeight}>
+        /* flex-1 + height 100%: the plot fills whatever height the card gets
+           from the grid row (chartHeight is only the floor), no dead zone. */
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col" data-testid="trend-chart">
+          <div className="min-h-0 w-full flex-1" style={{ minHeight: chartHeight }}>
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartRows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/40" />
               <XAxis
@@ -232,6 +235,7 @@ export function MarketTrendWidget({
               />
             </AreaChart>
           </ResponsiveContainer>
+          </div>
           <p className="mt-1 text-right text-2xs text-muted-foreground">EUR</p>
         </div>
       ) : null}

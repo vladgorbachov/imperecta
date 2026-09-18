@@ -2,12 +2,14 @@
  * Create-alert-rule dialog (P3, live backend).
  * Used from the Alerts page (with a product picker) and from Product Peek
  * (prefilled with the peek's listing — picker hidden).
+ * Channels are toggles (several at once, P15): in-app / email / Telegram.
+ * Webhook stays API-only — business analysts never see it here.
  */
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Check, Search } from "lucide-react";
+import { Bell, Check, Mail, Search, Send } from "lucide-react";
 import type { AlertChannel, AlertType } from "@/api/alerts";
 import { useCreateAlertRule } from "@/hooks/useAlerts";
 import { usePoolProducts } from "@/hooks/usePoolProducts";
@@ -27,10 +29,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 const ALERT_TYPES: AlertType[] = ["price_drop", "price_rise", "availability"];
-const CHANNELS: AlertChannel[] = ["email", "telegram", "webhook"];
+/** Channels a client can toggle; webhook is operator/API territory. */
+const TOGGLE_CHANNELS = ["in_app", "email", "telegram"] as const;
+type ToggleChannel = (typeof TOGGLE_CHANNELS)[number];
 
 /** Static key maps — the i18n coverage guard forbids template-literal keys. */
 const ALERT_TYPE_LABELS: Record<AlertType, string> = {
@@ -38,10 +43,21 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   price_rise: "alerts.type.price_rise",
   availability: "alerts.type.availability",
 };
-const CHANNEL_LABELS: Record<AlertChannel, string> = {
+const CHANNEL_LABELS: Record<ToggleChannel, string> = {
+  in_app: "alerts.channel.inApp",
   email: "alerts.channel.email",
   telegram: "alerts.channel.telegram",
-  webhook: "alerts.channel.webhook",
+};
+const CHANNEL_ICONS: Record<ToggleChannel, typeof Bell> = {
+  in_app: Bell,
+  email: Mail,
+  telegram: Send,
+};
+
+const DEFAULT_CHANNELS: Record<ToggleChannel, boolean> = {
+  in_app: true,
+  email: false,
+  telegram: false,
 };
 
 export interface CreateAlertDialogProps {
@@ -58,9 +74,8 @@ export function CreateAlertDialog({ open, onOpenChange, prefill }: CreateAlertDi
   const [productQuery, setProductQuery] = useState("");
   const [picked, setPicked] = useState<{ listingId: string; title: string } | null>(null);
   const [alertType, setAlertType] = useState<AlertType>("price_drop");
-  const [channel, setChannel] = useState<AlertChannel>("email");
+  const [channels, setChannels] = useState<Record<ToggleChannel, boolean>>(DEFAULT_CHANNELS);
   const [threshold, setThreshold] = useState("5");
-  const [webhookUrl, setWebhookUrl] = useState("");
 
   const debouncedQuery = useDebounce(productQuery, 300);
   const searchEnabled = open && !prefill && debouncedQuery.trim().length >= 2;
@@ -74,29 +89,37 @@ export function CreateAlertDialog({ open, onOpenChange, prefill }: CreateAlertDi
   const thresholdValue = Number(threshold);
   const thresholdValid =
     !needsThreshold || (Number.isFinite(thresholdValue) && thresholdValue > 0 && thresholdValue <= 100);
-  const webhookValid = channel !== "webhook" || webhookUrl.startsWith("https://");
-  const canSubmit = !!target && thresholdValid && webhookValid && !createRule.isPending;
+  const enabledChannels = TOGGLE_CHANNELS.filter((key) => channels[key]);
+  const channelsValid = enabledChannels.length > 0;
+  const canSubmit = !!target && thresholdValid && channelsValid && !createRule.isPending;
 
   const reset = () => {
     setProductQuery("");
     setPicked(null);
     setAlertType("price_drop");
-    setChannel("email");
+    setChannels(DEFAULT_CHANNELS);
     setThreshold("5");
-    setWebhookUrl("");
   };
 
   const submit = async () => {
     if (!target) {
       return;
     }
+    /* Legacy `channel` mirrors the primary external channel until the
+       backend accepts the channels[] set (P15); in-app-only maps to in_app. */
+    const primaryChannel: AlertChannel = channels.email
+      ? "email"
+      : channels.telegram
+        ? "telegram"
+        : "in_app";
     try {
       await createRule.mutateAsync({
         listing_id: target.listingId,
         alert_type: alertType,
         threshold_pct: needsThreshold ? thresholdValue : null,
-        channel,
-        webhook_url: channel === "webhook" ? webhookUrl : null,
+        channel: primaryChannel,
+        channels: enabledChannels,
+        webhook_url: null,
         cooldown_minutes: 60,
       });
       toast.success(t("alerts.toast.created"));
@@ -206,33 +229,33 @@ export function CreateAlertDialog({ open, onOpenChange, prefill }: CreateAlertDi
           </div>
 
           <div className="space-y-1.5">
-            <label className="label-mono block">{t("alerts.create.channel")}</label>
-            <Select value={channel} onValueChange={(value) => setChannel(value as AlertChannel)}>
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CHANNELS.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {t(CHANNEL_LABELS[value])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {channel === "webhook" ? (
-            <div className="space-y-1.5">
-              <label className="label-mono block">{t("alerts.create.webhookUrl")}</label>
-              <Input
-                type="url"
-                value={webhookUrl}
-                onChange={(event) => setWebhookUrl(event.target.value)}
-                placeholder="https://…"
-                className={cn(!webhookValid && webhookUrl !== "" && "border-[var(--status-error-border)]")}
-              />
+            <label className="label-mono block">{t("alerts.create.channels")}</label>
+            <div className="divide-y divide-[var(--glass-border)] rounded-md border border-[var(--glass-border)]">
+              {TOGGLE_CHANNELS.map((value) => {
+                const Icon = CHANNEL_ICONS[value];
+                return (
+                  <div key={value} className="flex items-center gap-2.5 px-3 py-2">
+                    <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      {t(CHANNEL_LABELS[value])}
+                    </span>
+                    <Switch
+                      checked={channels[value]}
+                      aria-label={t(CHANNEL_LABELS[value])}
+                      onCheckedChange={(checked) =>
+                        setChannels((prev) => ({ ...prev, [value]: checked === true }))
+                      }
+                    />
+                  </div>
+                );
+              })}
             </div>
-          ) : null}
+            {!channelsValid ? (
+              <p className="text-xs text-[var(--status-error)]">
+                {t("alerts.create.channelsRequired")}
+              </p>
+            ) : null}
+          </div>
 
           <Button className="w-full" disabled={!canSubmit} onClick={() => void submit()}>
             {t("alerts.create.submit")}

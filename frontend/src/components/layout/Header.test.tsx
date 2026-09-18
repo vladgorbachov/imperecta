@@ -23,7 +23,12 @@ vi.mock("@/stores/authStore", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => key,
+    i18n: { language: "en" },
   }),
+}));
+
+vi.mock("@/hooks/useAlerts", () => ({
+  useAlertEvents: () => ({ data: undefined }),
 }));
 
 describe("Header", () => {

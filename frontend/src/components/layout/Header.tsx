@@ -8,9 +8,10 @@
 import { useTranslation } from "react-i18next";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router-dom";
-import { Menu, LogOut, Bell, Search, Sun, Moon, Settings } from "lucide-react";
+import { Menu, LogOut, Search, Sun, Moon, Settings } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { usePaletteStore } from "@/stores/paletteStore";
+import { NotificationsMenu } from "@/components/layout/NotificationsMenu";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,10 +25,9 @@ import { cn } from "@/lib/utils";
 
 interface HeaderProps {
   onMenuClick?: () => void;
-  notificationCount?: number;
 }
 
-export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
+export function Header({ onMenuClick }: HeaderProps) {
   const { t } = useTranslation();
   const { resolvedTheme, setTheme } = useTheme();
   const { user, logout } = useAuthStore();
@@ -94,28 +94,7 @@ export function Header({ onMenuClick, notificationCount = 0 }: HeaderProps) {
             <Moon className="size-4 text-[var(--foreground)]" />
           )}
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "relative min-h-9 min-w-9 size-9 touch-manipulation transition-colors",
-            "bg-[var(--glass-bg)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)]"
-          )}
-          aria-label={t("common.notifications")}
-        >
-          <Bell className="size-4 text-[var(--foreground)]" />
-          {notificationCount > 0 && (
-            <span
-              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-2xs font-bold"
-              style={{
-                background: "var(--accent)",
-                color: "var(--primary-foreground)",
-              }}
-            >
-              {notificationCount > 99 ? "99+" : notificationCount}
-            </span>
-          )}
-        </Button>
+        <NotificationsMenu />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

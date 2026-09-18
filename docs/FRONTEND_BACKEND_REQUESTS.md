@@ -280,3 +280,38 @@ V4 stores table views in `localStorage`. If/when cross-device sync is wanted:
   without refetch.
 - All new list endpoints: `items/total/limit/offset` envelope, stable ordering.
 - Errors: standard FastAPI envelope; the frontend surfaces `common.error` + retry.
+
+## P15 — Alert channels: multi-select + in_app (2026-09-18)
+
+User feedback: business analysts don't understand "Webhook", want SEVERAL
+channels per rule at once (toggles), and want an "in the app only" option.
+The create dialog now shows three switches — In-app / Email / Telegram —
+and sends both fields:
+
+```json
+POST /alerts
+{
+  ...,
+  "channel": "email",              // legacy: primary channel (back-compat)
+  "channels": ["in_app", "email"]  // NEW: the full set the user enabled
+}
+```
+
+Requests:
+1. Add `in_app` to the channel enum. `channel: "in_app"` means no external
+   delivery — the event only lands in `GET /alerts/events` (that feed IS the
+   in-app channel; the frontend header bell + dashboard stream render it).
+   Today an in-app-only rule submits `channel: "in_app"` and will 422 until
+   the enum accepts it — small change, please land it before the trigger
+   engine ships.
+2. Accept and persist `channels: string[]` (subset of the enum, non-empty,
+   webhook still allowed via API for operators). Treat a legacy payload
+   without `channels` as `channels = [channel]`. Return `channels` on rule
+   responses — the Alerts page already renders it when present, falling
+   back to `channel`.
+3. Trigger engine: fan out one event per rule, delivered to every channel
+   in `channels`; `in_app` delivery is just the event row itself (no-op).
+4. Existing rows: backfill `channels = [channel]`.
+
+Frontend is deployed and forward-compatible; no FE redeploy needed when
+this lands.

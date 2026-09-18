@@ -6,7 +6,7 @@
 import { apiClient } from "@/api/client";
 
 export type AlertType = "price_drop" | "price_rise" | "availability";
-export type AlertChannel = "email" | "telegram" | "webhook";
+export type AlertChannel = "in_app" | "email" | "telegram" | "webhook";
 
 export interface AlertRule {
   id: string;
@@ -16,6 +16,8 @@ export interface AlertRule {
   alert_type: AlertType;
   threshold_pct: number | null;
   channel: AlertChannel;
+  /** P15: full delivery-channel set; legacy `channel` mirrors the primary. */
+  channels?: AlertChannel[] | null;
   webhook_url: string | null;
   cooldown_minutes: number;
   is_active: boolean;
@@ -33,6 +35,8 @@ export interface AlertRuleCreatePayload {
   alert_type: AlertType;
   threshold_pct?: number | null;
   channel: AlertChannel;
+  /** P15: full delivery-channel set; legacy `channel` mirrors the primary. */
+  channels?: AlertChannel[];
   webhook_url?: string | null;
   cooldown_minutes?: number;
 }
