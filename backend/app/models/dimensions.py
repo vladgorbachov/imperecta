@@ -201,6 +201,9 @@ class DimMarketplace(Base):
     discovered_category_urls: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    # Lower-bound catalog size from sitemap enumeration (coverage quota
+    # denominator, migration 060); raised monotonically, never shrunk.
+    catalog_size_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_category_recon_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

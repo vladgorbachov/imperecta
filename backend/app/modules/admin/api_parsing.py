@@ -155,6 +155,76 @@ async def get_proxy_usage(
     }
 
 
+@router.get("/coverage")
+async def get_coverage_report(
+    _current_user: CurrentSuperuser,
+    db: DbSession,
+) -> dict:
+    """Per-shop coverage vs the >=80% quota (roadmap item 2).
+
+    coverage_pct = active pool listings / catalog_size_estimate (lower-bound
+    denominator from sitemap enumeration; null until a shop enumerates).
+    Sorted by the biggest absolute gap so the next quota work is the top row.
+    """
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import select
+
+    from app.models.dimensions import DimMarketplace
+    from app.models.facts import FactListing
+
+    rows = (
+        await db.execute(
+            select(
+                DimMarketplace.marketplace_code,
+                DimMarketplace.access_mode,
+                DimMarketplace.catalog_size_estimate,
+                sa_func.count(FactListing.id).label("pool"),
+                sa_func.count(FactListing.id)
+                .filter(FactListing.last_price.isnot(None))
+                .label("priced"),
+            )
+            .select_from(DimMarketplace)
+            .outerjoin(
+                FactListing,
+                (FactListing.marketplace_id == DimMarketplace.id)
+                & FactListing.is_active,
+            )
+            .where(DimMarketplace.is_active)
+            .group_by(
+                DimMarketplace.marketplace_code,
+                DimMarketplace.access_mode,
+                DimMarketplace.catalog_size_estimate,
+            )
+        )
+    ).all()
+
+    shops = []
+    for code, access_mode, estimate, pool, priced in rows:
+        coverage_pct = (
+            round(100.0 * pool / estimate, 1) if estimate else None
+        )
+        shops.append(
+            {
+                "marketplace_code": code,
+                "access_mode": access_mode,
+                "pool": int(pool or 0),
+                "priced": int(priced or 0),
+                "catalog_size_estimate": estimate,
+                "coverage_pct": coverage_pct,
+                "quota_met": coverage_pct is not None and coverage_pct >= 80.0,
+                "gap": (max(estimate - pool, 0) if estimate else None),
+            }
+        )
+    shops.sort(key=lambda s: (s["gap"] is None, -(s["gap"] or 0)))
+    quota_known = [s for s in shops if s["coverage_pct"] is not None]
+    return {
+        "shops": shops,
+        "quota_target_pct": 80.0,
+        "shops_with_estimate": len(quota_known),
+        "shops_meeting_quota": sum(1 for s in quota_known if s["quota_met"]),
+    }
+
+
 @router.get("/pipeline-runs")
 async def get_pipeline_runs(
     _current_user: CurrentSuperuser,

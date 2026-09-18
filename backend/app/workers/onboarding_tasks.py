@@ -81,6 +81,26 @@ async def _enumerate(marketplace_code: str, max_urls: int) -> dict:
             ScraperPool(),
             max_urls=max_urls,
         )
+        # Coverage denominator (roadmap item 2): persist the product-like URL
+        # count as a LOWER-BOUND catalog estimate — raised, never shrunk, so
+        # a narrower rerun cannot damage the quota math.
+        if result.product_like > 0:
+            from app.modules.persist.meta_write import (
+                build_dim_marketplace_fields,
+                write_meta_async,
+            )
+
+            current = int(getattr(marketplace, "catalog_size_estimate", None) or 0)
+            if result.product_like > current:
+                await write_meta_async(
+                    table="dim_marketplace",
+                    operation="update",
+                    fields=build_dim_marketplace_fields(
+                        id=marketplace.id,
+                        catalog_size_estimate=result.product_like,
+                    ),
+                    reject_source="sitemap_enumerate",
+                )
         return asdict(result)
     finally:
         await engine.dispose()

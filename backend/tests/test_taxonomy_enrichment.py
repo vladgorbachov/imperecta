@@ -151,3 +151,12 @@ def test_fact_price_weekly_model_matches_retention_contract():
     } <= cols
     pk = {c.name for c in FactPriceWeekly.__table__.primary_key.columns}
     assert pk == {"listing_id", "week_start", "currency_code"}
+
+
+def test_coverage_endpoint_registered_and_meta_key_added():
+    from app.main import app
+    from app.modules.discovery.cursor_store import DISCOVERY_MP_WRITE_KEYS
+
+    schema = app.openapi()
+    assert "get" in schema["paths"].get("/api/admin/parsing/coverage", {})
+    assert "catalog_size_estimate" in DISCOVERY_MP_WRITE_KEYS
