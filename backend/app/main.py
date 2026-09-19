@@ -129,9 +129,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origins_list,
+    # Vercel preview deploys of the frontend (stealth prod, 2026-09-19).
+    allow_origin_regex=r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag", "Cache-Control"],
 )
 # ETag/304 for edge-cacheable public GETs (registered after CORS so CORS
 # headers still wrap the 304).
