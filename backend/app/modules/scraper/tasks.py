@@ -995,6 +995,16 @@ SCRAPE_FANOUT_SHARD_SIZE = 250
 # spreads today's remaining allowance over the ticks still to come.
 SCRAPE_FANOUT_TICKS_PER_DAY = 48
 PAID_ACCESS_MODES = ("proxy", "proxy_render")
+# Frontier diversity: at most this share of one tick's slots per shop, so a
+# single huge backlog (ldlc: 397k never-checked listings) cannot fill every
+# shard. Sized as one shard: shards x shard_size / SHOP_CAP_DIVISOR.
+SHOP_CAP_DIVISOR = 4
+# Circuit breaker: a shop with this many scrape attempts in the last hour and
+# ZERO successes is unreachable right now; it keeps a probe of a few
+# listings per tick so recovery is noticed, the rest of its slots go to
+# shops that answer.
+DEAD_SHOP_MIN_ATTEMPTS = 20
+DEAD_SHOP_PROBE = 5
 
 
 def _due_by_interval():
@@ -1011,6 +1021,24 @@ def _sitemap_changed():
     return FactListing.sitemap_lastmod > func.coalesce(
         FactListing.last_checked_at, func.to_timestamp(0)
     )
+
+
+def _dead_shops_sync(db) -> set:
+    """marketplace_ids with >= DEAD_SHOP_MIN_ATTEMPTS scrapes in the last hour
+    and no success among them (scrape_logs, indexed by created_at)."""
+    from sqlalchemy import text
+
+    rows = db.execute(
+        text(
+            "SELECT marketplace_id FROM scrape_logs "
+            "WHERE created_at > now() - interval '1 hour' "
+            "GROUP BY marketplace_id "
+            "HAVING count(*) >= :min_attempts "
+            "AND count(*) FILTER (WHERE status IN ('success','no_change')) = 0"
+        ),
+        {"min_attempts": DEAD_SHOP_MIN_ATTEMPTS},
+    ).all()
+    return {r[0] for r in rows}
 
 
 def _paid_quota_this_tick(now: float | None = None) -> int | None:
@@ -1047,8 +1075,10 @@ def scrape_stale_fanout(
     stalest-first frontier was 89% paid proxy fetches chosen by age alone,
     with the free direct shops queued behind them. Now:
 
-    * FREE frontier (direct/render shops): stalest first, the full
-      shards x shard_size — nothing to ration.
+    * FREE frontier (direct/render shops): stalest first, but at most one
+      shard's worth per shop and DEAD_SHOP_PROBE for shops with no success
+      in the last hour (ldlc's direct tarpit filled every shard with 183s
+      timeouts, 2026-09-19).
     * PAID frontier (proxy shops): only the value carriers — listings
       watched by an alert, flagged changed by the shop's own sitemap
       <lastmod> (067), or in a cross-shop match group — ordered by that
@@ -1056,7 +1086,7 @@ def scrape_stale_fanout(
       budget allowance. Bulk repricing of proxy shops belongs to the list-page
       harvest, which is ~30x cheaper per price.
     """
-    from sqlalchemy import case, exists
+    from sqlalchemy import case, exists, text
 
     from app.database import sync_session_factory
     from app.models.app_tables import Alert
@@ -1066,17 +1096,36 @@ def scrape_stale_fanout(
     db = sync_session_factory()
     try:
         changed = _sitemap_changed()
+        dead = _dead_shops_sync(db)
+        shop_cap = max(shards * shard_size // SHOP_CAP_DIVISOR, 1)
+        # One ordered index range scan per shop (idx_listing_shop_checked_active,
+        # 068) that stops after the shop's cap — 96ms for 48 shops against 9s
+        # for a window function over the whole table. rn interleaves shops
+        # in the final order so every shard mixes hosts.
         free_rows = db.execute(
-            select(FactListing.id)
-            .join(DimMarketplace, DimMarketplace.id == FactListing.marketplace_id)
-            .where(FactListing.is_active)
-            .where(DimMarketplace.access_mode.notin_(PAID_ACCESS_MODES))
-            .where(due)
-            .order_by(
-                case((changed, 0), else_=1),
-                FactListing.last_checked_at.asc().nulls_first(),
-            )
-            .limit(shards * shard_size)
+            text(
+                "SELECT l.id FROM dim_marketplace m "
+                "CROSS JOIN LATERAL ("
+                "  SELECT f.id, f.last_checked_at, "
+                "         row_number() OVER (ORDER BY f.last_checked_at ASC NULLS FIRST) AS rn "
+                "  FROM fact_listing f "
+                "  WHERE f.marketplace_id = m.id AND f.is_active "
+                "    AND (f.last_checked_at IS NULL OR f.last_checked_at < now() "
+                "         - make_interval(mins => f.scrape_interval_minutes)) "
+                "  ORDER BY f.last_checked_at ASC NULLS FIRST "
+                "  LIMIT CASE WHEN m.id = ANY(:dead) THEN :probe ELSE :cap END"
+                ") l "
+                "WHERE m.is_active AND m.access_mode <> ALL(:paid_modes) "
+                "ORDER BY l.rn ASC, l.last_checked_at ASC NULLS FIRST "
+                "LIMIT :total"
+            ),
+            {
+                "dead": list(dead),
+                "probe": DEAD_SHOP_PROBE,
+                "cap": shop_cap,
+                "paid_modes": list(PAID_ACCESS_MODES),
+                "total": shards * shard_size,
+            },
         ).all()
         paid_quota = _paid_quota_this_tick()
         paid_rows: list = []
@@ -1110,6 +1159,7 @@ def scrape_stale_fanout(
         "free": len(free_ids),
         "paid": len(paid_ids),
         "paid_quota": paid_quota,
+        "dead_shops": len(dead),
         "shards_dispatched": dispatched,
     }
     slog.info("scrape_stale_fanout_done", **summary)

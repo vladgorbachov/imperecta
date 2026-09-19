@@ -86,6 +86,7 @@ def test_scrape_stale_fanout_splits_free_and_paid_frontiers(monkeypatch) -> None
     paid_ids = [uuid4() for _ in range(2)]
     session = MagicMock()
     session.execute.return_value.all.side_effect = [
+        [("dead-shop-id",)],  # circuit breaker query
         [(i,) for i in free_ids],
         [(i,) for i in paid_ids],
     ]
@@ -101,18 +102,24 @@ def test_scrape_stale_fanout_splits_free_and_paid_frontiers(monkeypatch) -> None
     out = scraper_tasks.scrape_stale_fanout.run(shards=4, shard_size=3)
 
     assert (out["free"], out["paid"], out["paid_quota"]) == (10, 2, 2)
-    assert out["due"] == 12
+    assert out["due"] == 12 and out["dead_shops"] == 1
     assert out["shards_dispatched"] == 5  # 3+3+3+1 free, 2 paid
     assert all(opts["priority"] == 2 for _a, opts in dispatched)
     assert dispatched[-1][0][0] == [str(i) for i in paid_ids]
-    paid_sql = str(session.execute.call_args_list[1].args[0].compile())
+    free_call = session.execute.call_args_list[1]
+    free_sql = str(free_call.args[0])
+    # per-shop LATERAL with cap / probe, dead shops bound as a parameter
+    assert "CROSS JOIN LATERAL" in free_sql and "LIMIT CASE WHEN m.id = ANY(:dead)" in free_sql
+    assert free_call.args[1]["dead"] == ["dead-shop-id"]
+    assert free_call.args[1]["cap"] == 3 and free_call.args[1]["total"] == 12
+    paid_sql = str(session.execute.call_args_list[2].args[0].compile())
     assert "match_group_id IS NOT NULL" in paid_sql and "alerts" in paid_sql
     assert "LIMIT" in paid_sql
 
 
 def test_scrape_stale_fanout_skips_paid_when_budget_spent(monkeypatch) -> None:
     session = MagicMock()
-    session.execute.return_value.all.return_value = [(uuid4(),)]
+    session.execute.return_value.all.side_effect = [[], [(uuid4(),)]]
     monkeypatch.setattr("app.database.sync_session_factory", lambda: session)
     monkeypatch.setattr(scraper_tasks, "_paid_quota_this_tick", lambda: 0)
     monkeypatch.setattr(
@@ -120,7 +127,7 @@ def test_scrape_stale_fanout_skips_paid_when_budget_spent(monkeypatch) -> None:
     )
     out = scraper_tasks.scrape_stale_fanout.run(shards=1, shard_size=5)
     assert (out["free"], out["paid"]) == (1, 0)
-    assert session.execute.call_count == 1  # paid frontier not even queried
+    assert session.execute.call_count == 2  # breaker + free; paid not even queried
 
 
 def test_paid_quota_spreads_remaining_allowance_over_ticks_left(monkeypatch) -> None:

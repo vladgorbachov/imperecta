@@ -50,7 +50,10 @@ PAID_BACKEND_ATTEMPTS = 1
 RETRY_BACKOFF_SEC = 0.45
 # Cap raw HTML attached to PoolScrapeResult when proxy provider is off (debug only).
 _MAX_DEBUG_RAW_HTML_CHARS = 200_000
-_NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit"}
+# A timeout is not retried inside the same fetch either: ldlc.com's direct
+# tarpit (2026-09-19) cost 3 x 25s + 3 x 35s = 183s per listing and starved
+# every PDP shard. The listing simply comes around again on its next tick.
+_NON_RETRIABLE_LAYER_ERRORS = {"not_found", "blocked", "captcha", "rate_limit", "timeout"}
 # Tiered scrape strategy: which fetch backends are eligible for each tier.
 # Backend order within a tier is determined by _layer_order() based on requires_js
 # (kept as a fine-grained hint inside a tier).

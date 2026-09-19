@@ -113,8 +113,31 @@ error-path `scrape_listing_batch` (неимпортированный
 `test_scrape_stale_fanout_skips_paid_when_budget_spent`,
 `test_paid_quota_spreads_remaining_allowance_over_ticks_left`.
 
-**После:** _free/paid в `scrape_stale_fanout_done`, доля платных PDP в
-scrape_logs, рост priced у direct-магазинов._
+**После (первый прогон, 2026-09-19 06:00-07:30 UTC) — два дефекта, оба
+починены:**
+1. **Харвест не запускался вовсе.** `harvest_tick` раздавал задачи с новыми
+   квотами (pigu 125, kaup24 30 …), но `harvest_list_pages` шли с приоритетом
+   5 и ни разу не были получены воркером — все 6 детей заняты PDP-шардами
+   (priority 2). Read-only срез брокера: priority-2 очередь 28 задач (9
+   match-тиков, 3 harvest-тика, 6 harvest_list_pages…), priority-5 — 224,
+   priority-8 — 434 (энумерация). Фикс: дети харвеста → priority 2
+   (`21052a8`).
+2. **Каждый PDP-шард — 840 с и 0 результатов.** Бесплатный frontier «самые
+   старые» целиком состоял из ldlc.com (397k непроверенных, `direct`), а
+   ldlc — тарпит: direct 3×25 с таймаут + browser_render 3×35 с = **183 с на
+   листинг**, все впустую (`scrape_listing_batch_done assigned=250
+   scraped_ok=0 scraped_failed=0`). Фиксы: (а) `timeout` больше не
+   ретраится внутри одного фетча (ldlc: 183 → ≤60 с); (б) frontier с
+   диверсификацией — не более одного шарда на магазин за тик и
+   circuit-breaker: магазин с ≥20 попытками за час и 0 успехов получает
+   5 пробных листингов, остальное — магазинам, которые отвечают;
+   (в) реализация — LATERAL по магазинам на новом индексе
+   `idx_listing_shop_checked_active (marketplace_id, last_checked_at NULLS
+   FIRST) WHERE is_active` (068): EXPLAIN ANALYZE в проде **96 мс / 860
+   буферов** против 9 136 мс / 150k буферов у оконной функции по всей
+   таблице.
+Открытый вопрос для Waldemar: ldlc.com (397k) под `direct` недостижим —
+переводить на proxy (платно) или оставить на пробах 5/тик.
 
 ## П.6 — lastmod сайтмапов как сигнал изменений
 
