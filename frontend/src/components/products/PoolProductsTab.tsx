@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bookmark, Download, Rows2, Rows4, Search, Trash2 } from "lucide-react";
+import { Bookmark, Rows2, Rows4, Search, Trash2 } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { usePoolProducts, usePoolCategories } from "@/hooks/usePoolProducts";
 import { useMarketplaceLabelFormatter } from "@/hooks/useMarketplaceLabel";
@@ -48,10 +48,11 @@ import { ErrorState } from "@/components/ui-custom/ErrorState";
 import { ProductPeek } from "@/components/products/ProductPeek";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import { productsApi, type PoolProductItem } from "@/api/products";
+import type { PoolProductItem } from "@/api/products";
 
-const PAGE_SIZES = [20, 50, 100] as const;
+const PAGE_SIZES = [20, 50] as const;
+/** Backend caps browsing depth (WP2 §4): offset <= 450 → at most 10 pages. */
+const MAX_PAGE_DEPTH = 10;
 const SORT_OPTIONS = [
   { value: "recent", labelKey: "products.sort.recent" },
   { value: "name_asc", labelKey: "products.sort.nameAsc" },
@@ -102,36 +103,6 @@ function loadDensity(): "comfortable" | "compact" {
     return "comfortable";
   }
 }
-
-function exportCsv(items: PoolProductItem[]) {
-  const header = ["title", "marketplace", "country", "price", "currency", "change_24h_pct", "url"];
-  const escape = (value: unknown) => {
-    const text = value == null ? "" : String(value);
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
-  const rows = items.map((item) =>
-    [
-      item.title ?? "",
-      item.marketplace_name ?? item.marketplace_domain ?? "",
-      item.country_code ?? "",
-      item.price ?? "",
-      item.currency,
-      item.price_change_pct ?? "",
-      item.url,
-    ]
-      .map(escape)
-      .join(","),
-  );
-  const csv = [header.join(","), ...rows].join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `imperecta-products-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 
 export function PoolProductsTab() {
   const { t } = useTranslation();
@@ -186,25 +157,6 @@ export function PoolProductsTab() {
     persistSavedViews(next);
   };
 
-  /* P5: server-streamed CSV of the full filtered pool. */
-  const exportFullPool = async () => {
-    try {
-      const response = await productsApi.exportPoolCsv({
-        search: search.length >= 2 ? search : undefined,
-        marketplace_id: marketplaceId !== "all" ? marketplaceId : undefined,
-        sort: sort as Parameters<typeof usePoolProducts>[0]["sort"],
-      });
-      const url = URL.createObjectURL(response.data);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "imperecta_pool.csv";
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      toast.error(t("common.error"));
-    }
-  };
-
   const search = useDebounce(searchRaw, 500);
   const offset = (page - 1) * pageSize;
   const formatMarketplaceLabel = useMarketplaceLabelFormatter();
@@ -236,7 +188,9 @@ export function PoolProductsTab() {
     ...items.filter((item) => !favorites[item.id]),
   ];
   const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / pageSize) || 1;
+  const totalPagesUncapped = Math.ceil(total / pageSize) || 1;
+  const totalPages = Math.min(totalPagesUncapped, MAX_PAGE_DEPTH);
+  const depthCapped = totalPagesUncapped > MAX_PAGE_DEPTH;
   const clampedPage = Math.min(page, totalPages) || 1;
   const start = (clampedPage - 1) * pageSize;
   const hasFilters = search.length >= 2 || marketplaceId !== "all";
@@ -362,29 +316,6 @@ export function PoolProductsTab() {
             )}
           </Button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" title={t("products.export.hint")}>
-                <Download className="me-1.5 size-3.5" />
-                {t("products.export.label")}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="surface-overlay">
-              <DropdownMenuItem
-                disabled={items.length === 0}
-                className="focus:bg-[var(--glass-bg-hover)]"
-                onClick={() => exportCsv(items)}
-              >
-                {t("products.export.visible")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="focus:bg-[var(--glass-bg-hover)]"
-                onClick={() => void exportFullPool()}
-              >
-                {t("products.export.full")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 
@@ -497,8 +428,9 @@ export function PoolProductsTab() {
             >
               {t("common.back")}
             </Button>
-            <span className="px-2 text-sm">
+            <span className="px-2 text-sm" title={depthCapped ? t("products.paginationDepthHint") : undefined}>
               {clampedPage} / {totalPages}
+              {depthCapped ? "+" : ""}
             </span>
             <Button
               variant="outline"

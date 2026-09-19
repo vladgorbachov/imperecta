@@ -4,7 +4,7 @@
  * price · 24h change. Star toggles the client-side favorite.
  */
 
-import { Star } from "lucide-react";
+import { ExternalLink, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PoolProductItem } from "@/api/products";
 import { MarketplaceBadge } from "@/components/ui-custom/MarketplaceBadge";
@@ -30,35 +30,6 @@ export function countryFlag(code?: string | null): string {
   );
 }
 
-function ProductThumb({ item }: { item: PoolProductItem }) {
-  const letter = (item.title || "?")[0].toUpperCase();
-  if (item.image_url) {
-    return (
-      <img
-        src={item.image_url}
-        alt=""
-        loading="lazy"
-        className="size-15 shrink-0 rounded-lg border border-[var(--glass-border)] object-cover"
-        style={{ width: 60, height: 60 }}
-      />
-    );
-  }
-  return (
-    <div
-      className="flex shrink-0 items-center justify-center rounded-lg text-lg font-semibold"
-      style={{
-        width: 60,
-        height: 60,
-        background: "var(--glass-bg)",
-        border: "1px solid var(--glass-border)",
-        color: "var(--foreground-muted)",
-      }}
-    >
-      {letter}
-    </div>
-  );
-}
-
 export interface ProductRowProps {
   item: PoolProductItem;
   onOpen: (item: PoolProductItem) => void;
@@ -79,6 +50,8 @@ export function ProductRow({ item, onOpen }: ProductRowProps) {
     item.marketplace_name ||
     item.marketplace_domain ||
     "—";
+  const sourceDomain = item.source_domain ?? item.marketplace_domain ?? null;
+  const externalUrl = item.external_url ?? item.url;
 
   return (
     <TableRow
@@ -114,9 +87,6 @@ export function ProductRow({ item, onOpen }: ProductRowProps) {
           />
         </button>
       </TableCell>
-      <TableCell className="w-[76px]">
-        <ProductThumb item={item} />
-      </TableCell>
       <TableCell className="w-32">
         {item.product_type_en || item.product_type ? (
           <span className="line-clamp-2 text-sm leading-snug">
@@ -145,7 +115,7 @@ export function ProductRow({ item, onOpen }: ProductRowProps) {
           <span className="text-muted-foreground">—</span>
         )}
       </TableCell>
-      <TableCell className="w-40">
+      <TableCell className="w-44">
         <MarketplaceBadge
           marketplace={
             item.marketplace_domain ||
@@ -155,6 +125,20 @@ export function ProductRow({ item, onOpen }: ProductRowProps) {
           label={marketplaceLabel}
           size="sm"
         />
+        {/* Source attribution + link to the original listing (WP2 §5). */}
+        {sourceDomain ? (
+          <a
+            href={externalUrl}
+            target="_blank"
+            rel="noopener nofollow"
+            className="mt-0.5 flex max-w-full items-center gap-1 font-mono text-2xs text-muted-foreground hover:text-[var(--foreground)]"
+            onClick={(event) => event.stopPropagation()}
+            title={t("products.source.open")}
+          >
+            <span className="truncate">{sourceDomain}</span>
+            <ExternalLink className="size-3 shrink-0" />
+          </a>
+        ) : null}
       </TableCell>
       <TableCell className="w-20 whitespace-nowrap">
         {item.country_code ? (
@@ -206,11 +190,10 @@ export function ProductsTableHead() {
     <TableHeader>
       <TableRow className="hover:bg-transparent">
         <TableHead className="w-10" />
-        <TableHead className="w-[76px]" />
         <TableHead className="w-32 whitespace-nowrap">{t("products.type")}</TableHead>
         <TableHead className="min-w-[220px] whitespace-nowrap">{t("products.name")}</TableHead>
         <TableHead className="w-36 whitespace-nowrap">{t("products.category")}</TableHead>
-        <TableHead className="w-40 whitespace-nowrap">{t("products.marketplace")}</TableHead>
+        <TableHead className="w-44 whitespace-nowrap">{t("products.marketplace")}</TableHead>
         <TableHead className="w-20 whitespace-nowrap">{t("products.country")}</TableHead>
         <TableHead className="w-32 whitespace-nowrap text-right">{t("products.price")}</TableHead>
         <TableHead className="w-28 whitespace-nowrap text-right">{t("products.change24h")}</TableHead>

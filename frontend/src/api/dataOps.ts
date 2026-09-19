@@ -1,10 +1,8 @@
 /**
  * Client for the Rust data-ops read service (P6, docs/P6_FRONTEND_SPEC.md).
- * Separate origin from the main API. Every route is a public read that is
- * identical for all viewers, so requests are ANONYMOUS on purpose: without
- * an Authorization header the service answers `Cache-Control: public,
- * s-maxage=300, stale-while-revalidate=600` + ETag and the CDN serves the
- * page from the edge (a token would flip it to `private`).
+ * Separate origin from the main API, same JWT: since WP2 every pool read is
+ * user-scoped (no anonymous path, no edge cache), so the auth interceptors
+ * from setupAuth.ts attach the Bearer token and handle 401 refresh here too.
  */
 
 import axios from "axios";

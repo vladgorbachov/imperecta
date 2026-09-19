@@ -2,10 +2,10 @@
  * Product Peek — right-side drawer with product context, opened from a
  * catalog row without leaving the page (peek → page pattern).
  *
- * Shows everything the pool item already carries (image, description,
- * price, 24h change), the fact_price history (P1), and the cross-shop
- * price comparison from the data-ops service (P6,
- * docs/P6_FRONTEND_SPEC.md).
+ * Shows what the pool item carries (price, 24h change, source attribution
+ * with a link to the original listing — no third-party images, WP3), the
+ * fact_price history (P1), and the cross-shop price comparison from the
+ * data-ops service (P6, docs/P6_FRONTEND_SPEC.md).
  */
 
 import { useMemo, useState } from "react";
@@ -116,6 +116,8 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
   });
   const changeValue = view.price_change_pct ?? null;
   const hasHistory = historyRows.length >= 2;
+  const sourceDomain = view.source_domain ?? view.marketplace_domain ?? null;
+  const externalUrl = view.external_url ?? item.url;
 
   return (
     <>
@@ -131,20 +133,6 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
         <div className="space-y-5 p-5">
           {/* Identity */}
           <div className="flex gap-4">
-            <div className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--glass-border)] bg-[var(--background-elevated)]">
-              {item.image_url ? (
-                <img
-                  src={item.image_url}
-                  alt=""
-                  className="h-full w-full object-contain"
-                  loading="lazy"
-                />
-              ) : (
-                <span className="text-2xl font-semibold text-muted-foreground">
-                  {(item.title ?? "?").slice(0, 1).toUpperCase()}
-                </span>
-              )}
-            </div>
             <div className="min-w-0 flex-1 space-y-1.5">
               <h2 className="text-base font-semibold leading-snug">
                 {item.title ?? t("market.overview.untitled")}
@@ -184,6 +172,20 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
                   </span>
                 )}
               </div>
+              {/* Source attribution + link to the original listing (WP2 §5). */}
+              {sourceDomain ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("products.source.label")}:{" "}
+                  <a
+                    href={externalUrl}
+                    target="_blank"
+                    rel="noopener nofollow"
+                    className="font-mono underline-offset-2 hover:underline"
+                  >
+                    {sourceDomain}
+                  </a>
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -312,9 +314,9 @@ export function ProductPeek({ item, open, onOpenChange }: ProductPeekProps) {
               <Bell className="me-1.5 size-3.5" />
               {t("products.peek.setAlert")}
             </Button>
-            {item.url ? (
+            {externalUrl ? (
               <Button variant="outline" size="sm" asChild>
-                <a href={item.url} target="_blank" rel="noopener noreferrer">
+                <a href={externalUrl} target="_blank" rel="noopener nofollow">
                   <ExternalLink className="me-1.5 size-3.5" />
                   {t("products.peek.openExternal")}
                 </a>

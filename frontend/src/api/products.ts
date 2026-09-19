@@ -1,6 +1,6 @@
 import type { DisplayCurrency } from "@/lib/displayCurrency";
 import type { LocalCurrencyResolution } from "./markets";
-import { apiClient, publicClient } from "./client";
+import { publicClient } from "./client";
 import { dataOpsApi } from "./dataOps";
 
 export type { LocalCurrencyResolution };
@@ -48,7 +48,9 @@ export interface PoolProductItem {
   country_code?: string | null;
   url: string;
   title?: string | null;
-  image_url?: string | null;
+  /** Source attribution (WP2): domain of the original listing + link to it. */
+  source_domain?: string | null;
+  external_url?: string | null;
   description?: string | null;
   price?: number | null;
   price_eur?: number | null;
@@ -118,7 +120,7 @@ export const productsApi = {
   /**
    * Grid/search read path lives in the Rust data-ops service (in-memory
    * search index, keyset paging); the FastAPI twin is the fallback when
-   * data-ops is unreachable or errors. Both are anonymous + edge-cached.
+   * data-ops is unreachable or errors. Both require the user's JWT (WP2).
    */
   fetchPoolProducts: async (params: PoolProductsParams) => {
     try {
@@ -136,13 +138,6 @@ export const productsApi = {
   getPoolProduct: (listingId: string, displayCurrency?: DisplayCurrency) =>
     publicClient.get<PoolProductDetail>(`/pool/products/${listingId}`, {
       params: displayCurrency ? { display_currency: displayCurrency } : undefined,
-    }),
-
-  /** P5: full filtered pool as CSV (server-streamed; auth via the api client). */
-  exportPoolCsv: (params: Pick<PoolProductsParams, "search" | "marketplace_id" | "sort">) =>
-    apiClient.get<Blob>("/pool/products/export.csv", {
-      params,
-      responseType: "blob",
     }),
 
   getPriceHistory: (listingId: string, period: PriceHistoryPeriod = "30d") =>

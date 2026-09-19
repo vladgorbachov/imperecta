@@ -26,14 +26,11 @@ export const apiClient = axios.create({
 // Interceptors are configured in setupAuth.ts (after authStore is available)
 
 /**
- * Anonymous client for the public storefront reads (pool, market KPIs,
- * news). It deliberately sends NO Authorization header: the backend stamps
- * anonymous responses `Cache-Control: public, s-maxage=300,
- * stale-while-revalidate=600`, so the CDN in front of the API serves them
- * from the edge for every viewer. A token would make the response
- * `private` and drop it out of the shared cache (see
- * backend/app/common/public_cache.py). Never use it for user-scoped or
- * write endpoints.
+ * Read client for pool / market / news endpoints. It used to be anonymous
+ * and edge-cached; since WP2 (2026-09-19) every pool read is user-scoped
+ * (`Cache-Control: private, no-store`), so setupAuth.ts installs the same
+ * Bearer + 401-refresh interceptors here as on apiClient. Kept as a
+ * separate instance only so read traffic stays distinguishable from writes.
  */
 export const publicClient = axios.create({
   baseURL: apiBaseUrl,
