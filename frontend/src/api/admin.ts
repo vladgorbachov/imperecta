@@ -27,7 +27,6 @@ export interface AdminMarketplace {
   domain: string;
   country_code: string;
   country: string;
-  region: string;
   source: "registry" | "admin";
   is_active: boolean;
   last_scrape_at: string | null;
@@ -39,7 +38,6 @@ export interface AdminCountryRef {
   code: string;
   name: string;
   name_local: string | null;
-  region: string;
   currency_code: string;
 }
 

@@ -34,10 +34,10 @@ import {
 } from "./useAdmin";
 
 const blockedRow = {
-  country_code: "RU",
-  name: "Russia",
-  reason: "product_exclusion",
-  basis: "EU Reg. 833/2014",
+  country_code: "IR",
+  name: "Iran",
+  reason: "comprehensive_sanctions",
+  basis: "EU Reg. 267/2012",
   note: null,
   is_active: true,
   added_by: null,
@@ -85,7 +85,7 @@ describe("compliance hooks", () => {
     const { wrapper } = createWrapper();
     const { result } = renderHook(() => useBlockedCountries(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.items[0].country_code).toBe("RU");
+    expect(result.current.data?.items[0].country_code).toBe("IR");
     expect(result.current.data?.next_review_due_at).toBe("2026-12-18");
   });
 
@@ -130,10 +130,10 @@ describe("compliance hooks", () => {
     const remove = renderHook(() => useRemoveBlockedCountry(), { wrapper });
     const review = renderHook(() => useCompleteReview(), { wrapper });
     await act(async () => {
-      await remove.result.current.mutateAsync("RU");
+      await remove.result.current.mutateAsync("IR");
       await review.result.current.mutateAsync("checked against sanctionsmap.eu");
     });
-    expect(api.removeBlockedCountry).toHaveBeenCalledWith("RU");
+    expect(api.removeBlockedCountry).toHaveBeenCalledWith("IR");
     expect(api.completeBlockedCountriesReview).toHaveBeenCalledWith("checked against sanctionsmap.eu");
     expect(invalidateSpy).toHaveBeenCalledTimes(2);
   });

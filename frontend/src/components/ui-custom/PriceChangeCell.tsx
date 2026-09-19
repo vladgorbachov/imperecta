@@ -8,7 +8,7 @@ export interface PriceChangeCellProps {
   oldPrice: number;
   /** New price */
   newPrice: number;
-  /** Currency code (default RUB) */
+  /** Currency code (default EUR) */
   currency?: string;
   /** Additional CSS classes */
   className?: string;
@@ -21,7 +21,7 @@ export interface PriceChangeCellProps {
 export function PriceChangeCell({
   oldPrice,
   newPrice,
-  currency = "RUB",
+  currency = "EUR",
   className,
 }: PriceChangeCellProps) {
   const { t, i18n } = useTranslation();

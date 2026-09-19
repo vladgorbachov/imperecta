@@ -7,8 +7,8 @@
  * Formats a price amount using Intl.NumberFormat.
  * Always renders two fraction digits so values align in lists
  * (e.g. 6.9 → "6.90", 1980 → "1,980.00").
- * @example formatPrice(12450, "RUB", "ru") → "12 450,00 ₽"
- * @example formatPrice(12450, "RUB", "en") → "RUB 12,450.00"
+ * @example formatPrice(12450, "PLN", "pl") → "12 450,00 zł"
+ * @example formatPrice(12450, "PLN", "en") → "PLN 12,450.00"
  */
 export function formatPrice(amount: number, currency: string, locale: string): string {
   const normalizedCurrency = currency?.trim().toUpperCase() || "USD";

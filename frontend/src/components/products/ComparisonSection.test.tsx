@@ -69,9 +69,9 @@ describe("ComparisonSection", () => {
             }),
             offer({
               listing_id: "listing-3",
-              marketplace_name: "Kaspi",
-              marketplace_code: "kaspi_kz",
-              country_code: "KZ",
+              marketplace_name: "Senukai",
+              marketplace_code: "senukai_lt",
+              country_code: "LT",
               last_price: null,
               last_currency_code: null,
               last_price_eur: null,
