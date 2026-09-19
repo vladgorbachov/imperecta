@@ -406,3 +406,76 @@ class TestMultiLocaleTree:
         # doc1: 6 (<8, go on); doc2: raw 12 > 8 and 12 >= 8 -> processed, then stop
         assert result.inserted == 12
         assert walked == list(docs)[:2]
+
+
+@pytest.mark.asyncio
+class TestBudgetExhausted:
+    """A paid fetch skipped by the budget guard is not a missing document:
+    the 2026-09-19 tsbohemia/ldlc coordinators reported empty_sitemap on a
+    budget skip and the runs were lost."""
+
+    async def test_fetch_sitemap_document_raises_on_budget_skip(self, monkeypatch):
+        from app.modules.scraper.proxy_provider_limiter import (
+            PROXY_PROVIDER_BUDGET_ERROR,
+            ProxyBudgetExhausted,
+        )
+        from app.modules.scraper.scraper_pool import BackendId, ScraperPool
+
+        pool = ScraperPool()
+
+        async def fake_layer(backend_id, url, **_kw):
+            if backend_id == BackendId.DIRECT_HTTP:
+                return None, "blocked:direct_http"
+            return None, PROXY_PROVIDER_BUDGET_ERROR
+
+        rendered: list[str] = []
+
+        async def fake_raw(url, **_kw):
+            rendered.append(url)
+            return None
+
+        monkeypatch.setattr(pool, "_fetch_layer_with_retries", fake_layer)
+        monkeypatch.setattr(pool, "_fetch_raw", fake_raw)
+        with pytest.raises(ProxyBudgetExhausted) as info:
+            await pool._fetch_sitemap_document("https://s.example/sitemap.xml", log_hint="x")
+        assert info.value.error == PROXY_PROVIDER_BUDGET_ERROR
+        assert rendered == []  # the paid render fallback is not tried either
+
+    async def test_resolve_shards_propagates_budget_skip(self, monkeypatch):
+        from app.modules.scraper.proxy_provider_limiter import ProxyBudgetExhausted
+        from app.modules.scraper.scraper_pool import ScraperPool
+
+        pool = ScraperPool()
+
+        async def fake_static(url, **_kw):
+            return None
+
+        async def fake_doc(url, *, log_hint):
+            raise ProxyBudgetExhausted(url, "proxy_provider_budget")
+
+        monkeypatch.setattr(pool, "_fetch_static", fake_static)
+        monkeypatch.setattr(pool, "_fetch_sitemap_document", fake_doc)
+        with pytest.raises(ProxyBudgetExhausted):
+            await pool.resolve_sitemap_shards("https://s.example")
+
+    async def test_walk_keeps_written_documents_and_reports_budget_exhausted(self):
+        from app.modules.scraper.proxy_provider_limiter import ProxyBudgetExhausted
+
+        pool = SimpleNamespace()
+
+        async def walk(base_url, *, explicit_sitemaps=None, subfile_selector=None, **_kw):
+            yield "https://shop.example/sitemap-products-1.xml", {
+                "sitemaps": [], "urls": [],
+                "url_entries": [{"loc": f"https://shop.example/p/a-{i:06d}", "alternates": {}, "lastmod": None} for i in range(5)],
+            }
+            raise ProxyBudgetExhausted("https://shop.example/sitemap-products-2.xml", "proxy_provider_budget")
+
+        pool.walk_sitemaps = walk
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(_marketplace(), pool)
+        assert result.status == "budget_exhausted"
+        assert result.inserted == 5

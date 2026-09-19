@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
 import structlog
+from celery.exceptions import Retry
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -21,10 +22,34 @@ from app.modules.discovery.sitemap_enumerator import (
     ENUMERATE_MAX_URLS,
     enumerate_sitemap_full,
 )
+from app.modules.scraper.proxy_provider_limiter import (
+    ProxyBudgetExhausted,
+    seconds_until_daily_reset,
+)
 from app.observability.sentry_init import capture_exception_if_initialized
 from app.workers.celery_app import celery_app
 
 slog = structlog.get_logger(__name__)
+
+# A budget skip is not a result: the task comes back when the daily
+# allowance recomputes (UTC midnight), spread over ten minutes so a
+# whole backlog does not land on the same second. Up to a week of days.
+BUDGET_RETRY_JITTER_SEC = 600
+BUDGET_MAX_RETRIES = 7
+
+
+def _budget_retry(task, marketplace_code: str, stage: str):
+    import random
+
+    countdown = seconds_until_daily_reset() + random.randint(0, BUDGET_RETRY_JITTER_SEC)
+    slog.warning(
+        "sitemap_enumerate_budget_retry",
+        marketplace_code=marketplace_code,
+        stage=stage,
+        retry_in_sec=countdown,
+        retries=task.request.retries,
+    )
+    raise task.retry(countdown=countdown, max_retries=BUDGET_MAX_RETRIES)
 
 
 def _run_async(coro):
@@ -292,7 +317,10 @@ def sitemap_enumerate_marketplace(
     runs inline exactly as before.
     """
     try:
-        marketplace, shards, locale = _run_async(_resolve_shards(marketplace_code))
+        try:
+            marketplace, shards, locale = _run_async(_resolve_shards(marketplace_code))
+        except ProxyBudgetExhausted:
+            _budget_retry(self, marketplace_code, "resolve_shards")
         if marketplace is None:
             return {"status": "unknown_marketplace", "code": marketplace_code}
         if len(shards) < 2:
@@ -301,6 +329,8 @@ def sitemap_enumerate_marketplace(
                 _enumerate(marketplace_code, max_urls, locale=locale, whole_tree=True)
             )
             summary.pop("_category_urls", None)
+            if summary.get("status") == "budget_exhausted":
+                _budget_retry(self, marketplace_code, "inline_walk")
             slog.info("sitemap_enumerate_task_done", **summary)
             return summary
 
@@ -343,6 +373,8 @@ def sitemap_enumerate_marketplace(
         }
         slog.info("sitemap_enumerate_sharded", **summary)
         return summary
+    except Retry:
+        raise
     except Exception as exc:
         slog.error(
             "sitemap_enumerate_task_failed",
@@ -383,6 +415,10 @@ def sitemap_enumerate_shard(
             )
         )
         shard_categories = summary.pop("_category_urls", [])
+        if summary.get("status") == "budget_exhausted":
+            # Not done: the pending counter must not move, the shard comes
+            # back tomorrow and re-walks (dedupe makes that free).
+            _budget_retry(self, marketplace_code, f"shard:{shard_no}")
         if run_id is not None:
             _stash_shard_categories(marketplace_code, run_id, shard_categories)
             total = _record_shard_done(
@@ -404,6 +440,8 @@ def sitemap_enumerate_shard(
                 summary["run_total_product_like"] = total
         slog.info("sitemap_enumerate_shard_done", shard=shard_no, **summary)
         return summary
+    except Retry:
+        raise
     except Exception as exc:
         slog.error(
             "sitemap_enumerate_shard_failed",

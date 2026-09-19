@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -277,3 +278,42 @@ def test_bulk_tasks_route_to_their_own_queue() -> None:
         assert routes[name]["queue"] == "bulk", name
     # periodic ticks stay on the default queue
     assert "harvest_tick" not in routes and "scrape_stale_fanout" not in routes
+
+
+def test_coordinator_retries_when_the_index_fetch_hits_the_budget(monkeypatch) -> None:
+    from celery.exceptions import Retry
+
+    from app.modules.scraper.proxy_provider_limiter import ProxyBudgetExhausted
+
+    async def fake_resolve(_code):
+        raise ProxyBudgetExhausted("https://s.example/sitemap.xml", "proxy_provider_budget")
+
+    monkeypatch.setattr(ob, "_resolve_shards", fake_resolve)
+    monkeypatch.setattr(ob, "seconds_until_daily_reset", lambda: 3600)
+    with pytest.raises(Retry):
+        ob.sitemap_enumerate_marketplace.run("shop_x")
+
+
+def test_shard_retries_on_budget_without_recording_the_shard(monkeypatch) -> None:
+    from celery.exceptions import Retry
+
+    async def fake_enumerate(code, max_urls, **kw):
+        return {"status": "budget_exhausted", "product_like": 0, "_category_urls": []}
+
+    recorded: list = []
+    monkeypatch.setattr(ob, "_enumerate", fake_enumerate)
+    monkeypatch.setattr(ob, "_record_shard_done", lambda *a: recorded.append(a))
+    monkeypatch.setattr(ob, "seconds_until_daily_reset", lambda: 3600)
+    with pytest.raises(Retry):
+        ob.sitemap_enumerate_shard.run("shop_x", ["https://s.example/a.xml"], run_id="r1", shard_no=4)
+    assert recorded == []
+
+
+def test_seconds_until_daily_reset() -> None:
+    from datetime import datetime, timezone
+
+    from app.modules.scraper.proxy_provider_limiter import seconds_until_daily_reset
+
+    at = datetime(2026, 9, 19, 23, 30, tzinfo=timezone.utc)
+    assert seconds_until_daily_reset(at) == 1800
+    assert seconds_until_daily_reset(datetime(2026, 9, 19, 23, 59, 59, tzinfo=timezone.utc)) == 60

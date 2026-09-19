@@ -80,7 +80,7 @@ class EnumerateResult:
     rejected: int
     duplicates: int
     duration_ms: int
-    status: str  # "completed" | "empty_sitemap" | "error:<type>"
+    status: str  # "completed" | "empty_sitemap" | "budget_exhausted" | "error:<type>"
     # Category/listing pages seen in the same files (harvest optimisation
     # #3): the caller merges them into discovered_category_urls.
     category_urls: list[str] = field(default_factory=list)
@@ -259,6 +259,7 @@ async def enumerate_sitemap_full(
         select_sitemap_subfiles,
     )
     from app.modules.scraper.locale_selection import select_locale_url
+    from app.modules.scraper.proxy_provider_limiter import ProxyBudgetExhausted
 
     base_host = urlparse(marketplace.base_url).netloc.lower().removeprefix("www.")
     country_hint = country_language_hint(marketplace.country_code)
@@ -389,6 +390,32 @@ async def enumerate_sitemap_full(
                 break
         await _flush()
         await _flush()  # drain the last in-flight write
+    except ProxyBudgetExhausted as exc:
+        # What was already walked is written (the walk is idempotent); the
+        # task retries the rest when the allowance is back.
+        try:
+            await _flush()
+            await _flush()
+        except Exception:  # noqa: BLE001 - the retry re-walks anyway
+            pass
+        slog.warning(
+            "sitemap_enumerate_budget_exhausted",
+            marketplace_id=str(marketplace_id),
+            documents=documents,
+            inserted=inserted,
+            error=exc.error,
+        )
+        return _result(
+            "budget_exhausted",
+            raw_urls=raw_count,
+            product_like=product_like_count,
+            inserted=inserted,
+            rejected=rejected,
+            duplicates=duplicates,
+            locale=locale,
+            subfiles_skipped_noise=skipped_noise,
+            subfiles_skipped_locale=skipped_locale_files,
+        )
     except Exception as exc:
         slog.error(
             "sitemap_enumerate_fetch_failed",

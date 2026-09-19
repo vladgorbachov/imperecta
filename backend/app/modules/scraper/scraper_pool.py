@@ -37,6 +37,7 @@ from app.modules.scraper.fetch_backends import (
 from app.modules.scraper.proxy_provider_limiter import (
     PROXY_PROVIDER_DEADLINE_ERROR,
     PROXY_PROVIDER_SKIP_ERRORS,
+    ProxyBudgetExhausted,
 )
 from app.observability.sentry_init import capture_exception_if_initialized
 
@@ -542,7 +543,22 @@ class ScraperPool:
         and if both direct HTTP and proxy-provider bypass fail, the document is likely
         unavailable rather than JS-gated.
         """
+        html, _err = await self._fetch_static_with_error(
+            url, log_url_hint=log_url_hint, accept_language=accept_language
+        )
+        return html
+
+    async def _fetch_static_with_error(
+        self,
+        url: str,
+        *,
+        log_url_hint: str | None = None,
+        accept_language: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """_fetch_static plus the LAST backend's error, so a caller can tell a
+        budget skip (nothing was fetched, retry later) from a missing document."""
         started = time.perf_counter()
+        last_err: str | None = None
         for backend_id, render_js in (
             (BackendId.DIRECT_HTTP, None),
             (BackendId.PROXY_PROVIDER, False),
@@ -571,14 +587,15 @@ class ScraperPool:
                     total_ms,
                     (log_url_hint or url)[:200],
                 )
-                return html
+                return html, None
+            last_err = backend_err
         total_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
             "fetch_static_failed duration_ms=%s url=%s",
             total_ms,
             (log_url_hint or url)[:200],
         )
-        return None
+        return None, last_err
 
     @staticmethod
     def _looks_like_sitemap_xml(content: str) -> bool:
@@ -587,10 +604,18 @@ class ScraperPool:
         return head.startswith("<?xml") or "<urlset" in head or "<sitemapindex" in head
 
     async def _fetch_sitemap_document(self, sitemap_url: str, *, log_hint: str) -> str | None:
-        """Fetch sitemap XML via static backends, then browser render as fallback."""
-        content = await self._fetch_static(sitemap_url, log_url_hint=log_hint)
+        """Fetch sitemap XML via static backends, then browser render as fallback.
+
+        Raises ProxyBudgetExhausted when the paid layer was skipped by the
+        budget guard: the document is not missing, the walk must resume when
+        the allowance is back (the render fallback is paid too, so it is not
+        tried either).
+        """
+        content, err = await self._fetch_static_with_error(sitemap_url, log_url_hint=log_hint)
         if content and self._looks_like_sitemap_xml(content):
             return content
+        if err in PROXY_PROVIDER_SKIP_ERRORS:
+            raise ProxyBudgetExhausted(sitemap_url, err)
         html = await self._fetch_raw(sitemap_url, requires_js=True)
         if html and self._looks_like_sitemap_xml(html):
             logger.info(
@@ -637,6 +662,8 @@ class ScraperPool:
                 content = await self._fetch_sitemap_document(
                     entry, log_hint=f"{base_url} sitemap index"
                 )
+            except ProxyBudgetExhausted:
+                raise
             except Exception:
                 continue
             if not content:
@@ -818,6 +845,8 @@ class ScraperPool:
         async def _fetch(url: str) -> str | None:
             try:
                 return await self._fetch_sitemap_document(url, log_hint=f"{base_url} sitemap")
+            except ProxyBudgetExhausted:
+                raise
             except Exception:
                 return None
 

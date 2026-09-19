@@ -18,6 +18,27 @@ PROXY_PROVIDER_SKIP_ERRORS = frozenset(
     {PROXY_PROVIDER_DEADLINE_ERROR, PROXY_PROVIDER_BUDGET_ERROR}
 )
 
+
+class ProxyBudgetExhausted(RuntimeError):
+    """A paid fetch was skipped by the budget guard (daily allowance spent
+    or deadline passed). Long-running walks raise it instead of treating
+    the skip as "document missing": 2026-09-19 the tsbohemia/ldlc
+    enumeration coordinators reported empty_sitemap on a budget skip and
+    the runs were simply lost."""
+
+    def __init__(self, url: str, error: str) -> None:
+        super().__init__(f"{error}: {url[:200]}")
+        self.url = url
+        self.error = error
+
+
+def seconds_until_daily_reset(now: datetime | None = None, jitter_sec: int = 600) -> int:
+    """Seconds until the next UTC midnight (when the daily allowance
+    recomputes) plus a deterministic-free jitter bound the caller applies."""
+    now = now or datetime.now(timezone.utc)
+    tomorrow = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    return max(60, int((tomorrow - now).total_seconds()))
+
 # Concurrent in-flight fetches per scrape child (tunable; provider cap is fleet-wide).
 SCRAPE_FETCH_PARALLELISM = 5
 
