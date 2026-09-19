@@ -708,7 +708,11 @@ class ProductPoolService:
         return output
 
     async def get_categories(self, *, include_blocked_countries: bool = False) -> list[dict]:
-        """Distinct marketplaces that have active listings (lightweight category browse)."""
+        """Distinct marketplaces that have active listings (lightweight category browse).
+
+        Served from mv_marketplace_stats (066): the live GROUP BY over
+        3M fact_listing rows took 6-10s per Products-page load.
+        """
         stmt = (
             select(
                 DimMarketplace.id,
@@ -716,18 +720,11 @@ class ProductPoolService:
                 DimMarketplace.name,
                 DimMarketplace.domain,
                 DimMarketplace.country_code,
-                func.count(FactListing.id).label("listing_count"),
+                _MV_MARKETPLACE_STATS.c.listing_count.label("listing_count"),
             )
-            .select_from(FactListing)
-            .join(DimMarketplace, FactListing.marketplace_id == DimMarketplace.id)
-            .where(FactListing.is_active)
-            .group_by(
-                DimMarketplace.id,
-                DimMarketplace.marketplace_code,
-                DimMarketplace.name,
-                DimMarketplace.domain,
-                DimMarketplace.country_code,
-            )
+            .select_from(_MV_MARKETPLACE_STATS)
+            .join(DimMarketplace, _MV_MARKETPLACE_STATS.c.marketplace_id == DimMarketplace.id)
+            .where(_MV_MARKETPLACE_STATS.c.listing_count > 0)
             .order_by(desc("listing_count"))
         )
         stmt = self._apply_country_visibility_filter(

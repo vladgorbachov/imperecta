@@ -135,13 +135,21 @@ async def get_proxy_usage(
     import anyio
 
     from app.config import Settings
-    from app.modules.scraper.proxy_provider_limiter import read_usage_days_sync
+    from app.modules.scraper.proxy_provider_limiter import (
+        proxy_provider_daily_cap,
+        read_usage_days_sync,
+    )
 
     per_day = await anyio.to_thread.run_sync(read_usage_days_sync, days)
     cost_per_1k = float(getattr(Settings(), "proxy_cost_per_1k", None) or 1.9)
     total = sum(per_day.values())
+    daily_cap = proxy_provider_daily_cap()
+    today_used = per_day.get(max(per_day), 0) if per_day else 0
     return {
         "days": days,
+        "daily_cap": daily_cap or None,
+        "today_requests": today_used,
+        "cap_reached": bool(daily_cap and today_used >= daily_cap),
         "per_day": [
             {
                 "date": day,

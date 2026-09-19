@@ -49,6 +49,7 @@ from app.modules.persist.scrape_gate_fields import (
 from app.modules.persist.writer import PersistContext, write_sync
 from app.modules.scraper import access_policy, host_throttle
 from app.modules.scraper.fetch_backends import backend_id_persisted
+from app.modules.scraper.proxy_provider_limiter import PROXY_PROVIDER_SKIP_ERRORS
 from app.modules.scraper.scraper_pool import ListingFetchResult, PoolScrapeResult, ScraperPool
 
 logger = logging.getLogger(__name__)
@@ -743,7 +744,10 @@ class GlobalScrapeService:
         gate_skip_reason: str | None = None
 
         if not result.success or not data:
-            if not result.success:
+            # Proxy deadline/budget skips never reached the shop: they say
+            # nothing about the listing, so they must not feed the streak
+            # that deactivates it after LISTING_DEACTIVATE_AFTER_ERRORS.
+            if not result.success and result.error not in PROXY_PROVIDER_SKIP_ERRORS:
                 self._route_failure_housekeeping_updates(
                     listing,
                     listing_id=listing_id,

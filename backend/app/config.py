@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Provider-neutral proxy fetch configuration (Stage 2).
     proxy_provider: str = "decodo"
     proxy_provider_rps: int = 10
+    # Fleet-wide paid-fetch ceiling per UTC day (0 = unlimited). Spend guard:
+    # at ~$1.9/1k requests the default bounds the provider bill to ~$10/day.
+    proxy_provider_daily_cap: int = 5000
     proxy_provider_api_url: str | None = Field(
         default=None,
         validation_alias="PROXY_PROVIDER_API_URL",

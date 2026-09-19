@@ -17,6 +17,8 @@ import time
 import weakref
 from urllib.parse import urlparse
 
+from app.modules.scraper.access_policy import normalize_host
+
 DEFAULT_HOST_INTERVAL_SEC = 1.0
 
 # host -> configured minimum interval (process-wide; plain floats are loop-safe)
@@ -29,7 +31,9 @@ _loop_state: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, lis
 
 
 def _host_of(url: str) -> str:
-    return (urlparse(url).netloc or "").lower()
+    # Same 'www.'-insensitive key as access_policy: apex base_url must
+    # throttle the www listing host it registers for.
+    return normalize_host(urlparse(url).netloc or "")
 
 
 def set_host_interval(base_url_or_host: object, interval_sec: object) -> None:
@@ -40,7 +44,7 @@ def set_host_interval(base_url_or_host: object, interval_sec: object) -> None:
     """
     if not isinstance(base_url_or_host, str):
         return
-    host = _host_of(base_url_or_host) or base_url_or_host.strip().lower()
+    host = _host_of(base_url_or_host) or normalize_host(base_url_or_host)
     if not host:
         return
     try:

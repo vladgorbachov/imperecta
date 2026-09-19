@@ -1087,6 +1087,13 @@ def _has_path_facet(path: str) -> bool:
     return False
 
 
+def _site_host(netloc: str) -> str:
+    """Same-site key: 'www.shop.tld' and 'shop.tld' are one storefront —
+    dim_marketplace.base_url is apex while shops link absolute www URLs."""
+    host = netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def _is_excluded_link(url: str) -> bool:
     lowered = url.lower()
     return any(hint in lowered for hint in _EXCLUDED_LINK_HINTS)
@@ -1115,7 +1122,7 @@ def extract_product_links(
         parsed = urlparse(full_url)
         if parsed.scheme not in {"http", "https"}:
             continue
-        if parsed.netloc != parsed_base.netloc:
+        if _site_host(parsed.netloc) != _site_host(parsed_base.netloc):
             continue
         if _is_excluded_link(full_url):
             continue
@@ -1262,7 +1269,7 @@ def extract_links_from_repeated_structure(
                 continue
             full_url = urljoin(base_url, href)
             parsed = urlparse(full_url)
-            if parsed.netloc != base_domain:
+            if _site_host(parsed.netloc) != _site_host(base_domain):
                 continue
             path_lower = parsed.path.lower()
             if any(
@@ -1331,7 +1338,7 @@ def extract_internal_links_all(soup: BeautifulSoup, base_url: str) -> list[str]:
             continue
         full_url = urljoin(base_url, href)
         parsed = urlparse(full_url)
-        if parsed.netloc != base_domain:
+        if _site_host(parsed.netloc) != _site_host(base_domain):
             continue
         path = parsed.path
         if not path or path == "/":

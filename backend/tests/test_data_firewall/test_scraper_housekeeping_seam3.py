@@ -299,3 +299,32 @@ def test_success_path_start_reset_rides_ingestion_commit(
 
     assert housekeeping_commits == []
     mock_ing_cls.return_value.persist_extracted.assert_called_once()
+
+
+def test_proxy_skip_results_do_not_feed_failure_streak() -> None:
+    """Deadline/budget skips never reached the shop (2026-09-19 spend guard):
+    no failure housekeeping, no deactivation pressure on a live listing."""
+    from app.modules.scraper.proxy_provider_limiter import PROXY_PROVIDER_SKIP_ERRORS
+
+    for skip_error in sorted(PROXY_PROVIDER_SKIP_ERRORS):
+        db = MagicMock()
+        listing = MagicMock()
+        listing.url_hash = "hash"
+        listing.marketplace_id = uuid4()
+        listing.id = uuid4()
+        listing.external_url = "https://example.com/item"
+        svc = GlobalScrapeService(db, MagicMock())
+        with (
+            patch.object(svc, "_route_failure_housekeeping_updates") as hk,
+            patch.object(svc, "_persist_scrape_log", return_value=True),
+            patch.object(svc, "_persist_listing_housekeeping_or_fail", return_value=None),
+        ):
+            svc._persist_scrape_pool_result(
+                listing.id,
+                listing,
+                PoolScrapeResult(
+                    success=False, url=listing.external_url, error=skip_error, is_empty=True
+                ),
+                now=datetime.now(timezone.utc),
+            )
+        hk.assert_not_called()

@@ -10,6 +10,12 @@ from app.config import Settings
 
 PROXY_PROVIDER_REDIS_KEY = "proxy_provider:ratebucket"
 PROXY_PROVIDER_DEADLINE_ERROR = "proxy_provider_deadline"
+PROXY_PROVIDER_BUDGET_ERROR = "proxy_provider_budget"
+# Infrastructure skips, not verdicts about the listing: the fetch never
+# happened, so callers must not count them toward failure streaks.
+PROXY_PROVIDER_SKIP_ERRORS = frozenset(
+    {PROXY_PROVIDER_DEADLINE_ERROR, PROXY_PROVIDER_BUDGET_ERROR}
+)
 
 # Concurrent in-flight fetches per scrape child (tunable; provider cap is fleet-wide).
 SCRAPE_FETCH_PARALLELISM = 5
@@ -133,6 +139,31 @@ def _record_usage_sync() -> None:
         client.expire(key, _USAGE_TTL_SECONDS)
     except Exception:  # noqa: BLE001 - accounting must never fail a fetch
         pass
+
+
+def proxy_provider_daily_cap() -> int:
+    """Fleet-wide paid fetches per UTC day; 0 disables the guard."""
+    return int(Settings().proxy_provider_daily_cap or 0)
+
+
+def daily_budget_exhausted_sync() -> bool:
+    """True once today's granted tokens reach the daily cap.
+
+    Spend guard for the proxy-mode shops (2026-09-19: the www-host fix put
+    ~550k proxy_render listings onto the paid backend for real). Fail-open
+    on Redis trouble — the RPS limiter's local fallback already throttles
+    to 1 req/s per process, and accounting must never fail a fetch.
+    """
+    cap = proxy_provider_daily_cap()
+    if cap <= 0:
+        return False
+    try:
+        client = _get_redis()
+        key = PROXY_USAGE_KEY_PREFIX + time.strftime("%Y%m%d", time.gmtime())
+        used = client.get(key)
+        return int(used or 0) >= cap
+    except Exception:  # noqa: BLE001 - see docstring
+        return False
 
 
 def read_usage_days_sync(days: int = 14) -> dict[str, int]:

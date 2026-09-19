@@ -82,6 +82,33 @@ def test_set_host_mode_ignores_garbage():
     assert access_policy.mode_for("https://x.example/p") == "direct"
 
 
+def test_host_mode_is_www_insensitive(monkeypatch):
+    """2026-09-19: apex base_url vs www listing host — 11 proxy_render shops
+    silently fell back to a datacenter browser fetch (90% blocked)."""
+    monkeypatch.setattr(
+        ProxyProviderBackend, "is_configured", staticmethod(lambda: True)
+    )
+    access_policy.set_host_mode("https://tsbohemia.example", "proxy_render")
+    assert access_policy.mode_for("https://www.tsbohemia.example/p") == "proxy_render"
+    access_policy.set_host_mode("https://WWW.Euro.example", "proxy")
+    assert access_policy.mode_for("https://euro.example/p") == "proxy"
+    pool = ScraperPool()
+    assert pool._layer_order(
+        requires_js=False, scrape_tier=1, url="https://www.tsbohemia.example/p"
+    ) == [BackendId.PROXY_PROVIDER]
+
+
+def test_host_throttle_interval_is_www_insensitive():
+    from app.modules.scraper import host_throttle
+
+    host_throttle.set_host_interval("https://slow.example", 7.5)
+    try:
+        assert host_throttle.interval_for(host_throttle._host_of("https://www.slow.example/p")) == 7.5
+        assert host_throttle.interval_for(host_throttle._host_of("https://slow.example/p")) == 7.5
+    finally:
+        host_throttle.set_host_interval("https://slow.example", None)
+
+
 def test_layer_order_tier2_raises_not_implemented():
     pool = ScraperPool()
     with pytest.raises(NotImplementedError, match="scrape_tier=2"):

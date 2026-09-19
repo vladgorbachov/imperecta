@@ -26,15 +26,27 @@ VALID_MODES = frozenset({MODE_DIRECT, MODE_RENDER, MODE_PROXY, MODE_PROXY_RENDER
 _host_modes: dict[str, str] = {}
 
 
+def normalize_host(host: str) -> str:
+    """Registry key for a host: lowercase, leading 'www.' dropped.
+
+    dim_marketplace.base_url is stored apex ('https://tsbohemia.cz') while the
+    enumerated listing URLs carry 'www.' — keyed on the raw netloc the mode
+    never matched, so 11 proxy_render shops (~550k listings) silently fetched
+    with a datacenter browser instead (2026-09-19 blocked% investigation).
+    """
+    host = host.strip().lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def _host_of(url: str) -> str:
-    return (urlparse(url).netloc or "").lower()
+    return normalize_host(urlparse(url).netloc or "")
 
 
 def set_host_mode(base_url_or_host: object, mode: object) -> None:
     """Register a marketplace's access_mode for its host; garbage is ignored."""
     if not isinstance(base_url_or_host, str) or not isinstance(mode, str):
         return
-    host = _host_of(base_url_or_host) or base_url_or_host.strip().lower()
+    host = _host_of(base_url_or_host) or normalize_host(base_url_or_host)
     if not host:
         return
     normalized = mode.strip().lower()

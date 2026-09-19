@@ -33,7 +33,10 @@ from app.modules.scraper.fetch_backends import (
     backend_id_persisted,
     get_fetch_backend,
 )
-from app.modules.scraper.proxy_provider_limiter import PROXY_PROVIDER_DEADLINE_ERROR
+from app.modules.scraper.proxy_provider_limiter import (
+    PROXY_PROVIDER_DEADLINE_ERROR,
+    PROXY_PROVIDER_SKIP_ERRORS,
+)
 from app.observability.sentry_init import capture_exception_if_initialized
 
 logger = logging.getLogger(__name__)
@@ -154,6 +157,8 @@ class ListingFetchResult:
     last_error: str
     duration_ms: int
     deadline_skipped: bool = False
+    # Which infra skip fired (deadline | budget); surfaces as the result error.
+    deadline_skip_error: str = PROXY_PROVIDER_DEADLINE_ERROR
 
 
 @dataclass
@@ -231,7 +236,7 @@ class ScraperPool:
             return PoolScrapeResult(
                 success=False,
                 url=url,
-                error=PROXY_PROVIDER_DEADLINE_ERROR,
+                error=fetch.deadline_skip_error,
                 data=None,
                 fetch_backend=None,
                 duration_ms=fetch.duration_ms,
@@ -272,6 +277,7 @@ class ScraperPool:
         used_backend: BackendId | None = None
         last_error = "fetch_failed"
         deadline_skipped = False
+        deadline_skip_error = PROXY_PROVIDER_DEADLINE_ERROR
         for backend_id in backend_ids:
             backend_started = time.perf_counter()
             html, backend_err = await self._fetch_layer_with_retries(
@@ -296,8 +302,9 @@ class ScraperPool:
                 ((backend_err or "")[:300] if backend_err else None),
                 url[:200],
             )
-            if backend_err == PROXY_PROVIDER_DEADLINE_ERROR:
+            if backend_err in PROXY_PROVIDER_SKIP_ERRORS:
                 deadline_skipped = True
+                deadline_skip_error = backend_err
                 break
             if html:
                 used_backend = backend_id
@@ -312,6 +319,7 @@ class ScraperPool:
             last_error=last_error,
             duration_ms=duration_ms,
             deadline_skipped=deadline_skipped and not html,
+            deadline_skip_error=deadline_skip_error,
         )
 
     def build_scrape_result_from_html(
@@ -823,13 +831,13 @@ class ScraperPool:
             last_code = err or "fetch_failed"
             if last_code in _NON_RETRIABLE_LAYER_ERRORS:
                 break
-            if last_code == PROXY_PROVIDER_DEADLINE_ERROR:
+            if last_code in PROXY_PROVIDER_SKIP_ERRORS:
                 break
             if attempt < FETCH_ATTEMPTS_PER_LAYER - 1:
                 await asyncio.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
         mapped = self._map_layer_error(last_code, backend_id)
-        if last_code == PROXY_PROVIDER_DEADLINE_ERROR:
-            return None, PROXY_PROVIDER_DEADLINE_ERROR
+        if last_code in PROXY_PROVIDER_SKIP_ERRORS:
+            return None, last_code
         return None, mapped
 
     def _map_layer_error(self, code: str | None, backend_id: BackendId) -> str:

@@ -222,3 +222,21 @@ def test_detect_next_page_custom_and_rel_and_query():
     assert detect_next_page(soup2, "https://x.com/cat?page=1") is not None
     soup3 = BeautifulSoup('<a class="n" href="?page=3">далее</a>', "html.parser")
     assert detect_next_page(soup3, "https://x.com/z?page=2", custom_selector="a.n") is not None
+
+
+def test_link_extractors_treat_www_as_same_site():
+    """2026-09-19: apex base_url vs absolute www links on the page — every
+    internal link was dropped as 'external' for ~20 shops."""
+    html = (
+        '<a href="https://www.shop.example/product/abc-123">p</a>'
+        '<a href="https://other.example/product/zzz-999">ext</a>'
+        '<a href="https://www.shop.example/help/x">nav</a>'
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    links = extract_product_links(soup, "https://shop.example/cat")
+    assert links == ["https://www.shop.example/product/abc-123"]
+    internal = ex.extract_internal_links_all(soup, "https://shop.example/")
+    assert internal == [
+        "https://www.shop.example/product/abc-123",
+        "https://www.shop.example/help/x",
+    ]

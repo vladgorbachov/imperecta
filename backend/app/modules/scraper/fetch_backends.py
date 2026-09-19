@@ -18,8 +18,10 @@ from playwright.async_api import async_playwright
 
 from app.config import Settings
 from app.modules.scraper.proxy_provider_limiter import (
+    PROXY_PROVIDER_BUDGET_ERROR,
     PROXY_PROVIDER_DEADLINE_ERROR,
     acquire_proxy_provider_token,
+    daily_budget_exhausted_sync,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +217,8 @@ class ProxyProviderBackend:
         if not (settings.proxy_provider_username and settings.proxy_provider_password):
             logger.debug("Proxy provider credentials not configured, skipping")
             return None, "fetch_failed"
+        if await asyncio.to_thread(daily_budget_exhausted_sync):
+            return None, PROXY_PROVIDER_BUDGET_ERROR
         if not await acquire_proxy_provider_token(deadline_monotonic):
             return None, PROXY_PROVIDER_DEADLINE_ERROR
         auth = base64.b64encode(

@@ -729,3 +729,65 @@ def test_batch_loop_deadline_skipped_fetch_not_counted_failed(monkeypatch):
     assert out["scraped_ok"] == 1
     assert out["scraped_failed"] == 0
     svc.scrape_listing_from_fetch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_proxy_daily_budget_cap_blocks_before_spending(monkeypatch):
+    """Cap reached -> honest budget skip, no RPS token, no provider POST."""
+    from app.modules.scraper import fetch_backends as fb
+
+    acquire_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(fb, "acquire_proxy_provider_token", acquire_mock)
+    monkeypatch.setattr(fb, "daily_budget_exhausted_sync", lambda: True)
+    monkeypatch.setattr(
+        fb,
+        "settings",
+        MagicMock(
+            proxy_provider_enabled=True,
+            proxy_provider_username="user",
+            proxy_provider_password="pass",
+            proxy_provider_api_url="http://proxy-provider",
+        ),
+    )
+    with patch("app.modules.scraper.fetch_backends.httpx.AsyncClient") as client_cls:
+        html, err = await fb.ProxyProviderBackend().fetch("https://shop.example/p/3")
+    assert (html, err) == (None, limiter.PROXY_PROVIDER_BUDGET_ERROR)
+    acquire_mock.assert_not_called()
+    client_cls.assert_not_called()
+
+
+def test_daily_budget_exhausted_reads_today_usage(monkeypatch):
+    store = MagicMock()
+    monkeypatch.setattr(limiter, "_get_redis", lambda: store)
+    monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 5000)
+    store.get.return_value = "4999"
+    assert limiter.daily_budget_exhausted_sync() is False
+    store.get.return_value = "5000"
+    assert limiter.daily_budget_exhausted_sync() is True
+    key = store.get.call_args.args[0]
+    assert key.startswith(limiter.PROXY_USAGE_KEY_PREFIX)
+    # 0 disables the guard; Redis trouble fails open.
+    monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 0)
+    assert limiter.daily_budget_exhausted_sync() is False
+    monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 10)
+    store.get.side_effect = ConnectionError("redis down")
+    assert limiter.daily_budget_exhausted_sync() is False
+
+
+@pytest.mark.asyncio
+async def test_budget_skip_surfaces_as_empty_result(monkeypatch):
+    from app.modules.scraper import scraper_pool as sp
+
+    pool = sp.ScraperPool()
+    monkeypatch.setattr(
+        pool, "_layer_order", lambda *a, **k: [sp.BackendId.PROXY_PROVIDER]
+    )
+
+    async def budget_once(_backend_id, _url, **_kw):
+        return None, limiter.PROXY_PROVIDER_BUDGET_ERROR
+
+    monkeypatch.setattr(pool, "_fetch_by_backend_once", budget_once)
+    result = await pool.scrape_product("https://shop.example/p/4", requires_js=False)
+    assert result.success is False
+    assert result.is_empty is True
+    assert result.error == limiter.PROXY_PROVIDER_BUDGET_ERROR
