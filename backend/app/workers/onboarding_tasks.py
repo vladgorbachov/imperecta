@@ -107,6 +107,39 @@ def _enum_run_keys(marketplace_code: str, run_id: str) -> tuple[str, str]:
     return f"{base}:pending", f"{base}:counts"
 
 
+def _enum_run_categories_key(marketplace_code: str, run_id: str) -> str:
+    return f"enumrun:{marketplace_code}:{run_id}:cats"
+
+
+def _stash_shard_categories(marketplace_code: str, run_id: str, urls: list[str]) -> None:
+    """Shards park their category finds in a run-scoped Redis set; the
+    finisher merges them into the shop once (no concurrent JSONB writes)."""
+    if not urls:
+        return
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
+
+    try:
+        client = _get_redis()
+        key = _enum_run_categories_key(marketplace_code, run_id)
+        client.sadd(key, *urls)
+        client.expire(key, _ENUM_RUN_TTL_SEC)
+    except Exception:
+        pass
+
+
+def _pop_run_categories(marketplace_code: str, run_id: str) -> list[str]:
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
+
+    try:
+        client = _get_redis()
+        key = _enum_run_categories_key(marketplace_code, run_id)
+        members = client.smembers(key)
+        client.delete(key)
+        return sorted(m.decode() if isinstance(m, bytes) else m for m in members)
+    except Exception:
+        return []
+
+
 def _record_shard_done(
     marketplace_code: str, run_id: str, shard_no: int, product_like: int
 ) -> int | None:
@@ -157,6 +190,7 @@ async def _enumerate(
     *,
     explicit_sitemaps: list[str] | None = None,
     write_estimate: bool = True,
+    publish_categories: bool = True,
 ) -> dict:
     from app.modules.scraper.scraper_pool import ScraperPool
 
@@ -180,6 +214,7 @@ async def _enumerate(
             ScraperPool(),
             max_urls=max_urls,
             explicit_sitemaps=explicit_sitemaps,
+            publish_categories=publish_categories,
         )
         # Coverage denominator (roadmap item 2): persist the product-like URL
         # count as a LOWER-BOUND catalog estimate — raised, never shrunk, so
@@ -187,7 +222,11 @@ async def _enumerate(
         # this: the LAST shard aggregates the run total instead.
         if write_estimate:
             await _write_estimate(marketplace, result.product_like)
-        return asdict(result)
+        summary = asdict(result)
+        # The URL list itself is for the fan-out finisher, not for the log.
+        summary["category_like"] = len(summary.pop("category_urls", []))
+        summary["_category_urls"] = result.category_urls
+        return summary
     finally:
         await engine.dispose()
 
@@ -214,6 +253,7 @@ def sitemap_enumerate_marketplace(
             return {"status": "unknown_marketplace", "code": marketplace_code}
         if len(shards) < 2:
             summary = _run_async(_enumerate(marketplace_code, max_urls))
+            summary.pop("_category_urls", None)
             slog.info("sitemap_enumerate_task_done", **summary)
             return summary
 
@@ -279,9 +319,12 @@ def sitemap_enumerate_shard(
                 max_urls,
                 explicit_sitemaps=shard_sitemaps,
                 write_estimate=False,
+                publish_categories=run_id is None,
             )
         )
+        shard_categories = summary.pop("_category_urls", [])
         if run_id is not None:
+            _stash_shard_categories(marketplace_code, run_id, shard_categories)
             total = _record_shard_done(
                 marketplace_code, run_id, shard_no, summary.get("product_like", 0)
             )
@@ -289,6 +332,15 @@ def sitemap_enumerate_shard(
                 marketplace = _run_async(_load_marketplace(marketplace_code))
                 if marketplace is not None:
                     _run_async(_write_estimate(marketplace, total))
+                    run_categories = _pop_run_categories(marketplace_code, run_id)
+                    if run_categories:
+                        from app.modules.discovery.sitemap_categories import (
+                            publish_category_urls,
+                        )
+
+                        summary["run_categories_added"] = _run_async(
+                            publish_category_urls(marketplace, run_categories)
+                        )
                 summary["run_total_product_like"] = total
         slog.info("sitemap_enumerate_shard_done", shard=shard_no, **summary)
         return summary

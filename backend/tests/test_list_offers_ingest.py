@@ -214,11 +214,159 @@ def test_shops_with_categories_guards_non_array_jsonb():
     from app.workers import harvest_tasks as ht
 
     db = MagicMock()
-    db.execute.return_value.all.return_value = [("shop_a",)]
+    # first execute: marketplace rows; second: mv_marketplace_stats pools
+    db.execute.return_value.all.side_effect = [[("shop_a", "mid-a")], [("mid-a", 4200)]]
     with _patch("app.database.sync_session_factory", return_value=db):
-        assert ht._shops_with_categories_sync() == ["shop_a"]
-    stmt = db.execute.call_args.args[0]
+        assert ht._shops_with_categories_and_pool_sync() == [("shop_a", 4200)]
+    stmt = db.execute.call_args_list[0].args[0]
     sql = str(stmt.compile(dialect=postgresql.dialect()))
     assert "jsonb_typeof(dim_marketplace.discovered_category_urls) = " in sql
     assert "CASE WHEN" in sql and "jsonb_array_length" in sql
     db.close.assert_called_once()
+
+
+# --- paginated harvest cursor (2026-09-19) -------------------------------
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.h: dict[str, dict] = {}
+
+    def hgetall(self, key):
+        return dict(self.h.get(key, {}))
+
+    def hset(self, key, mapping):
+        self.h.setdefault(key, {}).update({k: str(v) for k, v in mapping.items()})
+
+
+def test_pages_for_shop_walks_pool_once_per_pass():
+    from app.workers import harvest_tasks as ht
+
+    # pigu: 1,045,296 listings, 31 eligible shops, 30 offers/page ->
+    # 1,161 pages/day needed; picked 48*6/31 = 9.3 times/day -> 125/run.
+    assert ht.pages_for_shop(1_045_296, 31, 30.0) == 125
+    # tiny shop clamps to the floor, unknown pool falls back to the default
+    assert ht.pages_for_shop(48, 31, 30.0) == ht.HARVEST_PAGES_MIN
+    assert ht.pages_for_shop(None, 31, 30.0) == ht.HARVEST_PAGES_PER_SHOP
+    # a better measured yield needs fewer pages
+    assert ht.pages_for_shop(1_045_296, 31, 60.0) < ht.pages_for_shop(1_045_296, 31, 30.0)
+
+
+def test_harvest_walks_pagination_and_persists_cursor(monkeypatch):
+    """Two categories; category A has 3 pages, B has 1. A run of limit=3
+    fetches A1, A2, A3 and leaves the cursor on B; the next run resumes at B."""
+    import types
+
+    from app.workers import harvest_tasks as ht
+
+    pages = {
+        "https://s.example/a": ('<a rel="next" href="/a?page=2">n</a>', 3),
+        "https://s.example/a?page=2": ('<a rel="next" href="/a?page=3">n</a>', 3),
+        "https://s.example/a?page=3": ("<p>last</p>", 2),
+        "https://s.example/b": ("<p>only</p>", 4),
+    }
+    fetched: list[str] = []
+
+    class _Pool:
+        async def fetch_listing_html(self, url, **_kw):
+            fetched.append(url)
+            html, _n = pages[url]
+            return types.SimpleNamespace(html=html, deadline_skipped=False)
+
+    fake_core = types.SimpleNamespace(
+        extract_list_offers=lambda html, url: [{"url": f"{url}#{i}", "price": 1.0} for i in range(pages[url][1])]
+    )
+    monkeypatch.setitem(__import__("sys").modules, "imperecta_core", fake_core)
+    monkeypatch.setattr("app.modules.scraper.scraper_pool.ScraperPool", _Pool)
+    redis = _FakeRedis()
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    monkeypatch.setattr(
+        ht, "_ingest_offers_sync", lambda offers, mid: {"matched": len(offers), "saved": len(offers)}
+    )
+    mp = SimpleNamespace(id="mid", base_url="https://s.example", domain="s.example",
+                         requires_js=False, scrape_tier=1, rate_limit_delay=None,
+                         access_mode="direct",
+                         discovered_category_urls=["https://s.example/a", "https://s.example/b"])
+
+    class _Res:
+        def scalar_one_or_none(self):
+            return mp
+
+    class _Db:
+        async def execute(self, _stmt):
+            return _Res()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+    class _Engine:
+        async def dispose(self):
+            return None
+
+    monkeypatch.setattr(ht, "_make_session_factory", lambda: (_Engine(), lambda: _Db()))
+
+    out = ht._run_async(ht._harvest("shop", 3))
+    assert fetched == [
+        "https://s.example/a",
+        "https://s.example/a?page=2",
+        "https://s.example/a?page=3",
+    ]
+    assert out["pages_fetched"] == 3 and out["matched"] == 8
+    assert out["categories_done"] == 1 and out["cursor_category"] == 1
+    assert 30 > out["yield_ema"] > 2  # EMA moved from the 30 prior toward ~3
+
+    out2 = ht._run_async(ht._harvest("shop", 3))
+    # resumed at B, then wrapped into pass 1 and re-fetched A1, A2
+    assert fetched[3:] == [
+        "https://s.example/b",
+        "https://s.example/a",
+        "https://s.example/a?page=2",
+    ]
+    assert out2["pass_no"] == 1
+
+
+def test_harvest_budget_skip_keeps_cursor(monkeypatch):
+    import types
+
+    from app.workers import harvest_tasks as ht
+
+    class _Pool:
+        async def fetch_listing_html(self, url, **_kw):
+            return types.SimpleNamespace(html=None, deadline_skipped=True)
+
+    monkeypatch.setitem(__import__("sys").modules, "imperecta_core", types.SimpleNamespace(extract_list_offers=lambda h, u: []))
+    monkeypatch.setattr("app.modules.scraper.scraper_pool.ScraperPool", _Pool)
+    redis = _FakeRedis()
+    redis.hset("harvest:cursor:shop", {"cat_idx": 1, "next_url": "https://s.example/b?page=4", "page": 3, "pass_no": 0, "yield_ema": 22.0})
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    mp = SimpleNamespace(id="mid", base_url="https://s.example", domain="s.example",
+                         requires_js=False, scrape_tier=1, rate_limit_delay=None,
+                         access_mode="proxy_render",
+                         discovered_category_urls=["https://s.example/a", "https://s.example/b"])
+
+    class _Res:
+        def scalar_one_or_none(self):
+            return mp
+
+    class _Db:
+        async def execute(self, _stmt):
+            return _Res()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+    class _Engine:
+        async def dispose(self):
+            return None
+
+    monkeypatch.setattr(ht, "_make_session_factory", lambda: (_Engine(), lambda: _Db()))
+    out = ht._run_async(ht._harvest("shop", 10))
+    assert out["status"] == "budget_exhausted" and out["pages_fetched"] == 0
+    saved = redis.hgetall("harvest:cursor:shop")
+    assert (saved["cat_idx"], saved["next_url"], saved["page"]) == ("1", "https://s.example/b?page=4", "3")

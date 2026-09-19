@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 # Per-backend fetch: retries (timeouts / transient failures) before trying next backend.
 FETCH_ATTEMPTS_PER_LAYER = 3
+# The paid backend bills every attempt, failed ones included (Decodo
+# dashboard 2026-09-19: 681 failed of 9,879 billed), so it gets exactly one
+# try per fetch — the listing simply comes around again on its next tick.
+PAID_BACKEND_ATTEMPTS = 1
 RETRY_BACKOFF_SEC = 0.45
 # Cap raw HTML attached to PoolScrapeResult when proxy provider is off (debug only).
 _MAX_DEBUG_RAW_HTML_CHARS = 200_000
@@ -818,7 +822,12 @@ class ScraperPool:
     ) -> tuple[str | None, str | None]:
         """Try backend up to FETCH_ATTEMPTS_PER_LAYER times; return (html, last_error_code)."""
         last_code: str | None = None
-        for attempt in range(FETCH_ATTEMPTS_PER_LAYER):
+        attempts = (
+            PAID_BACKEND_ATTEMPTS
+            if backend_id == BackendId.PROXY_PROVIDER
+            else FETCH_ATTEMPTS_PER_LAYER
+        )
+        for attempt in range(attempts):
             html, err = await self._fetch_by_backend_once(
                 backend_id,
                 url,
@@ -833,7 +842,7 @@ class ScraperPool:
                 break
             if last_code in PROXY_PROVIDER_SKIP_ERRORS:
                 break
-            if attempt < FETCH_ATTEMPTS_PER_LAYER - 1:
+            if attempt < attempts - 1:
                 await asyncio.sleep(RETRY_BACKOFF_SEC * (attempt + 1))
         mapped = self._map_layer_error(last_code, backend_id)
         if last_code in PROXY_PROVIDER_SKIP_ERRORS:

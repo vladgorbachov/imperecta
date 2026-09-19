@@ -1,6 +1,7 @@
 """Unit tests for ScraperPool fetch retries (no real HTTP)."""
 
 import pytest
+from unittest.mock import AsyncMock
 
 from app.modules.scraper.fetch_backends import BackendId
 from app.modules.scraper.scraper_pool import ScraperPool
@@ -26,6 +27,27 @@ async def test_fetch_layer_retries_until_html(monkeypatch):
     assert html is not None
     assert err is None
     assert attempts["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_paid_backend_gets_exactly_one_attempt(monkeypatch):
+    """Every proxy-provider attempt is billed, failed ones included."""
+    import app.modules.scraper.scraper_pool as sp
+
+    pool = ScraperPool()
+    attempts = {"count": 0}
+
+    async def always_timeout(backend_id: BackendId, url: str, **kwargs):
+        attempts["count"] += 1
+        return None, "timeout"
+
+    monkeypatch.setattr(pool, "_fetch_by_backend_once", always_timeout)
+    monkeypatch.setattr(sp.asyncio, "sleep", AsyncMock())
+    html, err = await pool._fetch_layer_with_retries(
+        BackendId.PROXY_PROVIDER, "https://shop.example/p/1"
+    )
+    assert html is None and err == "timeout:proxy_provider"
+    assert attempts["count"] == sp.PAID_BACKEND_ATTEMPTS == 1
 
 
 @pytest.mark.asyncio

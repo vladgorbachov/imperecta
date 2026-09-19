@@ -20,7 +20,7 @@ import asyncio
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -68,6 +68,10 @@ class EnumerateResult:
     duplicates: int
     duration_ms: int
     status: str  # "completed" | "empty_sitemap" | "error:<type>"
+    # Category/listing pages seen in the same files (harvest optimisation
+    # #3): the caller merges them into discovered_category_urls.
+    category_urls: list[str] = field(default_factory=list)
+    categories_added: int = 0
 
 
 def _existing_hashes_sync(hashes: list[str]) -> set[str]:
@@ -110,8 +114,14 @@ async def enumerate_sitemap_full(
     max_subfiles: int = ENUMERATE_MAX_SUBFILES,
     max_urls: int = ENUMERATE_MAX_URLS,
     explicit_sitemaps: list[str] | None = None,
+    publish_categories: bool = True,
 ) -> EnumerateResult:
-    """Walk the full sitemap tree and gate-insert product URL skeletons."""
+    """Walk the full sitemap tree and gate-insert product URL skeletons.
+
+    Category-like URLs met on the way are returned in the result and, when
+    `publish_categories` is set, merged into discovered_category_urls right
+    here (fan-out shards pass False and let the run finisher merge once).
+    """
     started = time.perf_counter()
     marketplace_id = marketplace.id
 
@@ -125,6 +135,8 @@ async def enumerate_sitemap_full(
             duplicates=counts.get("duplicates", 0),
             duration_ms=int((time.perf_counter() - started) * 1000),
             status=status,
+            category_urls=counts.get("category_urls", []),
+            categories_added=counts.get("categories_added", 0),
         )
 
     try:
@@ -209,6 +221,23 @@ async def enumerate_sitemap_full(
 
     await _flush()
 
+    from app.modules.discovery.sitemap_categories import (
+        collect_category_urls,
+        publish_category_urls,
+    )
+
+    category_urls = collect_category_urls(raw_entries, base_host)
+    categories_added = 0
+    if publish_categories and category_urls:
+        try:
+            categories_added = await publish_category_urls(marketplace, category_urls)
+        except Exception as exc:  # noqa: BLE001 - categories are a byproduct
+            logger.warning(
+                "sitemap_categories_publish_failed marketplace_id=%s err=%s",
+                marketplace_id,
+                exc,
+            )
+
     result = _result(
         "completed",
         raw_urls=len(raw_entries),
@@ -216,16 +245,21 @@ async def enumerate_sitemap_full(
         inserted=inserted,
         rejected=rejected,
         duplicates=duplicates,
+        category_urls=category_urls,
+        categories_added=categories_added,
     )
     logger.info(
         "sitemap_enumerate_done marketplace_id=%s raw=%d product_like=%d "
-        "inserted=%d duplicates=%d rejected=%d duration_ms=%d",
+        "inserted=%d duplicates=%d rejected=%d category_like=%d categories_added=%d "
+        "duration_ms=%d",
         marketplace_id,
         result.raw_urls,
         result.product_like,
         result.inserted,
         result.duplicates,
         result.rejected,
+        len(category_urls),
+        categories_added,
         result.duration_ms,
     )
     return result

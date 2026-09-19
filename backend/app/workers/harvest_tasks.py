@@ -29,11 +29,31 @@ DEFAULT_PAGES_PER_RUN = 20
 # Rotation state is operational, not business data — it lives in a Redis
 # ZSET (code -> last-run epoch), same store the worker log relay uses.
 HARVEST_ROTATION_KEY = "harvest:rotation"
-# Pool pricing ramp (2026-09-18): prices exist for ~2k of 2.17M listings —
-# 6 shops x 25 pages per */30 tick ~= 7.2k page fetches/day, within the
-# Decodo envelope (mixed direct/proxy; limiter caps the provider fleet-wide).
 HARVEST_SHOPS_PER_TICK = 6
+# Fallback page quota when a shop's pool size is unknown (mv not refreshed).
 HARVEST_PAGES_PER_SHOP = 25
+
+# Paginated category walk (2026-09-19). Before this the harvester refetched
+# page 1 of the first N category URLs every tick — the same ~25 cards per
+# category forever (pigu: 3 categories for 1.05M listings). Now a per-shop
+# cursor (category index, next-page URL) walks every page of every category
+# and wraps into a new pass; the quota per run is sized so each shop's whole
+# pool is walked once per HARVEST_TARGET_PASS_DAYS (= the proxy provider's
+# billing cycle, the period the paid budget is spread over).
+HARVEST_CURSOR_KEY = "harvest:cursor:"
+HARVEST_TARGET_PASS_DAYS = 30
+HARVEST_TICKS_PER_DAY = 48  # beat: */30
+# Offers per list page until a shop has its own measurement (EMA in the
+# cursor). 30 = the mid of the 20-30 observed in the 2026-09-18 datacomp/
+# techmart validation runs.
+HARVEST_OFFERS_PER_PAGE_INIT = 30.0
+HARVEST_PAGES_MIN = 5
+HARVEST_PAGES_MAX = 300
+# Loop guard, not a tuning knob: a category whose pagination never ends
+# (self-linking "next") is abandoned after this many pages; at 30 offers a
+# page that is 15k products — larger real categories resume on the next
+# pass because the cursor moves on to the following category.
+HARVEST_MAX_PAGES_PER_CATEGORY = 500
 
 
 def _run_async(coro):
@@ -78,6 +98,66 @@ def _ingest_offers_sync(offers: list[dict[str, Any]], marketplace_id) -> dict[st
         db.close()
 
 
+def _cursor_key(marketplace_code: str) -> str:
+    return f"{HARVEST_CURSOR_KEY}{marketplace_code}"
+
+
+def load_cursor(client, marketplace_code: str) -> dict:
+    raw = client.hgetall(_cursor_key(marketplace_code)) or {}
+
+    def _s(v):
+        return v.decode() if isinstance(v, bytes) else v
+
+    raw = {_s(k): _s(v) for k, v in raw.items()}
+    return {
+        "cat_idx": int(raw.get("cat_idx") or 0),
+        "next_url": raw.get("next_url") or None,
+        "page": int(raw.get("page") or 0),
+        "pass_no": int(raw.get("pass_no") or 0),
+        "yield_ema": float(raw.get("yield_ema") or HARVEST_OFFERS_PER_PAGE_INIT),
+    }
+
+
+def save_cursor(client, marketplace_code: str, cursor: dict) -> None:
+    client.hset(
+        _cursor_key(marketplace_code),
+        mapping={
+            "cat_idx": cursor["cat_idx"],
+            "next_url": cursor["next_url"] or "",
+            "page": cursor["page"],
+            "pass_no": cursor["pass_no"],
+            "yield_ema": round(cursor["yield_ema"], 2),
+        },
+    )
+
+
+def next_page_url(html: str, current_url: str) -> str | None:
+    from bs4 import BeautifulSoup
+
+    from app.modules.scraper.extractors import detect_next_page
+
+    try:
+        return detect_next_page(BeautifulSoup(html, "html.parser"), current_url)
+    except Exception:  # noqa: BLE001 - pagination is best-effort
+        return None
+
+
+def pages_for_shop(pool_size: int | None, eligible_shops: int, yield_ema: float) -> int:
+    """Per-run page quota so the shop's pool is walked once per target pass.
+
+    pages/day = pool / offers_per_page / HARVEST_TARGET_PASS_DAYS; a shop is
+    picked every eligible/HARVEST_SHOPS_PER_TICK ticks, so each pick must
+    cover that many ticks' worth. Clamped to [HARVEST_PAGES_MIN, _MAX].
+    """
+    if not pool_size or pool_size <= 0:
+        return HARVEST_PAGES_PER_SHOP
+    per_page = max(yield_ema, 1.0)
+    picks_per_day = HARVEST_TICKS_PER_DAY * HARVEST_SHOPS_PER_TICK / max(eligible_shops, 1)
+    pages_per_day = pool_size / per_page / HARVEST_TARGET_PASS_DAYS
+    quota = pages_per_day / max(picks_per_day, 1e-9)
+    return int(min(HARVEST_PAGES_MAX, max(HARVEST_PAGES_MIN, round(quota))))
+
+
 async def _harvest(marketplace_code: str, limit: int) -> dict:
     try:
         import imperecta_core
@@ -85,6 +165,8 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
         return {"status": "rust_core_unavailable", "code": marketplace_code}
 
     from app.modules.discovery import cursor_store
+    from app.modules.discovery.fetch_adapter import fetch_params_from_marketplace
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
     from app.modules.scraper.scraper_pool import ScraperPool
 
     engine, factory = _make_session_factory()
@@ -102,6 +184,10 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
             category_urls = list(
                 cursor_store.get_discovered_category_urls(marketplace) or []
             )
+            # Registers the shop's access_mode + politeness interval for its
+            # host: without this the proxy-mode shops were harvested through
+            # the datacenter path (2026-09-19 audit).
+            requires_js, scrape_tier = fetch_params_from_marketplace(marketplace)
     finally:
         await engine.dispose()
 
@@ -112,6 +198,8 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
             "hint": "run discovery first or pass URLs explicitly",
         }
 
+    redis = _get_redis()
+    cursor = load_cursor(redis, marketplace_code)
     pool = ScraperPool()
     pages = 0
     totals = {
@@ -122,26 +210,72 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
         "suspicious": 0,
         "onboarded": 0,
         "empty_pages": 0,
+        "categories_done": 0,
     }
     marketplace_id = marketplace.id
-    for url in category_urls[:limit]:
-        fetch = await pool.fetch_listing_html(url)
+    budget_stopped = False
+    visited: set[str] = set()
+
+    def _advance_category() -> None:
+        cursor["cat_idx"] += 1
+        cursor["next_url"] = None
+        cursor["page"] = 0
+        totals["categories_done"] += 1
+        visited.clear()
+
+    while pages < limit:
+        if cursor["cat_idx"] >= len(category_urls):
+            cursor["cat_idx"] = 0
+            cursor["next_url"] = None
+            cursor["page"] = 0
+            cursor["pass_no"] += 1
+            visited.clear()
+        url = cursor["next_url"] or category_urls[cursor["cat_idx"]]
+        fetch = await pool.fetch_listing_html(
+            url, requires_js=requires_js, scrape_tier=scrape_tier
+        )
+        if fetch.deadline_skipped:
+            # Paid budget for today is spent: stop WITHOUT moving the cursor
+            # so the same page is the first one fetched next time.
+            budget_stopped = True
+            break
+        pages += 1
+        visited.add(url)
         if not fetch.html:
             totals["empty_pages"] += 1
+            _advance_category()
             continue
         offers = imperecta_core.extract_list_offers(fetch.html, url)
-        pages += 1
         if not offers:
             totals["empty_pages"] += 1
+            _advance_category()
             continue
+        cursor["yield_ema"] = 0.8 * cursor["yield_ema"] + 0.2 * len(offers)
         counters = await asyncio.to_thread(_ingest_offers_sync, offers, marketplace_id)
         for key in ("matched", "saved", "unknown", "unpriced", "suspicious", "onboarded"):
             totals[key] += counters.get(key, 0)
+        nxt = next_page_url(fetch.html, url)
+        if (
+            nxt
+            and nxt != url
+            and nxt not in visited
+            and cursor["page"] + 1 < HARVEST_MAX_PAGES_PER_CATEGORY
+        ):
+            cursor["next_url"] = nxt
+            cursor["page"] += 1
+        else:
+            _advance_category()
 
+    save_cursor(redis, marketplace_code, cursor)
     return {
-        "status": "completed",
+        "status": "budget_exhausted" if budget_stopped and pages == 0 else "completed",
         "code": marketplace_code,
         "pages_fetched": pages,
+        "budget_stopped": budget_stopped,
+        "cursor_category": cursor["cat_idx"],
+        "cursor_page": cursor["page"],
+        "pass_no": cursor["pass_no"],
+        "yield_ema": round(cursor["yield_ema"], 1),
         **totals,
     }
 
@@ -172,7 +306,16 @@ def harvest_list_pages(
 
 def _shops_with_categories_sync() -> list[str]:
     """Active marketplace codes that have discovered category pages."""
-    from sqlalchemy import case
+    return [code for code, _pool in _shops_with_categories_and_pool_sync()]
+
+
+def _shops_with_categories_and_pool_sync() -> list[tuple[str, int | None]]:
+    """(marketplace_code, active pool size) for shops with category pages.
+
+    Pool sizes come from mv_marketplace_stats (pg_cron, 10 min) — never a
+    live count over fact_listing.
+    """
+    from sqlalchemy import case, text
     from sqlalchemy import func as sa_func
 
     from app.database import sync_session_factory
@@ -189,11 +332,22 @@ def _shops_with_categories_sync() -> list[str]:
     db = sync_session_factory()
     try:
         rows = db.execute(
-            select(DimMarketplace.marketplace_code)
+            select(DimMarketplace.marketplace_code, DimMarketplace.id)
             .where(DimMarketplace.is_active)
             .where(safe_length > 0)
         ).all()
-        return [r[0] for r in rows]
+        codes = [(r[0], r[1]) for r in rows]
+        pools: dict = {}
+        if codes:
+            stat_rows = db.execute(
+                text(
+                    "SELECT marketplace_id, listing_count FROM mv_marketplace_stats "
+                    "WHERE marketplace_id = ANY(:ids)"
+                ),
+                {"ids": [mid for _, mid in codes]},
+            ).all()
+            pools = {r[0]: int(r[1]) for r in stat_rows}
+        return [(code, pools.get(mid)) for code, mid in codes]
     finally:
         db.close()
 
@@ -219,16 +373,23 @@ def _pick_rotation_shops(codes: list[str], count: int) -> list[str]:
 def harvest_tick(self) -> dict:
     """Dispatch list-page harvesting for the stalest shops (beat-driven)."""
     try:
-        codes = _shops_with_categories_sync()
+        from app.modules.scraper.pipeline.worker_log_relay import _get_redis
+
+        shops = _shops_with_categories_and_pool_sync()
+        pool_by_code = dict(shops)
+        codes = [code for code, _ in shops]
         picked = _pick_rotation_shops(codes, HARVEST_SHOPS_PER_TICK)
+        redis = _get_redis()
+        quotas: dict[str, int] = {}
         for code in picked:
-            harvest_list_pages.apply_async(
-                [code], kwargs={"limit": HARVEST_PAGES_PER_SHOP}
-            )
+            yield_ema = load_cursor(redis, code)["yield_ema"]
+            quotas[code] = pages_for_shop(pool_by_code.get(code), len(codes), yield_ema)
+            harvest_list_pages.apply_async([code], kwargs={"limit": quotas[code]})
         summary = {
             "status": "completed",
             "eligible": len(codes),
             "dispatched": picked,
+            "quotas": quotas,
         }
         slog.info("harvest_tick_done", **summary)
         return summary
