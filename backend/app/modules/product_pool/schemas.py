@@ -38,6 +38,9 @@ class PoolProductItem(BaseModel):
     title: str | None = None
     image_url: str | None = None
     url: str | None = None
+    # Source attribution (WP2, counsel §3.9): origin listing + its host.
+    external_url: str | None = None
+    source_domain: str | None = None
     marketplace_id: UUID | None = None
     marketplace_name: str | None = None
     marketplace_domain: str | None = None

@@ -1635,3 +1635,21 @@ flowchart TD
 - Удалены `scripts/fix_marketplace_countries.py` (разовый, исполнен) и `scripts/scraper_output_harness.py` с
   `harness_urls.txt` (без ссылок из тестов/доков).
 - Новый Celery-таск `purge_marketplace_state(marketplace_codes)` — Redis-часть удаления источника.
+
+## 14. Legal clean-up 2026-09-19 — WP2 (доступ к пулу)
+
+- `product_pool/api.py`: все роуты `CurrentUser` + зависимость `PoolBudget` (`common/rate_limit.py`:
+  фиксированное часовое окно на Redis, `pool_rate_limit_per_hour`=600, 429 + `Retry-After`; Redis недоступен →
+  пропуск с одним предупреждением). `limit ≤ pool_page_size_max` (50), `offset ≤ 450` (10 страниц).
+  `GET /pool/products/export.csv` и `iter_export_rows` удалены. `news`, `visualisation_calc` — снова `CurrentUser`;
+  `common/public_cache.py` и `PublicETagMiddleware` удалены.
+- Безфильтровый просмотр (`list_products` без search/marketplace/category/country) → `_browse_page`: узкий
+  индексный скан `(id, marketplace_id)` первых `pool_browse_scan_cap` (50 000) строк порядка сортировки,
+  `cap_per_source` (≤ `pool_max_per_source_unfiltered`=20 на магазин, ≤ 500 строк), набор общий для всех и
+  кешируется в Redis `pool:browse:{sort}` на `pool_browse_cache_sec` (60 с); страница — срез, гидрация по PK,
+  только offset-пагинация. Фильтрованные запросы — прежний путь.
+- Каждый элемент пула несёт `external_url` и `source_domain` (атрибуция источника, §3.9); `url`/`marketplace_domain`
+  остаются до WP8.
+- data-ops (`data_ops/src/access.rs`, `pool_products.rs`): JWT на всех `/v1/*`, GCRA-бюджет на пользователя,
+  те же лимиты через env `POOL_*`, тот же `cap_per_source` (parity-векторы в тестах обоих языков),
+  `Cache-Control: private, no-store` на всём.

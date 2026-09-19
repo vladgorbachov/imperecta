@@ -26,6 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
 from app.models.facts import FactListing, FactPrice
 from app.modules.currency import (
@@ -159,6 +160,63 @@ def _pool_product_visibility_filter():
         FactListing.page_role == "product",
         and_(FactListing.page_role.is_(None), FactListing.last_price.isnot(None)),
     )
+
+
+_BROWSE_SET_KEY = "pool:browse:"
+_browse_redis: Any | None = None
+
+
+def _get_browse_redis() -> Any:
+    global _browse_redis
+    if _browse_redis is None:
+        import redis.asyncio as redis_async
+
+        _browse_redis = redis_async.from_url(Settings().redis_url, decode_responses=True)
+    return _browse_redis
+
+
+async def _browse_cache_get(key: str) -> list[UUID] | None:
+    try:
+        raw = await _get_browse_redis().get(key)
+    except Exception:  # noqa: BLE001 - cache miss on any Redis trouble
+        return None
+    if not raw:
+        return None
+    try:
+        return [UUID(v) for v in json.loads(raw)]
+    except (ValueError, TypeError):
+        return None
+
+
+async def _browse_cache_put(key: str, ids: list[UUID], ttl_sec: int) -> None:
+    try:
+        await _get_browse_redis().set(key, json.dumps([str(i) for i in ids]), ex=ttl_sec)
+    except Exception:  # noqa: BLE001 - the next request recomputes
+        return
+
+
+def cap_per_source(
+    rows: list[tuple[Any, Any]], per_source: int, depth: int
+) -> list[Any]:
+    """Keep the ordered prefix of `rows` = (listing_id, marketplace_id) with
+    at most `per_source` rows per marketplace, `depth` rows in total.
+
+    One pass, O(n) with a per-marketplace counter — the re-utilisation cap
+    of counsel §3.9 (Innoweb / CV-Online): unfiltered browsing never shows a
+    substantial part of any single source. Pure so both the Python and the
+    Rust read path (data_ops::pool_products) share the test vectors.
+    """
+    seen: dict[Any, int] = {}
+    kept: list[Any] = []
+    for listing_id, marketplace_id in rows:
+        n = seen.get(marketplace_id, 0)
+        if n >= per_source:
+            continue
+        seen[marketplace_id] = n + 1
+        kept.append(listing_id)
+        if len(kept) >= depth:
+            break
+    return kept
 
 
 class ProductPoolService:
@@ -312,6 +370,21 @@ class ProductPoolService:
                 }
             search_capped = ids_capped or listings_capped
 
+        unfiltered = (
+            search_listing_ids is None
+            and marketplace_id is None
+            and not category
+            and not country_code
+        )
+        if unfiltered:
+            return await self._browse_page(
+                sort=sort,
+                limit=limit,
+                offset=offset,
+                display_currency=display_currency,
+                skip_total=skip_total,
+            )
+
         stmt = self._base_listing_stmt()
         stmt = self._apply_filters(
             stmt,
@@ -401,6 +474,66 @@ class ProductPoolService:
             "prev_cursor": prev_cursor,
         }
         return items, (int(total) if total is not None else None), page_meta
+
+    async def _browse_page(
+        self,
+        *,
+        sort: str,
+        limit: int,
+        offset: int,
+        display_currency: str,
+        skip_total: bool = False,
+    ) -> tuple[list[dict[str, Any]], int | None, dict[str, Any]]:
+        """Unfiltered browsing (WP2): a shared, per-sort browse set instead of
+        the raw pool order.
+
+        The set = the first `pool_browse_scan_cap` rows of the sort order
+        (narrow, index-driven scan of ids only), capped to
+        `pool_max_per_source_unfiltered` per marketplace and
+        `page_size_max * page_depth_max` rows in total; it is identical for
+        every viewer, so it is computed once per sort and shared through
+        Redis for `pool_browse_cache_sec`. Pages are slices of it, hydrated
+        by primary key — offset pagination only (no cursors past the depth).
+        """
+        settings = Settings()
+        depth = settings.pool_page_size_max * settings.pool_page_depth_max
+        browse_ids = await self._browse_set(sort, settings=settings, depth=depth)
+        page_ids = browse_ids[offset : offset + limit]
+        items: list[dict[str, Any]] = []
+        if page_ids:
+            stmt = self._base_listing_stmt().where(FactListing.id.in_(page_ids))
+            rows = {r["id"]: dict(r) for r in (await self.db.execute(stmt)).mappings()}
+            items = [_row_to_pool_item(rows[i]) for i in page_ids if i in rows]
+            recent = await self._get_recent_prices_map([i["id"] for i in items])
+            for item in items:
+                item["recent_prices"] = recent.get(item["id"], [])
+            await self._apply_display_currency(items, display_currency)
+        return items, (None if skip_total else len(browse_ids)), {
+            "total_is_estimate": False,
+            "next_cursor": None,
+            "prev_cursor": None,
+        }
+
+    async def _browse_set(self, sort: str, *, settings: Settings, depth: int) -> list[UUID]:
+        cache_key = f"{_BROWSE_SET_KEY}{sort}"
+        cached = await _browse_cache_get(cache_key)
+        if cached is not None:
+            return cached
+        narrow = (
+            select(FactListing.id, FactListing.marketplace_id)
+            .select_from(FactListing)
+            .where(FactListing.is_active)
+            .where(_pool_product_visibility_filter())
+        )
+        if sort in (_SORT_NAME_ASC, _SORT_NAME_DESC):
+            narrow = narrow.join(DimProduct, FactListing.product_id == DimProduct.id)
+        narrow = self._apply_sort(narrow, sort).limit(settings.pool_browse_scan_cap)
+        scanned = (await self.db.execute(narrow)).all()
+        browse_ids = cap_per_source(
+            [(r[0], r[1]) for r in scanned], settings.pool_max_per_source_unfiltered, depth
+        )
+        await _browse_cache_put(cache_key, browse_ids, settings.pool_browse_cache_sec)
+        return browse_ids
 
     async def _search_product_ids(self, search: str) -> tuple[list, bool]:
         """Matching dim_product ids via the trgm index, capped (P12)."""
@@ -564,41 +697,6 @@ class ProductPoolService:
             "points": points if len(points) >= 2 else [],
             "data_ready": len(points) >= 2,
         }
-
-    async def iter_export_rows(
-        self,
-        *,
-        sort: str = "recent",
-        search: str | None = None,
-        marketplace_id: UUID | None = None,
-        category: str | None = None,
-        country_code: str | None = None,
-        batch_size: int = 500,
-    ):
-        """Yield the FULL filtered pool (no pagination) for CSV export."""
-        stmt = self._base_listing_stmt()
-        stmt = self._apply_filters(
-            stmt,
-            search=search,
-            marketplace_id=marketplace_id,
-            category=category,
-            country_code=country_code,
-        )
-        stmt = self._apply_sort(stmt, sort)
-        offset = 0
-        while True:
-            page = (
-                (await self.db.execute(stmt.limit(batch_size).offset(offset)))
-                .mappings()
-                .all()
-            )
-            if not page:
-                return
-            for row in page:
-                yield _row_to_pool_item(dict(row))
-            if len(page) < batch_size:
-                return
-            offset += batch_size
 
     async def _apply_display_currency(
         self,
@@ -793,6 +891,10 @@ def _row_to_pool_item(row: dict[str, Any]) -> dict[str, Any]:
         "title": row.get("title"),
         "image_url": row.get("image_url"),
         "url": row.get("url"),
+        # Source attribution (counsel §3.9): the origin listing and its host
+        # on every card; `url`/`marketplace_domain` stay until WP8 retires them.
+        "external_url": row.get("url"),
+        "source_domain": row.get("marketplace_domain"),
         "marketplace_name": row.get("marketplace_name"),
         "marketplace_domain": row.get("marketplace_domain"),
         "marketplace_code": row.get("marketplace_code"),
