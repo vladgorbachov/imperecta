@@ -9,12 +9,17 @@
 - Зона `imperecta.com` в Cloudflare (Free), SSL Full (strict).
 - `api.imperecta.com` → CNAME `l5lctepr.up.railway.app` (Proxied) — FastAPI.
 - `data.imperecta.com` → CNAME `g4b7pa0t.up.railway.app` (Proxied) — data-ops.
-- Cache Rule `edge-cache api+data`: host ∈ {api, data} AND method = GET →
+- Cache Rule `edge-cache api+data`: `(http.host in {"api.imperecta.com"
+  "data.imperecta.com"}) and (http.request.method eq "GET") and (not
+  any(lower(http.request.headers.names[*])[*] == "authorization"))` →
   Eligible for cache, Edge TTL = «respect origin cache-control, bypass если
-  нет», serve-stale-while-revalidating включён.
+  нет», serve-stale-while-revalidating включён. Запросы с токеном идут
+  мимо кеша (DYNAMIC) — персонализация суперюзера сохраняется.
+- Zone Browser Cache TTL = Respect Existing Headers (дефолт 4 часа
+  перебивал бы наш `max-age=60`).
 - Origin решает, что кешируется: только **анонимные** ответы получают
-  `Cache-Control: public, s-maxage=300, stale-while-revalidate=600` + weak
-  `ETag`; запрос с `Authorization` → `private, no-store` (персонализация
+  `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600`
+  + weak `ETag`; запрос с `Authorization` → `private, no-store` (персонализация
   суперюзера не попадает в общий кеш). Плохой токен на публичном роуте
   деградирует до анонима, а не 401.
   - FastAPI: `app/common/public_cache.py` (`OptionalUser`, `PublicCache`,
@@ -73,5 +78,6 @@
 curl -sI https://api.imperecta.com/api/pool/stats | grep -iE "cf-cache-status|cache-control|etag"
 ```
 
-Второй запрос должен дать `cf-cache-status: HIT`; с `Authorization` —
+Второй запрос должен дать `cf-cache-status: HIT` (проверено 2026-09-19:
+0.33 с через edge против 0.9-1.0 с в origin); с `Authorization` —
 `private, no-store` и `DYNAMIC`.
