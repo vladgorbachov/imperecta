@@ -89,19 +89,21 @@ def select_sitemap_subfiles(
     urls: list[str],
     canonical: str | None = None,
     country_hint: str | None = None,
-    fallback_to_first: bool = False,
+    whole_tree: bool = False,
 ) -> SubfileSelection:
-    """Drop media files; on a multi-locale tree keep one locale's files.
+    """Drop media files; keep one storefront locale's files.
 
-    The locale is `canonical` (the pool's prefix) when present in the tree,
-    else the country's language, else — only with `fallback_to_first` — the
-    first locale in index order. A shard seen in isolation passes False and
-    keeps every locale rather than electing its own.
+    `whole_tree` (the caller sees the shop's full index): on a tree with 2+
+    locales the winner is `canonical` when the index has it, else the
+    country's language, else the first locale in index order; a
+    single-locale index is never touched. A shard (3 files in isolation):
+    `canonical` is authoritative — files under any other locale are
+    dropped, a shard entirely under another locale is skipped whole — and
+    without a canonical nothing is dropped, so a shard never elects a
+    locale from its own files.
     """
     if _hp._use_rust():
-        raw = _hp._rust_core.select_sitemap_subfiles(
-            urls, canonical, country_hint, fallback_to_first
-        )
+        raw = _hp._rust_core.select_sitemap_subfiles(urls, canonical, country_hint, whole_tree)
         return SubfileSelection(
             kept=list(raw["kept"]),
             skipped_media=int(raw["skipped_media"]),
@@ -119,16 +121,19 @@ def select_sitemap_subfiles(
         if locale is not None and locale not in locales:
             locales.append(locale)
         candidates.append((url, locale))
+    canonical_l = (canonical or "").lower() or None
     chosen: str | None = None
-    if len(locales) >= 2:
-        canonical_l = canonical.lower() if canonical else None
-        hint_l = country_hint.lower() if country_hint else None
-        if canonical_l in locales:
-            chosen = canonical_l
-        elif hint_l in locales:
-            chosen = hint_l
-        elif fallback_to_first:
-            chosen = locales[0]
+    if whole_tree:
+        if len(locales) >= 2:
+            hint_l = (country_hint or "").lower() or None
+            if canonical_l in locales:
+                chosen = canonical_l
+            elif hint_l in locales:
+                chosen = hint_l
+            else:
+                chosen = locales[0]
+    elif canonical_l is not None and any(l != canonical_l for l in locales):
+        chosen = canonical_l
     kept: list[str] = []
     skipped_locale = 0
     for url, locale in candidates:
@@ -170,9 +175,11 @@ def country_language_hint(country_code: str | None) -> str | None:
     return COUNTRY_LANGUAGE.get((country_code or "").upper()) or None
 
 
-def canonical_locale_sync(marketplace_id, country_code: str | None = None) -> str | None:
-    """The locale prefix the shop's pool is written under (sampled), else
-    the country's language when the pool is still empty, else None."""
+def canonical_locale_sync(marketplace_id) -> str | None:
+    """The locale prefix the shop's own pool is written under (sampled),
+    None when the pool is empty or not locale-prefixed. Only an OBSERVED
+    prefix becomes authoritative for shards; the country's language is a
+    whole-tree tie-breaker the callers pass separately."""
     from sqlalchemy import select
 
     from app.database import sync_session_factory
@@ -190,10 +197,7 @@ def canonical_locale_sync(marketplace_id, country_code: str | None = None) -> st
         ).all()
     finally:
         db.close()
-    sample = [row[0] for row in rows if row[0]]
-    if sample:
-        return dominant_locale(sample)
-    return country_language_hint(country_code)
+    return dominant_locale([row[0] for row in rows if row[0]])
 
 
 __all__ = [

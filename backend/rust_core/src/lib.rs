@@ -254,15 +254,15 @@ fn is_media_sitemap(url: &str) -> bool {
 /// sitemap_locale.select_sitemap_subfiles twin:
 /// {"kept": [...], "skipped_media": n, "skipped_locale": n, "locale": str|None}.
 #[pyfunction]
-#[pyo3(signature = (urls, canonical=None, country_hint=None, fallback_to_first=false))]
+#[pyo3(signature = (urls, canonical=None, country_hint=None, whole_tree=false))]
 fn select_sitemap_subfiles<'py>(
     py: Python<'py>,
     urls: Vec<String>,
     canonical: Option<&str>,
     country_hint: Option<&str>,
-    fallback_to_first: bool,
+    whole_tree: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let sel = sitemap::select_sitemap_subfiles(&urls, canonical, country_hint, fallback_to_first);
+    let sel = sitemap::select_sitemap_subfiles(&urls, canonical, country_hint, whole_tree);
     let out = PyDict::new(py);
     out.set_item("kept", PyList::new(py, &sel.kept)?)?;
     out.set_item("skipped_media", sel.skipped_media)?;

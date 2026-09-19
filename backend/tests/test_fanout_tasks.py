@@ -69,7 +69,7 @@ def test_enumerate_coordinator_flat_sitemap_runs_inline(monkeypatch) -> None:
     assert out["status"] == "completed"
     assert inline_calls and inline_calls[0][0] == "shop_flat"
     # a whole-tree walk may elect the locale from the index itself
-    assert inline_calls[0][2]["locale_fallback_to_first"] is True
+    assert inline_calls[0][2]["whole_tree"] is True
 
 
 def test_resolve_shards_drops_media_and_other_locales(monkeypatch) -> None:
@@ -109,8 +109,7 @@ def test_resolve_shards_drops_media_and_other_locales(monkeypatch) -> None:
 
     monkeypatch.setattr(ScraperPool, "resolve_sitemap_shards", fake_resolve_shards)
     monkeypatch.setattr(
-        "app.modules.discovery.sitemap_locale.canonical_locale_sync",
-        lambda _id, _cc=None: "lt",
+        "app.modules.discovery.sitemap_locale.canonical_locale_sync", lambda _id: "lt"
     )
     marketplace, shards, locale = asyncio.run(ob._resolve_shards("pigu_lt"))
     assert marketplace is mp
@@ -133,6 +132,20 @@ def test_shard_task_passes_locale_through(monkeypatch) -> None:
     assert out["status"] == "completed"
     assert calls[0]["canonical_locale"] == "lt"
     assert calls[0]["explicit_sitemaps"] == ["https://s.example/a.xml"]
+
+
+def test_shard_task_lifts_a_stale_per_shard_floor(monkeypatch) -> None:
+    """Messages queued with the old 10k value walk their subfiles whole."""
+    seen: list = []
+
+    async def fake_enumerate(code, max_urls, **kw):
+        seen.append(max_urls)
+        return {"status": "completed", "product_like": 1, "_category_urls": []}
+
+    monkeypatch.setattr(ob, "_enumerate", fake_enumerate)
+    ob.sitemap_enumerate_shard.run("shop_x", ["https://s.example/a.xml"], max_urls=10_000)
+    ob.sitemap_enumerate_shard.run("shop_x", ["https://s.example/a.xml"], max_urls=400_000)
+    assert seen == [ob.ENUMERATE_SHARD_MAX_URLS, 400_000]
 
 
 def test_record_shard_done_aggregates_on_last(monkeypatch) -> None:

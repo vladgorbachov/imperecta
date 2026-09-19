@@ -315,6 +315,64 @@ class TestMultiLocaleTree:
         assert result.locale == "lt"
         assert result.inserted == 2  # the stub pool still yields the lt files
 
+    async def test_ru_only_shard_is_skipped_whole_without_a_fetch(self):
+        """A shard entirely under another locale never reaches the walker
+        (the 11 ru shards of 2026-09-19 were fetched and then dropped URL by
+        URL — 114,405 of them)."""
+        fetched: list[str] = []
+        pool = SimpleNamespace()
+
+        async def walk(base_url, *, explicit_sitemaps=None, subfile_selector=None, **_kw):
+            files = list(explicit_sitemaps or [])
+            if subfile_selector is not None:
+                files = list(subfile_selector(files))
+            for f in files:
+                fetched.append(f)
+                yield f, {"sitemaps": [], "urls": [], "url_entries": []}
+
+        pool.walk_sitemaps = walk
+        with patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
+                   return_value="lt"):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(country_code="LT"), pool,
+                explicit_sitemaps=[self.RU, "https://shop.example/ru/sitemap-products-2.xml", self.RU_IMG],
+            )
+        assert fetched == []
+        assert result.status == "empty_sitemap"
+        assert result.locale == "lt"
+        assert result.subfiles_skipped_locale == 2 and result.subfiles_skipped_media == 1
+
+    async def test_run_floor_processes_the_paid_document_before_stopping(self):
+        """max_urls is a floor for the run: the document that crossed it is
+        written in full, the walk stops before the next one."""
+        docs = {
+            "https://shop.example/sitemap-products-1.xml": [f"https://shop.example/p/a-{i:06d}" for i in range(6)],
+            "https://shop.example/sitemap-products-2.xml": [f"https://shop.example/p/b-{i:06d}" for i in range(6)],
+            "https://shop.example/sitemap-products-3.xml": [f"https://shop.example/p/c-{i:06d}" for i in range(6)],
+        }
+        pool = SimpleNamespace()
+        walked: list[str] = []
+
+        async def walk(base_url, *, explicit_sitemaps=None, subfile_selector=None, **_kw):
+            for f, locs in docs.items():
+                walked.append(f)
+                yield f, {"sitemaps": [], "urls": locs,
+                          "url_entries": [{"loc": u, "alternates": {}, "lastmod": None} for u in locs]}
+
+        pool.walk_sitemaps = walk
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+            patch("app.modules.discovery.sitemap_locale.canonical_locale_sync", return_value=None),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(), pool, max_urls=8
+            )
+        # doc1: 6 (<8, go on); doc2: raw 12 > 8 and 12 >= 8 -> processed, then stop
+        assert result.inserted == 12
+        assert walked == list(docs)[:2]
+
     async def test_mixed_locale_urls_inside_one_file_are_filtered(self):
         urls = [
             ("https://shop.example/lt/p/widget-123456", PRODUCT_SHARD),

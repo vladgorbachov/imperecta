@@ -214,7 +214,7 @@ async def enumerate_sitemap_full(
     explicit_sitemaps: list[str] | None = None,
     publish_categories: bool = True,
     canonical_locale: str | None = None,
-    locale_fallback_to_first: bool = False,
+    whole_tree: bool = False,
 ) -> EnumerateResult:
     """Walk the full sitemap tree and gate-insert product URL skeletons.
 
@@ -225,9 +225,10 @@ async def enumerate_sitemap_full(
     Multi-locale shops (pigu.lt: one tree per storefront language) are
     walked in ONE locale — `canonical_locale` when the caller resolved it,
     else the pool's own prefix — and image/video sitemaps are skipped
-    (sitemap_locale). `locale_fallback_to_first` lets a whole-tree walk
-    elect the first locale in index order for a shop with no pool yet; a
-    shard seen in isolation leaves it False.
+    (sitemap_locale). `whole_tree` says the walk starts from the shop's
+    full index and may elect the locale from it (country language, first
+    in index order) for a shop with no pool yet; a shard seen in isolation
+    leaves it False and treats the canonical as authoritative.
     """
     started = time.perf_counter()
     marketplace_id = marketplace.id
@@ -263,17 +264,13 @@ async def enumerate_sitemap_full(
 
     base_host = urlparse(marketplace.base_url).netloc.lower().removeprefix("www.")
     if canonical_locale is None:
-        canonical_locale = await asyncio.to_thread(
-            canonical_locale_sync, marketplace_id, marketplace.country_code
-        )
+        canonical_locale = await asyncio.to_thread(canonical_locale_sync, marketplace_id)
     country_hint = country_language_hint(marketplace.country_code)
     skipped_media = skipped_locale_files = urls_skipped_locale = 0
 
     def _select_subfiles(urls: list[str]) -> list[str]:
         nonlocal canonical_locale, skipped_media, skipped_locale_files
-        selection = select_sitemap_subfiles(
-            urls, canonical_locale, country_hint, locale_fallback_to_first
-        )
+        selection = select_sitemap_subfiles(urls, canonical_locale, country_hint, whole_tree)
         skipped_media += selection.skipped_media
         skipped_locale_files += selection.skipped_locale
         if selection.locale and not canonical_locale:
@@ -352,9 +349,6 @@ async def enumerate_sitemap_full(
             lastmod_seen += len(doc_lastmod)
             if not doc_urls:
                 continue
-            if raw_count > max_urls and product_like_count >= max_urls:
-                # max_urls is a floor for the run; once met, stop walking.
-                break
             product_like_count += len(doc_urls)
             # --- hash (Rust, one call) + dedupe against pool and this run --
             hashes = _url_hashes(doc_urls)
@@ -394,6 +388,10 @@ async def enumerate_sitemap_full(
                 )
                 if len(batch) >= SAVE_PRODUCT_URLS_BATCH_SIZE:
                     await _flush()
+            if raw_count > max_urls and product_like_count >= max_urls:
+                # max_urls is a floor for the run: a document already paid
+                # for is processed in full, the walk stops before the next.
+                break
         await _flush()
         await _flush()  # drain the last in-flight write
     except Exception as exc:
@@ -405,7 +403,12 @@ async def enumerate_sitemap_full(
         return _result(f"error:{type(exc).__name__}")
 
     if documents == 0 or raw_count == 0:
-        return _result("empty_sitemap")
+        return _result(
+            "empty_sitemap",
+            locale=canonical_locale,
+            subfiles_skipped_media=skipped_media,
+            subfiles_skipped_locale=skipped_locale_files,
+        )
 
     lastmod_updated = 0
     if lastmod_updates:

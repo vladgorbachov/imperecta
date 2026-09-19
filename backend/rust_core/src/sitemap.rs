@@ -338,19 +338,22 @@ pub struct SubfileSelection {
 
 /// Choose which sub-sitemaps of one shop to walk.
 ///
-/// Media files are always dropped. When the remaining files live under two
-/// or more locale prefixes, one locale wins — `canonical` (the pool's own
-/// prefix) first, then `country_hint` (the shop country's language), then
-/// the first locale in index order when `fallback_to_first` — and files of
-/// the other locales are dropped; files without a locale prefix are kept.
-/// With no way to choose (no canonical, no hint, no fallback) nothing is
-/// dropped for locale reasons: a 3-file shard seen in isolation must not
-/// elect its own locale.
+/// Media files are always dropped. Files without a locale prefix are always
+/// kept. For the rest one locale wins and the other locales' files are
+/// dropped:
+/// - `whole_tree` (the caller sees the shop's full index): `canonical` (the
+///   pool's own prefix) when the index has it, else `country_hint`, else the
+///   first locale in index order — and only when the index carries two or
+///   more locales; a single-locale index is never touched.
+/// - a shard (3 files seen in isolation): `canonical` is authoritative — a
+///   shard whose files all sit under another locale is skipped whole — and
+///   without a canonical nothing is dropped, so a shard never elects a
+///   locale from its own files.
 pub fn select_sitemap_subfiles(
     urls: &[String],
     canonical: Option<&str>,
     country_hint: Option<&str>,
-    fallback_to_first: bool,
+    whole_tree: bool,
 ) -> SubfileSelection {
     let mut out = SubfileSelection::default();
     let mut candidates: Vec<(&String, Option<String>)> = Vec::with_capacity(urls.len());
@@ -368,15 +371,19 @@ pub fn select_sitemap_subfiles(
         }
         candidates.push((url, locale));
     }
-    let chosen: Option<String> = if locales.len() < 2 {
-        None
+    let canonical = canonical.map(|c| c.to_lowercase()).filter(|c| !c.is_empty());
+    let chosen: Option<String> = if whole_tree {
+        if locales.len() < 2 {
+            None
+        } else {
+            let hint = country_hint.map(|c| c.to_lowercase());
+            canonical
+                .filter(|c| locales.contains(c))
+                .or_else(|| hint.filter(|h| locales.contains(h)))
+                .or_else(|| locales.first().cloned())
+        }
     } else {
-        let canonical = canonical.map(|c| c.to_lowercase());
-        let hint = country_hint.map(|c| c.to_lowercase());
-        canonical
-            .filter(|c| locales.contains(c))
-            .or_else(|| hint.filter(|h| locales.contains(h)))
-            .or_else(|| if fallback_to_first { locales.first().cloned() } else { None })
+        canonical.filter(|c| locales.iter().any(|l| l != c))
     };
     for (url, locale) in candidates {
         match (&chosen, locale) {
@@ -506,26 +513,39 @@ mod tests {
             "https://pigu.lt/ru/sitemap-products-images-1.xml",
             "https://pigu.lt/sitemap-categories.xml",
         ]);
-        let sel = select_sitemap_subfiles(&files, Some("lt"), None, false);
+        let sel = select_sitemap_subfiles(&files, Some("lt"), None, true);
         assert_eq!(sel.kept, v(&["https://pigu.lt/lt/sitemap-products-1.xml", "https://pigu.lt/sitemap-categories.xml"]));
         assert_eq!((sel.skipped_media, sel.skipped_locale), (2, 1));
         assert_eq!(sel.locale.as_deref(), Some("lt"));
 
-        // No pool yet: the country hint decides; else the first locale in index order.
-        let sel = select_sitemap_subfiles(&files, None, Some("RU"), false);
+        // Whole tree, no pool yet: the country hint decides; else the first locale in index order.
+        let sel = select_sitemap_subfiles(&files, None, Some("RU"), true);
         assert_eq!(sel.locale.as_deref(), Some("ru"));
         assert_eq!(sel.skipped_locale, 1);
         let sel = select_sitemap_subfiles(&files, None, Some("et"), true);
         assert_eq!(sel.locale.as_deref(), Some("lt"));
-        // A shard seen in isolation with nothing to go on drops nothing for locale.
-        let sel = select_sitemap_subfiles(&files, None, None, false);
-        assert_eq!(sel.locale, None);
-        assert_eq!(sel.kept.len(), 3);
-        // Single-locale trees are never touched.
+        // Whole tree: a canonical the index lacks falls through to the hint.
+        let sel = select_sitemap_subfiles(&files, Some("en"), Some("ru"), true);
+        assert_eq!(sel.locale.as_deref(), Some("ru"));
+        // Single-locale whole trees are never touched, whatever the pool says.
         let single = v(&["https://s.example/lt/a.xml", "https://s.example/lt/b.xml"]);
         let sel = select_sitemap_subfiles(&single, Some("ru"), None, true);
         assert_eq!(sel.kept.len(), 2);
         assert_eq!(sel.locale, None);
+
+        // A shard: the canonical is authoritative even against a single foreign locale...
+        let ru_only = v(&["https://pigu.lt/ru/sitemap-products-7.xml", "https://pigu.lt/ru/sitemap-products-8.xml"]);
+        let sel = select_sitemap_subfiles(&ru_only, Some("lt"), Some("lt"), false);
+        assert!(sel.kept.is_empty());
+        assert_eq!((sel.skipped_locale, sel.locale.as_deref()), (2, Some("lt")));
+        // ...and its own locale passes untouched.
+        let sel = select_sitemap_subfiles(&single, Some("lt"), None, false);
+        assert_eq!(sel.kept.len(), 2);
+        assert_eq!(sel.locale, None);
+        // A shard with nothing to go on drops nothing for locale (hint alone is not enough).
+        let sel = select_sitemap_subfiles(&files, None, Some("ru"), false);
+        assert_eq!(sel.locale, None);
+        assert_eq!(sel.kept.len(), 3);
     }
 
     #[test]

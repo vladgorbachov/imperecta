@@ -311,10 +311,13 @@ class TestSitemapParity:
         assert ic.is_media_sitemap(url) == sl.is_media_sitemap(url), url
 
     @pytest.mark.parametrize(
-        ("canonical", "hint", "first"),
-        [("lt", None, False), (None, "RU", False), (None, "et", True), (None, None, False), ("xx", None, True)],
+        ("canonical", "hint", "whole"),
+        [
+            ("lt", None, True), (None, "RU", True), (None, "et", True), ("xx", None, True),
+            ("lt", None, False), ("ru", "lt", False), (None, "ru", False), (None, None, False),
+        ],
     )
-    def test_select_sitemap_subfiles(self, canonical, hint, first, monkeypatch):
+    def test_select_sitemap_subfiles(self, canonical, hint, whole, monkeypatch):
         from app.modules.discovery import sitemap_locale as sl
 
         files = [
@@ -325,8 +328,8 @@ class TestSitemapParity:
             "https://pigu.lt/sitemap-categories.xml",
         ]
         monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
-        py = sl.select_sitemap_subfiles(files, canonical, hint, first)
-        rust = ic.select_sitemap_subfiles(files, canonical, hint, first)
+        py = sl.select_sitemap_subfiles(files, canonical, hint, whole)
+        rust = ic.select_sitemap_subfiles(files, canonical, hint, whole)
         assert rust["kept"] == py.kept
         assert rust["skipped_media"] == py.skipped_media
         assert rust["skipped_locale"] == py.skipped_locale

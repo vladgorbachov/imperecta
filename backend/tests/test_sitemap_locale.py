@@ -42,22 +42,35 @@ class TestPrimitives:
         assert not sl.is_media_sitemap("https://pigu.lt/lt/sitemap-products-3.xml")
         assert not sl.is_media_sitemap("https://s.example/sitemap-news.xml")
 
-    def test_selection_with_pool_locale(self, engine):
-        sel = sl.select_sitemap_subfiles(PIGU_INDEX, "lt", "lt", fallback_to_first=True)
+    def test_whole_tree_with_pool_locale(self, engine):
+        sel = sl.select_sitemap_subfiles(PIGU_INDEX, "lt", "lt", whole_tree=True)
         assert sel.kept == ["https://pigu.lt/lt/sitemap-products-1.xml", "https://pigu.lt/sitemap-general.xml"]
         assert sel.skipped_media == 2 and sel.skipped_locale == 2 and sel.locale == "lt"
 
-    def test_selection_country_hint_then_first(self, engine):
-        assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "ru").locale == "ru"
-        assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "et", fallback_to_first=True).locale == "lt"
-        isolated = sl.select_sitemap_subfiles(PIGU_INDEX, None, None)
-        assert isolated.locale is None and isolated.skipped_locale == 0
-        assert len(isolated.kept) == 4
+    def test_whole_tree_country_hint_then_first(self, engine):
+        assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "ru", whole_tree=True).locale == "ru"
+        assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "et", whole_tree=True).locale == "lt"
+        # a canonical the index lacks falls through to the hint
+        assert sl.select_sitemap_subfiles(PIGU_INDEX, "en", "ru", whole_tree=True).locale == "ru"
 
-    def test_single_locale_tree_untouched(self, engine):
+    def test_whole_tree_single_locale_untouched(self, engine):
         files = ["https://s.example/lt/a.xml", "https://s.example/lt/b.xml", "https://s.example/c.xml"]
-        sel = sl.select_sitemap_subfiles(files, "ru", "ru", fallback_to_first=True)
+        sel = sl.select_sitemap_subfiles(files, "ru", "ru", whole_tree=True)
         assert sel.kept == files and sel.locale is None
+
+    def test_shard_canonical_is_authoritative(self, engine):
+        ru_only = ["https://pigu.lt/ru/sitemap-products-7.xml", "https://pigu.lt/ru/sitemap-products-8.xml"]
+        sel = sl.select_sitemap_subfiles(ru_only, "lt", "lt")
+        assert sel.kept == [] and sel.skipped_locale == 2 and sel.locale == "lt"
+        own = ["https://pigu.lt/lt/sitemap-products-7.xml", "https://pigu.lt/sitemap-general.xml"]
+        sel = sl.select_sitemap_subfiles(own, "lt", "lt")
+        assert sel.kept == own and sel.locale is None
+
+    def test_shard_without_canonical_drops_nothing(self, engine):
+        # the country hint alone never lets a shard elect a locale
+        isolated = sl.select_sitemap_subfiles(PIGU_INDEX, None, "lt")
+        assert isolated.locale is None and isolated.skipped_locale == 0
+        assert len(isolated.kept) == 4 and isolated.skipped_media == 2
 
     def test_dominant_locale_threshold(self, engine):
         pool = ["https://pigu.lt/lt/p/%d" % i for i in range(8)] + ["https://pigu.lt/ru/p/1", "https://pigu.lt/p/2"]
@@ -79,15 +92,18 @@ class TestCanonicalLocaleSync:
     def test_pool_prefix_wins(self):
         rows = [("https://pigu.lt/lt/p/%d" % i,) for i in range(10)]
         with patch("app.database.sync_session_factory", lambda: self._db(rows)):
-            assert sl.canonical_locale_sync(uuid4(), "EE") == "lt"
+            assert sl.canonical_locale_sync(uuid4()) == "lt"
 
-    def test_empty_pool_uses_country_language(self):
+    def test_empty_pool_is_unknown_not_guessed(self):
+        """The country language is a whole-tree tie-breaker, never a
+        canonical a shard could drop files against."""
         with patch("app.database.sync_session_factory", lambda: self._db([])):
-            assert sl.canonical_locale_sync(uuid4(), "EE") == "et"
-            assert sl.canonical_locale_sync(uuid4(), "KZ") is None
-            assert sl.canonical_locale_sync(uuid4(), None) is None
+            assert sl.canonical_locale_sync(uuid4()) is None
+        assert sl.country_language_hint("EE") == "et"
+        assert sl.country_language_hint("KZ") is None
+        assert sl.country_language_hint(None) is None
 
     def test_unprefixed_pool_means_no_locale(self):
         rows = [("https://s.example/p/%d" % i,) for i in range(10)]
         with patch("app.database.sync_session_factory", lambda: self._db(rows)):
-            assert sl.canonical_locale_sync(uuid4(), "LT") is None
+            assert sl.canonical_locale_sync(uuid4()) is None
