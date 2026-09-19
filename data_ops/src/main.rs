@@ -3,14 +3,20 @@
 //! Serves the P6 cross-shop price-comparison contract straight off the
 //! match groups written by the Python matching tick:
 //!   GET /health
-//!   GET /v1/groups/{group_id}/offers          (JWT)
-//!   GET /v1/listings/{listing_id}/comparison  (JWT)
+//!   GET /v1/groups/{group_id}/offers
+//!   GET /v1/listings/{listing_id}/comparison
+//!   GET /v1/pool/search, GET /v1/pool/products
+//!   POST /v1/pool/products/refresh            (live catch-up for a page)
+//!
+//! Reads are anonymous and edge-cacheable (edge.rs): the data is the same
+//! for every viewer, so the CDN serves 5-minute snapshots. JWT validation
+//! (`require_jwt`) stays available for any future non-public route.
 //!
 //! Read-only by design: the data_firewall gate governs writes; reads are
 //! plain operational SELECTs on indexed keys (ix_product_match_group,
-//! idx_listing_url_hash-family). Auth mirrors the FastAPI backend: HS256
-//! bearer tokens signed with the shared JWT_SECRET.
+//! idx_listing_url_hash-family).
 
+mod edge;
 mod pool_products;
 mod search_index;
 
@@ -18,9 +24,10 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, State},
-    http::{header, HeaderMap, Method, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::from_fn,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
@@ -76,7 +83,9 @@ struct GroupOffers {
 }
 
 pub enum ApiError {
+    #[allow(dead_code)]
     Unauthorized(&'static str),
+    BadRequest(&'static str),
     NotFound(&'static str),
     Internal(String),
 }
@@ -85,6 +94,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, detail) = match self {
             ApiError::Unauthorized(d) => (StatusCode::UNAUTHORIZED, d.to_string()),
+            ApiError::BadRequest(d) => (StatusCode::BAD_REQUEST, d.to_string()),
             ApiError::NotFound(d) => (StatusCode::NOT_FOUND, d.to_string()),
             ApiError::Internal(d) => {
                 tracing::error!(error = %d, "internal error");
@@ -104,6 +114,7 @@ impl From<sqlx::Error> for ApiError {
     }
 }
 
+#[allow(dead_code)]
 pub fn require_jwt(state: &AppState, headers: &HeaderMap) -> Result<Claims, ApiError> {
     let raw = headers
         .get(header::AUTHORIZATION)
@@ -184,10 +195,8 @@ async fn fetch_group_offers(pool: &PgPool, group_id: Uuid) -> Result<GroupOffers
 
 async fn group_offers(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(group_id): Path<Uuid>,
 ) -> Result<Json<GroupOffers>, ApiError> {
-    require_jwt(&state, &headers)?;
     let payload = fetch_group_offers(&state.pool, group_id).await?;
     if payload.offers.is_empty() {
         return Err(ApiError::NotFound("group not found or empty"));
@@ -197,10 +206,8 @@ async fn group_offers(
 
 async fn listing_comparison(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(listing_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_jwt(&state, &headers)?;
     let row = sqlx::query(
         r#"
         SELECT dp.match_group_id, dp.match_method
@@ -333,10 +340,8 @@ struct SearchParams {
 /// top-N sort over primary keys — no full-pool scan on any path.
 async fn pool_search(
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<SearchParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_jwt(&state, &headers)?;
     let q = params.q.trim();
     if q.len() < 2 {
         return Err(ApiError::NotFound("query too short (min 2 chars)"));
@@ -460,19 +465,37 @@ async fn main() {
         .await
         .expect("database connection failed");
 
+    // Browser origins: the production hosts plus Vercel preview deploys;
+    // ALLOWED_ORIGINS (comma-separated) extends the list without a rebuild.
+    let extra_origins: Vec<String> = env::var("ALLOWED_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|o| o.trim().trim_end_matches('/').to_string())
+        .filter(|o| !o.is_empty())
+        .collect();
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin, _| {
+        .allow_origin(AllowOrigin::predicate(move |origin: &HeaderValue, _| {
             origin
                 .to_str()
                 .map(|o| {
                     o == "https://imperecta.pages.dev"
+                        || o == "https://imperecta.com"
+                        || o == "https://www.imperecta.com"
+                        || o == "https://app.imperecta.com"
+                        || o.ends_with(".vercel.app")
                         || o.starts_with("http://localhost")
                         || o.starts_with("http://127.0.0.1")
+                        || extra_origins.iter().any(|e| e == o)
                 })
                 .unwrap_or(false)
         }))
-        .allow_methods([Method::GET])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::IF_NONE_MATCH,
+        ])
+        .expose_headers([header::ETAG, header::CACHE_CONTROL]);
 
     let index = Arc::new(search_index::SearchIndex::new());
     search_index::spawn_refresher(index.clone(), pool.clone());
@@ -482,7 +505,12 @@ async fn main() {
         .route("/v1/groups/:group_id/offers", get(group_offers))
         .route("/v1/pool/search", get(pool_search))
         .route("/v1/pool/products", get(pool_products::pool_products))
+        .route(
+            "/v1/pool/products/refresh",
+            post(pool_products::pool_products_refresh),
+        )
         .route("/v1/listings/:listing_id/comparison", get(listing_comparison))
+        .layer(from_fn(edge::public_cache_layer))
         .layer(cors)
         .with_state(AppState {
             pool,

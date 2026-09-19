@@ -12,7 +12,6 @@
 
 use axum::{
     extract::{Query, State},
-    http::HeaderMap,
     Json,
 };
 use base64::Engine as _;
@@ -21,7 +20,7 @@ use serde_json::{json, Value};
 use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 
-use crate::{require_jwt, ApiError, AppState};
+use crate::{ApiError, AppState};
 
 const SEARCH_PRODUCT_CAP: usize = 500;
 const SEARCH_LISTING_CAP: i64 = 1_500;
@@ -254,6 +253,78 @@ fn row_to_item(r: &PgRow, display_currency: &str) -> Value {
     })
 }
 
+/// Sparklines for the page (second bounded query, python-parity).
+async fn attach_sparklines(pool: &sqlx::PgPool, items: &mut [Value]) {
+    if items.is_empty() {
+        return;
+    }
+    let page_ids: Vec<Uuid> = items
+        .iter()
+        .filter_map(|i| i["id"].as_str().and_then(|s| s.parse().ok()))
+        .collect();
+    if let Ok(spark_rows) = sqlx::query(SPARKLINE_SQL)
+        .bind(&page_ids)
+        .fetch_all(pool)
+        .await
+    {
+        use std::collections::HashMap;
+        let mut by_id: HashMap<Uuid, Value> = HashMap::new();
+        for r in &spark_rows {
+            let id: Uuid = r.get("listing_id");
+            let points: Option<Value> = r.get("points");
+            by_id.insert(id, points.unwrap_or_else(|| json!([])));
+        }
+        for item in items.iter_mut() {
+            if let Some(id) = item["id"].as_str().and_then(|s| s.parse::<Uuid>().ok()) {
+                item["recent_prices"] = by_id.remove(&id).unwrap_or_else(|| json!([]));
+            }
+        }
+    }
+}
+
+/// Live catch-up for the rows a viewer already has on screen: the edge
+/// serves a ≤5-minute-old page instantly, then the page asks for exactly
+/// its listing ids and swaps in current prices. PK lookup, ≤500 ids —
+/// never cached (POST).
+pub const REFRESH_MAX_IDS: usize = 500;
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshBody {
+    pub ids: Vec<Uuid>,
+    pub display_currency: Option<String>,
+}
+
+pub async fn pool_products_refresh(
+    State(state): State<AppState>,
+    Json(body): Json<RefreshBody>,
+) -> Result<Json<Value>, ApiError> {
+    if body.ids.len() > REFRESH_MAX_IDS {
+        return Err(ApiError::BadRequest("too many ids (max 500)"));
+    }
+    let display_currency = body
+        .display_currency
+        .as_deref()
+        .unwrap_or("local")
+        .to_string();
+    let mut items: Vec<Value> = Vec::new();
+    if !body.ids.is_empty() {
+        let sql = format!("{ITEM_SELECT}{ITEM_FROM}WHERE fl.id = ANY($1)");
+        let rows = sqlx::query(&sql)
+            .bind(&body.ids)
+            .fetch_all(&state.pool)
+            .await?;
+        items = rows
+            .iter()
+            .map(|r| row_to_item(r, &display_currency))
+            .collect();
+        attach_sparklines(&state.pool, &mut items).await;
+    }
+    Ok(Json(json!({
+        "items": items,
+        "refreshed_at": chrono::Utc::now(),
+    })))
+}
+
 fn keyset_value_of(item: &Value, sort: &str) -> Option<String> {
     let key = match sort {
         "name_asc" | "name_desc" => "title",
@@ -269,10 +340,8 @@ fn keyset_value_of(item: &Value, sort: &str) -> Option<String> {
 
 pub async fn pool_products(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(params): Query<PoolParams>,
 ) -> Result<Json<Value>, ApiError> {
-    require_jwt(&state, &headers)?;
     let pool = &state.pool;
     let limit = params.limit.unwrap_or(20).clamp(1, 500);
     let offset = params.offset.unwrap_or(0).max(0);
@@ -423,32 +492,7 @@ pub async fn pool_products(
         items.reverse();
     }
 
-    // Sparklines for the page (second bounded query, python-parity).
-    if !items.is_empty() {
-        let page_ids: Vec<Uuid> = items
-            .iter()
-            .filter_map(|i| i["id"].as_str().and_then(|s| s.parse().ok()))
-            .collect();
-        if let Ok(spark_rows) = sqlx::query(SPARKLINE_SQL)
-            .bind(&page_ids)
-            .fetch_all(pool)
-            .await
-        {
-            use std::collections::HashMap;
-            let mut by_id: HashMap<Uuid, Value> = HashMap::new();
-            for r in &spark_rows {
-                let id: Uuid = r.get("listing_id");
-                let points: Option<Value> = r.get("points");
-                by_id.insert(id, points.unwrap_or_else(|| json!([])));
-            }
-            for item in items.iter_mut() {
-                if let Some(id) = item["id"].as_str().and_then(|s| s.parse::<Uuid>().ok()) {
-                    item["recent_prices"] =
-                        by_id.remove(&id).unwrap_or_else(|| json!([]));
-                }
-            }
-        }
-    }
+    attach_sparklines(pool, &mut items).await;
 
     // --- totals ----------------------------------------------------------
     let mut total: Option<i64> = None;
