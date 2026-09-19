@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { CheckCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { LegalFooter } from "@/components/layout/LegalFooter";
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -82,6 +83,7 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
           </Link>
         </div>
         <div className="surface-base w-full max-w-md rounded-xl p-6 sm:p-8">{children}</div>
+        <LegalFooter compact className="mt-6 max-w-md" />
       </div>
     </div>
   );

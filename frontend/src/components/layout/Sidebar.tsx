@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { LegalFooter } from "@/components/layout/LegalFooter";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -225,7 +226,7 @@ function SidebarFooter({
   const progress = Math.min(100, (trialDaysLeft / maxDays) * 100);
 
   return (
-    <div className="shrink-0 p-4">
+    <div className="shrink-0 space-y-3 p-4">
       {isTrial && (
         <div className="surface-base overflow-hidden p-4">
           <p
@@ -259,6 +260,7 @@ function SidebarFooter({
           </Button>
         </div>
       )}
+      {showLabels ? <LegalFooter /> : null}
     </div>
   );
 }

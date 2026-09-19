@@ -26,6 +26,9 @@ import { RegisterPage } from "@/pages/auth/RegisterPage";
 import { ForgotPasswordPage } from "@/pages/auth/ForgotPasswordPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { BlockedCountryPage } from "@/pages/BlockedCountryPage";
+import { LegalDocumentPage } from "@/pages/legal/LegalDocumentPage";
+import { BotPolicyPage } from "@/pages/legal/BotPolicyPage";
+import { TrustPage } from "@/pages/legal/TrustPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
 import { MovementsPage } from "@/pages/MovementsPage";
@@ -98,6 +101,10 @@ export function App() {
                   />
                   <Route path="/change-password" element={<ChangePasswordRoute />} />
                   <Route path="/blocked" element={<BlockedCountryPage />} />
+                  <Route path="/legal" element={<LegalDocumentPage />} />
+                  <Route path="/legal/:document" element={<LegalDocumentPage />} />
+                  <Route path="/bot" element={<BotPolicyPage />} />
+                  <Route path="/trust" element={<TrustPage />} />
                   <Route
                     path="/"
                     element={
