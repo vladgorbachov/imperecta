@@ -790,6 +790,8 @@ def test_cycle_budget_spreads_remaining_over_days_left(monkeypatch):
     usage = {"20260918": "4891", "20260915": "99999"}  # the 15th is the previous cycle
 
     def mget(keys):
+        if keys and keys[0].startswith(limiter.PROXY_COST_KEY_PREFIX):
+            return [None for _ in keys]  # no cost counters yet -> plain counts
         return [usage.get(k.removeprefix(limiter.PROXY_USAGE_KEY_PREFIX)) for k in keys]
 
     store.mget.side_effect = mget
@@ -817,9 +819,9 @@ def test_daily_budget_guard_disabled_and_fail_open(monkeypatch):
     monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 0)
     assert limiter.daily_budget_exhausted_sync() is False
     store.mget.assert_not_called()
-    # Hard daily cap works without a monthly budget.
+    # Hard daily cap works without a monthly budget (count 10, cost 10.00).
     monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 10)
-    store.mget.return_value = ["10"]
+    store.mget.side_effect = [["10"], ["1000"]]
     assert limiter.daily_budget_exhausted_sync() is True
     # Redis trouble fails open.
     store.mget.side_effect = ConnectionError("redis down")
@@ -858,3 +860,27 @@ async def test_budget_skip_surfaces_as_empty_result(monkeypatch):
     assert result.success is False
     assert result.is_empty is True
     assert result.error == limiter.PROXY_PROVIDER_BUDGET_ERROR
+
+
+def test_cost_weighted_usage_lets_nojs_buy_more(monkeypatch):
+    """A no-JS fetch is charged nojs/js of a JS fetch (0.38/0.82 = 46%)."""
+    monkeypatch.setattr(
+        limiter,
+        "Settings",
+        lambda: MagicMock(
+            proxy_cost_per_1k_usd=0.82, proxy_cost_nojs_per_1k_usd=0.38, proxy_provider_billing_day=19
+        ),
+    )
+    assert limiter.cost_weight_hundredths(True) == 100
+    assert limiter.cost_weight_hundredths(False) == 46
+    store = MagicMock()
+    monkeypatch.setattr(limiter, "_get_redis", lambda: store)
+    limiter._record_usage_sync(render_js=False)
+    incrby_key, weight = store.incrby.call_args.args
+    assert incrby_key.startswith(limiter.PROXY_COST_KEY_PREFIX) and weight == 46
+    # status pacing reads the cost counter: 100 no-JS fetches = 46 JS-equivalents
+    monkeypatch.setattr(limiter, "proxy_provider_monthly_cap", lambda: 1000)
+    monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 0)
+    store.mget.side_effect = [["100"], ["4600"]]
+    status = limiter.budget_status_sync()
+    assert status["today_used"] == 46

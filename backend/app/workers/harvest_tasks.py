@@ -55,6 +55,18 @@ HARVEST_PAGES_MAX = 300
 # pass because the cursor moves on to the following category.
 HARVEST_MAX_PAGES_PER_CATEGORY = 500
 
+# List-page render mode per shop (harvest optimisation #2). On the paid
+# backend a JS render costs 2.2x a plain fetch (Decodo $49 plan: $0.65 vs
+# $0.30 per 1k). Most category pages are server-rendered for SEO, so each
+# shop is probed once: the same first category page fetched without and
+# with JS; no-JS wins when it yields at least as many cards (and enough to
+# be a listing at all). The verdict is operational state in Redis and
+# expires so a shop that changes its storefront is re-probed.
+HARVEST_LIST_MODE_KEY = "harvest:listmode:"
+HARVEST_LIST_MODE_TTL_SEC = 7 * 24 * 3600
+LIST_MODE_NOJS = "nojs"
+LIST_MODE_JS = "js"
+
 
 def _run_async(coro):
     try:
@@ -142,6 +154,34 @@ def next_page_url(html: str, current_url: str) -> str | None:
         return None
 
 
+def _list_mode_key(marketplace_code: str) -> str:
+    return f"{HARVEST_LIST_MODE_KEY}{marketplace_code}"
+
+
+def decide_list_mode(nojs_offers: int, js_offers: int) -> str:
+    """No-JS wins only when it is a listing on its own and loses no cards."""
+    from app.common.html_parsing import REPEATED_STRUCTURE_MIN_COUNT
+
+    if nojs_offers >= REPEATED_STRUCTURE_MIN_COUNT and nojs_offers >= js_offers:
+        return LIST_MODE_NOJS
+    return LIST_MODE_JS
+
+
+async def probe_list_mode(
+    pool, core, url: str, *, requires_js: bool, scrape_tier: int
+) -> tuple[str, dict]:
+    """Two fetches of one category page: without JS, then with JS."""
+    counts: dict[str, int] = {}
+    for label, render_js in ((LIST_MODE_NOJS, False), (LIST_MODE_JS, True)):
+        fetch = await pool.fetch_listing_html(
+            url, requires_js=requires_js, scrape_tier=scrape_tier, render_js=render_js
+        )
+        if fetch.deadline_skipped:
+            return LIST_MODE_JS, {"status": "budget_skip"}
+        counts[label] = len(core.extract_list_offers(fetch.html, url)) if fetch.html else 0
+    return decide_list_mode(counts[LIST_MODE_NOJS], counts[LIST_MODE_JS]), counts
+
+
 def pages_for_shop(pool_size: int | None, eligible_shops: int, yield_ema: float) -> int:
     """Per-run page quota so the shop's pool is walked once per target pass.
 
@@ -201,6 +241,20 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
     redis = _get_redis()
     cursor = load_cursor(redis, marketplace_code)
     pool = ScraperPool()
+    list_mode = redis.get(_list_mode_key(marketplace_code))
+    list_mode = list_mode.decode() if isinstance(list_mode, bytes) else list_mode
+    probe: dict = {}
+    if list_mode not in (LIST_MODE_NOJS, LIST_MODE_JS):
+        list_mode, probe = await probe_list_mode(
+            pool,
+            imperecta_core,
+            category_urls[cursor["cat_idx"] % len(category_urls)],
+            requires_js=requires_js,
+            scrape_tier=scrape_tier,
+        )
+        if probe.get("status") != "budget_skip":
+            redis.set(_list_mode_key(marketplace_code), list_mode, ex=HARVEST_LIST_MODE_TTL_SEC)
+    render_js: bool | None = False if list_mode == LIST_MODE_NOJS else None
     pages = 0
     totals = {
         "matched": 0,
@@ -232,7 +286,7 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
             visited.clear()
         url = cursor["next_url"] or category_urls[cursor["cat_idx"]]
         fetch = await pool.fetch_listing_html(
-            url, requires_js=requires_js, scrape_tier=scrape_tier
+            url, requires_js=requires_js, scrape_tier=scrape_tier, render_js=render_js
         )
         if fetch.deadline_skipped:
             # Paid budget for today is spent: stop WITHOUT moving the cursor
@@ -276,6 +330,8 @@ async def _harvest(marketplace_code: str, limit: int) -> dict:
         "cursor_page": cursor["page"],
         "pass_no": cursor["pass_no"],
         "yield_ema": round(cursor["yield_ema"], 1),
+        "list_mode": list_mode,
+        "list_mode_probe": probe,
         **totals,
     }
 

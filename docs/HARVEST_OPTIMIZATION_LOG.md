@@ -70,9 +70,51 @@ category-like URL (без query/фасетов/chrome, `_is_category_url`), prod
 
 **После:** _доля failed в дашборде Decodo через сутки._
 
-## П.2 — списки без JS (в очереди)
+## П.2 — списки без JS
 
-## П.4 — cost-aware frontier для PDP (в очереди)
+**До (аудит):** `_fetch_by_backend_once` перекрывал переданный `render_js`
+политикой хоста (`wants_proxy_render`) — даже `fetch_static` (сайтмапы,
+robots) с явным `render_js=False` у proxy_render-магазинов шёл с JS-рендером:
+энумерация партии 7 (4 891 запросов 18.09) оплачена по JS-тарифу. Это и
+есть измеренные «+27% к листу» в дашборде Decodo. Все proxy_render-магазины
+имеют `requires_js=false` — режим выбирался из-за блокировок, а не из-за JS.
+
+**Сделано:** `render_js: bool | None` — None = политика хоста, явный False
+честно уходит в no-JS тариф; статика теперь без JS. Харвест пробует каждый
+магазин раз в 7 дней (`harvest:listmode:{code}`): первая категория без JS и
+с JS, no-JS побеждает, если даёт ≥ `REPEATED_STRUCTURE_MIN_COUNT` карточек и
+не меньше, чем JS (`decide_list_mode`); дальше весь обход магазина идёт с
+`render_js=False`. Гард бюджета стал считать стоимость, а не запросы:
+no-JS фетч списывает 0.38/0.82 = 46% JS-запроса (`proxy_provider:cost:*`),
+так что экономия превращается в дополнительные страницы. Тесты:
+`test_decide_list_mode_rules`, `test_cost_weighted_usage_lets_nojs_buy_more`,
+обновлённый `test_harvest_walks_pagination_and_persists_cursor`.
+
+**После:** _доля магазинов с вердиктом nojs и фактическая цена за 1k в
+дашборде через сутки._
+
+## П.4 — cost-aware frontier для PDP
+
+**До (замер):** первые 1 000 due-листингов очереди PDP (SQL по frontier):
+887 proxy_render (платные), 111 direct, 2 render; из 887 платных лишь 126 в
+match-группах. Очередь `last_checked_at ASC NULLS FIRST` слепа к стоимости:
+89% каждого тика — платные карточки по давности, бесплатные магазины стоят
+за ними.
+
+**Сделано:** `scrape_stale_fanout` строит два frontier'а: FREE
+(direct/render) — полный `shards×shard_size` по давности; PAID (proxy) —
+только носители ценности (листинг в match-группе или с алертом), порядок
+«алерт > группа > давность», лимит = остаток дневной квоты гарда / оставшиеся
+тики дня (`_paid_quota_this_tick`). Массовая приценка proxy-магазинов —
+задача харвеста (в ~30× дешевле за цену). Попутно: латентный `NameError` в
+error-path `scrape_listing_batch` (неимпортированный
+`capture_exception_if_initialized`). Тесты:
+`test_scrape_stale_fanout_splits_free_and_paid_frontiers`,
+`test_scrape_stale_fanout_skips_paid_when_budget_spent`,
+`test_paid_quota_spreads_remaining_allowance_over_ticks_left`.
+
+**После:** _free/paid в `scrape_stale_fanout_done`, доля платных PDP в
+scrape_logs, рост priced у direct-магазинов._
 
 ## П.6 — lastmod сайтмапов как сигнал изменений (в очереди)
 

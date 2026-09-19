@@ -79,13 +79,18 @@ def test_record_shard_done_aggregates_on_last(monkeypatch) -> None:
     assert ob._record_shard_done("s", "run", 2, 30) == 60
 
 
-def test_scrape_stale_fanout_dispatches_priority_shards(monkeypatch) -> None:
-    ids = [uuid4() for _ in range(10)]
+def test_scrape_stale_fanout_splits_free_and_paid_frontiers(monkeypatch) -> None:
+    """Free (direct) shops get the full frontier; paid (proxy) shops only
+    the value carriers within this tick's budget share; separate shards."""
+    free_ids = [uuid4() for _ in range(10)]
+    paid_ids = [uuid4() for _ in range(2)]
     session = MagicMock()
-    session.execute.return_value.all.return_value = [(i,) for i in ids]
-    monkeypatch.setattr(
-        "app.database.sync_session_factory", lambda: session
-    )
+    session.execute.return_value.all.side_effect = [
+        [(i,) for i in free_ids],
+        [(i,) for i in paid_ids],
+    ]
+    monkeypatch.setattr("app.database.sync_session_factory", lambda: session)
+    monkeypatch.setattr(scraper_tasks, "_paid_quota_this_tick", lambda: 2)
     dispatched: list = []
     monkeypatch.setattr(
         scraper_tasks.scrape_listing_batch,
@@ -95,8 +100,42 @@ def test_scrape_stale_fanout_dispatches_priority_shards(monkeypatch) -> None:
 
     out = scraper_tasks.scrape_stale_fanout.run(shards=4, shard_size=3)
 
-    assert out["due"] == 10
-    assert out["shards_dispatched"] == 4  # 3+3+3+1
+    assert (out["free"], out["paid"], out["paid_quota"]) == (10, 2, 2)
+    assert out["due"] == 12
+    assert out["shards_dispatched"] == 5  # 3+3+3+1 free, 2 paid
     assert all(opts["priority"] == 2 for _a, opts in dispatched)
-    total_ids = sum(len(a[0]) for a, _o in dispatched)
-    assert total_ids == 10
+    assert dispatched[-1][0][0] == [str(i) for i in paid_ids]
+    paid_sql = str(session.execute.call_args_list[1].args[0].compile())
+    assert "match_group_id IS NOT NULL" in paid_sql and "alerts" in paid_sql
+    assert "LIMIT" in paid_sql
+
+
+def test_scrape_stale_fanout_skips_paid_when_budget_spent(monkeypatch) -> None:
+    session = MagicMock()
+    session.execute.return_value.all.return_value = [(uuid4(),)]
+    monkeypatch.setattr("app.database.sync_session_factory", lambda: session)
+    monkeypatch.setattr(scraper_tasks, "_paid_quota_this_tick", lambda: 0)
+    monkeypatch.setattr(
+        scraper_tasks.scrape_listing_batch, "apply_async", lambda args, **opts: None
+    )
+    out = scraper_tasks.scrape_stale_fanout.run(shards=1, shard_size=5)
+    assert (out["free"], out["paid"]) == (1, 0)
+    assert session.execute.call_count == 1  # paid frontier not even queried
+
+
+def test_paid_quota_spreads_remaining_allowance_over_ticks_left(monkeypatch) -> None:
+    import calendar
+    import time as _time
+
+    monkeypatch.setattr(
+        "app.modules.scraper.proxy_provider_limiter.budget_status_sync",
+        lambda now=None: {"daily_allowance": 2400, "today_used": 1200},
+    )
+    # 12:00 UTC -> 24 of 48 ticks left -> (2400-1200)//24 = 50
+    noon = calendar.timegm(_time.strptime("2026-09-19 12:00", "%Y-%m-%d %H:%M"))
+    assert scraper_tasks._paid_quota_this_tick(noon) == 50
+    monkeypatch.setattr(
+        "app.modules.scraper.proxy_provider_limiter.budget_status_sync",
+        lambda now=None: {"daily_allowance": None, "today_used": 0},
+    )
+    assert scraper_tasks._paid_quota_this_tick(noon) is None

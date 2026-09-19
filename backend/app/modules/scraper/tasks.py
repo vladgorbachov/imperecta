@@ -991,6 +991,41 @@ def _scrape_pool_product_impl(listing_id: str) -> dict:
 
 SCRAPE_FANOUT_SHARDS = 4
 SCRAPE_FANOUT_SHARD_SIZE = 250
+# Beat cadence of scrape-stale-pool-products (*/30): the paid frontier
+# spreads today's remaining allowance over the ticks still to come.
+SCRAPE_FANOUT_TICKS_PER_DAY = 48
+PAID_ACCESS_MODES = ("proxy", "proxy_render")
+
+
+def _due_by_interval():
+    return or_(
+        FactListing.last_checked_at.is_(None),
+        FactListing.last_checked_at
+        < func.now()
+        - func.make_interval(0, 0, 0, 0, 0, FactListing.scrape_interval_minutes),
+    )
+
+
+def _paid_quota_this_tick(now: float | None = None) -> int | None:
+    """Paid PDP fetches this tick: what is left of today's allowance, spread
+    over the ticks still to come today. None = no budget guard configured."""
+    import time as _time
+
+    from app.modules.scraper.proxy_provider_limiter import budget_status_sync
+
+    try:
+        status = budget_status_sync(now)
+    except Exception:  # noqa: BLE001 - Redis trouble: fall back to the old blind frontier
+        return None
+    allowance = status.get("daily_allowance")
+    if allowance is None:
+        return None
+    remaining = max(int(allowance) - int(status.get("today_used", 0)), 0)
+    t = _time.gmtime(now if now is not None else _time.time())
+    minutes_today = t.tm_hour * 60 + t.tm_min
+    ticks_used = minutes_today * SCRAPE_FANOUT_TICKS_PER_DAY // 1440
+    ticks_left = max(SCRAPE_FANOUT_TICKS_PER_DAY - ticks_used, 1)
+    return remaining // ticks_left
 
 
 @celery_app.task(name="scrape_stale_fanout", bind=True)
@@ -1001,36 +1036,70 @@ def scrape_stale_fanout(
 ) -> dict:
     """Beat dispatcher: split the due-listing frontier into shard tasks.
 
-    The single-task pass kept PDP pricing on ONE worker child; this
-    dispatcher selects the stalest due ids once (cheap index read) and
-    fans them out so several children scrape in parallel — combined with
-    queue priorities the pricing path now scales with worker_concurrency.
-    """
-    from app.database import sync_session_factory
+    Cost-aware since 2026-09-19 (harvest optimisation #4). The blind
+    stalest-first frontier was 89% paid proxy fetches chosen by age alone,
+    with the free direct shops queued behind them. Now:
 
-    due_by_interval = or_(
-        FactListing.last_checked_at.is_(None),
-        FactListing.last_checked_at
-        < func.now()
-        - func.make_interval(0, 0, 0, 0, 0, FactListing.scrape_interval_minutes),
-    )
+    * FREE frontier (direct/render shops): stalest first, the full
+      shards x shard_size — nothing to ration.
+    * PAID frontier (proxy shops): only the value carriers — listings in a
+      cross-shop match group or watched by an alert — ordered by that value
+      then age, capped at this tick's share of the day's remaining budget
+      allowance. Bulk repricing of proxy shops belongs to the list-page
+      harvest, which is ~30x cheaper per price.
+    """
+    from sqlalchemy import case, exists
+
+    from app.database import sync_session_factory
+    from app.models.app_tables import Alert
+    from app.models.dimensions import DimProduct
+
+    due = _due_by_interval()
     db = sync_session_factory()
     try:
-        rows = db.execute(
+        free_rows = db.execute(
             select(FactListing.id)
+            .join(DimMarketplace, DimMarketplace.id == FactListing.marketplace_id)
             .where(FactListing.is_active)
-            .where(due_by_interval)
+            .where(DimMarketplace.access_mode.notin_(PAID_ACCESS_MODES))
+            .where(due)
             .order_by(FactListing.last_checked_at.asc().nulls_first())
             .limit(shards * shard_size)
         ).all()
+        paid_quota = _paid_quota_this_tick()
+        paid_rows: list = []
+        if paid_quota is None or paid_quota > 0:
+            watched = exists().where(Alert.listing_id == FactListing.id)
+            in_group = DimProduct.match_group_id.isnot(None)
+            value = case((watched, 2), (in_group, 1), else_=0)
+            paid_stmt = (
+                select(FactListing.id)
+                .join(DimMarketplace, DimMarketplace.id == FactListing.marketplace_id)
+                .join(DimProduct, DimProduct.id == FactListing.product_id)
+                .where(FactListing.is_active)
+                .where(DimMarketplace.access_mode.in_(PAID_ACCESS_MODES))
+                .where(due)
+                .where(or_(watched, in_group))
+                .order_by(value.desc(), FactListing.last_checked_at.asc().nulls_first())
+                .limit(paid_quota if paid_quota is not None else shards * shard_size)
+            )
+            paid_rows = db.execute(paid_stmt).all()
     finally:
         db.close()
-    ids = [str(r[0]) for r in rows]
+    free_ids = [str(r[0]) for r in free_rows]
+    paid_ids = [str(r[0]) for r in paid_rows]
     dispatched = 0
-    for i in range(0, len(ids), shard_size):
-        scrape_listing_batch.apply_async([ids[i : i + shard_size]], priority=2)
-        dispatched += 1
-    summary = {"due": len(ids), "shards_dispatched": dispatched}
+    for ids in (free_ids, paid_ids):
+        for i in range(0, len(ids), shard_size):
+            scrape_listing_batch.apply_async([ids[i : i + shard_size]], priority=2)
+            dispatched += 1
+    summary = {
+        "due": len(free_ids) + len(paid_ids),
+        "free": len(free_ids),
+        "paid": len(paid_ids),
+        "paid_quota": paid_quota,
+        "shards_dispatched": dispatched,
+    }
     slog.info("scrape_stale_fanout_done", **summary)
     return summary
 
@@ -1056,6 +1125,8 @@ def scrape_listing_batch(self, listing_ids: list[str]) -> dict:
         )
         return result
     except Exception as exc:
+        from app.observability.sentry_init import capture_exception_if_initialized
+
         capture_exception_if_initialized(exc)
         slog.error("scrape_listing_batch_failed", error=str(exc)[:500])
         return {"status": f"error:{type(exc).__name__}"}

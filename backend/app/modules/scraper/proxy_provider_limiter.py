@@ -129,15 +129,32 @@ def _redis_acquire_sync() -> bool:
 # an accounting failure never blocks a scrape; billing truth stays with the
 # provider's own dashboard, this is the operational estimate.
 PROXY_USAGE_KEY_PREFIX = "proxy_provider:usage:"
+# Cost-weighted twin of the request counter, in hundredths of a JS-tier
+# request (a no-JS fetch adds nojs/js x 100). The budget guard paces on this
+# one; the plain counter stays the "how many calls" figure for the report.
+PROXY_COST_KEY_PREFIX = "proxy_provider:cost:"
 _USAGE_TTL_SECONDS = 90 * 24 * 3600
 
 
-def _record_usage_sync() -> None:
+def cost_weight_hundredths(render_js: bool) -> int:
+    if render_js:
+        return 100
+    settings = Settings()
+    js = float(settings.proxy_cost_per_1k_usd or 0)
+    nojs = float(settings.proxy_cost_nojs_per_1k_usd or 0)
+    if js <= 0 or nojs <= 0:
+        return 100
+    return max(1, int(round(100 * nojs / js)))
+
+
+def _record_usage_sync(render_js: bool = True) -> None:
     try:
         client = _get_redis()
-        key = PROXY_USAGE_KEY_PREFIX + time.strftime("%Y%m%d", time.gmtime())
-        client.incr(key)
-        client.expire(key, _USAGE_TTL_SECONDS)
+        day = time.strftime("%Y%m%d", time.gmtime())
+        client.incr(PROXY_USAGE_KEY_PREFIX + day)
+        client.expire(PROXY_USAGE_KEY_PREFIX + day, _USAGE_TTL_SECONDS)
+        client.incrby(PROXY_COST_KEY_PREFIX + day, cost_weight_hundredths(render_js))
+        client.expire(PROXY_COST_KEY_PREFIX + day, _USAGE_TTL_SECONDS)
     except Exception:  # noqa: BLE001 - accounting must never fail a fetch
         pass
 
@@ -201,12 +218,15 @@ def budget_status_sync(now: float | None = None) -> dict:
     cycle_start, cycle_end = billing_cycle(ts)
     client = _get_redis()
     day_count = (today - cycle_start).days + 1
-    month_keys = [
-        PROXY_USAGE_KEY_PREFIX + (cycle_start + timedelta(days=i)).strftime("%Y%m%d")
-        for i in range(day_count)
+    days = [(cycle_start + timedelta(days=i)).strftime("%Y%m%d") for i in range(day_count)]
+    counts = client.mget([PROXY_USAGE_KEY_PREFIX + d for d in days])
+    costs = client.mget([PROXY_COST_KEY_PREFIX + d for d in days])
+    # Cost-weighted usage in JS-request equivalents; days before the cost
+    # counter existed fall back to the plain count (every fetch was JS then).
+    per_day = [
+        (int(c) / 100.0) if c else (int(n) if n else 0)
+        for n, c in zip(counts, costs)
     ]
-    values = client.mget(month_keys)
-    per_day = [int(v) if v else 0 for v in values]
     today_used = per_day[-1]
     month_used = sum(per_day)
     month_used_before_today = month_used - today_used
@@ -220,6 +240,8 @@ def budget_status_sync(now: float | None = None) -> dict:
         daily_allowance = (
             hard_daily if daily_allowance is None else min(daily_allowance, hard_daily)
         )
+    if daily_allowance is not None:
+        daily_allowance = int(daily_allowance)
 
     exhausted = False
     if monthly_cap > 0 and month_used >= monthly_cap:
@@ -231,8 +253,8 @@ def budget_status_sync(now: float | None = None) -> dict:
         "cycle_start": cycle_start.isoformat(),
         "cycle_end": cycle_end.isoformat(),
         "monthly_cap": monthly_cap or None,
-        "month_used": month_used,
-        "today_used": today_used,
+        "month_used": int(round(month_used)),
+        "today_used": int(round(today_used)),
         "daily_allowance": daily_allowance,
         "days_left": days_left,
         "exhausted": exhausted,
@@ -270,7 +292,9 @@ def read_usage_days_sync(days: int = 14) -> dict[str, int]:
     return out
 
 
-async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) -> bool:
+async def acquire_proxy_provider_token(
+    deadline_monotonic: float | None = None, *, render_js: bool = True
+) -> bool:
     """Acquire one proxy-provider outbound token before issuing a provider POST.
 
     Returns False when the cooperative deadline would be exceeded by waiting,
@@ -284,7 +308,7 @@ async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) 
     try:
         acquired = await asyncio.to_thread(_redis_acquire_sync)
         if acquired:
-            await asyncio.to_thread(_record_usage_sync)
+            await asyncio.to_thread(_record_usage_sync, render_js)
             return True
         wait_sec = 1.0 / proxy_provider_max_rps()
         if remaining is not None and wait_sec > remaining:
@@ -295,7 +319,7 @@ async def acquire_proxy_provider_token(deadline_monotonic: float | None = None) 
                 return False
         acquired = await asyncio.to_thread(_redis_acquire_sync)
         if acquired:
-            await asyncio.to_thread(_record_usage_sync)
+            await asyncio.to_thread(_record_usage_sync, render_js)
         return acquired
     except Exception:
         return await _acquire_local_fallback(deadline_monotonic)

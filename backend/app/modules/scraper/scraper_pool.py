@@ -264,8 +264,14 @@ class ScraperPool:
         requires_js: bool = False,
         scrape_tier: int = 1,
         deadline_monotonic: float | None = None,
+        render_js: bool | None = None,
     ) -> ListingFetchResult:
-        """Fetch HTML for one listing URL without extraction."""
+        """Fetch HTML for one listing URL without extraction.
+
+        `render_js=False` asks the paid backend for the cheaper no-JS tier
+        (list pages proven server-rendered); None leaves it to the shop's
+        access_mode.
+        """
         started = time.perf_counter()
         cached = page_cache.get_html(url)
         if cached:
@@ -287,6 +293,7 @@ class ScraperPool:
             html, backend_err = await self._fetch_layer_with_retries(
                 backend_id,
                 url,
+                render_js=render_js,
                 deadline_monotonic=deadline_monotonic,
             )
             backend_ms = int((time.perf_counter() - backend_started) * 1000)
@@ -533,7 +540,7 @@ class ScraperPool:
         """
         started = time.perf_counter()
         for backend_id, render_js in (
-            (BackendId.DIRECT_HTTP, True),
+            (BackendId.DIRECT_HTTP, None),
             (BackendId.PROXY_PROVIDER, False),
         ):
             backend_started = time.perf_counter()
@@ -816,7 +823,7 @@ class ScraperPool:
         backend_id: BackendId,
         url: str,
         *,
-        render_js: bool = True,
+        render_js: bool | None = None,
         deadline_monotonic: float | None = None,
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
@@ -863,15 +870,22 @@ class ScraperPool:
         backend_id: BackendId,
         url: str,
         *,
-        render_js: bool = True,
+        render_js: bool | None = None,
         deadline_monotonic: float | None = None,
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         backend = get_fetch_backend(backend_id)
         if backend_id == BackendId.PROXY_PROVIDER:
-            # JS rendering costs extra proxy credits: request it only when the
-            # marketplace's access_mode explicitly asks for it.
-            render_js = access_policy.wants_proxy_render(url)
+            # JS rendering costs 2.2x the proxy credits (Decodo $49 plan:
+            # $0.65 vs $0.30 per 1k). None = the marketplace's access_mode
+            # decides; an explicit False (static documents, list pages proven
+            # server-rendered) is honoured — until 2026-09-19 the policy
+            # overrode it and every sitemap of a proxy_render shop was billed
+            # at the JS tier.
+            if render_js is None:
+                render_js = access_policy.wants_proxy_render(url)
+        elif render_js is None:
+            render_js = True
         await host_throttle.acquire(url)
         return await backend.fetch(
             url,

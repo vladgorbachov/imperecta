@@ -231,12 +231,19 @@ def test_shops_with_categories_guards_non_array_jsonb():
 class _FakeRedis:
     def __init__(self) -> None:
         self.h: dict[str, dict] = {}
+        self.kv: dict[str, str] = {}
 
     def hgetall(self, key):
         return dict(self.h.get(key, {}))
 
     def hset(self, key, mapping):
         self.h.setdefault(key, {}).update({k: str(v) for k, v in mapping.items()})
+
+    def get(self, key):
+        return self.kv.get(key)
+
+    def set(self, key, value, ex=None):
+        self.kv[key] = value
 
 
 def test_pages_for_shop_walks_pool_once_per_pass():
@@ -260,16 +267,18 @@ def test_harvest_walks_pagination_and_persists_cursor(monkeypatch):
     from app.workers import harvest_tasks as ht
 
     pages = {
-        "https://s.example/a": ('<a rel="next" href="/a?page=2">n</a>', 3),
-        "https://s.example/a?page=2": ('<a rel="next" href="/a?page=3">n</a>', 3),
+        "https://s.example/a": ('<a rel="next" href="/a?page=2">n</a>', 8),
+        "https://s.example/a?page=2": ('<a rel="next" href="/a?page=3">n</a>', 8),
         "https://s.example/a?page=3": ("<p>last</p>", 2),
         "https://s.example/b": ("<p>only</p>", 4),
     }
     fetched: list[str] = []
+    modes: list = []
 
     class _Pool:
-        async def fetch_listing_html(self, url, **_kw):
+        async def fetch_listing_html(self, url, **kw):
             fetched.append(url)
+            modes.append(kw.get("render_js"))
             html, _n = pages[url]
             return types.SimpleNamespace(html=html, deadline_skipped=False)
 
@@ -309,14 +318,22 @@ def test_harvest_walks_pagination_and_persists_cursor(monkeypatch):
     monkeypatch.setattr(ht, "_make_session_factory", lambda: (_Engine(), lambda: _Db()))
 
     out = ht._run_async(ht._harvest("shop", 3))
+    # probe: page A without JS, then with JS (equal cards -> no-JS wins),
+    # then the walk itself runs with render_js=False
+    assert fetched[:2] == ["https://s.example/a", "https://s.example/a"]
+    assert modes[:2] == [False, True]
+    assert out["list_mode"] == "nojs" and out["list_mode_probe"] == {"nojs": 8, "js": 8}
+    assert redis.kv["harvest:listmode:shop"] == "nojs"
+    fetched[:] = fetched[2:]
     assert fetched == [
         "https://s.example/a",
         "https://s.example/a?page=2",
         "https://s.example/a?page=3",
     ]
-    assert out["pages_fetched"] == 3 and out["matched"] == 8
+    assert set(modes[2:]) == {False}
+    assert out["pages_fetched"] == 3 and out["matched"] == 18
     assert out["categories_done"] == 1 and out["cursor_category"] == 1
-    assert 30 > out["yield_ema"] > 2  # EMA moved from the 30 prior toward ~3
+    assert 30 > out["yield_ema"] > 5  # EMA moved from the 30 prior toward ~6
 
     out2 = ht._run_async(ht._harvest("shop", 3))
     # resumed at B, then wrapped into pass 1 and re-fetched A1, A2
@@ -341,6 +358,7 @@ def test_harvest_budget_skip_keeps_cursor(monkeypatch):
     monkeypatch.setattr("app.modules.scraper.scraper_pool.ScraperPool", _Pool)
     redis = _FakeRedis()
     redis.hset("harvest:cursor:shop", {"cat_idx": 1, "next_url": "https://s.example/b?page=4", "page": 3, "pass_no": 0, "yield_ema": 22.0})
+    redis.set("harvest:listmode:shop", "js")
     monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
     mp = SimpleNamespace(id="mid", base_url="https://s.example", domain="s.example",
                          requires_js=False, scrape_tier=1, rate_limit_delay=None,
@@ -370,3 +388,14 @@ def test_harvest_budget_skip_keeps_cursor(monkeypatch):
     assert out["status"] == "budget_exhausted" and out["pages_fetched"] == 0
     saved = redis.hgetall("harvest:cursor:shop")
     assert (saved["cat_idx"], saved["next_url"], saved["page"]) == ("1", "https://s.example/b?page=4", "3")
+
+
+def test_decide_list_mode_rules():
+    from app.common.html_parsing import REPEATED_STRUCTURE_MIN_COUNT
+    from app.workers import harvest_tasks as ht
+
+    n = REPEATED_STRUCTURE_MIN_COUNT
+    assert ht.decide_list_mode(n, n) == "nojs"
+    assert ht.decide_list_mode(n + 5, n) == "nojs"
+    assert ht.decide_list_mode(n - 1, n - 1) == "js"  # not a listing without JS
+    assert ht.decide_list_mode(n, n + 1) == "js"  # JS shows more cards

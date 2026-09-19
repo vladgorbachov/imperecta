@@ -219,7 +219,7 @@ class ProxyProviderBackend:
             return None, "fetch_failed"
         if await asyncio.to_thread(daily_budget_exhausted_sync):
             return None, PROXY_PROVIDER_BUDGET_ERROR
-        if not await acquire_proxy_provider_token(deadline_monotonic):
+        if not await acquire_proxy_provider_token(deadline_monotonic, render_js=render_js):
             return None, PROXY_PROVIDER_DEADLINE_ERROR
         auth = base64.b64encode(
             f"{settings.proxy_provider_username}:{settings.proxy_provider_password}".encode()

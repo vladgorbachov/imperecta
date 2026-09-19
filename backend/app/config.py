@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # differs from the plan (carried-over credit).
     proxy_provider_monthly_budget_usd: float = 49.0
     proxy_cost_per_1k_usd: float = 0.82
+    # No-JS tier for pacing: list $0.30/1k x the same 27% overhead = $0.38.
+    # The guard charges each fetch by its tier, so no-JS pages really do
+    # buy more fetches inside the same budget.
+    proxy_cost_nojs_per_1k_usd: float = 0.38
     proxy_provider_billing_day: int = 19
     # Optional hard per-day ceiling on top of the budget (0 = budget only).
     proxy_provider_daily_cap: int = 0
