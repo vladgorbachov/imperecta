@@ -44,23 +44,22 @@ class FactListing(Base):
         default=uuid.uuid4,
         server_default=text("gen_random_uuid()"),
     )
+    # No index=True on the FKs: the explicit idx_listing_* indexes below
+    # carry those lookups; the auto ix_fact_listing_* twins were dropped (070).
     product_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("dim_product.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     marketplace_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("dim_marketplace.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     seller_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("dim_seller.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
     external_url: Mapped[str] = mapped_column(Text, nullable=False)
     # Structural page role at discovery gate ('product' for gated pool rows).

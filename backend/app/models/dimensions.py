@@ -379,17 +379,17 @@ class DimProduct(Base):
     match_confidence: Mapped[float | None] = mapped_column(
         Numeric(3, 2), nullable=True
     )
+    # idx_product_category / idx_product_brand below carry these lookups;
+    # the auto ix_dim_product_* twins were dropped (070).
     category_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("dim_category.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
     brand_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("dim_brand.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
     attributes: Mapped[dict] = mapped_column(
         JSONB,
@@ -428,20 +428,9 @@ class DimProduct(Base):
         Index("idx_product_category", "category_id"),
         Index("idx_product_brand", "brand_id"),
         Index(
-            "idx_product_name",
-            "name_normalized",
-            postgresql_using="gin",
-            postgresql_ops={"name_normalized": "gin_trgm_ops"},
-        ),
-        Index(
             "idx_product_sku",
             "sku_universal",
             postgresql_where=text("sku_universal IS NOT NULL"),
-        ),
-        Index(
-            "idx_product_attributes",
-            "attributes",
-            postgresql_using="gin",
         ),
     )
 
