@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiClient, publicClient } from "./client";
 
 export const authApi = {
   login: (email: string, password: string, remember_me?: boolean) =>
@@ -21,7 +21,8 @@ export const authApi = {
     password: string,
     name: string,
     companyName?: string,
-    language?: string
+    language?: string,
+    countryCode?: string
   ) =>
     apiClient.post<{
       access_token: string;
@@ -30,8 +31,23 @@ export const authApi = {
       expires_at?: string;
     }>(
       "/auth/register",
-      { email, password, name, company_name: companyName ?? null, language }
+      {
+        email,
+        password,
+        name,
+        company_name: companyName ?? null,
+        language,
+        country_code: countryCode,
+      }
     ),
+  /**
+   * Public country picker for registration (WP6): active dim_country rows
+   * minus the blocked list, sorted by name. No auth, rate-limited.
+   */
+  getCountries: () =>
+    publicClient.get<{
+      items: Array<{ code: string; name: string; name_local: string | null }>;
+    }>("/auth/countries"),
   getMe: () =>
     apiClient.get<{
       id: string;

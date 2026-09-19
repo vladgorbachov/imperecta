@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   Package,
   FileText,
+  Scale,
   Shield,
   Store,
   Users,
@@ -404,6 +405,15 @@ export function Sidebar({
               isMobile={isMobile}
               onNavigate={onNavigate}
               isActive={isActive("/admin/alerts")}
+            />
+            <SidebarItem
+              icon={Scale}
+              label={t("admin.tabs.compliance")}
+              to="/admin/compliance"
+              collapsed={collapsed}
+              isMobile={isMobile}
+              onNavigate={onNavigate}
+              isActive={isActive("/admin/compliance")}
             />
           </SidebarSection>
         )}

@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/ui-custom/PageHeader";
 import { AdminOpsOverview } from "@/components/admin/AdminOpsOverview";
 import { DataCollectionTab } from "@/components/admin/DataCollectionTab";
 import { AlertsTab } from "@/components/admin/alerts/AlertsTab";
+import { BlockedCountriesSection } from "@/components/admin/compliance/BlockedCountriesSection";
 import { EmptyState } from "@/components/ui-custom/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -169,7 +170,7 @@ function statusLabelKey(status: ParsingPipelineJobStatus): string {
   return "admin.dataCollection.stageStatus.unknown";
 }
 
-const ADMIN_TABS = ["ops", "data-collection", "overview", "users-management", "alerts"] as const;
+const ADMIN_TABS = ["ops", "data-collection", "overview", "users-management", "alerts", "compliance"] as const;
 
 export function AdminPage() {
   const { t, i18n } = useTranslation();
@@ -399,6 +400,7 @@ export function AdminPage() {
           <TabsTrigger value="overview">{t("admin.tabs.marketplacesTab")}</TabsTrigger>
           <TabsTrigger value="users-management">{t("admin.tabs.usersManagement")}</TabsTrigger>
           <TabsTrigger value="alerts">{t("admin.alerts.tab")}</TabsTrigger>
+          <TabsTrigger value="compliance">{t("admin.tabs.compliance")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ops" className="space-y-4">
@@ -617,6 +619,10 @@ export function AdminPage() {
 
         <TabsContent value="alerts">
           <AlertsTab />
+        </TabsContent>
+
+        <TabsContent value="compliance" className="space-y-4">
+          <BlockedCountriesSection />
         </TabsContent>
 
         <TabsContent value="users-management">

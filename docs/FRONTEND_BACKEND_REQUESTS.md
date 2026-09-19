@@ -335,3 +335,40 @@ Bearer JWT, что и для основного API (HS256, общий секр�
 - CORS: https://imperecta.pages.dev и localhost разрешены.
 - Данные наполняются: мэтчинг перепроходит пул после фикса точности v2
   (~34ч на полный проход), приценённость растёт от harvest-тика.
+
+## P16 — F1 compliance UI: contract confirmed, endpoints pending (2026-09-19)
+
+Frontend task F1 (docs/FRONTEND_TASKS_2026-09-19.md) is built and deployed
+against the §6.6 contract of LEGAL_CLEANUP_PLAN_2026-09-19.md, confirmed with
+the WP6 backend session (imperecta-65) on 2026-09-19. Nothing below is live on
+prod yet (WP order: WP1 → WP2 → WP10 → WP11 → WP3 → WP4 → WP5 → WP6), so the
+UI currently shows honest error/empty states; no FE redeploy is needed when
+the endpoints land.
+
+Frontend relies on exactly:
+- `GET/POST /api/admin/blocked-countries/` (+ `dry_run`, `force`),
+  `GET …/available`, `PATCH …/{code}`, `DELETE …/{code}`,
+  `POST …/review-complete`, `GET …/audit?limit=&cursor=`, `GET …/check?ip=`
+  — shapes as in the §6.6 table. The dialog calls `dry_run: true` first and
+  treats `409 {"detail":"protected_country"}` on EITHER the dry-run or the
+  real POST as the legal-warning trigger, then retries the same step with
+  `force: true` and the mandatory note appended to `note`.
+- `POST /auth/register` now carries `country_code` (ISO-2 upper).
+  `422` with `detail: "country_not_supported"` (plain string) maps to the
+  country field error. Until the backend accepts the field it is ignored.
+- `GET /api/auth/countries` (public, `{items:[{code,name,name_local}]}`,
+  active `dim_country` minus blocked, ZZ excluded) feeds the signup picker.
+  Until it exists the request 404s and the bundled ISO reference list
+  (`src/lib/countries.ts`) stands in — reference data, not a mock.
+- `451 {"detail":"service_unavailable_in_your_country","country":"XX"}` on
+  any `apiClient`/`publicClient` call → stored session cleared, full
+  navigation to `/blocked` (fixed-text page, contact info@imperecta.com).
+  The data-ops client is not intercepted (anonymous public reads).
+
+Notes for the backend:
+- `GET /available` is fetched only while the add dialog is open (cached 1 h).
+- The IP-check form validates the shape client-side; the endpoint should
+  still reject garbage with 422.
+- Access: the whole /admin surface is superuser-only (SuperuserRoute →
+  /dashboard for others), so the Compliance tab inherits it; there is no
+  separate "admin but not superuser" role on the FE.

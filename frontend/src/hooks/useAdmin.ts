@@ -269,3 +269,82 @@ export const useResolveServiceAlert = () => {
     },
   });
 };
+
+// --- Compliance: blocked countries (F1) ---
+
+const BLOCKED_COUNTRIES_KEY = ["admin", "blocked-countries"] as const;
+
+export const useBlockedCountries = () =>
+  useQuery({
+    queryKey: BLOCKED_COUNTRIES_KEY,
+    queryFn: () => adminApi.getBlockedCountries().then((r) => r.data),
+    staleTime: 30_000,
+  });
+
+export const useAvailableCountries = (enabled = true) =>
+  useQuery({
+    queryKey: [...BLOCKED_COUNTRIES_KEY, "available"],
+    queryFn: () => adminApi.getAvailableCountries().then((r) => r.data),
+    staleTime: 60 * 60 * 1000,
+    enabled,
+  });
+
+export const useAddBlockedCountry = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: adminApi.BlockedCountryCreatePayload) =>
+      adminApi.addBlockedCountry(payload).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+};
+
+/** Impact preview — no invalidation, the server writes nothing. */
+export const useDryRunBlockedCountry = () =>
+  useMutation({
+    mutationFn: (payload: Omit<adminApi.BlockedCountryCreatePayload, "dry_run">) =>
+      adminApi.dryRunBlockedCountry(payload).then((r) => r.data),
+  });
+
+export const useUpdateBlockedCountry = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      code,
+      payload,
+    }: {
+      code: string;
+      payload: adminApi.BlockedCountryUpdatePayload;
+    }) => adminApi.updateBlockedCountry(code, payload).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+};
+
+export const useRemoveBlockedCountry = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => adminApi.removeBlockedCountry(code),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+};
+
+export const useCompleteReview = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (note?: string) =>
+      adminApi.completeBlockedCountriesReview(note).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }),
+  });
+};
+
+export const useBlockedCountriesAudit = (cursor: string | null, enabled: boolean) =>
+  useQuery({
+    queryKey: [...BLOCKED_COUNTRIES_KEY, "audit", cursor],
+    queryFn: () => adminApi.getBlockedCountriesAudit({ limit: 50, cursor }).then((r) => r.data),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+
+export const useCheckIpCountry = () =>
+  useMutation({
+    mutationFn: (ip: string) => adminApi.checkIpCountry(ip).then((r) => r.data),
+  });

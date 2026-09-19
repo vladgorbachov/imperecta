@@ -72,7 +72,8 @@ interface AuthState {
     password: string,
     name: string,
     companyName?: string,
-    language?: string
+    language?: string,
+    countryCode?: string
   ) => Promise<void>;
   logout: () => void;
   setUser: (user: User | null) => void;
@@ -146,14 +147,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     password: string,
     name: string,
     companyName?: string,
-    language?: string
+    language?: string,
+    countryCode?: string
   ) => {
     const { data } = await authApi.register(
       email,
       password,
       name,
       companyName,
-      language
+      language,
+      countryCode
     );
     const persistent = data.persistent ?? false;
     const expiresAt = data.expires_at ?? null;

@@ -477,3 +477,142 @@ export const getServiceAlerts = (params?: ServiceAlertsParams) =>
       ...(params?.severity ? { severity: params.severity } : {}),
     },
   });
+
+// --- Compliance: blocked (sanctioned) countries (F1, LEGAL_CLEANUP_PLAN §6.6) ---
+
+export type BlockedReason =
+  | "product_exclusion"
+  | "comprehensive_sanctions"
+  | "restrictive_measures"
+  | "other";
+
+export interface BlockedCountryActor {
+  id: string;
+  email: string;
+}
+
+export interface BlockedCountry {
+  country_code: string;
+  name: string;
+  reason: BlockedReason;
+  basis: string;
+  note: string | null;
+  is_active: boolean;
+  added_by: BlockedCountryActor | null;
+  added_at: string;
+  updated_at: string;
+  review_due_at: string;
+  is_protected: boolean;
+  affected_users: number;
+  affected_marketplaces: number;
+}
+
+export interface BlockedCountriesResponse {
+  items: BlockedCountry[];
+  last_reviewed_at: string | null;
+  next_review_due_at: string;
+}
+
+export interface AvailableCountry {
+  code: string;
+  name: string;
+  in_dim_country: boolean;
+  is_blocked: boolean;
+  is_protected: boolean;
+}
+
+export interface BlockedCountryCreatePayload {
+  country_code: string;
+  reason: BlockedReason;
+  basis: string;
+  note?: string | null;
+  force?: boolean;
+  dry_run?: boolean;
+}
+
+/** `dry_run: true` answers 200 with the impact counts only. */
+export interface BlockedCountryDryRunResult {
+  affected_users: number;
+  affected_marketplaces: number;
+}
+
+export interface BlockedCountryUpdatePayload {
+  reason?: BlockedReason;
+  basis?: string;
+  note?: string | null;
+  review_due_at?: string;
+}
+
+export interface BlockedCountriesReviewResult {
+  last_reviewed_at: string;
+  next_review_due_at: string;
+}
+
+export type BlockedCountryAuditAction = "add" | "remove" | "edit" | "review";
+
+export interface BlockedCountryAudit {
+  id: string;
+  country_code: string;
+  action: BlockedCountryAuditAction;
+  actor: BlockedCountryActor | null;
+  at: string;
+  before: unknown;
+  after: unknown;
+  note: string | null;
+}
+
+export interface BlockedCountriesAuditPage {
+  items: BlockedCountryAudit[];
+  next_cursor: string | null;
+}
+
+export interface IpCountryCheck {
+  ip: string;
+  country: string | null;
+  blocked: boolean;
+  provider: string;
+}
+
+const BLOCKED_COUNTRIES_PATH = "/admin/blocked-countries";
+
+export const getBlockedCountries = () =>
+  apiClient.get<BlockedCountriesResponse>(`${BLOCKED_COUNTRIES_PATH}/`);
+
+export const getAvailableCountries = () =>
+  apiClient.get<AvailableCountry[]>(`${BLOCKED_COUNTRIES_PATH}/available`);
+
+export const addBlockedCountry = (payload: BlockedCountryCreatePayload) =>
+  apiClient.post<BlockedCountry>(`${BLOCKED_COUNTRIES_PATH}/`, payload);
+
+export const dryRunBlockedCountry = (
+  payload: Omit<BlockedCountryCreatePayload, "dry_run">,
+) =>
+  apiClient.post<BlockedCountryDryRunResult>(`${BLOCKED_COUNTRIES_PATH}/`, {
+    ...payload,
+    dry_run: true,
+  });
+
+export const updateBlockedCountry = (
+  code: string,
+  payload: BlockedCountryUpdatePayload,
+) => apiClient.patch<BlockedCountry>(`${BLOCKED_COUNTRIES_PATH}/${code}`, payload);
+
+export const removeBlockedCountry = (code: string) =>
+  apiClient.delete<void>(`${BLOCKED_COUNTRIES_PATH}/${code}`);
+
+export const completeBlockedCountriesReview = (note?: string) =>
+  apiClient.post<BlockedCountriesReviewResult>(
+    `${BLOCKED_COUNTRIES_PATH}/review-complete`,
+    { note: note ?? null },
+  );
+
+export const getBlockedCountriesAudit = (params?: { limit?: number; cursor?: string | null }) =>
+  apiClient.get<BlockedCountriesAuditPage>(`${BLOCKED_COUNTRIES_PATH}/audit`, {
+    params: {
+      limit: params?.limit ?? 50,
+      ...(params?.cursor ? { cursor: params.cursor } : {}),
+    },
+  });
+
+export const checkIpCountry = (ip: string) =>
+  apiClient.get<IpCountryCheck>(`${BLOCKED_COUNTRIES_PATH}/check`, { params: { ip } });

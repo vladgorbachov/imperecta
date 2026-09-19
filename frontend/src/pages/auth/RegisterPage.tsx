@@ -7,8 +7,10 @@ import { useState } from "react";
 import { Link, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { getReturnPath } from "@/lib/routes";
 import { useTranslation } from "react-i18next";
-import { User, Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+import { User, Mail, Lock, Eye, EyeOff, Globe, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { useSignupCountries } from "@/hooks/useSignupCountries";
+import { flagForCode } from "@/lib/countryFlag";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const COUNTRY_NOT_SUPPORTED = "country_not_supported";
 
 type PasswordStrength = "weak" | "medium" | "strong";
 
@@ -44,12 +47,16 @@ export function RegisterPage() {
     location.state as { from?: { pathname: string } } | undefined
   );
 
+  const { countries, isLoading: countriesLoading } = useSignupCountries();
+
   const [name, setName] = useState("");
+  const [country, setCountry] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [nameError, setNameError] = useState("");
+  const [countryError, setCountryError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [confirmError, setConfirmError] = useState("");
@@ -72,6 +79,11 @@ export function RegisterPage() {
 
   const validateName = (value: string) => {
     if (!value.trim()) return t("auth.fieldRequired");
+    return "";
+  };
+
+  const validateCountry = (value: string) => {
+    if (!value) return t("auth.fieldRequired");
     return "";
   };
 
@@ -102,27 +114,34 @@ export function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const nErr = validateName(name);
+    const ctErr = validateCountry(country);
     const eErr = validateEmail(email);
     const pErr = validatePassword(password);
     const cErr = validateConfirm(confirmPassword);
     setNameError(nErr);
+    setCountryError(ctErr);
     setEmailError(eErr);
     setPasswordError(pErr);
     setConfirmError(cErr);
-    if (nErr || eErr || pErr || cErr) return;
+    if (nErr || ctErr || eErr || pErr || cErr) return;
 
     setSubmitError("");
     setLoading(true);
     try {
       const raw = (i18n.language ?? "en").split("-")[0];
       const lang = ["en", "ar", "es", "zh", "ru", "fr"].includes(raw) ? raw : "en";
-      await register(email, password, name, undefined, lang);
+      await register(email, password, name, undefined, lang, country);
       navigate(returnPath, { replace: true });
     } catch (err: unknown) {
       const message =
         err && typeof err === "object" && "response" in err
           ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : t("auth.registerError");
+      if (message === COUNTRY_NOT_SUPPORTED) {
+        setCountryError(t("auth.countryNotSupported"));
+        setSubmitError(t("auth.countryNotSupported"));
+        return;
+      }
       setSubmitError(typeof message === "string" ? message : t("auth.registerError"));
     } finally {
       setLoading(false);
@@ -166,6 +185,44 @@ export function RegisterPage() {
           </div>
           {nameError && (
             <p className="text-xs text-destructive dark:text-destructive">{nameError}</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="country" className="text-sm font-medium">
+            {t("auth.country")}
+          </label>
+          <div className="relative">
+            <Globe className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground dark:text-muted-foreground" />
+            <select
+              id="country"
+              value={country}
+              onChange={(e) => {
+                setCountry(e.target.value);
+                setCountryError("");
+              }}
+              onBlur={() => setCountryError(validateCountry(country))}
+              disabled={countriesLoading}
+              autoComplete="country"
+              data-testid="register-country"
+              className={cn(
+                "flex h-8 w-full appearance-none rounded-md border border-input bg-background py-1.5 pl-9 pr-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                !country && "text-muted-foreground",
+                countryError && "border-destructive focus-visible:ring-destructive"
+              )}
+            >
+              <option value="" disabled>
+                {t("auth.countryPlaceholder")}
+              </option>
+              {countries.map((row) => (
+                <option key={row.code} value={row.code}>
+                  {flagForCode(row.code)} {row.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {countryError && (
+            <p className="text-xs text-destructive dark:text-destructive">{countryError}</p>
           )}
         </div>
 
