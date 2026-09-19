@@ -316,21 +316,30 @@ pub fn url_locale_segment(url: &str) -> Option<String> {
     }
 }
 
-/// Sitemap files that carry the image / video extension entries restate
-/// product locs the product files already list (pigu.lt: 406
-/// `sitemap-products-images-N.xml` beside 406 `sitemap-products-N.xml`).
-const MEDIA_SITEMAP_TOKENS: [&str; 5] = ["image", "images", "img", "video", "videos"];
+/// Sub-sitemaps whose NAME says they carry no live offers: image / video
+/// extension files restate product locs the product files already list
+/// (pigu.lt: 406 `sitemap-products-images-N.xml` beside 406
+/// `sitemap-products-N.xml`); discontinued catalogs are dead pages a price
+/// scraper would pay to visit (tsbohemia.cz: 2150
+/// `sitemap-products-disabled-N-cs.xml` of 2759 files); reviews /
+/// consultations / questions are user content under product paths.
+const NOISE_SITEMAP_TOKENS: [&str; 24] = [
+    "image", "images", "img", "video", "videos",
+    "disabled", "discontinued", "archive", "archived", "expired", "inactive", "unavailable",
+    "review", "reviews", "consultation", "consultations", "question", "questions",
+    "comment", "comments", "discussion", "discussions", "rating", "ratings",
+];
 
-pub fn is_media_sitemap(url: &str) -> bool {
+pub fn is_noise_sitemap(url: &str) -> bool {
     let name = url_path(url).rsplit('/').next().unwrap_or("").to_lowercase();
     name.split(|c: char| !c.is_ascii_alphanumeric())
-        .any(|token| MEDIA_SITEMAP_TOKENS.contains(&token))
+        .any(|token| NOISE_SITEMAP_TOKENS.contains(&token))
 }
 
 #[derive(Debug, Default, PartialEq)]
 pub struct SubfileSelection {
     pub kept: Vec<String>,
-    pub skipped_media: usize,
+    pub skipped_noise: usize,
     pub skipped_locale: usize,
     /// The locale the selection settled on (None = single-locale tree).
     pub locale: Option<String>,
@@ -338,8 +347,8 @@ pub struct SubfileSelection {
 
 /// Choose which sub-sitemaps of one shop to walk.
 ///
-/// Media files are always dropped. Files without a locale prefix are always
-/// kept. For the rest one locale wins and the other locales' files are
+/// Noise files (media, discontinued, user content) are always dropped.
+/// Files without a locale prefix are always kept. For the rest one locale wins and the other locales' files are
 /// dropped:
 /// - `whole_tree` (the caller sees the shop's full index): `canonical` (the
 ///   pool's own URL prefix — a tie-breaker only, it may live in another
@@ -361,8 +370,8 @@ pub fn select_sitemap_subfiles(
     let mut candidates: Vec<(&String, Option<String>)> = Vec::with_capacity(urls.len());
     let mut locales: Vec<String> = Vec::new();
     for url in urls {
-        if is_media_sitemap(url) {
-            out.skipped_media += 1;
+        if is_noise_sitemap(url) {
+            out.skipped_noise += 1;
             continue;
         }
         let locale = url_locale_segment(url);
@@ -487,11 +496,16 @@ mod tests {
         assert_eq!(url_locale_segment("https://s.example/p/1"), None);
         assert_eq!(url_locale_segment("https://s.example/sitemap.xml"), None);
         assert_eq!(url_locale_segment("https://s.example"), None);
-        assert!(is_media_sitemap("https://pigu.lt/ru/sitemap-products-images-405.xml"));
-        assert!(is_media_sitemap("https://s.example/image_sitemap.xml"));
-        assert!(is_media_sitemap("https://s.example/sitemaps/video-1.xml"));
-        assert!(!is_media_sitemap("https://pigu.lt/lt/sitemap-products-5.xml"));
-        assert!(!is_media_sitemap("https://s.example/sitemap-imagery.xml"));
+        assert!(is_noise_sitemap("https://pigu.lt/ru/sitemap-products-images-405.xml"));
+        assert!(is_noise_sitemap("https://s.example/image_sitemap.xml"));
+        assert!(is_noise_sitemap("https://s.example/sitemaps/video-1.xml"));
+        assert!(is_noise_sitemap("https://sitemap.tsbohemia.cz/cs/sitemap-products-disabled-12-cs.xml"));
+        assert!(is_noise_sitemap("https://sitemap.tsbohemia.cz/cs/sitemap-products-disabled-consultations-1-cs.xml"));
+        assert!(is_noise_sitemap("https://sitemap.tsbohemia.cz/cs/sitemap-products-reviews-1-cs.xml"));
+        assert!(is_noise_sitemap("https://pigu.lt/lt/sitemap-archive-visible-products-1.xml"));
+        assert!(!is_noise_sitemap("https://pigu.lt/lt/sitemap-products-5.xml"));
+        assert!(!is_noise_sitemap("https://sitemap.tsbohemia.cz/cs/sitemap-products-accessories-3-cs.xml"));
+        assert!(!is_noise_sitemap("https://s.example/sitemap-imagery.xml"));
     }
 
     #[test]
@@ -505,7 +519,7 @@ mod tests {
         ]);
         let sel = select_sitemap_subfiles(&files, Some("lt"), None, true);
         assert_eq!(sel.kept, v(&["https://pigu.lt/lt/sitemap-products-1.xml", "https://pigu.lt/sitemap-categories.xml"]));
-        assert_eq!((sel.skipped_media, sel.skipped_locale), (2, 1));
+        assert_eq!((sel.skipped_noise, sel.skipped_locale), (2, 1));
         assert_eq!(sel.locale.as_deref(), Some("lt"));
 
         // Whole tree, no pool yet: the country hint decides; else the first locale in index order.

@@ -308,7 +308,7 @@ class TestSitemapParity:
 
         monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
         assert ic.url_locale_segment(url) == sl.url_locale_segment(url), url
-        assert ic.is_media_sitemap(url) == sl.is_media_sitemap(url), url
+        assert ic.is_noise_sitemap(url) == sl.is_noise_sitemap(url), url
 
     @pytest.mark.parametrize(
         ("canonical", "hint", "whole"),
@@ -331,7 +331,7 @@ class TestSitemapParity:
         py = sl.select_sitemap_subfiles(files, canonical, hint, whole)
         rust = ic.select_sitemap_subfiles(files, canonical, hint, whole)
         assert rust["kept"] == py.kept
-        assert rust["skipped_media"] == py.skipped_media
+        assert rust["skipped_noise"] == py.skipped_noise
         assert rust["skipped_locale"] == py.skipped_locale
         assert rust["locale"] == py.locale
 

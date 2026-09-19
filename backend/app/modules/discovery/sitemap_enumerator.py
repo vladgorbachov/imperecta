@@ -90,7 +90,7 @@ class EnumerateResult:
     lastmod_updated: int = 0
     # Multi-locale / media filter (sitemap_locale): what the walk left out.
     locale: str | None = None
-    subfiles_skipped_media: int = 0
+    subfiles_skipped_noise: int = 0
     subfiles_skipped_locale: int = 0
 
 
@@ -222,8 +222,8 @@ async def enumerate_sitemap_full(
     here (fan-out shards pass False and let the run finisher merge once).
 
     Multi-locale shops (pigu.lt: one tree per storefront language) are
-    walked in ONE locale and image/video sitemaps are skipped
-    (sitemap_locale). `locale` is the coordinator's election on the whole
+    walked in ONE locale and noise sub-sitemaps (media, discontinued, user
+    content) are skipped (sitemap_locale). `locale` is the coordinator's election on the whole
     index and is authoritative for the files of a shard; `whole_tree` says
     this walk starts from the shop's full index and elects the locale
     itself (pool prefix, country language, first in index order). URLs are
@@ -248,7 +248,7 @@ async def enumerate_sitemap_full(
             lastmod_seen=counts.get("lastmod_seen", 0),
             lastmod_updated=counts.get("lastmod_updated", 0),
             locale=counts.get("locale"),
-            subfiles_skipped_media=counts.get("subfiles_skipped_media", 0),
+            subfiles_skipped_noise=counts.get("subfiles_skipped_noise", 0),
             subfiles_skipped_locale=counts.get("subfiles_skipped_locale", 0),
         )
 
@@ -268,14 +268,14 @@ async def enumerate_sitemap_full(
         if whole_tree and locale is None
         else None
     )
-    skipped_media = skipped_locale_files = 0
+    skipped_noise = skipped_locale_files = 0
 
     def _select_subfiles(urls: list[str]) -> list[str]:
-        nonlocal locale, skipped_media, skipped_locale_files
+        nonlocal locale, skipped_noise, skipped_locale_files
         selection = select_sitemap_subfiles(
             urls, locale or pool_locale, country_hint, whole_tree
         )
-        skipped_media += selection.skipped_media
+        skipped_noise += selection.skipped_noise
         skipped_locale_files += selection.skipped_locale
         if selection.locale and not locale:
             # Elected on the index: nested indexes follow the same choice.
@@ -401,7 +401,7 @@ async def enumerate_sitemap_full(
         return _result(
             "empty_sitemap",
             locale=locale,
-            subfiles_skipped_media=skipped_media,
+            subfiles_skipped_noise=skipped_noise,
             subfiles_skipped_locale=skipped_locale_files,
         )
 
@@ -434,13 +434,13 @@ async def enumerate_sitemap_full(
         lastmod_seen=lastmod_seen,
         lastmod_updated=lastmod_updated,
         locale=locale,
-        subfiles_skipped_media=skipped_media,
+        subfiles_skipped_noise=skipped_noise,
         subfiles_skipped_locale=skipped_locale_files,
     )
     logger.info(
         "sitemap_enumerate_done marketplace_id=%s raw=%d product_like=%d "
         "inserted=%d duplicates=%d rejected=%d category_like=%d categories_added=%d "
-        "lastmod_seen=%d lastmod_updated=%d locale=%s skipped_media=%d "
+        "lastmod_seen=%d lastmod_updated=%d locale=%s skipped_noise=%d "
         "skipped_locale_files=%d duration_ms=%d",
         marketplace_id,
         result.raw_urls,
@@ -453,7 +453,7 @@ async def enumerate_sitemap_full(
         lastmod_seen,
         lastmod_updated,
         locale,
-        skipped_media,
+        skipped_noise,
         skipped_locale_files,
         result.duration_ms,
     )

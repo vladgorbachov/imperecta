@@ -21,7 +21,15 @@ from urllib.parse import urlparse
 from app.common import html_parsing as _hp
 
 _LOCALE_SEGMENT_RE = re.compile(r"^[a-z]{2}(?:[-_][a-z]{2})?$")
-_MEDIA_SITEMAP_TOKENS = frozenset({"image", "images", "img", "video", "videos"})
+# Sub-sitemaps whose name says they carry no live offers: media extension
+# files (locs restated), discontinued catalogs (tsbohemia: 2150 of 2759
+# files are `sitemap-products-disabled-N-cs.xml`), user content.
+_NOISE_SITEMAP_TOKENS = frozenset({
+    "image", "images", "img", "video", "videos",
+    "disabled", "discontinued", "archive", "archived", "expired", "inactive", "unavailable",
+    "review", "reviews", "consultation", "consultations", "question", "questions",
+    "comment", "comments", "discussion", "discussions", "rating", "ratings",
+})
 _TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 
 # Share of a pool sample that must sit under one locale prefix before it is
@@ -64,7 +72,7 @@ COUNTRY_LANGUAGE: dict[str, str] = {
 @dataclass(frozen=True)
 class SubfileSelection:
     kept: list[str] = field(default_factory=list)
-    skipped_media: int = 0
+    skipped_noise: int = 0
     skipped_locale: int = 0
     locale: str | None = None
 
@@ -77,12 +85,12 @@ def url_locale_segment(url: str) -> str | None:
     return first if _LOCALE_SEGMENT_RE.match(first) else None
 
 
-def is_media_sitemap(url: str) -> bool:
-    """Image / video extension sitemaps restate product locs — never walked."""
+def is_noise_sitemap(url: str) -> bool:
+    """Media / discontinued / user-content sub-sitemaps — never walked."""
     if _hp._use_rust():
-        return _hp._rust_core.is_media_sitemap(url)
+        return _hp._rust_core.is_noise_sitemap(url)
     name = urlparse(url).path.rsplit("/", 1)[-1].lower()
-    return any(token in _MEDIA_SITEMAP_TOKENS for token in _TOKEN_SPLIT_RE.split(name))
+    return any(token in _NOISE_SITEMAP_TOKENS for token in _TOKEN_SPLIT_RE.split(name))
 
 
 def select_sitemap_subfiles(
@@ -91,7 +99,7 @@ def select_sitemap_subfiles(
     country_hint: str | None = None,
     whole_tree: bool = False,
 ) -> SubfileSelection:
-    """Drop media files; keep one storefront locale's files.
+    """Drop noise files; keep one storefront locale's files.
 
     `whole_tree` (the caller sees the shop's full index): on a tree with 2+
     locales the winner is `canonical` when the index has it (the pool's URL
@@ -107,16 +115,16 @@ def select_sitemap_subfiles(
         raw = _hp._rust_core.select_sitemap_subfiles(urls, canonical, country_hint, whole_tree)
         return SubfileSelection(
             kept=list(raw["kept"]),
-            skipped_media=int(raw["skipped_media"]),
+            skipped_noise=int(raw["skipped_noise"]),
             skipped_locale=int(raw["skipped_locale"]),
             locale=raw["locale"],
         )
     candidates: list[tuple[str, str | None]] = []
     locales: list[str] = []
-    skipped_media = 0
+    skipped_noise = 0
     for url in urls:
-        if is_media_sitemap(url):
-            skipped_media += 1
+        if is_noise_sitemap(url):
+            skipped_noise += 1
             continue
         locale = url_locale_segment(url)
         if locale is not None and locale not in locales:
@@ -143,7 +151,7 @@ def select_sitemap_subfiles(
         else:
             kept.append(url)
     return SubfileSelection(
-        kept=kept, skipped_media=skipped_media, skipped_locale=skipped_locale, locale=chosen
+        kept=kept, skipped_noise=skipped_noise, skipped_locale=skipped_locale, locale=chosen
     )
 
 
@@ -200,7 +208,7 @@ __all__ = [
     "canonical_locale_sync",
     "country_language_hint",
     "dominant_locale",
-    "is_media_sitemap",
+    "is_noise_sitemap",
     "select_sitemap_subfiles",
     "url_locale_segment",
 ]

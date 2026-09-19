@@ -91,7 +91,7 @@ async def _resolve_shards(
     marketplace_code: str,
 ) -> tuple[object, list[str], str | None]:
     """(marketplace, sub-sitemaps to shard, locale) — the first index level
-    with media files and other storefront languages already dropped
+    with noise files and other storefront languages already dropped
     (sitemap_locale): pigu.lt's index carried 406 `ru/` product files and 812
     image twins beside the 406 `lt/` files the pool is built from. The
     locale is the index-level election only (None on a single-locale
@@ -127,13 +127,13 @@ async def _resolve_shards(
             country_language_hint(marketplace.country_code),
             whole_tree=True,
         )
-        if selection.skipped_media or selection.skipped_locale:
+        if selection.skipped_noise or selection.skipped_locale:
             slog.info(
                 "sitemap_enumerate_subfiles_filtered",
                 marketplace_code=marketplace_code,
                 subfiles=len(shards),
                 kept=len(selection.kept),
-                skipped_media=selection.skipped_media,
+                skipped_noise=selection.skipped_noise,
                 skipped_locale=selection.skipped_locale,
                 locale=selection.locale,
             )

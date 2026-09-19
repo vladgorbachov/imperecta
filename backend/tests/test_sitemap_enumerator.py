@@ -290,7 +290,7 @@ class TestMultiLocaleTree:
             )
         assert result.status == "completed"
         assert result.locale == "lt"
-        assert result.subfiles_skipped_media == 2
+        assert result.subfiles_skipped_noise == 2
         assert result.subfiles_skipped_locale == 1
         assert result.inserted == 2
         assert {dto.fact_listing["external_url"] for dto in written} == {
@@ -312,7 +312,7 @@ class TestMultiLocaleTree:
                 _marketplace(country_code="LT"), self._pool(), whole_tree=True
             )
         assert result.locale == "ru"
-        assert result.subfiles_skipped_locale == 1 and result.subfiles_skipped_media == 2
+        assert result.subfiles_skipped_locale == 1 and result.subfiles_skipped_noise == 2
         assert result.inserted == 2
 
     async def test_ru_only_shard_is_skipped_whole_without_a_fetch(self):
@@ -338,7 +338,7 @@ class TestMultiLocaleTree:
         assert fetched == []
         assert result.status == "empty_sitemap"
         assert result.locale == "lt"
-        assert result.subfiles_skipped_locale == 2 and result.subfiles_skipped_media == 1
+        assert result.subfiles_skipped_locale == 2 and result.subfiles_skipped_noise == 1
 
     async def test_shard_without_election_drops_nothing_and_never_consults_the_pool(self):
         """tsbohemia: files under /cs/, pool under /en/ (hreflang) — a shard

@@ -128,7 +128,9 @@ def test_resolve_shards_single_locale_index_elects_nothing(monkeypatch) -> None:
     from app.modules.scraper.scraper_pool import ScraperPool
 
     mp = SimpleNamespace(id=uuid4(), base_url="https://tsbohemia.cz", country_code="CZ")
-    index = ["https://sitemap.tsbohemia.cz/cs/sitemap-products-%d-cs.xml" % i for i in range(4)]
+    index = ["https://sitemap.tsbohemia.cz/cs/sitemap-products-%d-cs.xml" % i for i in range(4)] + [
+        "https://sitemap.tsbohemia.cz/cs/sitemap-products-disabled-%d-cs.xml" % i for i in range(3)
+    ]
 
     class _Db:
         async def __aenter__(self):
@@ -154,7 +156,7 @@ def test_resolve_shards_single_locale_index_elects_nothing(monkeypatch) -> None:
         "app.modules.discovery.sitemap_locale.canonical_locale_sync", lambda _id: "en"
     )
     _mp, shards, locale = asyncio.run(ob._resolve_shards("tsbohemia_cz"))
-    assert shards == index
+    assert shards == index[:4]  # the disabled catalog is noise
     assert locale is None
 
 
