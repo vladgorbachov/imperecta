@@ -78,9 +78,12 @@ class TestPrimitives:
         assert sl.dominant_locale(pool, 0.9) is None
         assert sl.dominant_locale(["https://s.example/p/1"]) is None
 
-    def test_keep_mask(self, engine):
-        urls = ["https://pigu.lt/lt/p/1", "https://pigu.lt/ru/p/1", "https://pigu.lt/p/1"]
-        assert sl.locale_keep_mask(urls, "lt") == [True, False, True]
+    def test_whole_tree_pool_prefix_outside_file_space_is_ignored(self, engine):
+        """tsbohemia: files under /cs/, pool under /en/ (hreflang) — one
+        locale in the index, nothing is dropped."""
+        files = ["https://sitemap.tsbohemia.cz/cs/sitemap-products-%d-cs.xml" % i for i in range(3)]
+        sel = sl.select_sitemap_subfiles(files, "en", "cs", whole_tree=True)
+        assert sel.kept == files and sel.locale is None and sel.skipped_locale == 0
 
 
 class TestCanonicalLocaleSync:

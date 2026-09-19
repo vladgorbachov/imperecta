@@ -277,12 +277,6 @@ fn dominant_locale(urls: Vec<String>, min_share: f64) -> Option<String> {
     sitemap::dominant_locale(&urls, min_share)
 }
 
-/// sitemap_locale.locale_keep_mask twin.
-#[pyfunction]
-fn locale_keep_mask(urls: Vec<String>, canonical: &str) -> Vec<bool> {
-    sitemap::locale_keep_mask(&urls, canonical)
-}
-
 #[pymodule]
 fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_sitemap_xml, m)?)?;
@@ -294,7 +288,6 @@ fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_media_sitemap, m)?)?;
     m.add_function(wrap_pyfunction!(select_sitemap_subfiles, m)?)?;
     m.add_function(wrap_pyfunction!(dominant_locale, m)?)?;
-    m.add_function(wrap_pyfunction!(locale_keep_mask, m)?)?;
     m.add_function(wrap_pyfunction!(parse_price_text, m)?)?;
     m.add_function(wrap_pyfunction!(parse_currency_symbol, m)?)?;
     m.add_function(wrap_pyfunction!(parse_currency_code, m)?)?;

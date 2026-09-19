@@ -93,7 +93,10 @@ async def _resolve_shards(
     """(marketplace, sub-sitemaps to shard, locale) — the first index level
     with media files and other storefront languages already dropped
     (sitemap_locale): pigu.lt's index carried 406 `ru/` product files and 812
-    image twins beside the 406 `lt/` files the pool is built from."""
+    image twins beside the 406 `lt/` files the pool is built from. The
+    locale is the index-level election only (None on a single-locale
+    tree) — never the pool's URL prefix, which can sit in another space
+    (tsbohemia: /cs/ files, /en/ pool via hreflang)."""
     from app.modules.discovery.sitemap_locale import (
         canonical_locale_sync,
         country_language_hint,
@@ -132,9 +135,9 @@ async def _resolve_shards(
                 kept=len(selection.kept),
                 skipped_media=selection.skipped_media,
                 skipped_locale=selection.skipped_locale,
-                locale=selection.locale or canonical,
+                locale=selection.locale,
             )
-        return marketplace, selection.kept, selection.locale or canonical
+        return marketplace, selection.kept, selection.locale
     finally:
         await engine.dispose()
 
@@ -228,7 +231,7 @@ async def _enumerate(
     explicit_sitemaps: list[str] | None = None,
     write_estimate: bool = True,
     publish_categories: bool = True,
-    canonical_locale: str | None = None,
+    locale: str | None = None,
     whole_tree: bool = False,
 ) -> dict:
     from app.modules.scraper.scraper_pool import ScraperPool
@@ -254,7 +257,7 @@ async def _enumerate(
             max_urls=max_urls,
             explicit_sitemaps=explicit_sitemaps,
             publish_categories=publish_categories,
-            canonical_locale=canonical_locale,
+            locale=locale,
             whole_tree=whole_tree,
         )
         # Coverage denominator (roadmap item 2): persist the product-like URL
@@ -295,7 +298,7 @@ def sitemap_enumerate_marketplace(
         if len(shards) < 2:
             # Whole-tree walk: it may elect the locale from the index itself.
             summary = _run_async(
-                _enumerate(marketplace_code, max_urls, canonical_locale=locale, whole_tree=True)
+                _enumerate(marketplace_code, max_urls, locale=locale, whole_tree=True)
             )
             summary.pop("_category_urls", None)
             slog.info("sitemap_enumerate_task_done", **summary)
@@ -362,9 +365,9 @@ def sitemap_enumerate_shard(
 ) -> dict:
     """Enumerate ONE shard (subset of sub-sitemaps) of a shop's tree.
 
-    `locale` is the coordinator's choice; shards queued before it existed
-    (None) fall back to the pool's own prefix inside the enumerator and
-    never elect a locale from their own 3 files. A shard walks its subfiles
+    `locale` is the coordinator's election on the whole index; without one
+    a shard drops nothing for locale reasons and never elects a locale from
+    its own 3 files. A shard walks its subfiles
     to their protocol maximum whatever floor the message carries — the
     2026-09 backlog was queued with the old 10k per-shard value.
     """
@@ -376,7 +379,7 @@ def sitemap_enumerate_shard(
                 explicit_sitemaps=shard_sitemaps,
                 write_estimate=False,
                 publish_categories=run_id is None,
-                canonical_locale=locale,
+                locale=locale,
             )
         )
         shard_categories = summary.pop("_category_urls", [])

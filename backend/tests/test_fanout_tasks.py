@@ -120,6 +120,44 @@ def test_resolve_shards_drops_media_and_other_locales(monkeypatch) -> None:
     ]
 
 
+def test_resolve_shards_single_locale_index_elects_nothing(monkeypatch) -> None:
+    """tsbohemia: every file under /cs/, pool under /en/ — shards must get
+    NO locale (the pool prefix is not the files' space)."""
+    import asyncio
+
+    from app.modules.scraper.scraper_pool import ScraperPool
+
+    mp = SimpleNamespace(id=uuid4(), base_url="https://tsbohemia.cz", country_code="CZ")
+    index = ["https://sitemap.tsbohemia.cz/cs/sitemap-products-%d-cs.xml" % i for i in range(4)]
+
+    class _Db:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, *_a, **_k):
+            return SimpleNamespace(scalar_one_or_none=lambda: mp)
+
+    class _Engine:
+        async def dispose(self):
+            pass
+
+    monkeypatch.setattr(ob, "_make_session_factory", lambda: (_Engine(), lambda: _Db()))
+
+    async def fake_resolve_shards(self, _base):
+        return {"shards": index, "entry": "https://tsbohemia.cz/sitemap.xml"}
+
+    monkeypatch.setattr(ScraperPool, "resolve_sitemap_shards", fake_resolve_shards)
+    monkeypatch.setattr(
+        "app.modules.discovery.sitemap_locale.canonical_locale_sync", lambda _id: "en"
+    )
+    _mp, shards, locale = asyncio.run(ob._resolve_shards("tsbohemia_cz"))
+    assert shards == index
+    assert locale is None
+
+
 def test_shard_task_passes_locale_through(monkeypatch) -> None:
     calls: list = []
 
@@ -130,7 +168,7 @@ def test_shard_task_passes_locale_through(monkeypatch) -> None:
     monkeypatch.setattr(ob, "_enumerate", fake_enumerate)
     out = ob.sitemap_enumerate_shard.run("shop_x", ["https://s.example/a.xml"], locale="lt")
     assert out["status"] == "completed"
-    assert calls[0]["canonical_locale"] == "lt"
+    assert calls[0]["locale"] == "lt"
     assert calls[0]["explicit_sitemaps"] == ["https://s.example/a.xml"]
 
 

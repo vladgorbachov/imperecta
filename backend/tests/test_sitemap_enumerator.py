@@ -254,7 +254,8 @@ async def test_walk_sitemaps_streams_documents_with_bounded_prefetch(monkeypatch
 @pytest.mark.asyncio
 class TestMultiLocaleTree:
     """pigu.lt shape: one product tree per storefront language plus image
-    twins — only the pool's locale is walked, media files never are."""
+    twins — the coordinator elects one locale on the index, shards treat it
+    as authoritative, media files are never walked."""
 
     LT = "https://shop.example/lt/sitemap-products-1.xml"
     LT_IMG = "https://shop.example/lt/sitemap-products-images-1.xml"
@@ -273,7 +274,7 @@ class TestMultiLocaleTree:
             ]
         )
 
-    async def test_pool_locale_wins_and_media_files_are_skipped(self):
+    async def test_elected_locale_wins_and_media_files_are_skipped(self):
         written = []
 
         def fake_write(dtos):
@@ -285,7 +286,7 @@ class TestMultiLocaleTree:
             patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
         ):
             result = await sitemap_enumerator.enumerate_sitemap_full(
-                _marketplace(country_code="LT"), self._pool(), canonical_locale="lt"
+                _marketplace(country_code="LT"), self._pool(), locale="lt"
             )
         assert result.status == "completed"
         assert result.locale == "lt"
@@ -297,28 +298,27 @@ class TestMultiLocaleTree:
             "https://shop.example/lt/p/gadget-234567",
         }
 
-    async def test_shard_without_locale_falls_back_to_pool_prefix(self):
-        """Shards queued before the coordinator carried a locale (the 434
-        stuck pigu messages) resolve it from the pool, never from their
-        own files."""
+    async def test_whole_tree_walk_elects_from_pool_prefix(self):
+        """A flat/whole-tree walk with no coordinator locale elects on the
+        index: the pool's prefix breaks the tie when the index has it."""
         with (
             patch.object(sitemap_enumerator, "write_pool_dtos_sync",
                          lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
             patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
             patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
-                  return_value="lt"),
+                  return_value="ru"),
         ):
             result = await sitemap_enumerator.enumerate_sitemap_full(
-                _marketplace(country_code="LT"), self._pool(),
-                explicit_sitemaps=[self.RU, self.RU_IMG],
+                _marketplace(country_code="LT"), self._pool(), whole_tree=True
             )
-        assert result.locale == "lt"
-        assert result.inserted == 2  # the stub pool still yields the lt files
+        assert result.locale == "ru"
+        assert result.subfiles_skipped_locale == 1 and result.subfiles_skipped_media == 2
+        assert result.inserted == 2
 
     async def test_ru_only_shard_is_skipped_whole_without_a_fetch(self):
-        """A shard entirely under another locale never reaches the walker
-        (the 11 ru shards of 2026-09-19 were fetched and then dropped URL by
-        URL — 114,405 of them)."""
+        """A shard entirely under another locale than the coordinator's
+        election never reaches the walker (the 11 ru shards of 2026-09-19
+        were fetched and then dropped URL by URL — 114,405 of them)."""
         fetched: list[str] = []
         pool = SimpleNamespace()
 
@@ -331,16 +331,51 @@ class TestMultiLocaleTree:
                 yield f, {"sitemaps": [], "urls": [], "url_entries": []}
 
         pool.walk_sitemaps = walk
-        with patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
-                   return_value="lt"):
-            result = await sitemap_enumerator.enumerate_sitemap_full(
-                _marketplace(country_code="LT"), pool,
-                explicit_sitemaps=[self.RU, "https://shop.example/ru/sitemap-products-2.xml", self.RU_IMG],
-            )
+        result = await sitemap_enumerator.enumerate_sitemap_full(
+            _marketplace(country_code="LT"), pool, locale="lt",
+            explicit_sitemaps=[self.RU, "https://shop.example/ru/sitemap-products-2.xml", self.RU_IMG],
+        )
         assert fetched == []
         assert result.status == "empty_sitemap"
         assert result.locale == "lt"
         assert result.subfiles_skipped_locale == 2 and result.subfiles_skipped_media == 1
+
+    async def test_shard_without_election_drops_nothing_and_never_consults_the_pool(self):
+        """tsbohemia: files under /cs/, pool under /en/ (hreflang) — a shard
+        with no coordinator locale walks its files whatever the pool says."""
+        files = ["https://sitemap.shop.example/cs/sitemap-products-%d-cs.xml" % i for i in range(3)]
+        urls = [(f"https://shop.example/en/p/item-{i:06d}", files[i]) for i in range(3)]
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+            patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
+                  side_effect=AssertionError("pool must not be consulted in a shard")),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(country_code="CZ"), _pool_returning(urls), explicit_sitemaps=files
+            )
+        assert result.locale is None
+        assert result.subfiles_skipped_locale == 0
+        assert result.inserted == 3
+
+    async def test_urls_are_never_filtered_by_locale(self):
+        """hreflang selection may move a URL to another prefix; a product
+        without an alternate keeps its own — both stay."""
+        urls = [
+            ("https://shop.example/lt/p/widget-123456", PRODUCT_SHARD),
+            ("https://shop.example/ru/p/widget-123456", PRODUCT_SHARD),
+            ("https://shop.example/p/plain-345678", PRODUCT_SHARD),
+        ]
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(), _pool_returning(urls), locale="lt"
+            )
+        assert result.inserted == 3
 
     async def test_run_floor_processes_the_paid_document_before_stopping(self):
         """max_urls is a floor for the run: the document that crossed it is
@@ -364,7 +399,6 @@ class TestMultiLocaleTree:
             patch.object(sitemap_enumerator, "write_pool_dtos_sync",
                          lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
             patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
-            patch("app.modules.discovery.sitemap_locale.canonical_locale_sync", return_value=None),
         ):
             result = await sitemap_enumerator.enumerate_sitemap_full(
                 _marketplace(), pool, max_urls=8
@@ -372,42 +406,3 @@ class TestMultiLocaleTree:
         # doc1: 6 (<8, go on); doc2: raw 12 > 8 and 12 >= 8 -> processed, then stop
         assert result.inserted == 12
         assert walked == list(docs)[:2]
-
-    async def test_mixed_locale_urls_inside_one_file_are_filtered(self):
-        urls = [
-            ("https://shop.example/lt/p/widget-123456", PRODUCT_SHARD),
-            ("https://shop.example/ru/p/widget-123456", PRODUCT_SHARD),
-            ("https://shop.example/en/p/widget-123456", PRODUCT_SHARD),
-            ("https://shop.example/p/plain-345678", PRODUCT_SHARD),
-        ]
-        with (
-            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
-                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
-            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
-        ):
-            result = await sitemap_enumerator.enumerate_sitemap_full(
-                _marketplace(), _pool_returning(urls), canonical_locale="lt"
-            )
-        assert result.urls_skipped_locale == 2
-        assert result.inserted == 2
-
-    async def test_no_locale_known_keeps_everything(self):
-        """A shop with no pool, no country hint and no index-level election
-        must not lose URLs to the filter."""
-        urls = [
-            ("https://shop.example/lt/p/widget-123456", PRODUCT_SHARD),
-            ("https://shop.example/ru/p/widget-123456", PRODUCT_SHARD),
-        ]
-        with (
-            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
-                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
-            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
-            patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
-                  return_value=None),
-        ):
-            result = await sitemap_enumerator.enumerate_sitemap_full(
-                _marketplace(), _pool_returning(urls)
-            )
-        assert result.locale is None
-        assert result.urls_skipped_locale == 0
-        assert result.inserted == 2

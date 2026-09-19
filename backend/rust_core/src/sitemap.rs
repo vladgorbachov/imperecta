@@ -342,13 +342,15 @@ pub struct SubfileSelection {
 /// kept. For the rest one locale wins and the other locales' files are
 /// dropped:
 /// - `whole_tree` (the caller sees the shop's full index): `canonical` (the
-///   pool's own prefix) when the index has it, else `country_hint`, else the
-///   first locale in index order — and only when the index carries two or
-///   more locales; a single-locale index is never touched.
-/// - a shard (3 files seen in isolation): `canonical` is authoritative — a
-///   shard whose files all sit under another locale is skipped whole — and
-///   without a canonical nothing is dropped, so a shard never elects a
-///   locale from its own files.
+///   pool's own URL prefix — a tie-breaker only, it may live in another
+///   space when hreflang alternates were followed at ingest) when the index
+///   has it, else `country_hint`, else the first locale in index order — and
+///   only when the index carries two or more locales; a single-locale index
+///   is never touched.
+/// - a shard (3 files seen in isolation): `canonical` is the locale the
+///   coordinator elected on the whole index and is authoritative — a shard
+///   whose files all sit under another locale is skipped whole; without one
+///   nothing is dropped, so a shard never elects a locale from its own files.
 pub fn select_sitemap_subfiles(
     urls: &[String],
     canonical: Option<&str>,
@@ -415,18 +417,6 @@ pub fn dominant_locale(urls: &[String], min_share: f64) -> Option<String> {
         .max_by_key(|(_, n)| *n)
         .filter(|(_, n)| (*n as f64) >= min_share * (urls.len() as f64))
         .map(|(l, _)| l)
-}
-
-/// Per-URL keep mask against a known canonical locale: URLs under another
-/// locale prefix are the same offers again and are dropped.
-pub fn locale_keep_mask(urls: &[String], canonical: &str) -> Vec<bool> {
-    let canonical = canonical.to_lowercase();
-    urls.iter()
-        .map(|u| match url_locale_segment(u) {
-            Some(l) => l == canonical,
-            None => true,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -549,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn dominant_locale_and_keep_mask() {
+    fn dominant_locale_threshold() {
         let pool = v(&[
             "https://pigu.lt/lt/p/1", "https://pigu.lt/lt/p/2", "https://pigu.lt/lt/p/3",
             "https://pigu.lt/lt/p/4", "https://pigu.lt/ru/p/1",
@@ -558,7 +548,5 @@ mod tests {
         assert_eq!(dominant_locale(&pool, 0.9), None);
         assert_eq!(dominant_locale(&v(&["https://s.example/p/1", "https://s.example/p/2"]), 0.8), None);
         assert_eq!(dominant_locale(&[], 0.8), None);
-        let urls = v(&["https://pigu.lt/lt/p/1", "https://pigu.lt/ru/p/1", "https://pigu.lt/p/1"]);
-        assert_eq!(locale_keep_mask(&urls, "LT"), vec![true, false, true]);
     }
 }

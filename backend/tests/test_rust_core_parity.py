@@ -335,7 +335,7 @@ class TestSitemapParity:
         assert rust["skipped_locale"] == py.skipped_locale
         assert rust["locale"] == py.locale
 
-    def test_dominant_locale_and_keep_mask(self, monkeypatch):
+    def test_dominant_locale(self, monkeypatch):
         from app.modules.discovery import sitemap_locale as sl
 
         pool = ["https://pigu.lt/lt/p/1", "https://pigu.lt/lt/p/2", "https://pigu.lt/lt/p/3",
@@ -344,5 +344,3 @@ class TestSitemapParity:
         for share in (0.5, 0.8, 0.9):
             assert ic.dominant_locale(pool, share) == sl.dominant_locale(pool, share)
         assert ic.dominant_locale([], 0.8) == sl.dominant_locale([], 0.8) is None
-        urls = ["https://pigu.lt/lt/p/1", "https://pigu.lt/ru/p/1", "https://pigu.lt/p/1"]
-        assert ic.locale_keep_mask(urls, "LT") == sl.locale_keep_mask(urls, "LT") == [True, False, True]

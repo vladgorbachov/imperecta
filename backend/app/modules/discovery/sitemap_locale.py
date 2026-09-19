@@ -94,13 +94,14 @@ def select_sitemap_subfiles(
     """Drop media files; keep one storefront locale's files.
 
     `whole_tree` (the caller sees the shop's full index): on a tree with 2+
-    locales the winner is `canonical` when the index has it, else the
-    country's language, else the first locale in index order; a
-    single-locale index is never touched. A shard (3 files in isolation):
-    `canonical` is authoritative — files under any other locale are
-    dropped, a shard entirely under another locale is skipped whole — and
-    without a canonical nothing is dropped, so a shard never elects a
-    locale from its own files.
+    locales the winner is `canonical` when the index has it (the pool's URL
+    prefix — a tie-breaker only: tsbohemia's files sit under /cs/ while its
+    pool is /en/ through hreflang alternates), else the country's language,
+    else the first locale in index order; a single-locale index is never
+    touched. A shard (3 files in isolation): `canonical` is the locale the
+    coordinator elected on the whole index and is authoritative — a shard
+    entirely under another locale is skipped whole — and without one
+    nothing is dropped, so a shard never elects a locale from its own files.
     """
     if _hp._use_rust():
         raw = _hp._rust_core.select_sitemap_subfiles(urls, canonical, country_hint, whole_tree)
@@ -163,23 +164,15 @@ def dominant_locale(urls: list[str], min_share: float = CANONICAL_LOCALE_MIN_SHA
     return locale if n >= min_share * len(urls) else None
 
 
-def locale_keep_mask(urls: list[str], canonical: str) -> list[bool]:
-    """Per-URL keep flag: another locale's prefix means the same offer again."""
-    if _hp._use_rust():
-        return _hp._rust_core.locale_keep_mask(urls, canonical)
-    canonical_l = canonical.lower()
-    return [(url_locale_segment(u) or canonical_l) == canonical_l for u in urls]
-
-
 def country_language_hint(country_code: str | None) -> str | None:
     return COUNTRY_LANGUAGE.get((country_code or "").upper()) or None
 
 
 def canonical_locale_sync(marketplace_id) -> str | None:
     """The locale prefix the shop's own pool is written under (sampled),
-    None when the pool is empty or not locale-prefixed. Only an OBSERVED
-    prefix becomes authoritative for shards; the country's language is a
-    whole-tree tie-breaker the callers pass separately."""
+    None when the pool is empty or not locale-prefixed. A whole-tree
+    tie-breaker only — pool URLs may sit in another locale than the
+    sitemap files (hreflang selection at ingest)."""
     from sqlalchemy import select
 
     from app.database import sync_session_factory
@@ -208,7 +201,6 @@ __all__ = [
     "country_language_hint",
     "dominant_locale",
     "is_media_sitemap",
-    "locale_keep_mask",
     "select_sitemap_subfiles",
     "url_locale_segment",
 ]
