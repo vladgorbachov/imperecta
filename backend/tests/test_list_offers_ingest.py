@@ -399,3 +399,22 @@ def test_decide_list_mode_rules():
     assert ht.decide_list_mode(n + 5, n) == "nojs"
     assert ht.decide_list_mode(n - 1, n - 1) == "js"  # not a listing without JS
     assert ht.decide_list_mode(n, n + 1) == "js"  # JS shows more cards
+
+
+def test_harvest_tick_dispatches_children_at_tick_priority(monkeypatch):
+    """Harvest children must not queue behind the priority-2 PDP shards."""
+    from unittest.mock import MagicMock
+
+    from app.workers import harvest_tasks as ht
+
+    monkeypatch.setattr(ht, "_shops_with_categories_and_pool_sync", lambda: [("pigu_lt", 1_045_296), ("tiny", 40)])
+    monkeypatch.setattr(ht, "_pick_rotation_shops", lambda codes, n: codes)
+    redis = _FakeRedis()
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    calls: list = []
+    monkeypatch.setattr(
+        ht.harvest_list_pages, "apply_async", lambda args, kwargs=None, **opts: calls.append((args, kwargs, opts))
+    )
+    out = ht.harvest_tick.run()
+    assert out["quotas"]["pigu_lt"] > out["quotas"]["tiny"] == ht.HARVEST_PAGES_MIN
+    assert all(opts["priority"] == 2 for _a, _k, opts in calls)

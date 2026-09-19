@@ -440,7 +440,12 @@ def harvest_tick(self) -> dict:
         for code in picked:
             yield_ema = load_cursor(redis, code)["yield_ema"]
             quotas[code] = pages_for_shop(pool_by_code.get(code), len(codes), yield_ema)
-            harvest_list_pages.apply_async([code], kwargs={"limit": quotas[code]})
+            # Same priority as the PDP shards: at the default 5 the harvest
+            # children never got a worker slot behind the 840s PDP batches
+            # (2026-09-19 after-report: tick dispatched, zero runs received).
+            harvest_list_pages.apply_async(
+                [code], kwargs={"limit": quotas[code]}, priority=2
+            )
         summary = {
             "status": "completed",
             "eligible": len(codes),
