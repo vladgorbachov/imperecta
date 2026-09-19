@@ -87,7 +87,7 @@ export function CreateAlertDialog({ open, onOpenChange, prefill }: CreateAlertDi
       /* Typeahead never needs totals — lets the backend skip the count(*). */
       skip_total: true,
     },
-    { enabled: searchEnabled },
+    { enabled: searchEnabled, liveRefresh: false },
   );
 
   const target = prefill ?? picked;

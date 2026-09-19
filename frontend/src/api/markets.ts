@@ -3,7 +3,7 @@
  */
 
 import type { DisplayCurrency } from "@/lib/displayCurrency";
-import { apiClient } from "./client";
+import { apiClient, publicClient } from "./client";
 
 // --- Preferences ---
 
@@ -305,7 +305,7 @@ export const marketsApi = {
     apiClient.put<MarketsPreferences>("/markets/preferences", body),
 
   getKpiHistory: (params?: { days?: number; country_code?: string }) =>
-    apiClient.get<KpiHistoryResponse>("/markets/kpi-history", {
+    publicClient.get<KpiHistoryResponse>("/markets/kpi-history", {
       params: {
         days: params?.days ?? 7,
         ...(params?.country_code ? { country_code: params.country_code } : {}),
@@ -313,7 +313,7 @@ export const marketsApi = {
     }),
 
   getVolatility: (params?: VolatilityParams) =>
-    apiClient.get<VolatilityResponse>("/markets/volatility", {
+    publicClient.get<VolatilityResponse>("/markets/volatility", {
       params: {
         period: params?.period ?? "30d",
         ...(params?.country_code ? { country_code: params.country_code } : {}),
@@ -322,31 +322,31 @@ export const marketsApi = {
     }),
 
   getPoolMarketplaceStats: () =>
-    apiClient.get<PoolMarketplaceStatsItem[]>("/pool/marketplace-stats"),
+    publicClient.get<PoolMarketplaceStatsItem[]>("/pool/marketplace-stats"),
 
   getPoolStats: () =>
-    apiClient.get<PoolStatsResponse>("/pool/stats"),
+    publicClient.get<PoolStatsResponse>("/pool/stats"),
 
   getDashboardKpi: (params?: DashboardKpiParams) =>
-    apiClient.get<DashboardKpi>("/markets/dashboard-kpi", { params }),
+    publicClient.get<DashboardKpi>("/markets/dashboard-kpi", { params }),
 
   getGeoCoverage: (params?: CoverageParams) =>
-    apiClient.get<CoverageBreakdown>("/markets/geo-coverage", { params }),
+    publicClient.get<CoverageBreakdown>("/markets/geo-coverage", { params }),
 
   getTrend: (params?: TrendParams) =>
-    apiClient.get<TrendSeries>("/markets/trend", { params }),
+    publicClient.get<TrendSeries>("/markets/trend", { params }),
 
   getMovers: (params?: MovementsQueryParams) =>
-    apiClient.get<MoversPage>("/markets/movements", { params }),
+    publicClient.get<MoversPage>("/markets/movements", { params }),
 
   getMoversKpi: (params?: MovementsQueryParams) =>
-    apiClient.get<MoversKpi>("/markets/movements/kpi", { params }),
+    publicClient.get<MoversKpi>("/markets/movements/kpi", { params }),
 
   getMoversSummary: (params?: MovementsQueryParams) =>
-    apiClient.get<MoversSummary>("/markets/movements/summary", { params }),
+    publicClient.get<MoversSummary>("/markets/movements/summary", { params }),
 
   getMoversCoverage: (params?: MovementsQueryParams) =>
-    apiClient.get<MoversCoverageMeta>("/markets/movements/coverage", { params }),
+    publicClient.get<MoversCoverageMeta>("/markets/movements/coverage", { params }),
 
   /** Trigger market data ingestion. Superuser only. Enqueues Celery task. */
   triggerIngest: () =>

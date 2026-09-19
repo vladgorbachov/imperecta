@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { publicClient } from "./client";
 
 export interface NewsItem {
   title: string;
@@ -21,7 +21,7 @@ export interface NewsParams {
 
 export const newsApi = {
   getNews: (params?: NewsParams) =>
-    apiClient.get<NewsResponse>("/news", { params }),
+    publicClient.get<NewsResponse>("/news", { params }),
 };
 
 export const newsQueryKeys = {

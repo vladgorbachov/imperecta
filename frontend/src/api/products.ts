@@ -1,6 +1,7 @@
 import type { DisplayCurrency } from "@/lib/displayCurrency";
 import type { LocalCurrencyResolution } from "./markets";
-import { apiClient } from "./client";
+import { apiClient, publicClient } from "./client";
+import { dataOpsApi } from "./dataOps";
 
 export type { LocalCurrencyResolution };
 
@@ -114,14 +115,26 @@ export interface PriceHistoryResponse {
 }
 
 export const productsApi = {
-  fetchPoolProducts: (params: PoolProductsParams) =>
-    apiClient.get<PoolProductsResponse>("/pool/products", { params }),
+  /**
+   * Grid/search read path lives in the Rust data-ops service (in-memory
+   * search index, keyset paging); the FastAPI twin is the fallback when
+   * data-ops is unreachable or errors. Both are anonymous + edge-cached.
+   */
+  fetchPoolProducts: async (params: PoolProductsParams) => {
+    try {
+      return await dataOpsApi.fetchPoolProducts(params);
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status !== undefined && status < 500) throw err;
+      return publicClient.get<PoolProductsResponse>("/pool/products", { params });
+    }
+  },
 
   getPoolCategories: () =>
-    apiClient.get<PoolCategoryItem[]>("/pool/categories"),
+    publicClient.get<PoolCategoryItem[]>("/pool/categories"),
 
   getPoolProduct: (listingId: string, displayCurrency?: DisplayCurrency) =>
-    apiClient.get<PoolProductDetail>(`/pool/products/${listingId}`, {
+    publicClient.get<PoolProductDetail>(`/pool/products/${listingId}`, {
       params: displayCurrency ? { display_currency: displayCurrency } : undefined,
     }),
 
@@ -133,7 +146,7 @@ export const productsApi = {
     }),
 
   getPriceHistory: (listingId: string, period: PriceHistoryPeriod = "30d") =>
-    apiClient.get<PriceHistoryResponse>(
+    publicClient.get<PriceHistoryResponse>(
       `/pool/products/${listingId}/price-history`,
       { params: { period, bucket: "day" } },
     ),

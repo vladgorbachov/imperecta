@@ -66,7 +66,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       limit: 6,
       offset: 0,
     },
-    { enabled: productSearchEnabled },
+    { enabled: productSearchEnabled, liveRefresh: false },
   );
 
   const close = useCallback(() => {

@@ -13,7 +13,8 @@
 
 import { Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient, setupQueryPersistence } from "@/lib/queryClient";
 import { ThemeProvider } from "next-themes";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -38,8 +39,6 @@ import { SuperuserRoute } from "@/components/SuperuserRoute";
 import { LandingPage } from "@/pages/landing/LandingPage";
 import { useAuthStore } from "@/stores/authStore";
 
-const queryClient = new QueryClient();
-
 /** Redirects authenticated users from landing to app root. */
 function LandingRoute({ children }: { children: React.ReactNode }) {
   const hasAuth = useAuthStore((s) => !!(s.accessToken ?? s.user));
@@ -47,9 +46,18 @@ function LandingRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/* Restore the public-read snapshot before the first render so the grid
+   and dashboard paint instantly on a return visit (module scope: runs
+   once per page load, before any query mounts). */
+setupQueryPersistence(queryClient);
+
+function QueryProvider({ children }: { children: React.ReactNode }) {
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+}
+
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
+    <QueryProvider>
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <TooltipProvider delayDuration={300}>
             <Suspense fallback={<LoadingScreen />}>
@@ -142,6 +150,6 @@ export function App() {
             </Suspense>
           </TooltipProvider>
       </ThemeProvider>
-    </QueryClientProvider>
+    </QueryProvider>
   );
 }

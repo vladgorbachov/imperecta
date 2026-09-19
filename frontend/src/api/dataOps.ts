@@ -1,14 +1,14 @@
 /**
  * Client for the Rust data-ops read service (P6, docs/P6_FRONTEND_SPEC.md).
- * Separate origin from the main API; same Bearer JWT (shared HS256 secret).
- * Read-only and latency-sensitive, so no refresh dance here: on 401 the
- * query simply errors and recovers on the next retry once the main client
- * has refreshed the token.
+ * Separate origin from the main API. Every route is a public read that is
+ * identical for all viewers, so requests are ANONYMOUS on purpose: without
+ * an Authorization header the service answers `Cache-Control: public,
+ * s-maxage=300, stale-while-revalidate=600` + ETag and the CDN serves the
+ * page from the edge (a token would flip it to `private`).
  */
 
 import axios from "axios";
-import { useAuthStore } from "@/stores/authStore";
-import { getStoredToken } from "@/lib/authStorage";
+import type { PoolProductItem, PoolProductsParams, PoolProductsResponse } from "./products";
 
 const DATA_OPS_URL: string =
   import.meta.env.VITE_DATA_OPS_URL ??
@@ -16,16 +16,17 @@ const DATA_OPS_URL: string =
 
 export const dataOpsClient = axios.create({
   baseURL: `${DATA_OPS_URL}/v1`,
-  headers: { "Content-Type": "application/json" },
+  headers: { Accept: "application/json" },
 });
 
-dataOpsClient.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().accessToken ?? getStoredToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+/** POST /v1/pool/products/refresh — live catch-up for on-screen rows. */
+export interface PoolRefreshResponse {
+  items: PoolProductItem[];
+  refreshed_at: string;
+}
+
+/** Server-side cap on ids per refresh call. */
+export const POOL_REFRESH_MAX_IDS = 500;
 
 export type MatchMethod =
   | "gtin"
@@ -72,4 +73,15 @@ export const dataOpsApi = {
 
   getGroupOffers: (groupId: string) =>
     dataOpsClient.get<ComparisonGroup>(`/groups/${groupId}/offers`),
+
+  /** R4 contract-parity port of /pool/products (same params + envelope). */
+  fetchPoolProducts: (params: PoolProductsParams) =>
+    dataOpsClient.get<PoolProductsResponse>("/pool/products", { params }),
+
+  /** Current rows for the ids a page already shows (<= 500, never cached). */
+  refreshPoolProducts: (ids: string[], displayCurrency?: string) =>
+    dataOpsClient.post<PoolRefreshResponse>("/pool/products/refresh", {
+      ids: ids.slice(0, POOL_REFRESH_MAX_IDS),
+      display_currency: displayCurrency,
+    }),
 };
