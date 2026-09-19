@@ -83,7 +83,7 @@ def test_jpy_seeded() -> None:
     assert DEFAULT_FOREX_ALLOWED_CURRENCIES == frozenset(
         {
             "USD", "EUR", "GBP", "JPY", "CHF", "MDL", "RON", "PLN", "TRY",
-            "UAH", "KZT", "CZK", "HUF", "BGN",
+            "UAH", "CZK", "HUF", "BGN",
         },
     )
 
@@ -95,7 +95,7 @@ def test_cleanup_removes_non9() -> None:
     assert "fact_crypto_price" not in text
     assert "fact_commodity_price" not in text
     # Migration 026 is a frozen historical artifact: it purged to the NINE
-    # currencies of its era; later pool currencies (UAH/KZT/...) joined via
+    # currencies of its era; later pool currencies (UAH/CZK/...) joined via
     # the Settings allowlist, not by rewriting 026.
     for code in ("USD", "EUR", "GBP", "JPY", "CHF", "MDL", "RON", "PLN", "TRY"):
         assert f"'{code}'" in text
@@ -157,6 +157,6 @@ def test_no_hardcoded_rates() -> None:
 def test_forex_allowed_currencies_env_default() -> None:
     """Settings default matches the pool-currency allowlist."""
     default = Settings.model_fields["forex_allowed_currencies"].default
-    assert default == "USD,EUR,GBP,JPY,CHF,MDL,RON,PLN,TRY,UAH,KZT,CZK,HUF,BGN"
+    assert default == "USD,EUR,GBP,JPY,CHF,MDL,RON,PLN,TRY,UAH,CZK,HUF,BGN"
     parsed = frozenset(part.strip().upper() for part in default.split(",") if part.strip())
     assert parsed == DEFAULT_FOREX_ALLOWED_CURRENCIES

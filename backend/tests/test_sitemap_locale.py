@@ -108,7 +108,7 @@ class TestCanonicalLocaleSync:
         with patch("app.database.sync_session_factory", lambda: self._db([])):
             assert sl.canonical_locale_sync(uuid4()) is None
         assert sl.country_language_hint("EE") == "et"
-        assert sl.country_language_hint("KZ") is None
+        assert sl.country_language_hint("CH") is None
         assert sl.country_language_hint(None) is None
 
     def test_unprefixed_pool_means_no_locale(self):

@@ -1419,3 +1419,26 @@ Migration `012`: `ENABLE ROW LEVEL SECURITY` на public business tables для 
 | ORM | `backend/app/models/*.py` |
 | Migrations | `backend/alembic/versions/001`–`030` |
 | Обзор | `Imperecta_Database.md` |
+
+## 12. Legal clean-up 2026-09-19 — WP1 (RU/BY/KZ purge, регионов нет)
+
+Решение основателя 19.09.2026 (`docs/LEGAL_CLEANUP_PLAN_2026-09-19.md`, меморандум юриста §2.9/§3.11):
+RU/BY/KZ удалены из продукта полностью, со всеми данными. Миграция `071_legal_purge_ru_by_kz`:
+
+- `maintenance.purge_marketplace(marketplace_id uuid, dry_run boolean) RETURNS jsonb` — единственная рутина
+  удаления источника со всем, что он породил, в порядке FK (set-based по temp-списку listing_id):
+  `fact_price` (все партиции), `fact_price_weekly`, `fact_review`, `scrape_logs`, `reject_data`, `fact_promo`,
+  `digests.marketplace_ids` (array_remove), `fact_listing`, `dim_seller`, orphan `dim_product` (на которые не
+  ссылается ни один листинг другого магазина; их `user_products` — CASCADE, считаются), `dim_marketplace`.
+  `alerts`/`alert_events`/`scrape_jobs` теряют указатель через свои `SET NULL` FK. `dry_run=true` — только счётчики.
+  `REVOKE EXECUTE FROM PUBLIC`; WP5 вызовет её из opt-out / admin-delete через свою дверь.
+- Выбор магазинов: `country_code IN ('RU','BY','KZ')` ∪ TLD `.ru/.by/.kz/.su/.рф` по `domain` и `base_url` ∪
+  жёсткий список хостов (kaspi/mechta/wildberries/ozon/yandex/dns-shop/citilink/mvideo/eldorado.ru/21vek/onliner/
+  e-katalog). В проде на 19.09: 4 магазина (kaspi_kz, sulpak_kz, mechta_kz, technodom_kz), RU/BY-магазинов не было.
+- Затем: `alerts.country_code`/`dim_brand.country_code` → NULL, `digests.country_codes` без этих кодов,
+  `fact_fuel_price`/`fact_search_trend`/`fact_tariff` строки удалены, `dim_country` RU/BY/KZ, `fact_currency_rate`
+  и `dim_currency` RUB/BYN/KZT удалены; `dim_country.region`/`subregion` + `ck_dim_country_region` сняты;
+  четыре MV освежены. Сид-миграции 001/009 не тронуты (история) — свежая схема после `upgrade head` без этих кодов
+  (тест `tests/test_migration_071_legal_purge.py`).
+- Redis-двойник: Celery-таск `purge_marketplace_state(codes)` (`workers/maintenance_tasks.py`) —
+  `harvest:cursor:*`, `harvest:listmode:*`, член `harvest:rotation`, `enumrun:{code}:*`, поля `enum:budget_retry`.

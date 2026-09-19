@@ -43,10 +43,8 @@ _CURRENCY_SYMBOLS: dict[str, str] = {
     "$": "USD",
     "£": "GBP",
     "₴": "UAH",
-    "₽": "RUB",
     "zł": "PLN",
     "₺": "TRY",
-    "₸": "KZT",
     "₾": "GEL",
     "₼": "AZN",
     "лв": "BGN",
@@ -58,7 +56,6 @@ _CURRENCY_SYMBOLS: dict[str, str] = {
     "ден": "MKD",
     "сўм": "UZS",
     "сом": "KGS",
-    "br": "BYN",
     # "sm" (TJS, Tajik Somoni) deliberately omitted: it word-boundary-matches
     # Samsung "SM-xxxx" model codes near the price and no shop in the fleet
     # sells in TJS. "tjs" (the ISO text code) is still matched below.
@@ -98,18 +95,10 @@ _CURRENCY_TEXT_CODES: dict[str, str] = {
     "gbp": "GBP",
     "uah": "UAH",
     "грн": "UAH",
-    "rub": "RUB",
-    "руб": "RUB",
-    "р.": "RUB",
     "pln": "PLN",
     "ron": "RON",
     "try": "TRY",
     "tl": "TRY",
-    "kzt": "KZT",
-    "тг": "KZT",
-    "тенге": "KZT",
-    "byn": "BYN",
-    "бел.руб": "BYN",
     "gel": "GEL",
     "azn": "AZN",
     "man": "AZN",
@@ -236,8 +225,8 @@ def parse_price_text(text: str) -> float | None:
 
     Supported patterns:
       1,234.56   (US/UK)         →  1234.56
-      1.234,56   (DE/FR/RU/UA)   →  1234.56
-      1 234,56   (RU/UA/KZ)      →  1234.56
+      1.234,56   (DE/FR/UA)      →  1234.56
+      1 234,56   (UA/CZ/PL)      →  1234.56
       1 234.56   (rarely)        →  1234.56
       1234,56    (short EU)      →  1234.56
       1234.56    (plain)         →  1234.56

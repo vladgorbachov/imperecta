@@ -67,13 +67,13 @@ CURRENCY_CORPUS = [
     "digikr8",
     "10 zł",
     "5 990 ft",
-    "120 руб",
-    "тенге 5000",
+    "120 лв",
+    "ден 5000",
     "IDR 5000",
     "price: 12 CHF",
     "",
     "просто текст",
-    "бел.руб 25",
+    "сўм 25",
     "12 man",
 ]
 
@@ -209,7 +209,7 @@ class TestQualityModule:
 
     def test_currency_whitelist_violation_critical(self):
         report = ic.assess_quality(
-            {"title": "X", "price": 5.0, "currency": "RUB", "allowed_currencies": ["MDL"]}
+            {"title": "X", "price": 5.0, "currency": "XXX", "allowed_currencies": ["MDL"]}
         )
         assert report["critical"] is True
         assert "currency_not_allowed" in report["flags"]
@@ -295,7 +295,7 @@ class TestSitemapParity:
         assert ic.category_like_url(url) == sc.category_like(url), url
 
     LOCALE_URLS = [
-        "https://pigu.lt/lt/sitemap-products-5.xml", "https://pigu.lt/RU/x?y=1",
+        "https://pigu.lt/lt/sitemap-products-5.xml", "https://pigu.lt/LV/x?y=1",
         "https://s.example/en-US/p/1", "https://s.example/p/1", "https://s.example/sitemap.xml",
         "https://s.example", "https://pigu.lt/ru/sitemap-products-images-405.xml",
         "https://s.example/image_sitemap.xml", "https://s.example/sitemaps/video-1.xml",
@@ -313,7 +313,7 @@ class TestSitemapParity:
     @pytest.mark.parametrize(
         ("canonical", "hint", "whole"),
         [
-            ("lt", None, True), (None, "RU", True), (None, "et", True), ("xx", None, True),
+            ("lt", None, True), (None, "LV", True), (None, "et", True), ("xx", None, True),
             ("lt", None, False), ("ru", "lt", False), (None, "ru", False), (None, None, False),
         ],
     )

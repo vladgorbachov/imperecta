@@ -64,20 +64,20 @@ class TestParsePriceTextAngloSaxon:
         assert parse_price_text("$12,345.67") == 12345.67
 
 
-class TestParsePriceTextCIS:
-    """CIS formats: spaces as thousands, comma as decimal."""
+class TestParsePriceTextSpaceThousands:
+    """Space as thousands separator, comma as decimal (UA/PL/CZ storefronts)."""
 
-    def test_russian_ruble(self):
-        assert parse_price_text("1 299,50 ₽") == 1299.50
+    def test_hryvnia_decimal(self):
+        assert parse_price_text("1 299,50 ₴") == 1299.50
 
     def test_ukrainian_hryvnia(self):
         assert parse_price_text("1 234,56 ₴") == 1234.56
 
-    def test_kazakh_tenge(self):
-        assert parse_price_text("15 000 ₸") == 15000.0
+    def test_czech_koruna(self):
+        assert parse_price_text("15 000 Kč") == 15000.0
 
-    def test_russian_large_no_decimal(self):
-        assert parse_price_text("125 000 руб") == 125000.0
+    def test_large_no_decimal(self):
+        assert parse_price_text("125 000 грн") == 125000.0
 
     def test_belarusian_ruble(self):
         assert parse_price_text("1 234,56 Br") == 1234.56
@@ -138,29 +138,23 @@ class TestCurrencyDetection:
     def test_hryvnia_symbol(self):
         assert parse_currency_symbol("1 299 ₴") == "UAH"
 
-    def test_ruble_symbol(self):
-        assert parse_currency_symbol("5 000 ₽") == "RUB"
-
     def test_zloty_symbol(self):
         assert parse_currency_symbol("99,99 zł") == "PLN"
 
     def test_lira_symbol(self):
         assert parse_currency_symbol("1.234 ₺") == "TRY"
 
-    def test_tenge_symbol(self):
-        assert parse_currency_symbol("15 000 ₸") == "KZT"
-
-    def test_code_rub(self):
-        assert parse_currency_code("1 299 руб") == "RUB"
+    def test_lari_symbol(self):
+        assert parse_currency_symbol("15 000 ₾") == "GEL"
 
     def test_code_grn(self):
         assert parse_currency_code("1 299 грн") == "UAH"
 
-    def test_code_tenge(self):
-        assert parse_currency_code("15 000 тенге") == "KZT"
+    def test_code_czk(self):
+        assert parse_currency_code("15 000 czk") == "CZK"
 
-    def test_code_byn(self):
-        assert parse_currency_code("price 100 byn") == "BYN"
+    def test_code_bgn(self):
+        assert parse_currency_code("price 100 bgn") == "BGN"
 
     def test_code_pln(self):
         assert parse_currency_code("99.99 pln") == "PLN"
@@ -204,12 +198,12 @@ class TestMultilingualTitle:
         "title,price,currency",
         [
             ("Смартфон Samsung Galaxy A54", "12999", "UAH"),
-            ("Ноутбук ASUS VivoBook 15", "45000", "RUB"),
+            ("Ноутбук ASUS VivoBook 15", "45000", "UAH"),
             ("Kühlschrank Bosch Serie 4", "599.99", "EUR"),
             ("Téléviseur LG OLED 55C3", "1299.99", "EUR"),
             ("Televizor Samsung UE50", "2499.99", "RON"),
             ("Bulaşık Makinesi Arçelik", "8999", "TRY"),
-            ("Пылесос Xiaomi Mi Robot", "150000", "KZT"),
+            ("Прахосмукачка Xiaomi Mi Robot", "1500", "BGN"),
             ("Mașină de spălat Whirlpool", "1599", "MDL"),
         ],
     )
@@ -234,16 +228,16 @@ class TestMetaTagCurrencyDetection:
         assert ep.price == 1299.50
         assert ep.title == "Laptop ASUS"
 
-    def test_auto_detect_with_rub_symbol(self):
+    def test_auto_detect_with_hryvnia_symbol(self):
         html = """<html><head><title>Товар</title></head><body>
-        <h1>Пылесос Xiaomi</h1>
-        <span class="price">12 499 ₽</span>
+        <h1>Пилосос Xiaomi</h1>
+        <span class="price">12 499 ₴</span>
         </body></html>"""
         soup = BeautifulSoup(html, "html.parser")
         ep = extract_auto_detect(soup)
         assert ep.price == 12499.0
-        assert ep.currency == "RUB"
-        assert ep.title == "Пылесос Xiaomi"
+        assert ep.currency == "UAH"
+        assert ep.title == "Пилосос Xiaomi"
 
 
 # ---------------------------------------------------------------------------

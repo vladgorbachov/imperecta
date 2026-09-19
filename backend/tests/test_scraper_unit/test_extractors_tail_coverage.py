@@ -19,7 +19,7 @@ def test_detect_currency_codes():
     assert ex._detect_currency("price 99 usd") == "USD"
     assert ex._detect_currency("cost 10 eur") == "EUR"
     assert ex._detect_currency("x uah y") == "UAH"
-    assert ex._detect_currency("x rub y") == "RUB"
+    assert ex._detect_currency("x bgn y") == "BGN"
     assert ex._detect_currency("x pln y") == "PLN"
     assert ex._detect_currency("x ron y") == "RON"
 

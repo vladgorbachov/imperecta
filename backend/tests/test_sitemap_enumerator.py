@@ -259,8 +259,8 @@ class TestMultiLocaleTree:
 
     LT = "https://shop.example/lt/sitemap-products-1.xml"
     LT_IMG = "https://shop.example/lt/sitemap-products-images-1.xml"
-    RU = "https://shop.example/ru/sitemap-products-1.xml"
-    RU_IMG = "https://shop.example/ru/sitemap-products-images-1.xml"
+    ALT = "https://shop.example/ru/sitemap-products-1.xml"
+    ALT_IMG = "https://shop.example/ru/sitemap-products-images-1.xml"
 
     def _pool(self):
         return _pool_returning(
@@ -268,9 +268,9 @@ class TestMultiLocaleTree:
                 ("https://shop.example/lt/p/widget-123456", self.LT),
                 ("https://shop.example/lt/p/gadget-234567", self.LT),
                 ("https://shop.example/lt/p/widget-123456", self.LT_IMG),
-                ("https://shop.example/ru/p/widget-123456", self.RU),
-                ("https://shop.example/ru/p/gadget-234567", self.RU),
-                ("https://shop.example/ru/p/widget-123456", self.RU_IMG),
+                ("https://shop.example/ru/p/widget-123456", self.ALT),
+                ("https://shop.example/ru/p/gadget-234567", self.ALT),
+                ("https://shop.example/ru/p/widget-123456", self.ALT_IMG),
             ]
         )
 
@@ -333,7 +333,7 @@ class TestMultiLocaleTree:
         pool.walk_sitemaps = walk
         result = await sitemap_enumerator.enumerate_sitemap_full(
             _marketplace(country_code="LT"), pool, locale="lt",
-            explicit_sitemaps=[self.RU, "https://shop.example/ru/sitemap-products-2.xml", self.RU_IMG],
+            explicit_sitemaps=[self.ALT, "https://shop.example/ru/sitemap-products-2.xml", self.ALT_IMG],
         )
         assert fetched == []
         assert result.status == "empty_sitemap"

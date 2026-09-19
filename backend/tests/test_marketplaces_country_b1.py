@@ -54,7 +54,7 @@ async def test_update_country_syncs_operates_in_and_currency() -> None:
     class _FakeMarketplace:
         name = "Shop"
         is_active = True
-        country_code = "KZ"
+        country_code = "PL"
 
     mp = _FakeMarketplace()
     svc.db = AsyncMock()

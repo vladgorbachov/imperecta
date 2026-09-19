@@ -78,8 +78,8 @@ class DimCountry(Base):
     country_code: Mapped[str] = mapped_column(String(2), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     name_local: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    region: Mapped[str] = mapped_column(String(30), nullable=False)
-    subregion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # No region/subregion: the product knows countries and nothing above
+    # them (legal clean-up 2026-09-19, §1.3; columns dropped in 071).
     currency_code: Mapped[str] = mapped_column(
         String(3),
         ForeignKey("dim_currency.currency_code", ondelete="RESTRICT"),
@@ -91,14 +91,6 @@ class DimCountry(Base):
     population: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    __table_args__ = (
-        CheckConstraint(
-            "region IN ("
-            "'CIS','EU','EFTA','Balkans','Caucasus','Central_Asia','Turkey','Other'"
-            ")",
-            name="ck_dim_country_region",
-        ),
-    )
 
 
 class DimMarketplace(Base):

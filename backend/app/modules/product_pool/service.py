@@ -43,7 +43,6 @@ _SORT_TRENDING = "trending"
 _SORT_GAINERS = "gainers"
 _SORT_LOSERS = "losers"
 _SORT_VOLATILE = "volatile"
-BLOCKED_PUBLIC_COUNTRY_CODES = frozenset({"RU", "BY"})
 SPARKLINE_POINTS_LIMIT = 14
 
 # P12: exact counts are capped — beyond this the total is an estimate.
@@ -266,12 +265,6 @@ class ProductPoolService:
         # recent and unknown
         return stmt.order_by(nullslast(desc(FactListing.last_checked_at)), tiebreak)
 
-    @staticmethod
-    def _apply_country_visibility_filter(stmt, *, include_blocked_countries: bool):
-        if include_blocked_countries:
-            return stmt
-        return stmt.where(DimMarketplace.country_code.notin_(BLOCKED_PUBLIC_COUNTRY_CODES))
-
     async def list_products(
         self,
         *,
@@ -284,7 +277,6 @@ class ProductPoolService:
         offset: int = 0,
         cursor: str | None = None,
         skip_total: bool = False,
-        include_blocked_countries: bool = False,
         display_currency: str = DISPLAY_LOCAL,
     ) -> tuple[list[dict[str, Any]], int | None, dict[str, Any]]:
         """List pool rows; returns (items, total, page_meta).
@@ -330,10 +322,6 @@ class ProductPoolService:
         )
         if search_listing_ids is not None:
             stmt = stmt.where(FactListing.id.in_(search_listing_ids))
-        stmt = self._apply_country_visibility_filter(
-            stmt,
-            include_blocked_countries=include_blocked_countries,
-        )
 
         keyset = _keyset_columns(sort)
         cursor_payload = _decode_cursor(cursor) if (cursor and keyset) else None
@@ -373,7 +361,6 @@ class ProductPoolService:
                 marketplace_id=marketplace_id,
                 category=category,
                 country_code=country_code,
-                include_blocked_countries=include_blocked_countries,
             )
             total_is_estimate = total_is_estimate or search_capped
         result = await self.db.execute(stmt)
@@ -444,7 +431,6 @@ class ProductPoolService:
         marketplace_id: UUID | None,
         category: str | None,
         country_code: str | None,
-        include_blocked_countries: bool,
     ) -> tuple[int, bool]:
         """P12: pool totals without a 1.4M-row count(*) per request.
 
@@ -457,7 +443,6 @@ class ProductPoolService:
             and marketplace_id is None
             and category is None
             and country_code is None
-            and include_blocked_countries
         )
         if unfiltered:
             row = (await self.db.execute(_POOL_STATS_STMT)).mappings().first()
@@ -481,10 +466,6 @@ class ProductPoolService:
         )
         if search_listing_ids is not None:
             inner = inner.where(FactListing.id.in_(search_listing_ids))
-        inner = self._apply_country_visibility_filter(
-            inner,
-            include_blocked_countries=include_blocked_countries,
-        )
         capped = inner.limit(COUNT_CAP + 1).subquery()
         counted = await self.db.scalar(select(func.count()).select_from(capped)) or 0
         if counted > COUNT_CAP:
@@ -496,7 +477,6 @@ class ProductPoolService:
         self,
         listing_id: UUID,
         *,
-        include_blocked_countries: bool = False,
         display_currency: str = DISPLAY_LOCAL,
     ) -> dict[str, Any] | None:
         """One PoolProductItem by listing id + taxonomy labels; None when hidden.
@@ -506,10 +486,6 @@ class ProductPoolService:
         """
         stmt = self._base_listing_stmt().where(FactListing.id == listing_id)
         stmt = stmt.add_columns(DimProduct.attributes.label("attributes"))
-        stmt = self._apply_country_visibility_filter(
-            stmt,
-            include_blocked_countries=include_blocked_countries,
-        )
         row = (await self.db.execute(stmt)).mappings().first()
         if row is None:
             return None
@@ -530,7 +506,6 @@ class ProductPoolService:
         listing_id: UUID,
         *,
         period: str = "30d",
-        include_blocked_countries: bool = False,
     ) -> dict[str, Any] | None:
         """Daily price series for one listing; None when the listing is hidden.
 
@@ -539,7 +514,6 @@ class ProductPoolService:
         """
         visible = await self.get_product_detail(
             listing_id,
-            include_blocked_countries=include_blocked_countries,
         )
         if visible is None:
             return None
@@ -599,7 +573,6 @@ class ProductPoolService:
         marketplace_id: UUID | None = None,
         category: str | None = None,
         country_code: str | None = None,
-        include_blocked_countries: bool = False,
         batch_size: int = 500,
     ):
         """Yield the FULL filtered pool (no pagination) for CSV export."""
@@ -610,10 +583,6 @@ class ProductPoolService:
             marketplace_id=marketplace_id,
             category=category,
             country_code=country_code,
-        )
-        stmt = self._apply_country_visibility_filter(
-            stmt,
-            include_blocked_countries=include_blocked_countries,
         )
         stmt = self._apply_sort(stmt, sort)
         offset = 0
@@ -707,7 +676,7 @@ class ProductPoolService:
             })
         return output
 
-    async def get_categories(self, *, include_blocked_countries: bool = False) -> list[dict]:
+    async def get_categories(self) -> list[dict]:
         """Distinct marketplaces that have active listings (lightweight category browse).
 
         Served from mv_marketplace_stats (066): the live GROUP BY over
@@ -727,10 +696,6 @@ class ProductPoolService:
             .where(_MV_MARKETPLACE_STATS.c.listing_count > 0)
             .order_by(desc("listing_count"))
         )
-        stmt = self._apply_country_visibility_filter(
-            stmt,
-            include_blocked_countries=include_blocked_countries,
-        )
         result = await self.db.execute(stmt)
         return [
             {
@@ -744,7 +709,7 @@ class ProductPoolService:
             for r in result.all()
         ]
 
-    async def get_marketplace_stats(self, *, include_blocked_countries: bool = False) -> list[dict]:
+    async def get_marketplace_stats(self) -> list[dict]:
         """Per-marketplace listing counts and average price (EUR) when available.
 
         Reads mv_marketplace_stats (pg_cron, every 10 min — migration 066)
@@ -770,10 +735,6 @@ class ProductPoolService:
             )
             .where(DimMarketplace.is_active.is_(True))
             .order_by(desc("listing_count"), asc(DimMarketplace.name))
-        )
-        stmt = self._apply_country_visibility_filter(
-            stmt,
-            include_blocked_countries=include_blocked_countries,
         )
         result = await self.db.execute(stmt)
         out: list[dict] = []
