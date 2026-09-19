@@ -73,6 +73,13 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour=3, day_of_week="sun"),
         "options": {"priority": 8},
     },
+    # Walks a proxy-budget skip parked come back once the daily allowance
+    # has recomputed (UTC midnight) — a beat re-dispatch, never an ETA.
+    "sitemap-budget-retry": {
+        "task": "sitemap_budget_retry_tick",
+        "schedule": crontab(minute=5, hour=0),
+        "options": {"priority": 8},
+    },
     # Cross-shop matching (roadmap item 3): drains match_method IS NULL
     # products into deterministic brand+model groups, 10k per tick — full
     # 1.75M pool in ~30h, then incremental on new onboardings.

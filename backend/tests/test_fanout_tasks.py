@@ -280,8 +280,11 @@ def test_bulk_tasks_route_to_their_own_queue() -> None:
     assert "harvest_tick" not in routes and "scrape_stale_fanout" not in routes
 
 
-def test_coordinator_retries_when_the_index_fetch_hits_the_budget(monkeypatch) -> None:
-    from celery.exceptions import Retry
+def test_coordinator_parks_when_the_index_fetch_hits_the_budget(monkeypatch) -> None:
+    """No Celery countdown retry: on the Redis broker an ETA past the
+    visibility timeout is duplicated hourly. The walk is parked in Redis
+    for the 00:05 UTC beat."""
+    import json
 
     from app.modules.scraper.proxy_provider_limiter import ProxyBudgetExhausted
 
@@ -289,13 +292,17 @@ def test_coordinator_retries_when_the_index_fetch_hits_the_budget(monkeypatch) -
         raise ProxyBudgetExhausted("https://s.example/sitemap.xml", "proxy_provider_budget")
 
     monkeypatch.setattr(ob, "_resolve_shards", fake_resolve)
-    monkeypatch.setattr(ob, "seconds_until_daily_reset", lambda: 3600)
-    with pytest.raises(Retry):
-        ob.sitemap_enumerate_marketplace.run("shop_x")
+    redis = MagicMock()
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    out = ob.sitemap_enumerate_marketplace.run("shop_x", max_urls=1234)
+    assert out == {"status": "budget_exhausted", "code": "shop_x", "parked": True}
+    key, field, raw = redis.hset.call_args.args
+    assert key == ob.BUDGET_RETRY_KEY and field == "coordinator:shop_x::"
+    assert json.loads(raw) == {"kind": "coordinator", "code": "shop_x", "max_urls": 1234, "attempts": 1}
 
 
-def test_shard_retries_on_budget_without_recording_the_shard(monkeypatch) -> None:
-    from celery.exceptions import Retry
+def test_shard_parks_on_budget_without_recording_the_shard(monkeypatch) -> None:
+    import json
 
     async def fake_enumerate(code, max_urls, **kw):
         return {"status": "budget_exhausted", "product_like": 0, "_category_urls": []}
@@ -303,17 +310,62 @@ def test_shard_retries_on_budget_without_recording_the_shard(monkeypatch) -> Non
     recorded: list = []
     monkeypatch.setattr(ob, "_enumerate", fake_enumerate)
     monkeypatch.setattr(ob, "_record_shard_done", lambda *a: recorded.append(a))
-    monkeypatch.setattr(ob, "seconds_until_daily_reset", lambda: 3600)
-    with pytest.raises(Retry):
-        ob.sitemap_enumerate_shard.run("shop_x", ["https://s.example/a.xml"], run_id="r1", shard_no=4)
+    redis = MagicMock()
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    out = ob.sitemap_enumerate_shard.run(
+        "shop_x", ["https://s.example/a.xml"], run_id="r1", shard_no=4, locale="lt", budget_attempts=2
+    )
+    assert out["status"] == "budget_exhausted" and out["parked"] is True
     assert recorded == []
+    _key, field, raw = redis.hset.call_args.args
+    assert field == "shard:shop_x:r1:4"
+    entry = json.loads(raw)
+    assert entry["shard_sitemaps"] == ["https://s.example/a.xml"]
+    assert entry["run_id"] == "r1" and entry["shard_no"] == 4 and entry["locale"] == "lt"
+    assert entry["attempts"] == 3
 
 
-def test_seconds_until_daily_reset() -> None:
-    from datetime import datetime, timezone
+def test_park_gives_up_after_max_attempts(monkeypatch) -> None:
+    redis = MagicMock()
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    out = ob._park_for_budget(
+        {"kind": "coordinator", "code": "shop_x", "attempts": ob.BUDGET_RETRY_MAX_ATTEMPTS}, "shop_x", "x"
+    )
+    assert out["parked"] is False
+    redis.hset.assert_not_called()
 
-    from app.modules.scraper.proxy_provider_limiter import seconds_until_daily_reset
 
-    at = datetime(2026, 9, 19, 23, 30, tzinfo=timezone.utc)
-    assert seconds_until_daily_reset(at) == 1800
-    assert seconds_until_daily_reset(datetime(2026, 9, 19, 23, 59, 59, tzinfo=timezone.utc)) == 60
+def test_budget_retry_tick_redispatches_and_clears(monkeypatch) -> None:
+    import json
+
+    redis = MagicMock()
+    redis.hgetall.return_value = {
+        "coordinator:shop_a::": json.dumps({"kind": "coordinator", "code": "shop_a", "max_urls": 500, "attempts": 1}),
+        "shard:shop_b:r9:2": json.dumps({
+            "kind": "shard", "code": "shop_b", "shard_sitemaps": ["https://b.example/s.xml"],
+            "max_urls": 150000, "run_id": "r9", "shard_no": 2, "locale": "lv", "attempts": 2,
+        }),
+        "garbage": "{not json",
+    }
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    coords: list = []
+    shards: list = []
+    monkeypatch.setattr(ob.sitemap_enumerate_marketplace, "apply_async",
+                        lambda args, kwargs=None, **o: coords.append((args, kwargs, o)))
+    monkeypatch.setattr(ob.sitemap_enumerate_shard, "apply_async",
+                        lambda args, kwargs=None, **o: shards.append((args, kwargs, o)))
+    out = ob.sitemap_budget_retry_tick.run()
+    assert out == {"status": "completed", "coordinator": 1, "shard": 1}
+    assert coords == [(["shop_a"], {"max_urls": 500, "budget_attempts": 1}, {"priority": 8})]
+    assert shards[0][0] == ["shop_b", ["https://b.example/s.xml"]]
+    assert shards[0][1] == {"max_urls": 150000, "run_id": "r9", "shard_no": 2, "locale": "lv", "budget_attempts": 2}
+    cleared = {c.args[1] for c in redis.hdel.call_args_list}
+    assert cleared == {"coordinator:shop_a::", "shard:shop_b:r9:2", "garbage"}
+
+
+def test_budget_retry_beat_entry_is_registered() -> None:
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["sitemap-budget-retry"]
+    assert entry["task"] == "sitemap_budget_retry_tick"
+    assert str(entry["schedule"]).startswith("<crontab: 5 0")

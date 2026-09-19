@@ -8,11 +8,11 @@ the module-level pool.
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
 import structlog
-from celery.exceptions import Retry
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -22,34 +22,57 @@ from app.modules.discovery.sitemap_enumerator import (
     ENUMERATE_MAX_URLS,
     enumerate_sitemap_full,
 )
-from app.modules.scraper.proxy_provider_limiter import (
-    ProxyBudgetExhausted,
-    seconds_until_daily_reset,
-)
+from app.modules.scraper.proxy_provider_limiter import ProxyBudgetExhausted
 from app.observability.sentry_init import capture_exception_if_initialized
 from app.workers.celery_app import celery_app
 
 slog = structlog.get_logger(__name__)
 
-# A budget skip is not a result: the task comes back when the daily
-# allowance recomputes (UTC midnight), spread over ten minutes so a
-# whole backlog does not land on the same second. Up to a week of days.
-BUDGET_RETRY_JITTER_SEC = 600
-BUDGET_MAX_RETRIES = 7
+# A budget skip is not a result: the walk is parked in Redis and the beat
+# task `sitemap_budget_retry_tick` re-dispatches it once the daily
+# allowance has recomputed (00:05 UTC). NOT a Celery retry with a
+# countdown: on the Redis broker an ETA beyond visibility_timeout (1 h)
+# is restored as a fresh copy every hour — a 13 h countdown would have run
+# the tsbohemia coordinator ~13 times, each fanning out ~200 paid shards.
+BUDGET_RETRY_KEY = "enum:budget_retry"
+BUDGET_RETRY_TTL_SEC = 8 * 24 * 3600
+BUDGET_RETRY_MAX_ATTEMPTS = 7
 
 
-def _budget_retry(task, marketplace_code: str, stage: str):
-    import random
+def _park_for_budget(entry: dict, marketplace_code: str, stage: str) -> dict:
+    """Record a budget-skipped walk for the daily re-dispatch; idempotent
+    per (kind, code, run, shard) so an acks_late redelivery parks once."""
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
 
-    countdown = seconds_until_daily_reset() + random.randint(0, BUDGET_RETRY_JITTER_SEC)
+    attempts = int(entry.get("attempts", 0)) + 1
+    entry = {**entry, "attempts": attempts}
+    if attempts > BUDGET_RETRY_MAX_ATTEMPTS:
+        slog.error(
+            "sitemap_enumerate_budget_gave_up",
+            marketplace_code=marketplace_code,
+            stage=stage,
+            attempts=attempts,
+        )
+        return {"status": "budget_exhausted", "code": marketplace_code, "parked": False}
+    field = ":".join(
+        str(entry.get(k, "")) for k in ("kind", "code", "run_id", "shard_no")
+    )
+    parked = False
+    try:
+        client = _get_redis()
+        client.hset(BUDGET_RETRY_KEY, field, json.dumps(entry))
+        client.expire(BUDGET_RETRY_KEY, BUDGET_RETRY_TTL_SEC)
+        parked = True
+    except Exception as exc:  # noqa: BLE001 - the weekly rescan is the backstop
+        capture_exception_if_initialized(exc)
     slog.warning(
-        "sitemap_enumerate_budget_retry",
+        "sitemap_enumerate_budget_parked",
         marketplace_code=marketplace_code,
         stage=stage,
-        retry_in_sec=countdown,
-        retries=task.request.retries,
+        attempts=attempts,
+        parked=parked,
     )
-    raise task.retry(countdown=countdown, max_retries=BUDGET_MAX_RETRIES)
+    return {"status": "budget_exhausted", "code": marketplace_code, "parked": parked}
 
 
 def _run_async(coro):
@@ -308,6 +331,7 @@ def sitemap_enumerate_marketplace(
     self,
     marketplace_code: str,
     max_urls: int = ENUMERATE_MAX_URLS,
+    budget_attempts: int = 0,
 ) -> dict:
     """Enumerate one shop's catalog — coordinator with sub-sitemap fan-out.
 
@@ -316,11 +340,17 @@ def sitemap_enumerate_marketplace(
     children enumerate the shop in parallel; the flat-sitemap fallback
     runs inline exactly as before.
     """
+    parked_entry = {
+        "kind": "coordinator",
+        "code": marketplace_code,
+        "max_urls": int(max_urls),
+        "attempts": int(budget_attempts),
+    }
     try:
         try:
             marketplace, shards, locale = _run_async(_resolve_shards(marketplace_code))
         except ProxyBudgetExhausted:
-            _budget_retry(self, marketplace_code, "resolve_shards")
+            return _park_for_budget(parked_entry, marketplace_code, "resolve_shards")
         if marketplace is None:
             return {"status": "unknown_marketplace", "code": marketplace_code}
         if len(shards) < 2:
@@ -330,7 +360,7 @@ def sitemap_enumerate_marketplace(
             )
             summary.pop("_category_urls", None)
             if summary.get("status") == "budget_exhausted":
-                _budget_retry(self, marketplace_code, "inline_walk")
+                return _park_for_budget(parked_entry, marketplace_code, "inline_walk")
             slog.info("sitemap_enumerate_task_done", **summary)
             return summary
 
@@ -373,8 +403,6 @@ def sitemap_enumerate_marketplace(
         }
         slog.info("sitemap_enumerate_sharded", **summary)
         return summary
-    except Retry:
-        raise
     except Exception as exc:
         slog.error(
             "sitemap_enumerate_task_failed",
@@ -394,6 +422,7 @@ def sitemap_enumerate_shard(
     run_id: str | None = None,
     shard_no: int = 0,
     locale: str | None = None,
+    budget_attempts: int = 0,
 ) -> dict:
     """Enumerate ONE shard (subset of sub-sitemaps) of a shop's tree.
 
@@ -418,7 +447,20 @@ def sitemap_enumerate_shard(
         if summary.get("status") == "budget_exhausted":
             # Not done: the pending counter must not move, the shard comes
             # back tomorrow and re-walks (dedupe makes that free).
-            _budget_retry(self, marketplace_code, f"shard:{shard_no}")
+            return _park_for_budget(
+                {
+                    "kind": "shard",
+                    "code": marketplace_code,
+                    "shard_sitemaps": list(shard_sitemaps),
+                    "max_urls": int(max_urls),
+                    "run_id": run_id,
+                    "shard_no": int(shard_no),
+                    "locale": locale,
+                    "attempts": int(budget_attempts),
+                },
+                marketplace_code,
+                f"shard:{shard_no}",
+            )
         if run_id is not None:
             _stash_shard_categories(marketplace_code, run_id, shard_categories)
             total = _record_shard_done(
@@ -440,8 +482,6 @@ def sitemap_enumerate_shard(
                 summary["run_total_product_like"] = total
         slog.info("sitemap_enumerate_shard_done", shard=shard_no, **summary)
         return summary
-    except Retry:
-        raise
     except Exception as exc:
         slog.error(
             "sitemap_enumerate_shard_failed",
@@ -451,6 +491,55 @@ def sitemap_enumerate_shard(
         )
         capture_exception_if_initialized(exc)
         return {"status": f"error:{type(exc).__name__}", "code": marketplace_code}
+
+
+@celery_app.task(name="sitemap_budget_retry_tick", bind=True)
+def sitemap_budget_retry_tick(self) -> dict:
+    """Beat, 00:05 UTC: re-dispatch the walks a budget skip parked."""
+    from app.modules.scraper.pipeline.worker_log_relay import _get_redis
+
+    try:
+        client = _get_redis()
+        entries = client.hgetall(BUDGET_RETRY_KEY) or {}
+        dispatched = {"coordinator": 0, "shard": 0}
+        for field, raw in entries.items():
+            try:
+                entry = json.loads(raw)
+            except (TypeError, ValueError):
+                client.hdel(BUDGET_RETRY_KEY, field)
+                continue
+            attempts = int(entry.get("attempts", 0))
+            if entry.get("kind") == "shard":
+                sitemap_enumerate_shard.apply_async(
+                    [entry["code"], list(entry.get("shard_sitemaps") or [])],
+                    kwargs={
+                        "max_urls": int(entry.get("max_urls") or ENUMERATE_SHARD_MAX_URLS),
+                        "run_id": entry.get("run_id"),
+                        "shard_no": int(entry.get("shard_no") or 0),
+                        "locale": entry.get("locale"),
+                        "budget_attempts": attempts,
+                    },
+                    priority=8,
+                )
+                dispatched["shard"] += 1
+            else:
+                sitemap_enumerate_marketplace.apply_async(
+                    [entry["code"]],
+                    kwargs={
+                        "max_urls": int(entry.get("max_urls") or ENUMERATE_MAX_URLS),
+                        "budget_attempts": attempts,
+                    },
+                    priority=8,
+                )
+                dispatched["coordinator"] += 1
+            client.hdel(BUDGET_RETRY_KEY, field)
+        summary = {"status": "completed", **dispatched}
+        slog.info("sitemap_budget_retry_tick_done", **summary)
+        return summary
+    except Exception as exc:
+        capture_exception_if_initialized(exc)
+        slog.error("sitemap_budget_retry_tick_failed", error=str(exc)[:500])
+        return {"status": f"error:{type(exc).__name__}"}
 
 
 # Weekly sitemap re-scan (harvest optimisation #6): one paid no-JS request

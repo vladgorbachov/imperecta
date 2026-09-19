@@ -32,13 +32,6 @@ class ProxyBudgetExhausted(RuntimeError):
         self.error = error
 
 
-def seconds_until_daily_reset(now: datetime | None = None, jitter_sec: int = 600) -> int:
-    """Seconds until the next UTC midnight (when the daily allowance
-    recomputes) plus a deterministic-free jitter bound the caller applies."""
-    now = now or datetime.now(timezone.utc)
-    tomorrow = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-    return max(60, int((tomorrow - now).total_seconds()))
-
 # Concurrent in-flight fetches per scrape child (tunable; provider cap is fleet-wide).
 SCRAPE_FETCH_PARALLELISM = 5
 
