@@ -41,10 +41,13 @@ async def auth_headers_b(client):
 @pytest.mark.asyncio
 async def test_unauthenticated_cannot_access_protected_endpoints(client):
     """Unauthenticated user cannot access protected endpoints."""
+    # /api/pool/* reads became anonymous + edge-cacheable on 2026-09-19
+    # (app.common.public_cache); the CSV export is the pool route that
+    # still needs a login.
     endpoints = [
         ("GET", "/api/users/me"),
         ("GET", "/api/markets/preferences"),
-        ("GET", "/api/pool/products"),
+        ("GET", "/api/pool/products/export.csv"),
     ]
     for method, path in endpoints:
         if method == "GET":

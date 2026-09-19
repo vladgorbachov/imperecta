@@ -9,7 +9,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from app.common.deps import CurrentUser, DbSession
+from app.common.deps import DbSession
+from app.common.public_cache import PublicCache
 from app.database import sync_session_factory
 from app.modules.currency import CurrencyConverter, normalize_display_currency
 from app.modules.visualisation_calc.coverage.read import (
@@ -121,7 +122,7 @@ def _get_movers_coverage_sync(filters: MovementsFilters) -> MoversCoverageMeta:
 
 @router.get("/dashboard-kpi", response_model=DashboardKpi)
 async def get_dashboard_kpi(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     db: DbSession,
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     marketplace_id: UUID | None = Query(default=None),
@@ -137,7 +138,7 @@ async def get_dashboard_kpi(
 
 @router.get("/kpi-history", response_model=KpiHistoryResponse)
 async def get_kpi_history(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     db: DbSession,
     days: int = Query(default=7, ge=2, le=90),
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
@@ -152,7 +153,7 @@ async def get_kpi_history(
 
 @router.get("/geo-coverage", response_model=CoverageBreakdown)
 async def get_geo_coverage(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     db: DbSession,
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     marketplace_id: UUID | None = Query(default=None),
@@ -185,7 +186,7 @@ async def get_geo_coverage(
 
 @router.get("/trend", response_model=TrendSeries)
 async def get_price_trend(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     db: DbSession,
     period: Literal["7d", "30d", "90d"] = Query(default="30d"),
     bucket: Literal["day", "week", "month"] = Query(default="day"),
@@ -205,7 +206,7 @@ async def get_price_trend(
 
 @router.get("/volatility", response_model=VolatilityKpi)
 async def get_volatility_kpi(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     db: DbSession,
     period: Literal["7d", "30d", "90d"] = Query(default="30d"),
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
@@ -229,7 +230,7 @@ async def get_volatility_kpi(
 
 @router.get("/movements", response_model=MoversPage)
 async def get_movers(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     db: DbSession,
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     period: Literal["24h", "7d", "30d"] = Query(default="24h"),
@@ -263,7 +264,7 @@ async def get_movers(
 
 @router.get("/movements/kpi", response_model=MoversKpi)
 async def get_movers_kpi(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     period: Literal["24h", "7d", "30d"] = Query(default="24h"),
     marketplace_id: UUID | None = Query(default=None),
@@ -288,7 +289,7 @@ async def get_movers_kpi(
 
 @router.get("/movements/summary", response_model=MoversSummary)
 async def get_movers_summary(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     period: Literal["24h", "7d", "30d"] = Query(default="24h"),
     marketplace_id: UUID | None = Query(default=None),
@@ -311,7 +312,7 @@ async def get_movers_summary(
 
 @router.get("/movements/coverage", response_model=MoversCoverageMeta)
 async def get_movers_coverage(
-    _current_user: CurrentUser,
+    _cache: PublicCache,
     country_code: str | None = Query(default=None, min_length=2, max_length=2),
     period: Literal["24h", "7d", "30d"] = Query(default="24h"),
     marketplace_id: UUID | None = Query(default=None),

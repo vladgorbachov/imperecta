@@ -1,4 +1,8 @@
-"""Public API for the global product pool."""
+"""Public API for the global product pool.
+
+Read routes are anonymous + edge-cacheable (app.common.public_cache);
+only the CSV export stays behind a login.
+"""
 
 import csv
 import io
@@ -9,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.common.deps import CurrentUser, DbSession
+from app.common.public_cache import OptionalUser, PublicCache
 from app.modules.product_pool.schemas import (
     PoolCategoryItem,
     PoolCategorySummary,
@@ -22,8 +27,9 @@ from app.modules.product_pool.service import ProductPoolService
 router = APIRouter(prefix="/pool", tags=["product-pool"])
 @router.get("/products", response_model=PoolProductsResponse)
 async def list_pool_products(
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     db: DbSession,
+    _cache: PublicCache,
     search: str | None = Query(None, min_length=2, description="Search by title"),
     marketplace_id: UUID | None = Query(None, description="Filter by marketplace UUID"),
     category: str | None = Query(None, description="Filter by marketplace domain/name"),
@@ -137,8 +143,9 @@ async def export_pool_products_csv(
 @router.get("/products/{listing_id}", response_model=PoolProductDetail)
 async def get_pool_product(
     listing_id: UUID,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     db: DbSession,
+    _cache: PublicCache,
     display_currency: str = Query("local", description="local|EUR|USD"),
 ) -> PoolProductDetail:
     """One product card by listing id (P2); 404 for hidden/blocked listings."""
@@ -159,8 +166,9 @@ async def get_pool_product(
 )
 async def get_pool_product_price_history(
     listing_id: UUID,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     db: DbSession,
+    _cache: PublicCache,
     period: Literal["7d", "30d", "90d"] = Query("30d"),
     bucket: Literal["day"] = Query("day"),
 ) -> PriceHistoryResponse:
@@ -178,7 +186,9 @@ async def get_pool_product_price_history(
 
 
 @router.get("/categories", response_model=list[PoolCategoryItem])
-async def pool_categories(current_user: CurrentUser, db: DbSession) -> list[PoolCategoryItem]:
+async def pool_categories(
+    current_user: OptionalUser, db: DbSession, _cache: PublicCache
+) -> list[PoolCategoryItem]:
     service = ProductPoolService(db)
     rows = await service.get_categories(
         include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
@@ -188,8 +198,9 @@ async def pool_categories(current_user: CurrentUser, db: DbSession) -> list[Pool
 
 @router.get("/marketplace-stats", response_model=list[PoolCategorySummary])
 async def pool_marketplace_stats(
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     db: DbSession,
+    _cache: PublicCache,
 ) -> list[PoolCategorySummary]:
     service = ProductPoolService(db)
     rows = await service.get_marketplace_stats(
@@ -199,7 +210,9 @@ async def pool_marketplace_stats(
 
 
 @router.get("/stats", response_model=PoolStatsResponse)
-async def pool_stats(current_user: CurrentUser, db: DbSession) -> PoolStatsResponse:
+async def pool_stats(
+    current_user: OptionalUser, db: DbSession, _cache: PublicCache
+) -> PoolStatsResponse:
     _ = current_user
     service = ProductPoolService(db)
     payload = await service.get_pool_stats()
