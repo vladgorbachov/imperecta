@@ -41,16 +41,19 @@ class Settings(BaseSettings):
     # Provider-neutral proxy fetch configuration (Stage 2).
     proxy_provider: str = "decodo"
     proxy_provider_rps: int = 10
-    # Paid-fetch spend guard, numbers from the Decodo dashboard (2026-09-19):
-    # "Web Scraping API 19 plan" — $19 per billing cycle, unused balance is
-    # lost at renewal, cycle renews on the 16th (payment in 27 days on the
-    # 19th). Effective price from the same dashboard: $8.74 spent for 9,198
-    # successful requests = $0.95/1k (list: standard+JS $0.75, premium+JS
-    # $1.50). The limiter turns budget/price into a per-cycle request cap and
-    # spreads what is left evenly over the days remaining in the cycle.
-    proxy_provider_monthly_budget_usd: float = 19.0
-    proxy_cost_per_1k_usd: float = 0.95
-    proxy_provider_billing_day: int = 16
+    # Paid-fetch spend guard, numbers from the Decodo dashboard (2026-09-19,
+    # after Waldemar's upgrade): "Web Scraping API 49 plan" — $49 per billing
+    # cycle, unused balance is lost at renewal, cycle renews on the 19th.
+    # Price: standard+JS (our proxy_render mode) lists at $0.65/1k on this
+    # plan; on the previous plan the dashboard's effective price ran 27% above
+    # list ($0.95 measured vs $0.75 list — failed requests are billed too), so
+    # pacing uses 0.65 * 0.95/0.75 = $0.82/1k. The limiter turns budget/price
+    # into a per-cycle request cap and spreads what is left evenly over the
+    # days remaining in the cycle. Override per cycle via env when the balance
+    # differs from the plan (carried-over credit).
+    proxy_provider_monthly_budget_usd: float = 49.0
+    proxy_cost_per_1k_usd: float = 0.82
+    proxy_provider_billing_day: int = 19
     # Optional hard per-day ceiling on top of the budget (0 = budget only).
     proxy_provider_daily_cap: int = 0
     proxy_provider_api_url: str | None = Field(

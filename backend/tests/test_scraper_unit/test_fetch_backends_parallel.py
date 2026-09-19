@@ -830,9 +830,9 @@ def test_monthly_cap_derives_from_budget_and_price(monkeypatch):
     monkeypatch.setattr(
         limiter,
         "Settings",
-        lambda: MagicMock(proxy_provider_monthly_budget_usd=19.0, proxy_cost_per_1k_usd=0.95),
+        lambda: MagicMock(proxy_provider_monthly_budget_usd=49.0, proxy_cost_per_1k_usd=0.82),
     )
-    assert limiter.proxy_provider_monthly_cap() == 20_000
+    assert limiter.proxy_provider_monthly_cap() == 59_756
     monkeypatch.setattr(
         limiter,
         "Settings",
