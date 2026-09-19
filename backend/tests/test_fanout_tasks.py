@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -369,3 +368,21 @@ def test_budget_retry_beat_entry_is_registered() -> None:
     entry = celery_app.conf.beat_schedule["sitemap-budget-retry"]
     assert entry["task"] == "sitemap_budget_retry_tick"
     assert str(entry["schedule"]).startswith("<crontab: 5 0")
+
+
+def test_purge_marketplace_state_removes_every_key_of_the_code(monkeypatch) -> None:
+    from app.workers import maintenance_tasks as mt
+
+    redis = MagicMock()
+    redis.delete.side_effect = lambda *keys: len(keys)
+    redis.zrem.return_value = 1
+    redis.scan_iter.return_value = iter(["enumrun:shop_gone:r1:pending", "enumrun:shop_gone:r1:counts"])
+    redis.hkeys.return_value = [b"coordinator:shop_gone::", b"shard:pigu_lt:r2:3", b"shard:shop_gone:r1:0"]
+    redis.hdel.return_value = 1
+    monkeypatch.setattr("app.modules.scraper.pipeline.worker_log_relay._get_redis", lambda: redis)
+    out = mt.purge_marketplace_state_sync(["shop_gone"])
+    assert out == {"keys": 4, "rotation": 1, "budget_retry": 2}
+    redis.delete.assert_any_call("harvest:cursor:shop_gone", "harvest:listmode:shop_gone")
+    redis.zrem.assert_called_once_with("harvest:rotation", "shop_gone")
+    deleted_fields = {c.args[1] for c in redis.hdel.call_args_list}
+    assert deleted_fields == {b"coordinator:shop_gone::", b"shard:shop_gone:r1:0"}

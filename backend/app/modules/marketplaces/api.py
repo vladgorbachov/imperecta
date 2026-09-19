@@ -42,32 +42,19 @@ def _normalize_scrape_status(
     return "error"
 
 
-def _to_admin_row(mp: DimMarketplace, region: str) -> AdminMarketplaceListItem:
+def _to_admin_row(mp: DimMarketplace) -> AdminMarketplaceListItem:
     return AdminMarketplaceListItem(
         marketplace_id=str(mp.id),
         name=mp.name,
         domain=mp.domain,
         country_code=mp.country_code,
         country=mp.country_code,
-        region=region,
         source="admin",
         is_active=mp.is_active,
         last_scrape_at=mp.last_scrape_at,
         last_scrape_status=_normalize_scrape_status(mp.last_scrape_status),
         products_count=mp.products_in_pool,
     )
-
-
-async def _regions_for_marketplaces(db, rows: list[DimMarketplace]) -> dict[str, str]:
-    codes = {r.country_code for r in rows}
-    if not codes:
-        return {}
-    result = await db.execute(
-        select(DimCountry.country_code, DimCountry.region).where(
-            DimCountry.country_code.in_(codes),
-        ),
-    )
-    return {c: r for c, r in result.all()}
 
 
 @router.get("/countries", response_model=list[CountryRef])
@@ -81,7 +68,6 @@ async def list_marketplace_countries(
             DimCountry.country_code,
             DimCountry.name,
             DimCountry.name_local,
-            DimCountry.region,
             DimCountry.currency_code,
         )
         .where(DimCountry.is_active.is_(True))
@@ -92,7 +78,6 @@ async def list_marketplace_countries(
             code=row.country_code,
             name=row.name,
             name_local=row.name_local,
-            region=row.region,
             currency_code=row.currency_code,
         )
         for row in result.all()
@@ -106,8 +91,7 @@ async def list_marketplaces(
 ) -> list[AdminMarketplaceListItem]:
     svc = MarketplaceService(db)
     items = await svc.list_marketplaces()
-    regions = await _regions_for_marketplaces(db, items)
-    return [_to_admin_row(m, regions.get(m.country_code, "")) for m in items]
+    return [_to_admin_row(m) for m in items]
 
 
 @router.post("", response_model=AdminMarketplaceListItem)
@@ -124,8 +108,7 @@ async def add_marketplace_root(
         mp, _is_new = await svc.add_by_url(url, country_code=body.country_code)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    regions = await _regions_for_marketplaces(db, [mp])
-    return _to_admin_row(mp, regions.get(mp.country_code, ""))
+    return _to_admin_row(mp)
 
 
 @router.patch("/{marketplace_id}", response_model=AdminMarketplaceListItem)
@@ -145,8 +128,7 @@ async def update_marketplace(
         raise HTTPException(status_code=400, detail=str(e)) from e
     if mp is None:
         raise HTTPException(status_code=404, detail="Marketplace not found")
-    regions = await _regions_for_marketplaces(db, [mp])
-    return _to_admin_row(mp, regions.get(mp.country_code, ""))
+    return _to_admin_row(mp)
 
 
 @router.delete("/{marketplace_id}")

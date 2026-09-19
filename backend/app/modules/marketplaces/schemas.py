@@ -27,7 +27,6 @@ class CountryRef(BaseModel):
     code: str
     name: str
     name_local: str | None = None
-    region: str
     currency_code: str
 
 
@@ -46,7 +45,6 @@ class AdminMarketplaceListItem(BaseModel):
     domain: str
     country_code: str
     country: str
-    region: str = ""
     source: Literal["registry", "admin"] = "admin"
     is_active: bool
     last_scrape_at: datetime | None = None

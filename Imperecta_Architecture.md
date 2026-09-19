@@ -2390,3 +2390,10 @@ backend/app/
 #### `__init__.py` vs `init.py`
 
 Мусорные `init.py` (без `__`) в `modules/scraper/` и `modules/entitlements/` **удалены** — валидные package markers только `__init__.py` или implicit namespace (Python 3.3+).
+
+## 12. Legal clean-up 2026-09-19 (программа WP1–WP11)
+
+Основание: `docs/LEGAL_CLEANUP_PLAN_2026-09-19.md` + меморандум юриста. Решения основателя: RU/BY/KZ — вне продукта
+полностью (WP1, миграция 071 + `maintenance.purge_marketplace`); ярусная политика источников (WP4); пул только для
+аутентифицированных, без экспорта service-data (WP2/WP10); RU-локаль UI удалена (WP11); регионов нет — только
+страны (§1.3). Статус ведётся по PR на ветке `legal/cleanup-2026-09`; выполнено: WP1.

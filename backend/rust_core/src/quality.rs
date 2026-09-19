@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn currency_outside_whitelist_is_critical() {
         let mut record = full_record();
-        record.currency = Some("RUB".into());
+        record.currency = Some("XXX".into());
         let report = assess(&record);
         assert!(report.critical);
         assert!(report.flags.contains(&"currency_not_allowed".to_string()));

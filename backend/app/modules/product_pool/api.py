@@ -59,7 +59,6 @@ async def list_pool_products(
         offset=offset,
         cursor=cursor,
         skip_total=skip_total,
-        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
         display_currency=display_currency,
     )
     return PoolProductsResponse(
@@ -109,7 +108,6 @@ async def export_pool_products_csv(
             search=search,
             marketplace_id=marketplace_id,
             category=category,
-            include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
         ):
             writer.writerow(
                 [
@@ -152,7 +150,6 @@ async def get_pool_product(
     service = ProductPoolService(db)
     item = await service.get_product_detail(
         listing_id,
-        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
         display_currency=display_currency,
     )
     if item is None:
@@ -178,7 +175,6 @@ async def get_pool_product_price_history(
     history = await service.get_price_history(
         listing_id,
         period=period,
-        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
     if history is None:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -191,7 +187,6 @@ async def pool_categories(
 ) -> list[PoolCategoryItem]:
     service = ProductPoolService(db)
     rows = await service.get_categories(
-        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
     return [PoolCategoryItem(**row) for row in rows]
 
@@ -204,7 +199,6 @@ async def pool_marketplace_stats(
 ) -> list[PoolCategorySummary]:
     service = ProductPoolService(db)
     rows = await service.get_marketplace_stats(
-        include_blocked_countries=bool(getattr(current_user, "is_superuser", False)),
     )
     return [PoolCategorySummary(**row) for row in rows]
 

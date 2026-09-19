@@ -1621,3 +1621,17 @@ flowchart TD
 | UI | `DataCollectionTab.tsx`, `PipelineStatusPanel.tsx`, `usePipelineStatus` |
 
 Связанные документы: `Imperecta_Architecture.md`, `Imperecta_Backend.md`, `Imperecta_Database.md`, `.cursor/rules/scraper.mdc`.
+
+## 13. Legal clean-up 2026-09-19 — WP1
+
+- `product_pool`: `BLOCKED_PUBLIC_COUNTRY_CODES`, `_apply_country_visibility_filter`, параметр
+  `include_blocked_countries` и superuser-исключения удалены — скрытых стран больше нет (RU/BY/KZ удалены из данных
+  миграцией 071, см. `Imperecta_Database.md` §12).
+- Валюты: `KZT` убран из `forex_allowed_currencies` (config) и `DEFAULT_FOREX_ALLOWED_CURRENCIES`; токены
+  `₽ ₸ br rub руб р. kzt тг тенге byn бел.руб` удалены из `common/html_parsing.py` и `rust_core/src/pricing.rs`
+  (parity-корпус обновлён); `common/marketplace_locale.py` без `kz`/`KZ`.
+- Регионы: `DimCountry.region/subregion`, `CountryRef.region`, `AdminMarketplaceListItem.region` и
+  `/admin/marketplaces/countries` больше не несут регион (§1.3 плана — только страны).
+- Удалены `scripts/fix_marketplace_countries.py` (разовый, исполнен) и `scripts/scraper_output_harness.py` с
+  `harness_urls.txt` (без ссылок из тестов/доков).
+- Новый Celery-таск `purge_marketplace_state(marketplace_codes)` — Redis-часть удаления источника.

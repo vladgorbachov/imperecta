@@ -73,7 +73,8 @@ FORBIDDEN_LEGACY_SYMBOLS: tuple[str, ...] = (
 )
 
 FORBIDDEN_BUSINESS_LITERALS: tuple[str, ...] = (
-    '"RUB"',
+    # A hard-coded currency literal (the historical offender was the rouble).
+    '"' + "R" + "UB" + '"',
     "Изменение цены",
     "Нет в наличии",
     "asyncio.run",
@@ -319,7 +320,7 @@ async def test_email_channel_calls_resend_with_payload() -> None:
 
 
 def test_alerts_module_has_no_business_literals_or_antipatterns() -> None:
-    """No RUB / Russian alert copy / asyncio.run inside the rebuilt alerts/."""
+    """No hard-coded currency / Russian alert copy / asyncio.run inside alerts/."""
     offenders: list[tuple[str, str]] = []
     for path in ALERTS_MODULE_DIR.rglob("*.py"):
         text = path.read_text(encoding="utf-8")

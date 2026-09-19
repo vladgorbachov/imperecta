@@ -57,7 +57,6 @@ KEPT_RESPONSE_FIELDS: tuple[str, ...] = (
     "domain",
     "country_code",
     "country",
-    "region",
     "source",
     "is_active",
     "last_scrape_at",

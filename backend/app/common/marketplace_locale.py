@@ -17,7 +17,6 @@ TLD_TO_COUNTRY: dict[str, str] = {
     "bg": "BG",
     "com.ua": "UA",
     "ua": "UA",
-    "kz": "KZ",
     "ee": "EE",
     "lt": "LT",
     "lv": "LV",
@@ -56,7 +55,6 @@ COUNTRY_TO_CURRENCY: dict[str, str] = {
     # Bulgaria adopted the euro on 2026-01-01; lev (BGN) is no longer legal tender.
     "BG": "EUR",
     "UA": "UAH",
-    "KZ": "KZT",
     "EE": "EUR",
     "LT": "EUR",
     "LV": "EUR",

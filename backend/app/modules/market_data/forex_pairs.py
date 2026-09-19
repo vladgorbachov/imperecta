@@ -29,8 +29,8 @@ FOREX_PRIMARY_PAIRS: tuple[tuple[str, str], ...] = (
 DEFAULT_FOREX_ALLOWED_CURRENCIES: frozenset[str] = frozenset(
     {
         "USD", "EUR", "GBP", "JPY", "CHF", "MDL", "RON", "PLN", "TRY",
-        # Pool currencies added 2026-09-19 (UAH/KZT/CZK/HUF/BGN shops).
-        "UAH", "KZT", "CZK", "HUF", "BGN",
+        # Pool currencies added 2026-09-19 (UAH/CZK/HUF/BGN shops).
+        "UAH", "CZK", "HUF", "BGN",
     },
 )
 
