@@ -65,6 +65,14 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/30"),
         "options": {"priority": 2},
     },
+    # Weekly sitemap re-scan (harvest optimisation #6): the shop's own
+    # <lastmod> change signal + new products. Sunday 03:00 UTC — the quiet
+    # window before the week's harvest passes.
+    "sitemap-rescan": {
+        "task": "sitemap_rescan_tick",
+        "schedule": crontab(minute=0, hour=3, day_of_week="sun"),
+        "options": {"priority": 8},
+    },
     # Cross-shop matching (roadmap item 3): drains match_method IS NULL
     # products into deterministic brand+model groups, 10k per tick — full
     # 1.75M pool in ~30h, then incremental on new onboardings.

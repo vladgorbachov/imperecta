@@ -72,26 +72,102 @@ class EnumerateResult:
     # #3): the caller merges them into discovered_category_urls.
     category_urls: list[str] = field(default_factory=list)
     categories_added: int = 0
+    # Sitemap <lastmod> coverage (harvest optimisation #6).
+    lastmod_seen: int = 0
+    lastmod_updated: int = 0
 
 
-def _existing_hashes_sync(hashes: list[str]) -> set[str]:
-    """Chunked url_hash dedupe lookup on a short-lived sync session."""
+def _existing_hashes_sync(hashes: list[str]) -> dict[str, object]:
+    """Chunked url_hash dedupe lookup on a short-lived sync session.
+
+    Returns {url_hash: sitemap_lastmod} for the hashes already in the pool
+    (the lastmod lets a re-scan spot what the shop says changed).
+    """
     from sqlalchemy import select
 
     from app.database import sync_session_factory
 
     if not hashes:
-        return set()
+        return {}
     db = sync_session_factory()
     try:
-        found: set[str] = set()
+        found: dict[str, object] = {}
         for start in range(0, len(hashes), _HASH_LOOKUP_CHUNK):
             chunk = hashes[start : start + _HASH_LOOKUP_CHUNK]
             rows = db.execute(
-                select(FactListing.url_hash).where(FactListing.url_hash.in_(chunk))
+                select(FactListing.url_hash, FactListing.sitemap_lastmod).where(
+                    FactListing.url_hash.in_(chunk)
+                )
             )
-            found.update(row[0] for row in rows if row[0])
+            found.update({row[0]: row[1] for row in rows if row[0]})
         return found
+    finally:
+        db.close()
+
+
+def parse_lastmod(raw: str | None):
+    """Sitemap <lastmod> (W3C datetime: date or full ISO) -> aware UTC datetime."""
+    from datetime import datetime, timezone
+
+    if not raw:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        if len(text) == 10:
+            return datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _write_lastmod_updates_sync(updates: list[tuple[str, object]]) -> int:
+    """Gated fact_listing.sitemap_lastmod updates, pipelined like the
+    matching engine's writes (chunk failure degrades to per-record)."""
+    from sqlalchemy.exc import DBAPIError
+
+    from app.database import sync_session_factory
+    from app.modules.data_firewall.update_validator import authorize_scrape_update
+    from app.modules.persist.gate_rpc import (
+        GateRpcError,
+        exec_write_record,
+        exec_write_records,
+    )
+    from app.modules.persist.scrape_gate_fields import build_listing_update_fields
+
+    signed = []
+    for url_hash, lastmod in updates:
+        outcome = authorize_scrape_update(
+            table="fact_listing",
+            kind="listing_sitemap_lastmod",
+            fields=build_listing_update_fields(url_hash=url_hash, sitemap_lastmod=lastmod),
+            reject_source="sitemap_enumerate",
+        )
+        if outcome.passed and outcome.signed_record is not None:
+            signed.append(outcome.signed_record)
+    if not signed:
+        return 0
+    written = 0
+    db = sync_session_factory()
+    try:
+        for start in range(0, len(signed), 100):
+            chunk = signed[start : start + 100]
+            try:
+                written += exec_write_records(db, chunk)
+                db.commit()
+            except (GateRpcError, DBAPIError):
+                db.rollback()
+                for record in chunk:
+                    try:
+                        written += exec_write_record(db, record)
+                        db.commit()
+                    except (GateRpcError, DBAPIError):
+                        db.rollback()
+        return written
     finally:
         db.close()
 
@@ -137,9 +213,12 @@ async def enumerate_sitemap_full(
             status=status,
             category_urls=counts.get("category_urls", []),
             categories_added=counts.get("categories_added", 0),
+            lastmod_seen=counts.get("lastmod_seen", 0),
+            lastmod_updated=counts.get("lastmod_updated", 0),
         )
 
     try:
+        lastmod_by_url: dict[str, str] = {}
         raw_entries = await pool.fetch_sitemap_candidates(
             marketplace.base_url,
             marketplace_locale=marketplace.locale,
@@ -147,6 +226,7 @@ async def enumerate_sitemap_full(
             max_urls=max_urls,
             with_shard_origin=True,
             explicit_sitemaps=explicit_sitemaps,
+            lastmod_out=lastmod_by_url,
         )
     except Exception as exc:
         slog.error(
@@ -179,6 +259,7 @@ async def enumerate_sitemap_full(
     inserted = rejected = duplicates = 0
     batch: list[PoolInsertDTO] = []
     seen_in_run: set[str] = set()
+    lastmod_updates: list[tuple[str, object]] = []
 
     async def _flush() -> None:
         nonlocal inserted, rejected, batch
@@ -193,6 +274,10 @@ async def enumerate_sitemap_full(
         url_hash = hash_by_url[url]
         if url_hash in existing or url_hash in seen_in_run:
             duplicates += 1
+            if url_hash in existing:
+                new_lastmod = parse_lastmod(lastmod_by_url.get(url))
+                if new_lastmod is not None and new_lastmod != existing[url_hash]:
+                    lastmod_updates.append((url_hash, new_lastmod))
             continue
         seen_in_run.add(url_hash)
         title = _title_from_url(url) or "product"
@@ -221,6 +306,10 @@ async def enumerate_sitemap_full(
 
     await _flush()
 
+    lastmod_updated = 0
+    if lastmod_updates:
+        lastmod_updated = await asyncio.to_thread(_write_lastmod_updates_sync, lastmod_updates)
+
     from app.modules.discovery.sitemap_categories import (
         collect_category_urls,
         publish_category_urls,
@@ -247,11 +336,13 @@ async def enumerate_sitemap_full(
         duplicates=duplicates,
         category_urls=category_urls,
         categories_added=categories_added,
+        lastmod_seen=len(lastmod_by_url),
+        lastmod_updated=lastmod_updated,
     )
     logger.info(
         "sitemap_enumerate_done marketplace_id=%s raw=%d product_like=%d "
         "inserted=%d duplicates=%d rejected=%d category_like=%d categories_added=%d "
-        "duration_ms=%d",
+        "lastmod_seen=%d lastmod_updated=%d duration_ms=%d",
         marketplace_id,
         result.raw_urls,
         result.product_like,
@@ -260,6 +351,8 @@ async def enumerate_sitemap_full(
         result.rejected,
         len(category_urls),
         categories_added,
+        len(lastmod_by_url),
+        lastmod_updated,
         result.duration_ms,
     )
     return result

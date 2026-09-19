@@ -1181,15 +1181,38 @@ def detect_next_page(
     current_url: str,
     custom_selector: str | None = None,
 ) -> str | None:
-    """Find next page URL for pagination."""
+    """Find next page URL for pagination.
+
+    Every candidate passes ``_plausible_next`` — pigu.lt emits a
+    <link rel=next> of "https://pigu.lt/lthttps://pigu.lt/lt/...?page=2"
+    (2026-09-19), which would otherwise end every category walk at page 1.
+    """
+    current_host = urlparse(current_url).netloc.lower().removeprefix("www.")
+
+    def _plausible_next(candidate: str) -> str | None:
+        parsed = urlparse(candidate)
+        if parsed.scheme not in {"http", "https"}:
+            return None
+        if parsed.netloc.lower().removeprefix("www.") != current_host:
+            return None
+        if "http://" in candidate[8:] or "https://" in candidate[8:]:
+            return None
+        if candidate == current_url:
+            return None
+        return candidate
+
     if custom_selector:
         node = soup.select_one(custom_selector)
         if node and node.get("href"):
-            return urljoin(current_url, str(node.get("href")).strip())
+            found = _plausible_next(urljoin(current_url, str(node.get("href")).strip()))
+            if found:
+                return found
 
     rel_next = soup.find("link", rel="next")
     if rel_next and rel_next.get("href"):
-        return urljoin(current_url, str(rel_next.get("href")).strip())
+        found = _plausible_next(urljoin(current_url, str(rel_next.get("href")).strip()))
+        if found:
+            return found
 
     # Structural signals only — no language word lists (universality rule):
     # <a rel=next>, arrow glyphs, page-number progression in query or path,
@@ -1206,19 +1229,33 @@ def detect_next_page(
             continue
         rel = node.get("rel") or []
         rel_values = rel if isinstance(rel, list) else str(rel).split()
+        joined = _plausible_next(urljoin(current_url, href))
+        if joined is None:
+            continue
         if any(str(r).lower() == "next" for r in rel_values):
-            return urljoin(current_url, href)
+            return joined
         text = node.get_text(" ", strip=True)
         if "›" in text or "→" in text or "»" in text:
-            return urljoin(current_url, href)
+            return joined
         if current_page is not None:
             m = re.search(r"([?&](?:page|p)=)(\d+)", href) or re.search(
                 r"(/page/)(\d+)", href
             )
             if m and int(m.group(2)) == current_page + 1:
-                return urljoin(current_url, href)
+                return joined
             if text.strip() == str(current_page + 1):
-                return urljoin(current_url, href)
+                return joined
+    # Page 1 has no page marker in its URL: the anchor whose entire text is
+    # "2" (or whose href says page=2) is the next page.
+    if current_page is None:
+        for node in candidates:
+            href = str(node.get("href", "")).strip()
+            joined = _plausible_next(urljoin(current_url, href)) if href else None
+            if joined is None:
+                continue
+            m = re.search(r"([?&](?:page|p)=)(\d+)", href) or re.search(r"(/page/)(\d+)", href)
+            if (m and int(m.group(2)) == 2) or node.get_text(" ", strip=True).strip() == "2":
+                return joined
     return None
 
 
@@ -1422,11 +1459,14 @@ def parse_sitemap_xml(
             if _strip_ns(url_el.tag) != "url":
                 continue
             loc: str | None = None
+            lastmod: str | None = None
             alternates: dict[str, str] = {}
             for child in url_el:
                 child_tag = _strip_ns(child.tag)
                 if child_tag == "loc" and child.text:
                     loc = child.text.strip()
+                elif child_tag == "lastmod" and child.text:
+                    lastmod = child.text.strip() or None
                 elif child_tag == "link":
                     rel = (child.attrib.get("rel") or "").strip()
                     hreflang = (child.attrib.get("hreflang") or "").strip()
@@ -1438,5 +1478,7 @@ def parse_sitemap_xml(
             if not alternates:
                 alternates = _parse_alternates(url_el)
             result["urls"].append(loc)
-            result["url_entries"].append({"loc": loc, "alternates": alternates})
+            result["url_entries"].append(
+                {"loc": loc, "alternates": alternates, "lastmod": lastmod}
+            )
     return result

@@ -29,6 +29,8 @@ SCRAPE_UPDATE_ALLOWLIST: dict[str, dict[str, frozenset[str]]] = {
         ),
         "listing_deactivate": frozenset({"is_active"}),
         "listing_checked": frozenset({"last_checked_at"}),
+        # Sitemap re-scan (067): the shop's own "this page changed" signal.
+        "listing_sitemap_lastmod": frozenset({"sitemap_lastmod"}),
         "listing_denorm_success": frozenset(
             {
                 "last_price",

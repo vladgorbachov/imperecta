@@ -116,6 +116,52 @@ error-path `scrape_listing_batch` (неимпортированный
 **После:** _free/paid в `scrape_stale_fanout_done`, доля платных PDP в
 scrape_logs, рост priced у direct-магазинов._
 
-## П.6 — lastmod сайтмапов как сигнал изменений (в очереди)
+## П.6 — lastmod сайтмапов как сигнал изменений
 
-## П.7 — JSON-эндпоинты витрин (в очереди)
+**До (аудит):** `parse_sitemap_xml` читал только `<loc>` и hreflang-альтернативы;
+`<lastmod>` выбрасывался, в `fact_listing` его негде было хранить; повторной
+энумерации по расписанию не было (только ручные партии).
+
+**Сделано:** миграция 067 `fact_listing.sitemap_lastmod` (nullable, применена
+в проде мгновенно); парсер отдаёт `lastmod`; `fetch_sitemap_candidates(lastmod_out=)`;
+энумератор при повторном проходе обновляет `sitemap_lastmod` у уже известных
+листингов через META-дверь (`listing_sitemap_lastmod`, пайплайн 100/чанк);
+frontier: `sitemap_lastmod > coalesce(last_checked_at, epoch)` — сигнал
+«магазин говорит, что страница изменилась» — ценность 2 в платном frontier
+(между алертом и группой) и первый порядок в бесплатном; beat
+`sitemap-rescan` еженедельно (вс 03:00 UTC, priority 8) переэнумерирует все
+магазины с пулом — новые товары + lastmod, одним no-JS запросом на файл.
+Тесты: `test_parse_sitemap_xml_keeps_lastmod`, `test_parse_lastmod_formats`,
+`test_lastmod_updates_are_gated_by_kind`, `test_sitemap_changed_signal_orders_frontier`,
+`test_sitemap_rescan_tick_dispatches_populated_shops`.
+
+**После:** _после первого воскресного пересбора — доля листингов с
+`sitemap_lastmod`, честность lastmod по магазинам (distinct дат)._
+
+## П.7 — JSON-эндпоинты витрин: аудит pigu-группы (60% proxy-пула)
+
+**До (аудит в браузере, pigu.lt/lt/kompiuteriai/nesiojami-kompiuteriai):**
+страница категории серверная — 60 карточек с ценами в HTML, пагинация
+`?page=N` полным переходом (XHR нет), JSON-API не нужен: no-JS списки по
+$0.30 покрывают pigu-группу. Но три дефекта экстрактора дали бы **0 цен** на
+1.6M листингов:
+1. Каждая карточка несёт уникальный класс `product-block-267212686` →
+   структурная сигнатура (тег, классы) никогда не повторяется ≥6 → грид не
+   найден, офферов 0. Фикс: токены классов с 3+ цифрами подряд исключаются из
+   сигнатуры (Rust `is_instance_class` + Python `compute_element_signature`).
+2. Цена размечена `299<sup>99</sup> €` → текстовые ноды «299» «99» «€» →
+   склейка давала **99 €**. Фикс: приоритет атрибутам (`aria-label="299,99 €"`,
+   `data-price`, `itemprop=price` + `priceCurrency`), в текстовом пути —
+   склейка «целое» + «2 цифры» перед валютой.
+3. Две текущие цены — «лояльная» (члены Pigu PLUS, `h-price--loyalty`) первой,
+   публичная второй; старая — в `<s>`/`--old`. Фикс: зачёркнутые/old-hint
+   исключаются, member-hint (loyal/member/club) — только как запасной вариант.
+4. `<link rel=next>` битый (`https://pigu.lt/lthttps://…`) → обход обрывался
+   бы на 1-й странице. Фикс: `detect_next_page` проверяет правдоподобие
+   кандидата (тот же хост, один URL, не текущая страница) и умеет с 1-й
+   страницы найти «2».
+Тесты: Rust `attribute_price_prefers_public_over_member_and_old`,
+`superscript_cents_join_in_text_path`, `instance_id_classes_do_not_break_the_grid_signature`;
+Python `test_detect_next_page_rejects_malformed_rel_next_and_finds_page_2`.
+Вердикт по п.7: для pigu-группы JSON-API не нужен; кандидаты на отдельное
+исследование — darwin.md, x-kom (после «после» по п.1-2).

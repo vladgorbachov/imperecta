@@ -652,8 +652,12 @@ class ScraperPool:
         max_urls: int | None = None,
         with_shard_origin: bool = False,
         explicit_sitemaps: list[str] | None = None,
+        lastmod_out: dict[str, str] | None = None,
     ) -> list[str] | list[tuple[str, str]]:
         """Discover sitemap URLs with locale selection and canonical deduplication.
+
+        ``lastmod_out``, when given, collects each selected URL's <lastmod>
+        text (harvest optimisation #6 — the shop's own change signal).
 
         ``max_subfiles`` / ``max_urls`` override the module defaults for the
         sitemap-full onboarding path (quotas are floors, not ceilings); the
@@ -741,6 +745,8 @@ class ScraperPool:
                 if url_hash in seen_hashes:
                     continue
                 seen_hashes.add(url_hash)
+                if lastmod_out is not None and entry.get("lastmod"):
+                    lastmod_out[selected] = str(entry["lastmod"])
                 if with_shard_origin:
                     product_urls.append((selected, sitemap_url))
                 else:

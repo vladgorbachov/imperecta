@@ -93,11 +93,30 @@ fn strip_query_fragment(url: &str) -> String {
     no_frag.split('?').next().unwrap_or(no_frag).to_string()
 }
 
+/// A class token carrying a digit run is an instance id, not structure
+/// ("product-block-267212686" on every pigu card, 2026-09-19): with it in
+/// the signature no two cards ever match and the grid is never found.
+fn is_instance_class(class: &str) -> bool {
+    let mut run = 0;
+    for ch in class.chars() {
+        if ch.is_ascii_digit() {
+            run += 1;
+            if run >= 3 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
+}
+
 fn signature_of(el: &ElementRef) -> Option<(String, Vec<String>)> {
     let tag = el.value().name().to_lowercase();
     let mut classes: Vec<String> = el
         .value()
         .classes()
+        .filter(|c| !is_instance_class(c))
         .map(|c| c.to_string())
         .collect();
     if tag.is_empty() || classes.is_empty() {
@@ -163,7 +182,105 @@ fn numeric_edge_tokens(text: &str, from_end: bool) -> String {
     run.join(" ")
 }
 
+/// Class-token hints for prices that are NOT the offer: struck-through
+/// previous prices and member-only (loyalty club) prices. Structural in
+/// spirit — they name price roles, never shops.
+const OLD_PRICE_HINTS: [&str; 7] = ["old", "before", "strike", "cross", "was", "previous", "prev"];
+const MEMBER_PRICE_HINTS: [&str; 3] = ["loyal", "member", "club"];
+
+fn class_has_hint(el: &ElementRef, hints: &[&str]) -> bool {
+    el.value()
+        .attr("class")
+        .map(|c| {
+            let lower = c.to_ascii_lowercase();
+            hints.iter().any(|h| lower.contains(h))
+        })
+        .unwrap_or(false)
+}
+
+/// True when the element or an ancestor inside the card is struck through
+/// (<s>/<del>/<strike>) or carries an old-price class hint.
+fn is_old_price(el: &ElementRef, card: &ElementRef) -> bool {
+    let mut node = Some(*el);
+    while let Some(cur) = node {
+        if cur.id() == card.id() {
+            break;
+        }
+        let name = cur.value().name();
+        if name == "s" || name == "del" || name == "strike" || class_has_hint(&cur, &OLD_PRICE_HINTS) {
+            return true;
+        }
+        node = cur.parent().and_then(ElementRef::wrap);
+    }
+    false
+}
+
+/// Attribute-carried prices: aria-label="299,99 €", data-price, or
+/// itemprop=price content paired with priceCurrency. Markup like
+/// `299<sup>99</sup> €` (pigu group, 2026-09-19) defeats text-node
+/// parsing — the text nodes read "299" "99" "€" — while the attribute
+/// carries the exact amount. The first non-old, non-member candidate in
+/// DOM order wins; a member-only price is the fallback.
+fn attribute_price(card: &ElementRef) -> Option<(f64, &'static str, String)> {
+    let sel = Selector::parse("[aria-label], [data-price], [itemprop=\"price\"]").ok()?;
+    let cur_sel = Selector::parse("[itemprop=\"priceCurrency\"]").ok()?;
+    let card_currency: Option<&str> = card
+        .select(&cur_sel)
+        .find_map(|el| el.value().attr("content"))
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    let mut member_fallback: Option<(f64, &'static str, String)> = None;
+    for el in card.select(&sel) {
+        let attrs = el.value();
+        let mut text: Option<String> = None;
+        if let Some(label) = attrs.attr("aria-label") {
+            if detect_currency(label).is_some() {
+                text = Some(label.to_string());
+            }
+        }
+        if text.is_none() {
+            if let Some(dp) = attrs.attr("data-price") {
+                if detect_currency(dp).is_some() {
+                    text = Some(dp.to_string());
+                } else if let Some(cur) = card_currency {
+                    text = Some(format!("{dp} {cur}"));
+                }
+            }
+        }
+        if text.is_none() {
+            if attrs.attr("itemprop") == Some("price") {
+                if let (Some(content), Some(cur)) = (attrs.attr("content"), card_currency) {
+                    text = Some(format!("{content} {cur}"));
+                }
+            }
+        }
+        let Some(text) = text else { continue };
+        if is_old_price(&el, card) {
+            continue;
+        }
+        let parsed = match (parse_price_text(&text), detect_currency(&text)) {
+            (Some(price), Some(currency)) => {
+                let mut raw = text.clone();
+                if raw.chars().count() > MAX_RAW_PRICE_LEN {
+                    raw = raw.chars().take(MAX_RAW_PRICE_LEN).collect();
+                }
+                (price, currency, raw)
+            }
+            _ => continue,
+        };
+        if class_has_hint(&el, &MEMBER_PRICE_HINTS) {
+            member_fallback.get_or_insert(parsed);
+            continue;
+        }
+        return Some(parsed);
+    }
+    member_fallback
+}
+
 fn card_price(card: &ElementRef) -> Option<(f64, &'static str, String)> {
+    if let Some(found) = attribute_price(card) {
+        return Some(found);
+    }
     const MAX_PRICE_NODES: usize = 200;
     let nodes: Vec<&str> = card
         .text()
@@ -180,6 +297,20 @@ fn card_price(card: &ElementRef) -> Option<(f64, &'static str, String)> {
         // adjacent TOKEN of the neighbour joins — a full neighbour node can
         // be a title whose SKU digits would parse as a price.
         let mut candidates: Vec<String> = vec![(*node).to_string()];
+        // Superscript cents: "299" "99" "€" — the two-digit node right
+        // before the marker is the fraction of the node before it.
+        if idx > 1 {
+            let cents = nodes[idx - 1];
+            let whole = numeric_edge_tokens(nodes[idx - 2], true);
+            if cents.len() == 2
+                && cents.chars().all(|c| c.is_ascii_digit())
+                && !whole.is_empty()
+                && !whole.contains(',')
+                && !whole.contains('.')
+            {
+                candidates.push(format!("{whole},{cents} {node}"));
+            }
+        }
         if idx > 0 {
             let tail = numeric_edge_tokens(nodes[idx - 1], true);
             if !tail.is_empty() {
@@ -437,6 +568,58 @@ mod tests {
         assert_eq!(first.title.as_deref(), Some("Widget model 0"));
     }
 
+    /// pigu-group markup (2026-09-19): superscript cents, a member-only
+    /// loyalty price first, the public price second, both aria-labelled.
+    fn pigu_grid(cards: usize) -> String {
+        let mut items = String::new();
+        for i in 0..cards {
+            items.push_str(&format!(
+                r#"<div class="c-product-card product-block-26721268{i}">
+                     <a href="/lt/kompiuteriai/nesiojamas-{i}?id=24224{i}"><span>Nešiojamas kompiuteris {i}</span></a>
+                     <div class="c-product-card__prices">
+                       <span class="c-price h-price--loyalty" aria-label="299,99 €"><i class="c-icon--loyalty"></i> 299<sup>99</sup> <small>€</small></span>
+                       <span class="c-price h-price--medium" aria-label="329,99 €">329<sup>99</sup> <small>€</small></span>
+                       <span class="c-price c-price--old" aria-label="399,99 €"><s>399<sup>99</sup> €</s></span>
+                     </div>
+                   </div>"#
+            ));
+        }
+        format!(r#"<html><body><div class="grid">{items}</div></body></html>"#)
+    }
+
+    #[test]
+    fn attribute_price_prefers_public_over_member_and_old() {
+        let offers = extract_list_offers(&pigu_grid(8), "https://pigu.lt/lt/kompiuteriai");
+        assert_eq!(offers.len(), 8);
+        assert_eq!(offers[0].price, Some(329.99));
+        assert_eq!(offers[0].currency.as_deref(), Some("EUR"));
+    }
+
+    #[test]
+    fn instance_id_classes_do_not_break_the_grid_signature() {
+        assert!(is_instance_class("product-block-267212686"));
+        assert!(is_instance_class("item-123"));
+        assert!(!is_instance_class("c-product-card"));
+        assert!(!is_instance_class("col-12")); // two digits: a grid span, kept
+    }
+
+    #[test]
+    fn superscript_cents_join_in_text_path() {
+        let html = r#"<html><body><div class="grid">
+          <div class="card"><a href="/p/a1">A1 model</a><span>299<sup>99</sup> <small>€</small></span></div>
+          <div class="card"><a href="/p/a2">A2 model</a><span>19<sup>50</sup> <small>€</small></span></div>
+          <div class="card"><a href="/p/a3">A3 model</a><span>1 299<sup>00</sup> <small>€</small></span></div>
+          <div class="card"><a href="/p/a4">A4 model</a><span>5<sup>00</sup> <small>€</small></span></div>
+          <div class="card"><a href="/p/a5">A5 model</a><span>7<sup>25</sup> <small>€</small></span></div>
+          <div class="card"><a href="/p/a6">A6 model</a><span>8<sup>10</sup> <small>€</small></span></div>
+        </div></body></html>"#;
+        let offers = extract_list_offers(html, "https://shop.example/c");
+        assert_eq!(offers.len(), 6);
+        assert_eq!(offers[0].price, Some(299.99));
+        assert_eq!(offers[1].price, Some(19.50));
+        assert_eq!(offers[2].price, Some(1299.00));
+    }
+
     #[test]
     fn below_grid_threshold_yields_nothing() {
         let offers = extract_list_offers(&grid_html(4), "https://shop.example/c/tools");
@@ -546,3 +729,4 @@ mod tests {
         assert!(first.price_raw_text.is_none());
     }
 }
+

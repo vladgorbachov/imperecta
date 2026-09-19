@@ -1006,6 +1006,13 @@ def _due_by_interval():
     )
 
 
+def _sitemap_changed():
+    """The shop's sitemap says the page changed after our last check (067)."""
+    return FactListing.sitemap_lastmod > func.coalesce(
+        FactListing.last_checked_at, func.to_timestamp(0)
+    )
+
+
 def _paid_quota_this_tick(now: float | None = None) -> int | None:
     """Paid PDP fetches this tick: what is left of today's allowance, spread
     over the ticks still to come today. None = no budget guard configured."""
@@ -1042,10 +1049,11 @@ def scrape_stale_fanout(
 
     * FREE frontier (direct/render shops): stalest first, the full
       shards x shard_size — nothing to ration.
-    * PAID frontier (proxy shops): only the value carriers — listings in a
-      cross-shop match group or watched by an alert — ordered by that value
-      then age, capped at this tick's share of the day's remaining budget
-      allowance. Bulk repricing of proxy shops belongs to the list-page
+    * PAID frontier (proxy shops): only the value carriers — listings
+      watched by an alert, flagged changed by the shop's own sitemap
+      <lastmod> (067), or in a cross-shop match group — ordered by that
+      value then age, capped at this tick's share of the day's remaining
+      budget allowance. Bulk repricing of proxy shops belongs to the list-page
       harvest, which is ~30x cheaper per price.
     """
     from sqlalchemy import case, exists
@@ -1057,13 +1065,17 @@ def scrape_stale_fanout(
     due = _due_by_interval()
     db = sync_session_factory()
     try:
+        changed = _sitemap_changed()
         free_rows = db.execute(
             select(FactListing.id)
             .join(DimMarketplace, DimMarketplace.id == FactListing.marketplace_id)
             .where(FactListing.is_active)
             .where(DimMarketplace.access_mode.notin_(PAID_ACCESS_MODES))
             .where(due)
-            .order_by(FactListing.last_checked_at.asc().nulls_first())
+            .order_by(
+                case((changed, 0), else_=1),
+                FactListing.last_checked_at.asc().nulls_first(),
+            )
             .limit(shards * shard_size)
         ).all()
         paid_quota = _paid_quota_this_tick()
@@ -1071,7 +1083,7 @@ def scrape_stale_fanout(
         if paid_quota is None or paid_quota > 0:
             watched = exists().where(Alert.listing_id == FactListing.id)
             in_group = DimProduct.match_group_id.isnot(None)
-            value = case((watched, 2), (in_group, 1), else_=0)
+            value = case((watched, 3), (changed, 2), (in_group, 1), else_=0)
             paid_stmt = (
                 select(FactListing.id)
                 .join(DimMarketplace, DimMarketplace.id == FactListing.marketplace_id)
@@ -1079,7 +1091,7 @@ def scrape_stale_fanout(
                 .where(FactListing.is_active)
                 .where(DimMarketplace.access_mode.in_(PAID_ACCESS_MODES))
                 .where(due)
-                .where(or_(watched, in_group))
+                .where(or_(watched, changed, in_group))
                 .order_by(value.desc(), FactListing.last_checked_at.asc().nulls_first())
                 .limit(paid_quota if paid_quota is not None else shards * shard_size)
             )

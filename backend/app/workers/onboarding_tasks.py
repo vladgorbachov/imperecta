@@ -353,3 +353,48 @@ def sitemap_enumerate_shard(
         )
         capture_exception_if_initialized(exc)
         return {"status": f"error:{type(exc).__name__}", "code": marketplace_code}
+
+
+# Weekly sitemap re-scan (harvest optimisation #6): one paid no-JS request
+# per sitemap file tells the shop's own view of what changed (<lastmod>) and
+# onboards new products — weekly discovery of NEW products was approved in
+# the collection strategy; prices themselves never wait for this.
+SITEMAP_RESCAN_MAX_URLS = ENUMERATE_MAX_URLS
+
+
+def _shops_for_rescan_sync() -> list[str]:
+    from sqlalchemy import text
+
+    from app.database import sync_session_factory
+
+    db = sync_session_factory()
+    try:
+        rows = db.execute(
+            text(
+                "SELECT m.marketplace_code FROM dim_marketplace m "
+                "JOIN mv_marketplace_stats s ON s.marketplace_id = m.id "
+                "WHERE m.is_active AND s.listing_count > 0 "
+                "ORDER BY s.listing_count DESC"
+            )
+        ).all()
+        return [r[0] for r in rows]
+    finally:
+        db.close()
+
+
+@celery_app.task(name="sitemap_rescan_tick", bind=True)
+def sitemap_rescan_tick(self) -> dict:
+    """Beat: re-enumerate every populated shop (lastmod + new products)."""
+    try:
+        codes = _shops_for_rescan_sync()
+        for code in codes:
+            sitemap_enumerate_marketplace.apply_async(
+                [code], kwargs={"max_urls": SITEMAP_RESCAN_MAX_URLS}, priority=8
+            )
+        summary = {"status": "completed", "dispatched": len(codes)}
+        slog.info("sitemap_rescan_tick_done", **summary)
+        return summary
+    except Exception as exc:
+        capture_exception_if_initialized(exc)
+        slog.error("sitemap_rescan_tick_failed", error=str(exc)[:500])
+        return {"status": f"error:{type(exc).__name__}"}

@@ -76,6 +76,8 @@ class FactListing(Base):
     last_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
     last_review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # <lastmod> of this URL in the shop's sitemap at the last re-scan (067).
+    sitemap_lastmod: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scraper_type: Mapped[str] = mapped_column(String(30), default="web_api", nullable=False)
     scraper_config: Mapped[dict] = mapped_column(
         JSONB,

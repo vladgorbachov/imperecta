@@ -340,6 +340,9 @@ def parse_price_text(text: str) -> float | None:
     return best_value
 
 
+_INSTANCE_CLASS_RE = re.compile(r"\d{3,}")
+
+
 def compute_element_signature(element) -> tuple[str, frozenset[str]]:
     """Return a structural signature for a BeautifulSoup element.
 
@@ -351,7 +354,10 @@ def compute_element_signature(element) -> tuple[str, frozenset[str]]:
     """
     tag = getattr(element, "name", "") or ""
     classes: list[str] = element.get("class", []) if hasattr(element, "get") else []
-    return (tag.lower(), frozenset(classes))
+    # A class token with a 3+ digit run is an instance id, not structure
+    # ("product-block-267212686" on every pigu card): keeping it makes every
+    # card unique and the repeated-structure grid is never found.
+    return (tag.lower(), frozenset(c for c in classes if not _INSTANCE_CLASS_RE.search(c)))
 
 
 # Back-compat alias for any existing call sites that already used the

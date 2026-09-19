@@ -240,3 +240,19 @@ def test_link_extractors_treat_www_as_same_site():
         "https://www.shop.example/product/abc-123",
         "https://www.shop.example/help/x",
     ]
+
+
+def test_detect_next_page_rejects_malformed_rel_next_and_finds_page_2():
+    """pigu.lt (2026-09-19): <link rel=next> is 'https://pigu.lt/lthttps://…';
+    the numbered '2' anchor must win instead of the broken hint."""
+    from app.modules.scraper.extractors import detect_next_page
+
+    html = (
+        '<link rel="next" href="https://pigu.lt/lthttps://pigu.lt/lt/c/x?page=2">'
+        '<a href="/lt/c/x?page=2">2</a><a href="/lt/c/x?page=3">3</a>'
+    )
+    soup = BeautifulSoup(html, "html.parser")
+    assert detect_next_page(soup, "https://pigu.lt/lt/c/x") == "https://pigu.lt/lt/c/x?page=2"
+    # foreign-host and self links never count as "next"
+    html2 = '<link rel="next" href="https://other.example/c?page=2"><a href="https://pigu.lt/lt/c/x">1</a>'
+    assert detect_next_page(BeautifulSoup(html2, "html.parser"), "https://pigu.lt/lt/c/x") is None
