@@ -56,8 +56,8 @@ export function BotPolicyPage() {
     try {
       const { data } = await botApi.optOut({
         domain: domain.trim().toLowerCase(),
-        email: email.trim(),
-        message: message.trim() || undefined,
+        contact_email: email.trim(),
+        message: message.trim().slice(0, 2000) || undefined,
       });
       setRequestId(data?.request_id ?? null);
     } catch (err) {

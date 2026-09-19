@@ -13,8 +13,12 @@ const optOutMock = vi.fn();
 vi.mock("@/api/bot", () => ({
   botApi: { optOut: (...args: unknown[]) => optOutMock(...args) },
 }));
+const getLegalDocumentTextMock = vi.fn();
 vi.mock("@/api/auth", () => ({
-  authApi: { getLegalDocuments: () => Promise.reject(new Error("not deployed")) },
+  authApi: {
+    getLegalDocuments: () => Promise.reject(new Error("not deployed")),
+    getLegalDocumentText: (...args: unknown[]) => getLegalDocumentTextMock(...args),
+  },
 }));
 
 function renderAt(path: string) {
@@ -35,26 +39,50 @@ function renderAt(path: string) {
 
 describe("public legal pages", () => {
   afterEach(() => cleanup());
-  beforeEach(() => vi.clearAllMocks());
-
-  it("renders a versioned document with the pending-text notice", () => {
-    renderAt("/legal/privacy");
-    expect(screen.getByRole("heading", { level: 1, name: "legal.privacy" })).toBeInTheDocument();
-    expect(screen.getByText("legal.version")).toBeInTheDocument();
-    expect(screen.getByTestId("legal-text-pending")).toBeInTheDocument();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getLegalDocumentTextMock.mockRejectedValue({ response: { status: 404, data: { detail: "document_not_available" } } });
   });
 
-  it("links the data-sources document to the opt-out form and redirects unknown slugs", () => {
+  it("shows the pending notice while counsel's text is not available", async () => {
+    renderAt("/legal/privacy");
+    expect(screen.getByRole("heading", { level: 1, name: "legal.privacy" })).toBeInTheDocument();
+    expect(await screen.findByTestId("legal-text-pending")).toBeInTheDocument();
+    expect(screen.getByText("legal.version")).toBeInTheDocument();
+    expect(getLegalDocumentTextMock).toHaveBeenCalledWith("privacy", "en");
+  });
+
+  it("renders the markdown body and version served by the backend", async () => {
+    getLegalDocumentTextMock.mockResolvedValue({
+      data: {
+        document: "terms",
+        version: "2026-10-01",
+        lang: "en",
+        format: "markdown",
+        body: "# Scope\n\nThese terms apply to **business** users.\n\n- one\n- two",
+        updated_at: "2026-10-01T00:00:00Z",
+      },
+    });
+    renderAt("/legal/terms");
+    const article = await screen.findByTestId("legal-text");
+    expect(article).toHaveTextContent("Scope");
+    expect(article).toHaveTextContent("These terms apply to business users.");
+    expect(article.querySelectorAll("li")).toHaveLength(2);
+    expect(screen.queryByTestId("legal-text-pending")).not.toBeInTheDocument();
+  });
+
+  it("links the data-sources document to the opt-out form and redirects unknown slugs", async () => {
     renderAt("/legal/data-sources");
     expect(screen.getByRole("link", { name: "legal.optOutLink" })).toHaveAttribute("href", "/bot");
-    expect(screen.queryByText("legal.version")).not.toBeInTheDocument();
+    await screen.findByTestId("legal-text-pending");
+    expect(getLegalDocumentTextMock).toHaveBeenCalledWith("data_sources", "en");
     cleanup();
     renderAt("/legal/unknown");
     expect(screen.getByRole("heading", { level: 1, name: "legal.terms" })).toBeInTheDocument();
   });
 
   it("submits an opt-out request only with a valid domain and e-mail", async () => {
-    optOutMock.mockResolvedValue({ data: { request_id: "req-42" } });
+    optOutMock.mockResolvedValue({ data: { request_id: "req-42", status: "received" } });
     renderAt("/bot");
     const submit = screen.getByRole("button", { name: "bot.optOut.submit" });
     expect(submit).toBeDisabled();
@@ -65,7 +93,7 @@ describe("public legal pages", () => {
     await waitFor(() => expect(optOutMock).toHaveBeenCalledTimes(1));
     expect(optOutMock).toHaveBeenCalledWith({
       domain: "shop.example",
-      email: "ops@shop.example",
+      contact_email: "ops@shop.example",
       message: undefined,
     });
     expect(await screen.findByText("bot.optOut.received")).toBeInTheDocument();

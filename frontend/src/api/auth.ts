@@ -12,11 +12,22 @@ export interface UserConsent extends ConsentAcceptance {
 
 export interface LegalDocumentInfo {
   version: string;
+  /** API path of the text, e.g. "/api/legal/documents/terms?lang=en". */
   url: string | null;
 }
 
 /** GET /legal/documents — keyed by document (WP6 contract, 2026-09-19). */
-export type LegalDocumentsResponse = Record<LegalDocument, LegalDocumentInfo>;
+export type LegalDocumentsResponse = Record<LegalDocument | "data_sources", LegalDocumentInfo>;
+
+/** GET /legal/documents/{document}?lang=xx — markdown body; 404 document_not_available until counsel delivers. */
+export interface LegalDocumentText {
+  document: string;
+  version: string;
+  lang: string;
+  format: "markdown";
+  body: string;
+  updated_at: string;
+}
 
 /** Sibling of `detail` on 409 consent_required / 422 consent_version_outdated. */
 export interface RequiredConsent {
@@ -96,6 +107,8 @@ export const authApi = {
    */
   getLegalDocuments: () =>
     publicClient.get<LegalDocumentsResponse>("/legal/documents"),
+  getLegalDocumentText: (document: string, lang: string) =>
+    publicClient.get<LegalDocumentText>(`/legal/documents/${document}`, { params: { lang } }),
   /**
    * Public country picker for registration (WP6): active dim_country rows
    * minus the blocked list, sorted by name. No auth, rate-limited.

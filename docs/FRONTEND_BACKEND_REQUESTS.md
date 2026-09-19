@@ -398,22 +398,23 @@ resubmits the same credentials with `consents: [{document, version}]` and
 the login writes the consent rows and issues tokens in one call.
 `POST /users/me/consents` remains for mid-session re-consent only.
 
-## P18 — F8 public pages: opt-out endpoint + legal texts (2026-09-19)
+## P18 — F8 public pages: opt-out + legal texts (2026-09-19, contract confirmed)
 
 Routes live on the frontend: `/legal/terms`, `/legal/privacy`, `/legal/aup`,
 `/legal/data-sources`, `/bot` (crawler identity + opt-out form), `/trust`.
 Links sit in the auth-page footer, the app sidebar footer and the
-registration consent line.
+registration consent line. Contract confirmed with the backend session:
 
-- `POST /api/bot/opt-out` (public, rate-limited) — frontend sends
-  `{domain: "shop.example", email, message?}` and expects 2xx with an
-  optional `{request_id, status}`; any 4xx `detail` string is shown as is.
-  Please confirm the field names (WP5 "opt-out tooling") — the FE will adapt
-  without a redeploy only if the names match.
-- Legal texts: the pages render an explicit "text pending" notice until
-  counsel's texts exist. Delivery options, in order of preference:
-  (1) `GET /legal/documents` returns a `url` per document that serves the
-  text (HTML) — the FE will then link/render it; (2) texts are committed to
-  `frontend/src/content/legalTexts.ts` as sections per language (EN binding,
-  others fall back to EN). Say which one you plan so the loader is built once.
-- Version line on the legal pages reads `GET /legal/documents` (P17).
+- `POST /api/bot/opt-out` (public, per-IP rate limit): frontend sends
+  `{domain, contact_email, message?}` (message ≤ 2000 chars) and expects
+  `202 {request_id, status: "received"}`; `422` on a malformed domain/e-mail
+  and `429` when throttled are shown via their `detail` string.
+- Legal texts — the backend is the single source of truth for version AND
+  text: `GET /api/legal/documents` → `{terms, privacy, aup, data_sources}`
+  each `{version, url}`; `GET /api/legal/documents/{document}?lang=xx` →
+  `{document, version, lang, format: "markdown", body, updated_at}` (unknown
+  lang falls back to en, the response says which); `404
+  {"detail":"document_not_available"}` until counsel delivers → the page
+  keeps its explicit "text pending" notice, no placeholder text anywhere.
+  The frontend renders the markdown body (react-markdown) and shows the
+  served version + updated_at above it. No frontend content files exist.

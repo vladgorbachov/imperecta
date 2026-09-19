@@ -23,11 +23,8 @@ export function useLegalDocuments(): Record<LegalDocument, LegalDocumentRef> {
   for (const document of Object.keys(merged) as LegalDocument[]) {
     const row = query.data[document];
     if (row) {
-      merged[document] = {
-        ...merged[document],
-        version: row.version,
-        path: row.url ?? merged[document].path,
-      };
+      /* `url` is the API text endpoint; the in-app page path stays ours. */
+      merged[document] = { ...merged[document], version: row.version };
     }
   }
   return merged;
