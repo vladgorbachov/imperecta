@@ -10,6 +10,12 @@ import { useTranslation } from "react-i18next";
 import { User, Mail, Lock, Eye, EyeOff, Globe, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useSignupCountries } from "@/hooks/useSignupCountries";
+import { useLegalDocuments } from "@/hooks/useLegalDocuments";
+import { LegalConsentFields } from "@/components/auth/LegalConsentFields";
+import { EMPTY_CONSENT_STATE, type ConsentFormState } from "@/lib/consentForm";
+import { SIGNUP_CONSENT_DOCUMENTS } from "@/lib/legalVersions";
+import { requiredConsentsFromError } from "@/lib/consentErrors";
+import { useQueryClient } from "@tanstack/react-query";
 import { flagForCode } from "@/lib/countryFlag";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
@@ -48,6 +54,8 @@ export function RegisterPage() {
   );
 
   const { countries, isLoading: countriesLoading } = useSignupCountries();
+  const legalDocuments = useLegalDocuments();
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState("");
   const [country, setCountry] = useState("");
@@ -57,6 +65,8 @@ export function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [nameError, setNameError] = useState("");
   const [countryError, setCountryError] = useState("");
+  const [consent, setConsent] = useState<ConsentFormState>(EMPTY_CONSENT_STATE);
+  const [consentError, setConsentError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [confirmError, setConfirmError] = useState("");
@@ -84,6 +94,13 @@ export function RegisterPage() {
 
   const validateCountry = (value: string) => {
     if (!value) return t("auth.fieldRequired");
+    return "";
+  };
+
+  const validateConsent = (value: ConsentFormState) => {
+    if (!value.accountType) return t("auth.accountType.required");
+    if (!value.businessUseConfirmed || !value.adultConfirmed) return t("auth.consentRequired");
+    if (!value.documentsAccepted) return t("auth.consentRequired");
     return "";
   };
 
@@ -118,19 +135,32 @@ export function RegisterPage() {
     const eErr = validateEmail(email);
     const pErr = validatePassword(password);
     const cErr = validateConfirm(confirmPassword);
+    const csErr = validateConsent(consent);
     setNameError(nErr);
     setCountryError(ctErr);
     setEmailError(eErr);
     setPasswordError(pErr);
     setConfirmError(cErr);
-    if (nErr || ctErr || eErr || pErr || cErr) return;
+    setConsentError(csErr);
+    if (nErr || ctErr || eErr || pErr || cErr || csErr || !consent.accountType) return;
 
     setSubmitError("");
     setLoading(true);
     try {
       const raw = (i18n.language ?? "en").split("-")[0];
       const lang = ["en", "ar", "es", "zh", "ru", "fr"].includes(raw) ? raw : "en";
-      await register(email, password, name, undefined, lang, country);
+      await register({
+        email,
+        password,
+        name,
+        language: lang,
+        countryCode: country,
+        accountType: consent.accountType,
+        businessUseConfirmed: true,
+        adultConfirmed: true,
+        termsVersion: legalDocuments.terms.version,
+        privacyVersion: legalDocuments.privacy.version,
+      });
       navigate(returnPath, { replace: true });
     } catch (err: unknown) {
       const message =
@@ -140,6 +170,13 @@ export function RegisterPage() {
       if (message === COUNTRY_NOT_SUPPORTED) {
         setCountryError(t("auth.countryNotSupported"));
         setSubmitError(t("auth.countryNotSupported"));
+        return;
+      }
+      if (requiredConsentsFromError(err)) {
+        /* Our document versions are stale — refetch and ask to accept again. */
+        void queryClient.invalidateQueries({ queryKey: ["legal", "documents"] });
+        setConsent((prev) => ({ ...prev, documentsAccepted: false }));
+        setConsentError(t("auth.consentOutdated"));
         return;
       }
       setSubmitError(typeof message === "string" ? message : t("auth.registerError"));
@@ -335,6 +372,17 @@ export function RegisterPage() {
             <p className="text-xs text-destructive dark:text-destructive">{confirmError}</p>
           )}
         </div>
+
+        <LegalConsentFields
+          value={consent}
+          onChange={(next) => {
+            setConsent(next);
+            setConsentError("");
+          }}
+          documents={legalDocuments}
+          requiredDocuments={SIGNUP_CONSENT_DOCUMENTS}
+          error={consentError}
+        />
 
         <Button type="submit" className="w-full" disabled={loading}>
           {loading ? (

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import i18n, { enforceLanguagePolicy } from "@/i18n";
-import { authApi } from "@/api/auth";
+import { authApi, type ConsentAcceptance, type RegisterPayload } from "@/api/auth";
 import { setAuthCookie } from "@/lib/authCookie";
 import {
   loadTokens,
@@ -49,6 +49,8 @@ export interface LoginCredentials {
   email: string;
   password: string;
   remember_me: boolean;
+  /** Re-consent after a 409 required_consents (WP6 §2). */
+  consents?: ConsentAcceptance[];
 }
 
 export interface LoginResult {
@@ -67,14 +69,7 @@ interface AuthState {
   isInitialized: boolean;
 
   login: (credentials: LoginCredentials) => Promise<LoginResult>;
-  register: (
-    email: string,
-    password: string,
-    name: string,
-    companyName?: string,
-    language?: string,
-    countryCode?: string
-  ) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
   setUser: (user: User | null) => void;
   setTokensFromResponse: (data: {
@@ -103,7 +98,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { data } = await authApi.login(
       credentials.email,
       credentials.password,
-      credentials.remember_me
+      credentials.remember_me,
+      credentials.consents
     );
     const persistent = data.persistent ?? credentials.remember_me;
     set({
@@ -142,22 +138,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     };
   },
 
-  register: async (
-    email: string,
-    password: string,
-    name: string,
-    companyName?: string,
-    language?: string,
-    countryCode?: string
-  ) => {
-    const { data } = await authApi.register(
-      email,
-      password,
-      name,
-      companyName,
-      language,
-      countryCode
-    );
+  register: async (payload: RegisterPayload) => {
+    const { data } = await authApi.register(payload);
     const persistent = data.persistent ?? false;
     const expiresAt = data.expires_at ?? null;
     set({

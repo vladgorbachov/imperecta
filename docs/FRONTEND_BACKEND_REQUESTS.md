@@ -372,3 +372,32 @@ Notes for the backend:
 - Access: the whole /admin surface is superuser-only (SuperuserRoute →
   /dashboard for others), so the Compliance tab inherits it; there is no
   separate "admin but not superuser" role on the FE.
+
+## P17 — F5 registration consents: contract as implemented (2026-09-19)
+
+Built against the WP6 consent contract from the backend session
+(imperecta-65, 2026-09-19). Frontend relies on exactly:
+- `POST /auth/register` body adds `account_type` (`business` | `sole_trader`),
+  `business_use_confirmed: true`, `adult_confirmed: true`, `terms_version`,
+  `privacy_version` (plus `country_code` from P16). `422
+  {"detail":"consent_version_outdated","required_consents":[…]}` → the form
+  invalidates its cached document versions and asks to accept again.
+- `GET /legal/documents` (public) → `{"terms":{"version","url"},
+  "privacy":{…},"aup":{…}}`. Until it ships the request 404s and
+  `src/lib/legalVersions.ts` stands in with the PLACEHOLDER version
+  `2026-09-19` for all three documents — counsel's real version strings must
+  replace it (or simply land on the endpoint, which wins over the constants).
+- `POST /auth/login` → `409 {"detail":"consent_required",
+  "required_consents":[{document, version, url}]}` opens the re-consent step.
+- `POST /users/me/consents {document, version}` → 201; `GET /users/me/consents`
+  → `{items:[{document, version, accepted_at}]}` (Settings → Consents card).
+
+OPEN QUESTION (blocks nothing today, matters when WP6 lands): after a 409 on
+`/auth/login` the client holds no token, so it cannot call
+`POST /users/me/consents`. The frontend handles both possibilities:
+(a) if a session exists (409 raised after tokens were issued) it POSTs each
+consent then refetches `/users/me`; (b) otherwise it resubmits
+`POST /auth/login` with an extra `consents: [{document, version}]` array.
+Please either accept `consents` on login (b) or state which route issues the
+409 so (a) applies — the FE will not need a redeploy either way as long as
+one of the two is honoured.

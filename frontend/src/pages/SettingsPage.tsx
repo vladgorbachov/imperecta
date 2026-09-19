@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { ConsentsCard } from "@/components/settings/ConsentsCard";
 import { Separator } from "@/components/ui/separator";
 import { LanguageSelector } from "@/components/ui/LanguageSelector";
 import type { LanguageCode } from "@/i18n";
@@ -587,6 +588,8 @@ export function SettingsPage() {
               </Button>
             </CardContent>
           </Card>
+
+          <ConsentsCard />
         </>
       )}
     </div>

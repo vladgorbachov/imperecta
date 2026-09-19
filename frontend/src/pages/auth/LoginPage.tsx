@@ -9,6 +9,10 @@ import { getReturnPath } from "@/lib/routes";
 import { useTranslation } from "react-i18next";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { authApi, type ConsentAcceptance } from "@/api/auth";
+import { ConsentStep } from "@/components/auth/ConsentStep";
+import { requiredConsentsFromError } from "@/lib/consentErrors";
+import type { LegalDocument } from "@/lib/legalVersions";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +42,7 @@ export function LoginPage() {
   const [passwordError, setPasswordError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [requiredConsents, setRequiredConsents] = useState<LegalDocument[] | null>(null);
 
   if (accessToken) {
     return <Navigate to={returnPath} replace />;
@@ -75,6 +80,11 @@ export function LoginPage() {
         navigate(returnPath, { replace: true });
       }
     } catch (err: unknown) {
+      const required = requiredConsentsFromError(err);
+      if (required) {
+        setRequiredConsents(required);
+        return;
+      }
       const message =
         err && typeof err === "object" && "response" in err
           ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
@@ -84,6 +94,50 @@ export function LoginPage() {
       setLoading(false);
     }
   };
+
+  /* Re-consent (WP6 §2). With a session already issued the acceptances are
+     recorded via POST /users/me/consents; without one (409 straight from
+     /auth/login) the same credentials are resubmitted with `consents`. */
+  const submitWithConsents = async (consents: ConsentAcceptance[]) => {
+    setLoading(true);
+    try {
+      const hasSession = Boolean(useAuthStore.getState().accessToken);
+      let forcePasswordChange = false;
+      if (hasSession) {
+        for (const consent of consents) {
+          await authApi.acceptConsent(consent);
+        }
+        await useAuthStore.getState().fetchUser();
+      } else {
+        const result = await login({ email, password, remember_me: rememberMe, consents });
+        forcePasswordChange = result.forcePasswordChange ?? false;
+      }
+      setRequiredConsents(null);
+      navigate(forcePasswordChange ? "/change-password" : returnPath, { replace: true });
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : t("auth.loginError");
+      setRequiredConsents(null);
+      setSubmitError(typeof message === "string" ? message : t("auth.loginError"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (requiredConsents) {
+    return (
+      <AuthLayout>
+        <ConsentStep
+          requiredDocuments={requiredConsents}
+          pending={loading}
+          onConfirm={(consents) => void submitWithConsents(consents)}
+          onCancel={() => setRequiredConsents(null)}
+        />
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout>
