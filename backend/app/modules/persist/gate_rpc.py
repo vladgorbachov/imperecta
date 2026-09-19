@@ -128,6 +128,36 @@ def exec_write_records(db: Session, signed_records: list[SignedRecord]) -> int:
     return sum(int(value) for value in row)
 
 
+def exec_write_rows(db: Session, table: str, signed_records: list[SignedRecord]) -> int:
+    """Set-based signed inserts via gate.exec_write_rows (migration 069).
+
+    Every record keeps its own signature (the same canonical bytes
+    gate.exec_write verifies — the gate rebuilds each row's locator from
+    its fields); it checks all of them, then inserts the batch with ONE
+    statement. Rows must share a column set — the gate
+    raises 'heterogeneous_rows' otherwise and callers fall back per record.
+    """
+    if not signed_records:
+        return 0
+    params: dict[str, Any] = {"table": table}
+    row_entries = [ordered_entries_from_mapping(r.fields) for r in signed_records]
+    rows_sql = _row_payloads_sql(row_entries, params)
+    sig_parts: list[str] = []
+    for idx, signed in enumerate(signed_records):
+        if signed.table != table or signed.operation != "insert":
+            raise ValueError("exec_write_rows takes inserts of one table")
+        params[f"sig{idx}"] = signed.signature
+        sig_parts.append(f":sig{idx}")
+    sql = text(
+        f"SELECT gate.exec_write_rows(:table, {rows_sql}, ARRAY[{', '.join(sig_parts)}]::text[])"
+    )
+    try:
+        rowcount = db.execute(sql, params).scalar_one()
+    except DBAPIError as exc:
+        _raise_gate_rpc_error(exc)
+    return int(rowcount)
+
+
 def exec_write_batch(db: Session, signed: SignedBatch) -> int:
     """Call gate.exec_write_batch with ordered row payloads and return rows_affected."""
     locator_entries = ordered_entries_from_mapping(signed.locator)

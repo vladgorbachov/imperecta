@@ -40,7 +40,8 @@ def test_enumerate_coordinator_shards_and_sets_pending(monkeypatch) -> None:
     assert args0[0] == "shop_x"
     assert args0[1] == shard_urls[:3]
     assert kwargs0["run_id"] == out["run_id"]
-    assert kwargs0["max_urls"] == 30_000
+    # never max_urls // shards: a shard keeps all of its subfiles' URLs
+    assert kwargs0["max_urls"] == ob.ENUMERATE_SHARD_MAX_URLS == 150_000
     assert opts0["priority"] == 8
     # pending counter registered for the finisher aggregation
     redis.set.assert_called_once()
@@ -146,3 +147,13 @@ def test_paid_quota_spreads_remaining_allowance_over_ticks_left(monkeypatch) -> 
         lambda now=None: {"daily_allowance": None, "today_used": 0},
     )
     assert scraper_tasks._paid_quota_this_tick(noon) is None
+
+
+def test_bulk_tasks_route_to_their_own_queue() -> None:
+    from app.workers.celery_app import celery_app
+
+    routes = celery_app.conf.task_routes
+    for name in ("sitemap_enumerate_marketplace", "sitemap_enumerate_shard", "orchestrator_tick"):
+        assert routes[name]["queue"] == "bulk", name
+    # periodic ticks stay on the default queue
+    assert "harvest_tick" not in routes and "scrape_stale_fanout" not in routes

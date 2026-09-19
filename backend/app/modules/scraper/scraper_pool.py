@@ -759,6 +759,87 @@ class ScraperPool:
 
         return product_urls
 
+    async def walk_sitemaps(
+        self,
+        base_url: str,
+        *,
+        explicit_sitemaps: list[str] | None = None,
+        max_subfiles: int | None = None,
+        prefetch: int = 3,
+    ):
+        """Stream (sitemap_url, parsed) per document with bounded prefetch.
+
+        The enumerator used to fetch the WHOLE tree first (fetch_sitemap_candidates)
+        and only then classify/write; this generator lets parsing, dedupe
+        and the gate writes of document N overlap the fetch of document N+1
+        (2026-09-19 enumeration optimisation #5). Nested indexes found in a
+        document are queued behind the current pending list, product-named
+        shards first. `prefetch` documents are in flight at once — the
+        host throttle still spaces same-host requests.
+        """
+        from urllib.parse import urljoin
+
+        from app.modules.scraper.extractors import SITEMAP_MAX_SUBFILES, parse_sitemap_xml
+
+        subfile_cap = max_subfiles if max_subfiles is not None else SITEMAP_MAX_SUBFILES
+        if explicit_sitemaps is not None:
+            pending: list[str] = list(explicit_sitemaps)
+        else:
+            pending = []
+            robots_url = urljoin(base_url, "/robots.txt")
+            try:
+                robots_text = await self._fetch_static(
+                    robots_url, log_url_hint=f"{base_url} robots.txt"
+                )
+                if robots_text:
+                    for line in robots_text.splitlines():
+                        line = line.strip()
+                        if line.lower().startswith("sitemap:"):
+                            ref = line.split(":", 1)[1].strip()
+                            if ref:
+                                pending.append(ref)
+            except Exception:
+                pass
+            for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap/sitemap.xml"):
+                candidate = urljoin(base_url, path)
+                if candidate not in pending:
+                    pending.append(candidate)
+
+        visited: set[str] = set()
+        in_flight: dict[str, asyncio.Task] = {}
+
+        async def _fetch(url: str) -> str | None:
+            try:
+                return await self._fetch_sitemap_document(url, log_hint=f"{base_url} sitemap")
+            except Exception:
+                return None
+
+        while (pending or in_flight) and len(visited) < subfile_cap:
+            while (
+                pending
+                and len(in_flight) < prefetch
+                and len(visited) + len(in_flight) < subfile_cap
+            ):
+                url = pending.pop(0)
+                if url in visited or url in in_flight:
+                    continue
+                in_flight[url] = asyncio.create_task(_fetch(url))
+            if not in_flight:
+                break
+            # Yield documents in dispatch order: the oldest in-flight first.
+            url, task = next(iter(in_flight.items()))
+            content = await task
+            del in_flight[url]
+            visited.add(url)
+            if not content:
+                continue
+            parsed = parse_sitemap_xml(content, base_url)
+            for nested in parsed["sitemaps"]:
+                if nested not in visited and nested not in in_flight:
+                    pending.append(nested)
+            pending.sort(key=_sitemap_shard_priority)
+            yield url, parsed
+
     async def scrape_page_for_analysis(
         self,
         url: str,

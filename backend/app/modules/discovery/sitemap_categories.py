@@ -44,6 +44,10 @@ def is_category_shard(shard_url: str | None) -> bool:
 
 def category_like(url: str) -> bool:
     """Structural test: a listing page, not a product, not chrome/facets."""
+    from app.common import html_parsing as _hp
+
+    if _hp._use_rust():
+        return _hp._rust_core.category_like_url(url)
     parsed = urlparse(url)
     path = parsed.path or "/"
     if path == "/" or parsed.query:

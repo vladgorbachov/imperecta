@@ -127,14 +127,15 @@ def test_write_pool_dtos_sync_commits_successful_pair() -> None:
             ),
         ),
     ), patch(
-        "app.modules.discovery.gate_persist.exec_write_records", return_value=1
+        "app.modules.discovery.gate_persist.exec_write_rows", return_value=1
     ) as fast:
         result = write_pool_dtos_sync([dto])
 
     assert result.inserted == 1
     assert result.rejected == 0
-    # One pipelined statement for products, one for listings (FK order).
+    # One set-based statement for products, one for listings (FK order).
     assert fast.call_count == 2
+    assert [c.args[1] for c in fast.call_args_list] == ["dim_product", "fact_listing"]
     db.commit.assert_called_once()
     db.close.assert_called_once()
     assert nested.commit.call_count == 1
@@ -181,7 +182,7 @@ def test_write_pool_dtos_sync_falls_back_per_pair_on_chunk_failure() -> None:
             ),
         ),
     ), patch(
-        "app.modules.discovery.gate_persist.exec_write_records",
+        "app.modules.discovery.gate_persist.exec_write_rows",
         side_effect=GateRpcError("rpc_error", "boom"),
     ), patch(
         "app.modules.discovery.gate_persist.write_sync", return_value=True

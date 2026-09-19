@@ -143,7 +143,16 @@ class FactListing(Base):
 
     @staticmethod
     def compute_url_hash(url: str) -> str:
-        """Compute SHA256 hash of normalized URL for deduplication."""
+        """Compute SHA256 hash of normalized URL for deduplication.
+
+        The contract (strip, rstrip('/'), lower, sha256 hex) is pinned by
+        rust_core::sitemap::url_hash; the Rust twin serves when the engine
+        flag is on (parity: tests/test_rust_core_parity.py).
+        """
+        from app.common import html_parsing as _hp
+
+        if _hp._use_rust():
+            return _hp._rust_core.url_hash(url)
         normalized = url.strip().rstrip("/").lower()
         return hashlib.sha256(normalized.encode()).hexdigest()
 

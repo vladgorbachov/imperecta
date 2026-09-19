@@ -9,7 +9,7 @@ from sqlalchemy.exc import DBAPIError
 from app.database import sync_session_factory
 from app.modules.data_firewall.firewall import evaluate_market
 from app.modules.data_firewall.signing import SignedRecord
-from app.modules.persist.gate_rpc import GateRpcError, exec_write_records
+from app.modules.persist.gate_rpc import GateRpcError, exec_write_records, exec_write_rows
 from app.modules.persist.writer import PersistContext, write_sync
 
 # Pairs per pipelined gate statement: two round-trips (products, then
@@ -98,6 +98,13 @@ def _write_pair_slow(db: Any, pair: _SignedPair) -> bool:
             return False
         nested.commit()
         return True
+    except (GateRpcError, DBAPIError):
+        # A pair the gate refuses one-by-one (typically a url_hash / id
+        # duplicate from a concurrent shard racing on the same URL) is a
+        # rejected pair, not a failed batch: fan-out shards overlap on
+        # purpose and must stay idempotent. Anything else propagates.
+        nested.rollback()
+        return False
     except Exception:
         nested.rollback()
         raise
@@ -128,8 +135,11 @@ def write_pool_dtos_sync(dtos: list[PoolInsertDTO]) -> PoolWriteResult:
             chunk = pairs[start : start + FAST_WRITE_CHUNK_PAIRS]
             nested = db.begin_nested()
             try:
-                exec_write_records(db, [pair.product for pair in chunk])
-                exec_write_records(db, [pair.listing for pair in chunk])
+                # Set-based path (069): one INSERT per table per chunk. The
+                # per-record pipeline stays as the fallback for chunks the
+                # gate refuses as a set (heterogeneous rows, a duplicate).
+                exec_write_rows(db, "dim_product", [pair.product for pair in chunk])
+                exec_write_rows(db, "fact_listing", [pair.listing for pair in chunk])
                 nested.commit()
                 inserted += len(chunk)
             except (GateRpcError, DBAPIError):

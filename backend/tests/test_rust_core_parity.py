@@ -218,3 +218,78 @@ class TestQualityModule:
         report = ic.assess_quality({"title": None, "price": None})
         json.dumps(report)  # flags list + scalars only
         assert report["critical"] is True  # missing title + price? title critical
+
+
+class TestSitemapParity:
+    """rust_core::sitemap twins of the enumeration primitives."""
+
+    SITEMAP_INDEX = (
+        '<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        "<sitemap><loc>https://s.example/sitemap-1.xml</loc><lastmod>2026-09-01</lastmod></sitemap>"
+        "<sitemap><loc>https://s.example/sitemap-2.xml.gz</loc></sitemap></sitemapindex>"
+    )
+    URLSET = (
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+        'xmlns:xhtml="http://www.w3.org/1999/xhtml">'
+        "<url><loc>https://s.example/p/1?x=1&amp;y=2</loc><lastmod>2026-09-18T10:20:30+02:00</lastmod>"
+        '<xhtml:link rel="alternate" hreflang="LT" href="https://s.example/lt/p/1"/>'
+        '<xhtml:link rel="alternate" hreflang="x-default" href="https://s.example/p/1"></xhtml:link></url>'
+        "<url><loc><![CDATA[https://s.example/p/2]]></loc></url>"
+        "<url><lastmod>2026-01-01</lastmod></url></urlset>"
+    )
+
+    @pytest.mark.parametrize("xml", [SITEMAP_INDEX, URLSET, "<broken", ""])
+    def test_parse_sitemap_xml(self, xml, monkeypatch):
+        from app.modules.scraper.extractors import parse_sitemap_xml
+
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        py = parse_sitemap_xml(xml, "https://s.example")
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "rust")
+        rust = parse_sitemap_xml(xml, "https://s.example")
+        assert rust["sitemaps"] == py["sitemaps"]
+        assert rust["urls"] == py["urls"]
+        assert [e["loc"] for e in rust["url_entries"]] == [e["loc"] for e in py["url_entries"]]
+        assert [e["lastmod"] for e in rust["url_entries"]] == [e["lastmod"] for e in py["url_entries"]]
+        assert [e["alternates"] for e in rust["url_entries"]] == [e["alternates"] for e in py["url_entries"]]
+
+    @pytest.mark.parametrize(
+        "url",
+        ["https://S.example/p/1/", "  https://s.example/P/2  ", "https://s.example/", "x"],
+    )
+    def test_url_hash(self, url, monkeypatch):
+        from app.models.facts import FactListing
+
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        py = FactListing.compute_url_hash(url)
+        assert ic.url_hash(url) == py
+        assert ic.url_hashes([url, url + "z"]) == [py, FactListing.compute_url_hash(url + "z")]
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/baterii-ansmann-cr2016-1b-5020082", "/catalog/tv/samsung-qe55.html", "/p/12345",
+            "/catalog/tv", "/a/b/c", "/detail/1234", "/tovar/abcd", "/x-123.", "/x-12", "/", "",
+        ],
+    )
+    def test_product_like_path(self, path, monkeypatch):
+        from app.modules.discovery import sitemap_enumerator as se
+
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        assert ic.product_like_path(path) == se._url_is_product_like(path), path
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://shop.example/catalog/laptops", "https://shop.example/c/tv-audio/televizory",
+            "https://shop.example/catalog/laptops/lenovo-ideapad-3-1234567", "https://shop.example/product/12345",
+            "https://shop.example/login", "https://shop.example/c80196/strana-90098=675621/",
+            "https://shop.example/", "https://shop.example/catalog/laptops?page=2",
+            "https://shop.example/summer-2024", "https://shop.example/a/b/c/d", "https://shop.example/abcdefghijklmnopq-1",
+            "https://shop.example/news/x", "https://shop.example/x.html", "https://shop.example/a/b/1234/",
+        ],
+    )
+    def test_category_like_url(self, url, monkeypatch):
+        from app.modules.discovery import sitemap_categories as sc
+
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        assert ic.category_like_url(url) == sc.category_like(url), url

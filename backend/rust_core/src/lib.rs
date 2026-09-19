@@ -15,6 +15,7 @@ mod listing_page;
 mod matching;
 mod pricing;
 mod quality;
+mod sitemap;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -189,8 +190,62 @@ fn title_similarity(a: Vec<String>, b: Vec<String>) -> f64 {
     matching::title_similarity(&a, &b)
 }
 
+/// Parse a sitemap index / urlset: {"sitemaps": [...], "urls": [...],
+/// "url_entries": [{"loc", "lastmod", "alternates": {hreflang: href}}]}.
+#[pyfunction]
+fn parse_sitemap_xml<'py>(py: Python<'py>, xml: &str) -> PyResult<Bound<'py, PyDict>> {
+    let parsed = sitemap::parse_sitemap_xml(xml);
+    let out = PyDict::new(py);
+    out.set_item("sitemaps", PyList::new(py, &parsed.sitemaps)?)?;
+    let urls: Vec<&str> = parsed.entries.iter().map(|e| e.loc.as_str()).collect();
+    out.set_item("urls", PyList::new(py, &urls)?)?;
+    let entries = PyList::empty(py);
+    for entry in &parsed.entries {
+        let d = PyDict::new(py);
+        d.set_item("loc", &entry.loc)?;
+        d.set_item("lastmod", entry.lastmod.as_deref())?;
+        let alts = PyDict::new(py);
+        for (lang, href) in &entry.alternates {
+            alts.set_item(lang, href)?;
+        }
+        d.set_item("alternates", alts)?;
+        entries.append(d)?;
+    }
+    out.set_item("url_entries", entries)?;
+    Ok(out)
+}
+
+/// FactListing.compute_url_hash twin.
+#[pyfunction]
+fn url_hash(url: &str) -> String {
+    sitemap::url_hash(url)
+}
+
+/// url_hash for many URLs in one call (the 150k-URL shard loop).
+#[pyfunction]
+fn url_hashes(urls: Vec<String>) -> Vec<String> {
+    urls.iter().map(|u| sitemap::url_hash(u)).collect()
+}
+
+/// sitemap_enumerator._url_is_product_like twin (path only).
+#[pyfunction]
+fn product_like_path(path: &str) -> bool {
+    sitemap::product_like_path(path)
+}
+
+/// sitemap_categories.category_like twin (full URL).
+#[pyfunction]
+fn category_like_url(url: &str) -> bool {
+    sitemap::category_like_url(url)
+}
+
 #[pymodule]
 fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(parse_sitemap_xml, m)?)?;
+    m.add_function(wrap_pyfunction!(url_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(url_hashes, m)?)?;
+    m.add_function(wrap_pyfunction!(product_like_path, m)?)?;
+    m.add_function(wrap_pyfunction!(category_like_url, m)?)?;
     m.add_function(wrap_pyfunction!(parse_price_text, m)?)?;
     m.add_function(wrap_pyfunction!(parse_currency_symbol, m)?)?;
     m.add_function(wrap_pyfunction!(parse_currency_code, m)?)?;

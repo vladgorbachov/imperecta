@@ -63,6 +63,12 @@ def _make_session_factory() -> tuple:
 # worker_concurrency children chew the same shop's subtree in parallel
 # (url_hash dedupe makes overlaps and redeliveries harmless).
 ENUMERATE_SHARD_SUBFILES = 3
+# A shard takes EVERYTHING its sub-sitemaps list: the sitemap protocol caps
+# a file at 50k URLs, so 3 subfiles = 150k. Until 2026-09-19 the coordinator
+# divided max_urls by the shard count with a 10k floor — shards of big shops
+# were silently truncated at exactly 10,000 (raw=10000 in every log line).
+SITEMAP_PROTOCOL_MAX_URLS_PER_FILE = 50_000
+ENUMERATE_SHARD_MAX_URLS = ENUMERATE_SHARD_SUBFILES * SITEMAP_PROTOCOL_MAX_URLS_PER_FILE
 _ENUM_RUN_TTL_SEC = 24 * 3600
 
 
@@ -272,7 +278,9 @@ def sitemap_enumerate_marketplace(
             client.set(pending_key, len(chunks), ex=_ENUM_RUN_TTL_SEC)
         except Exception:
             pass
-        per_shard_urls = max(max_urls // max(len(chunks), 1), 10_000)
+        # max_urls is a floor for the whole run, never a per-shard ceiling:
+        # each shard walks its subfiles to their protocol maximum.
+        per_shard_urls = ENUMERATE_SHARD_MAX_URLS
         for shard_no, chunk in enumerate(chunks):
             sitemap_enumerate_shard.apply_async(
                 [marketplace_code, chunk],

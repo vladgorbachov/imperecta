@@ -49,6 +49,18 @@ celery_app.conf.update(
     # enrichment). Redis priorities: 0 = highest; ticks ship at 2, bulk jobs
     # at 8, everything else defaults to 5.
     task_default_priority=5,
+    # Bulk work (sitemap enumeration, category discovery) lives on its own
+    # queue served by the `celery worker-bulk` service (2026-09-19): on the
+    # shared queue strict priority + prefetch (4 x 6 children) starved
+    # priority-8 bulk forever once the periodic ticks saturated the pool
+    # (434 enumeration shards never received). The main worker consumes
+    # only the default queue, so the isolation needs no worker flags.
+    task_routes={
+        "sitemap_enumerate_marketplace": {"queue": "bulk"},
+        "sitemap_enumerate_shard": {"queue": "bulk"},
+        "orchestrator_tick": {"queue": "bulk"},
+        "discover_all_marketplaces": {"queue": "bulk"},
+    },
     broker_transport_options={
         "priority_steps": list(range(10)),
         "queue_order_strategy": "priority",

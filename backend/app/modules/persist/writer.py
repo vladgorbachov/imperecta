@@ -744,9 +744,18 @@ def build_fact_listing_fields(
     scrape_interval_minutes: int = 360,
     consecutive_errors: int = 0,
     failure_streak: int = 0,
+    listing_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Assemble the exact fact_listing columns that the firewall signs."""
-    return {
+    """Assemble the exact fact_listing columns that the firewall signs.
+
+    ``listing_id`` lets bulk writers supply a time-ordered id (uuid7) —
+    the server default gen_random_uuid() is random and costs a random
+    btree leaf per index on every insert.
+    """
+    fields: dict[str, Any] = {}
+    if listing_id is not None:
+        fields["id"] = listing_id
+    fields.update({
         "product_id": product_id,
         "marketplace_id": marketplace_id,
         "external_url": external_url,
@@ -757,4 +766,5 @@ def build_fact_listing_fields(
         "scrape_interval_minutes": scrape_interval_minutes,
         "consecutive_errors": consecutive_errors,
         "failure_streak": failure_streak,
-    }
+    })
+    return fields

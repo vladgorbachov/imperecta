@@ -22,10 +22,10 @@ import re
 import time
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
-from uuid import uuid4
 
 import structlog
 
+from app.common.uuid7 import uuid7
 from app.models.dimensions import DimMarketplace
 from app.models.facts import FactListing
 from app.modules.discovery.constants import SAVE_PRODUCT_URLS_BATCH_SIZE
@@ -44,9 +44,22 @@ _SLUG_SKU_RE = re.compile(r"-\d{3,}(?:[./]|$)")
 
 
 def _url_is_product_like(path: str) -> bool:
+    from app.common import html_parsing as _hp
+
+    if _hp._use_rust():
+        return _hp._rust_core.product_like_path(path)
     if _looks_like_product_url(path):
         return True
     return bool(_SLUG_SKU_RE.search(path.lower()))
+
+
+def _url_hashes(urls: list[str]) -> list[str]:
+    """url_hash for a whole shard in one call (Rust) — 150k URLs per shard."""
+    from app.common import html_parsing as _hp
+
+    if _hp._use_rust():
+        return _hp._rust_core.url_hashes(urls)
+    return [FactListing.compute_url_hash(u) for u in urls]
 
 logger = logging.getLogger(__name__)
 slog = structlog.get_logger(__name__)
@@ -55,7 +68,7 @@ slog = structlog.get_logger(__name__)
 # catalogs, small enough to bound one task run. Overridable per call.
 ENUMERATE_MAX_SUBFILES = 500
 ENUMERATE_MAX_URLS = 500_000
-_HASH_LOOKUP_CHUNK = 5_000
+_HASH_LOOKUP_CHUNK = 20_000
 
 
 @dataclass(frozen=True)
@@ -83,7 +96,8 @@ def _existing_hashes_sync(hashes: list[str]) -> dict[str, object]:
     Returns {url_hash: sitemap_lastmod} for the hashes already in the pool
     (the lastmod lets a re-scan spot what the shop says changed).
     """
-    from sqlalchemy import select
+    from sqlalchemy import bindparam, select
+    from sqlalchemy import func as sa_func
 
     from app.database import sync_session_factory
 
@@ -92,12 +106,15 @@ def _existing_hashes_sync(hashes: list[str]) -> dict[str, object]:
     db = sync_session_factory()
     try:
         found: dict[str, object] = {}
+        # = ANY(array) is one bound parameter per chunk (an IN list binds one
+        # parameter per hash: 5k placeholders to plan per query).
         for start in range(0, len(hashes), _HASH_LOOKUP_CHUNK):
             chunk = hashes[start : start + _HASH_LOOKUP_CHUNK]
             rows = db.execute(
                 select(FactListing.url_hash, FactListing.sitemap_lastmod).where(
-                    FactListing.url_hash.in_(chunk)
-                )
+                    FactListing.url_hash == sa_func.any_(bindparam("hashes", expanding=False))
+                ),
+                {"hashes": chunk},
             )
             found.update({row[0]: row[1] for row in rows if row[0]})
         return found
@@ -217,17 +234,115 @@ async def enumerate_sitemap_full(
             lastmod_updated=counts.get("lastmod_updated", 0),
         )
 
+    from app.modules.discovery.sitemap_categories import collect_category_urls
+    from app.modules.scraper.locale_selection import select_locale_url
+
+    base_host = urlparse(marketplace.base_url).netloc.lower().removeprefix("www.")
+    inserted = rejected = duplicates = 0
+    raw_count = 0
+    product_like_count = 0
+    lastmod_seen = 0
+    seen_in_run: set[str] = set()
+    lastmod_updates: list[tuple[str, object]] = []
+    category_urls: list[str] = []
+    category_seen: set[str] = set()
+    batch: list[PoolInsertDTO] = []
+    write_task: asyncio.Task | None = None
+
+    async def _flush() -> None:
+        """Hand the batch to the writer thread; wait for the previous one
+        first so at most one write is in flight while the next document
+        fetches (streaming pipeline, optimisation #5)."""
+        nonlocal inserted, rejected, batch, write_task
+        if write_task is not None:
+            result = await write_task
+            inserted += result.inserted
+            rejected += result.rejected
+            write_task = None
+        if batch:
+            write_task = asyncio.create_task(asyncio.to_thread(write_pool_dtos_sync, batch))
+            batch = []
+
+    documents = 0
     try:
-        lastmod_by_url: dict[str, str] = {}
-        raw_entries = await pool.fetch_sitemap_candidates(
+        async for shard_url, parsed in pool.walk_sitemaps(
             marketplace.base_url,
-            marketplace_locale=marketplace.locale,
-            max_subfiles=max_subfiles,
-            max_urls=max_urls,
-            with_shard_origin=True,
             explicit_sitemaps=explicit_sitemaps,
-            lastmod_out=lastmod_by_url,
-        )
+            max_subfiles=max_subfiles,
+        ):
+            documents += 1
+            entries = parsed.get("url_entries", [])
+            raw_count += len(entries)
+            # --- classify: same-host product URLs + category-like pages ----
+            doc_urls: list[str] = []
+            doc_lastmod: dict[str, str] = {}
+            shard_is_product = _sitemap_shard_priority(shard_url) == 0
+            for entry in entries:
+                loc = str(entry.get("loc") or "")
+                if not loc:
+                    continue
+                alternates = entry.get("alternates")
+                alt_map = alternates if isinstance(alternates, dict) else {}
+                selected = select_locale_url(loc, alt_map, marketplace.locale)
+                parsed_url = urlparse(selected)
+                if parsed_url.netloc.lower().removeprefix("www.") != base_host:
+                    continue
+                if entry.get("lastmod"):
+                    doc_lastmod[selected] = str(entry["lastmod"])
+                if shard_is_product or _url_is_product_like(parsed_url.path):
+                    doc_urls.append(selected)
+                elif len(category_urls) < 2000 and selected not in category_seen:
+                    for found in collect_category_urls([(selected, shard_url)], base_host):
+                        if found not in category_seen:
+                            category_seen.add(found)
+                            category_urls.append(found)
+            lastmod_seen += len(doc_lastmod)
+            if not doc_urls:
+                continue
+            if raw_count > max_urls and product_like_count >= max_urls:
+                # max_urls is a floor for the run; once met, stop walking.
+                break
+            product_like_count += len(doc_urls)
+            # --- hash (Rust, one call) + dedupe against pool and this run --
+            hashes = _url_hashes(doc_urls)
+            existing = await asyncio.to_thread(_existing_hashes_sync, hashes)
+            for url, url_hash in zip(doc_urls, hashes):
+                if url_hash in existing or url_hash in seen_in_run:
+                    duplicates += 1
+                    if url_hash in existing:
+                        new_lastmod = parse_lastmod(doc_lastmod.get(url))
+                        if new_lastmod is not None and new_lastmod != existing[url_hash]:
+                            lastmod_updates.append((url_hash, new_lastmod))
+                    continue
+                seen_in_run.add(url_hash)
+                title = _title_from_url(url) or "product"
+                # Time-ordered ids: 3.5x cheaper inserts on the 3 GB index set
+                # (see app.common.uuid7).
+                product_id = uuid7()
+                batch.append(
+                    PoolInsertDTO(
+                        marketplace_id=marketplace_id,
+                        dim_product=build_dim_product_fields(
+                            product_id=product_id,
+                            name=title,
+                            name_normalized=_normalize_name(title) or "product",
+                            is_active=True,
+                        ),
+                        fact_listing=build_fact_listing_fields(
+                            listing_id=uuid7(),
+                            product_id=product_id,
+                            marketplace_id=marketplace_id,
+                            external_url=url,
+                            url_hash=url_hash,
+                            is_active=True,
+                            page_role="product",
+                        ),
+                    )
+                )
+                if len(batch) >= SAVE_PRODUCT_URLS_BATCH_SIZE:
+                    await _flush()
+        await _flush()
+        await _flush()  # drain the last in-flight write
     except Exception as exc:
         slog.error(
             "sitemap_enumerate_fetch_failed",
@@ -236,86 +351,15 @@ async def enumerate_sitemap_full(
         )
         return _result(f"error:{type(exc).__name__}")
 
-    if not raw_entries:
+    if documents == 0 or raw_count == 0:
         return _result("empty_sitemap")
-
-    base_host = urlparse(marketplace.base_url).netloc.lower().removeprefix("www.")
-    product_urls: list[str] = []
-    for url, shard_url in raw_entries:
-        parsed = urlparse(url)
-        if parsed.netloc.lower().removeprefix("www.") != base_host:
-            continue
-        # A URL listed in a product-named shard IS a product URL — the shop
-        # said so (techmart's one-segment slugs taught us not to out-guess
-        # the shard). Structural filtering applies only to neutral shards.
-        if _sitemap_shard_priority(shard_url) == 0 or _url_is_product_like(parsed.path):
-            product_urls.append(url)
-
-    hash_by_url = {url: FactListing.compute_url_hash(url) for url in product_urls}
-    existing = await asyncio.to_thread(
-        _existing_hashes_sync, list(hash_by_url.values())
-    )
-
-    inserted = rejected = duplicates = 0
-    batch: list[PoolInsertDTO] = []
-    seen_in_run: set[str] = set()
-    lastmod_updates: list[tuple[str, object]] = []
-
-    async def _flush() -> None:
-        nonlocal inserted, rejected, batch
-        if not batch:
-            return
-        result = await asyncio.to_thread(write_pool_dtos_sync, batch)
-        inserted += result.inserted
-        rejected += result.rejected
-        batch = []
-
-    for url in product_urls:
-        url_hash = hash_by_url[url]
-        if url_hash in existing or url_hash in seen_in_run:
-            duplicates += 1
-            if url_hash in existing:
-                new_lastmod = parse_lastmod(lastmod_by_url.get(url))
-                if new_lastmod is not None and new_lastmod != existing[url_hash]:
-                    lastmod_updates.append((url_hash, new_lastmod))
-            continue
-        seen_in_run.add(url_hash)
-        title = _title_from_url(url) or "product"
-        product_id = uuid4()
-        batch.append(
-            PoolInsertDTO(
-                marketplace_id=marketplace_id,
-                dim_product=build_dim_product_fields(
-                    product_id=product_id,
-                    name=title,
-                    name_normalized=_normalize_name(title) or "product",
-                    is_active=True,
-                ),
-                fact_listing=build_fact_listing_fields(
-                    product_id=product_id,
-                    marketplace_id=marketplace_id,
-                    external_url=url,
-                    url_hash=url_hash,
-                    is_active=True,
-                    page_role="product",
-                ),
-            )
-        )
-        if len(batch) >= SAVE_PRODUCT_URLS_BATCH_SIZE:
-            await _flush()
-
-    await _flush()
 
     lastmod_updated = 0
     if lastmod_updates:
         lastmod_updated = await asyncio.to_thread(_write_lastmod_updates_sync, lastmod_updates)
 
-    from app.modules.discovery.sitemap_categories import (
-        collect_category_urls,
-        publish_category_urls,
-    )
+    from app.modules.discovery.sitemap_categories import publish_category_urls
 
-    category_urls = collect_category_urls(raw_entries, base_host)
     categories_added = 0
     if publish_categories and category_urls:
         try:
@@ -329,14 +373,14 @@ async def enumerate_sitemap_full(
 
     result = _result(
         "completed",
-        raw_urls=len(raw_entries),
-        product_like=len(product_urls),
+        raw_urls=raw_count,
+        product_like=product_like_count,
         inserted=inserted,
         rejected=rejected,
         duplicates=duplicates,
         category_urls=category_urls,
         categories_added=categories_added,
-        lastmod_seen=len(lastmod_by_url),
+        lastmod_seen=lastmod_seen,
         lastmod_updated=lastmod_updated,
     )
     logger.info(
@@ -351,7 +395,7 @@ async def enumerate_sitemap_full(
         result.rejected,
         len(category_urls),
         categories_added,
-        len(lastmod_by_url),
+        lastmod_seen,
         lastmod_updated,
         result.duration_ms,
     )

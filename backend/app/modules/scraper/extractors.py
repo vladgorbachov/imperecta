@@ -1404,6 +1404,9 @@ def parse_sitemap_xml(
     import xml.etree.ElementTree as ET
 
     _ = base_url
+    if _hp._use_rust():
+        # rust_core::sitemap — streaming quick-xml, same result shape.
+        return _hp._rust_core.parse_sitemap_xml(xml_content)
     result: dict[str, list[str] | list[dict[str, object]]] = {
         "urls": [],
         "url_entries": [],
