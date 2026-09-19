@@ -71,6 +71,28 @@
 - **Сценарий ущерба прод**: пока нет прямого влияния на пользователей (индекс поиска успевает обновляться), но запас производительности сокращается по мере роста пула — стоит держать в поле зрения при решении о масштабировании БД.
 - **План действий**: не требуется сейчас; мониторить тренд.
 
+### HIGH — энумерация: budget-skip платного слоя отчитывался как `empty_sitemap` (ИСПРАВЛЕНО 5d134cc)
+
+- **Приоритет**: high
+- **Источник**: логи bulk-воркера 10:28 UTC (`fetch_static_backend backend=proxy_provider ok=False error=proxy_provider_budget` → `sitemap_enumerate_task_done status=empty_sitemap duration_ms=13355`), `/admin/parsing/proxy-usage` (today 2408 при allowance 1991).
+- **Суть находки**: когда гард бюджета пропускает платный фетч, `_fetch_static` возвращал `None` как для «документа нет»; координатор `sitemap_enumerate_marketplace` (tsbohemia_cz, ldlc_fr) завершался `empty_sitemap`, шард в том же положении посчитал бы себя выполненным (`_record_shard_done`) — прогон терялся молча, без ретрая. Дневной лимит выбирается одним всплеском энумерации.
+- **Сценарий ущерба прод**: любая энумерация/рескан, стартовавшие после исчерпания дневного лимита, — потеряны; воскресный `sitemap-rescan` на 70+ магазинов особенно уязвим.
+- **Фикс**: `ProxyBudgetExhausted` из `_fetch_sitemap_document` (render-fолбэк — тоже платный, не пробуется), сквозь `resolve_sitemap_shards`/`walk_sitemaps`; энумератор дописывает уже пройденное и возвращает `budget_exhausted`; таски ретраятся в 00:00–00:10 UTC (до 7 суток), счётчик pending не трогается. Тесты `TestBudgetExhausted`, `test_coordinator_retries_when_the_index_fetch_hits_the_budget`, `test_shard_retries_on_budget_without_recording_the_shard`.
+
+### HIGH — энумерация: мультиязычные и «мусорные» подфайлы сайтмапов (ИСПРАВЛЕНО 9de80bd…ebb05dd)
+
+- **Приоритет**: high
+- **Источник**: инспекция 434 застрявших p8-сообщений (только чтение), SQL по префиксам URL пула, состав очереди tsbohemia.
+- **Суть находки**: (1) pigu.lt отдаёт дерево на каждый язык — 406 `ru/sitemap-products-*` рядом с 406 `lt/…` + 812 image-twins; пул pigu (1.05M) весь под `/lt/`; прогон «как есть» удвоил бы пул дублями `/ru/`. (2) tsbohemia.cz: 2150 из 2759 файлов — `sitemap-products-disabled-*` (снятые с продажи) + reviews/consultations — ~2M мёртвых страниц вошли бы в пул как активные листинги и потом оплачивались бы рендером. (3) Промежуточная версия правила брала «каноническую локаль» из префикса URL пула — а у tsbohemia файлы под `/cs/`, пул под `/en/` (hreflang-выбор при инжесте) → 845 шардов пропущены целиком.
+- **Фикс**: Rust `sitemap_locale` — `is_noise_sitemap` (media/disabled/archive/reviews/…), `select_sitemap_subfiles` (координатор выбирает локаль только на мультиязычном индексе: префикс пула как tie-breaker → язык страны → первая; шард получает только этот выбор и никогда не выбирает локаль по своим файлам), URL-фильтр по локали убран (hreflang законно переносит URL в другой префикс). Prod-проверка: `/ru/` строк у pigu 0, `/lt/` 1 045 288 → 1 317 767 (+272k из 57 lt-файлов бэклога); у tsbohemia до парковки добавилось 2 строки.
+
+### MEDIUM — основной воркер работал на 2 детях при `CELERYD_CONCURRENCY=6` (ИСПРАВЛЕНО через Railway GraphQL)
+
+- **Приоритет**: medium
+- **Источник**: `railway config pull --json` (startCommand `celery … worker -l info -c 2`), баннер деплоя 09c5b0f7 (`concurrency: 6 (prefork)` после правки).
+- **Суть находки**: `-c 2` в start command сервиса перекрывал переменную окружения; priority-8 (энумерация) не получала ни одного слота сутками (434 сообщения в `celery\x06\x168`). Плюс отсутствовал отдельный bulk-воркер.
+- **Фикс**: `serviceInstanceUpdate` через GraphQL (CLI токен): worker → без `-c`, `celery worker-bulk` → root `/backend`, `-Q bulk`, concurrency 3; 434 сообщения перенесены `LMOVE` в `bulk\x06\x168` (без удаления).
+
 ### Проверено чисто (без находок)
 
 - **Тесты**: канонический раннер `backend/scripts/run_tests_local.sh -q` — **1653 passed, 0 failed, 22 skipped** (эталон 2026-09-18 был 1647/0/22 — прирост на 6 тестов, регрессий нет).
