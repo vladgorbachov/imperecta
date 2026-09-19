@@ -4,6 +4,18 @@
 отдаёт готовые снапшоты мгновенно, а затем доводит страницу до актуальных
 данных. Четыре слоя, все реализованы.
 
+
+> **2026-09-19, вечер — слой 1 снят (legal clean-up WP2, меморандум юриста §3.8/§3.18).**
+> Пул, `/api/markets/*` и `/api/news` снова только для залогиненных: `OptionalUser`,
+> `PublicCache`, `PublicETagMiddleware` и `data_ops/src/edge.rs` удалены, каждый ответ
+> `Cache-Control: private, no-store`, data-ops требует тот же HS256 JWT (`src/access.rs`)
+> и ведёт часовой бюджет на пользователя (GCRA); FastAPI — `app/common/rate_limit.py`
+> (Redis, 600/час по умолчанию). CSV-экспорт пула удалён; страница ≤ 50, глубина ≤ 10
+> страниц; безфильтровый просмотр — общий набор ≤ 20 листингов на магазин (≤ 500 строк).
+> Cloudflare Cache Rule `edge-cache api+data` стал инертным (анонимных 200 больше нет) и
+> подлежит удалению в дашборде. Слои 2–4 (серверные снапшоты, persisted queries на
+> фронте, live-доводка) остаются — они не раздают данные анонимам.
+
 ## Слой 1 — edge-кеш Cloudflare перед API и data-ops
 
 - Зона `imperecta.com` в Cloudflare (Free), SSL Full (strict).

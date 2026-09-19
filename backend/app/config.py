@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     proxy_provider_billing_day: int = 19
     # Optional hard per-day ceiling on top of the budget (0 = budget only).
     proxy_provider_daily_cap: int = 0
+
+    # Pool read limits (legal clean-up 2026-09-19, WP2 — counsel §2.2/§3.8-3.9:
+    # the pool is served to logged-in users in bounded pages, never as a
+    # re-usable copy). Page size and depth cap every list read; the per-user
+    # hourly budget is the first bulk-extraction guard (WP10 adds metering);
+    # unfiltered browsing shows at most `pool_max_per_source_unfiltered`
+    # listings of any one marketplace, taken from the first
+    # `pool_browse_scan_cap` rows of the sort order (an engineering bound on
+    # the narrow index scan), and the browse set is shared for
+    # `pool_browse_cache_sec`.
+    pool_page_size_max: int = 50
+    pool_page_depth_max: int = 10
+    pool_rate_limit_per_hour: int = 600
+    pool_max_per_source_unfiltered: int = 20
+    pool_browse_scan_cap: int = 50_000
+    pool_browse_cache_sec: int = 60
     proxy_provider_api_url: str | None = Field(
         default=None,
         validation_alias="PROXY_PROVIDER_API_URL",

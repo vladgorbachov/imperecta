@@ -10,6 +10,12 @@
 //! - search: the in-memory index (search_index.rs) supplies product ids
 //!   when warm; the SQL ILIKE phase is the cold fallback.
 
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
 use axum::{
     extract::{Query, State},
     Json,
@@ -25,6 +31,88 @@ use crate::{ApiError, AppState};
 const SEARCH_PRODUCT_CAP: usize = 500;
 const SEARCH_LISTING_CAP: i64 = 1_500;
 const COUNT_CAP: i64 = 10_001;
+
+/// Pool read limits (legal clean-up WP2, counsel §2.2/§3.8-3.9) — the same
+/// env names as the FastAPI Settings so both read paths enforce one policy.
+#[derive(Clone, Copy, Debug)]
+pub struct PoolLimits {
+    pub page_size_max: i64,
+    pub page_depth_max: i64,
+    pub rate_limit_per_hour: u32,
+    pub max_per_source_unfiltered: usize,
+    pub browse_scan_cap: i64,
+    pub browse_cache_sec: u64,
+}
+
+impl PoolLimits {
+    pub fn from_env() -> Self {
+        fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
+            std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+        }
+        Self {
+            page_size_max: env_or("POOL_PAGE_SIZE_MAX", 50),
+            page_depth_max: env_or("POOL_PAGE_DEPTH_MAX", 10),
+            rate_limit_per_hour: env_or("POOL_RATE_LIMIT_PER_HOUR", 600),
+            max_per_source_unfiltered: env_or("POOL_MAX_PER_SOURCE_UNFILTERED", 20),
+            browse_scan_cap: env_or("POOL_BROWSE_SCAN_CAP", 50_000),
+            browse_cache_sec: env_or("POOL_BROWSE_CACHE_SEC", 60),
+        }
+    }
+
+    /// Deepest page start: page_depth_max pages of page_size_max rows.
+    pub fn offset_max(&self) -> i64 {
+        self.page_size_max * (self.page_depth_max - 1)
+    }
+
+    pub fn browse_depth(&self) -> usize {
+        (self.page_size_max * self.page_depth_max) as usize
+    }
+}
+
+/// Keep the ordered prefix of `rows` = (listing_id, marketplace_id) with at
+/// most `per_source` rows per marketplace and `depth` rows in total — one
+/// pass, one counter per marketplace (the twin of
+/// `product_pool.service.cap_per_source`, same test vectors).
+pub fn cap_per_source(rows: &[(Uuid, Uuid)], per_source: usize, depth: usize) -> Vec<Uuid> {
+    let mut seen: HashMap<Uuid, usize> = HashMap::new();
+    let mut kept = Vec::with_capacity(depth.min(rows.len()));
+    for (listing_id, marketplace_id) in rows {
+        let n = seen.entry(*marketplace_id).or_insert(0);
+        if *n >= per_source {
+            continue;
+        }
+        *n += 1;
+        kept.push(*listing_id);
+        if kept.len() >= depth {
+            break;
+        }
+    }
+    kept
+}
+
+/// The unfiltered browse set per sort, shared by every viewer for
+/// `browse_cache_sec` (one narrow scan per sort per minute, not per request).
+#[derive(Default)]
+pub struct BrowseCache {
+    sets: Mutex<HashMap<String, (Instant, Arc<Vec<Uuid>>)>>,
+}
+
+impl BrowseCache {
+    fn get(&self, sort: &str, ttl: Duration) -> Option<Arc<Vec<Uuid>>> {
+        let sets = self.sets.lock().ok()?;
+        sets.get(sort)
+            .filter(|(at, _)| at.elapsed() < ttl)
+            .map(|(_, ids)| ids.clone())
+    }
+
+    fn put(&self, sort: &str, ids: Vec<Uuid>) -> Arc<Vec<Uuid>> {
+        let ids = Arc::new(ids);
+        if let Ok(mut sets) = self.sets.lock() {
+            sets.insert(sort.to_string(), (Instant::now(), ids.clone()));
+        }
+        ids
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct PoolParams {
@@ -224,6 +312,9 @@ fn row_to_item(r: &PgRow, display_currency: &str) -> Value {
         "title": r.get::<Option<String>, _>("title"),
         "image_url": r.get::<Option<String>, _>("image_url"),
         "url": r.get::<Option<String>, _>("url"),
+        // Source attribution (counsel §3.9): origin listing + host on every card.
+        "external_url": r.get::<Option<String>, _>("url"),
+        "source_domain": r.get::<Option<String>, _>("marketplace_domain"),
         "marketplace_id": r.get::<Option<Uuid>, _>("marketplace_id"),
         "marketplace_name": r.get::<Option<String>, _>("marketplace_name"),
         "marketplace_domain": r.get::<Option<String>, _>("marketplace_domain"),
@@ -343,14 +434,21 @@ pub async fn pool_products(
     Query(params): Query<PoolParams>,
 ) -> Result<Json<Value>, ApiError> {
     let pool = &state.pool;
-    let limit = params.limit.unwrap_or(20).clamp(1, 500);
-    let offset = params.offset.unwrap_or(0).max(0);
+    let limits = state.limits;
+    let limit = params.limit.unwrap_or(20).clamp(1, limits.page_size_max);
+    let offset = params.offset.unwrap_or(0).clamp(0, limits.offset_max());
     let display_currency = params
         .display_currency
         .as_deref()
         .unwrap_or("local")
         .to_string();
     let spec = sort_spec(&params.sort);
+
+    // --- unfiltered browsing: the shared per-source-capped set ------------
+    let has_search = params.search.as_deref().map(str::trim).map_or(false, |q| q.len() >= 2);
+    if !has_search && params.marketplace_id.is_none() && params.category.is_none() {
+        return browse_page(&state, &spec, &params.sort, limit, offset, &display_currency).await;
+    }
 
     // --- search phase: in-memory index when warm, SQL ILIKE fallback -----
     let mut search_listing_ids: Option<Vec<Uuid>> = None;
@@ -579,6 +677,75 @@ pub async fn pool_products(
     })))
 }
 
+/// Unfiltered browsing (WP2): the first `browse_scan_cap` rows of the sort
+/// order — ids only, index-driven — capped to `max_per_source_unfiltered`
+/// per marketplace and `browse_depth` rows, cached per sort; the page is a
+/// slice hydrated by primary key. Offset pagination only, no cursors.
+async fn browse_page(
+    state: &AppState,
+    spec: &SortSpec,
+    sort: &str,
+    limit: i64,
+    offset: i64,
+    display_currency: &str,
+) -> Result<Json<Value>, ApiError> {
+    let limits = state.limits;
+    let ttl = Duration::from_secs(limits.browse_cache_sec);
+    let browse_ids = match state.browse.get(sort, ttl) {
+        Some(ids) => ids,
+        None => {
+            let name_join = if spec.key_expr.starts_with("dp.") {
+                "JOIN dim_product dp ON dp.id = fl.product_id"
+            } else {
+                ""
+            };
+            let scan_sql = format!(
+                "SELECT fl.id, fl.marketplace_id FROM fact_listing fl {name_join} \
+                 WHERE fl.is_active AND (fl.page_role = 'product' \
+                       OR (fl.page_role IS NULL AND fl.last_price IS NOT NULL)) \
+                 ORDER BY {} {} NULLS LAST, fl.id ASC LIMIT {}",
+                spec.key_expr,
+                if spec.desc { "DESC" } else { "ASC" },
+                limits.browse_scan_cap
+            );
+            let rows = sqlx::query(&scan_sql).fetch_all(&state.pool).await?;
+            let scanned: Vec<(Uuid, Uuid)> = rows
+                .iter()
+                .map(|r| (r.get::<Uuid, _>("id"), r.get::<Uuid, _>("marketplace_id")))
+                .collect();
+            let capped = cap_per_source(
+                &scanned,
+                limits.max_per_source_unfiltered,
+                limits.browse_depth(),
+            );
+            state.browse.put(sort, capped)
+        }
+    };
+    let start = (offset as usize).min(browse_ids.len());
+    let end = (start + limit as usize).min(browse_ids.len());
+    let page_ids: Vec<Uuid> = browse_ids[start..end].to_vec();
+    let mut items: Vec<Value> = Vec::new();
+    if !page_ids.is_empty() {
+        let sql = format!("{ITEM_SELECT}{ITEM_FROM}WHERE fl.id = ANY($1)");
+        let rows = sqlx::query(&sql).bind(&page_ids).fetch_all(&state.pool).await?;
+        let mut by_id: HashMap<Uuid, Value> = rows
+            .iter()
+            .map(|r| (r.get::<Uuid, _>("id"), row_to_item(r, display_currency)))
+            .collect();
+        items = page_ids.iter().filter_map(|id| by_id.remove(id)).collect();
+        attach_sparklines(&state.pool, &mut items).await;
+    }
+    Ok(Json(json!({
+        "items": items,
+        "total": browse_ids.len(),
+        "limit": limit,
+        "offset": offset,
+        "total_is_estimate": false,
+        "next_cursor": Value::Null,
+        "prev_cursor": Value::Null,
+    })))
+}
+
 fn empty_envelope(limit: i64, offset: i64) -> Value {
     json!({
         "items": [],
@@ -608,6 +775,40 @@ mod tests {
         let dec2 = decode_cursor(&enc2).unwrap();
         assert!(dec2.backwards);
         assert!(dec2.value.is_none());
+    }
+
+    fn uid(n: u128) -> Uuid {
+        Uuid::from_u128(n)
+    }
+
+    #[test]
+    fn cap_per_source_matches_the_python_vectors() {
+        let (a, b, c) = (uid(1_000), uid(2_000), uid(3_000));
+        let ids: Vec<Uuid> = (0..30).map(uid).collect();
+        // 5 of a, then b, c, b, then a again
+        let mut rows: Vec<(Uuid, Uuid)> = (0..5).map(|i| (ids[i], a)).collect();
+        rows.extend([(ids[10], b), (ids[11], c), (ids[12], b), (ids[20], a)]);
+        assert_eq!(
+            cap_per_source(&rows, 2, 100),
+            vec![ids[0], ids[1], ids[10], ids[11], ids[12]]
+        );
+        let rows2 = vec![(ids[0], a), (ids[1], b), (ids[2], a), (ids[3], b), (ids[4], a)];
+        assert_eq!(cap_per_source(&rows2, 5, 3), vec![ids[0], ids[1], ids[2]]);
+        assert!(cap_per_source(&[], 20, 500).is_empty());
+    }
+
+    #[test]
+    fn limits_default_to_the_policy_values() {
+        let l = PoolLimits {
+            page_size_max: 50,
+            page_depth_max: 10,
+            rate_limit_per_hour: 600,
+            max_per_source_unfiltered: 20,
+            browse_scan_cap: 50_000,
+            browse_cache_sec: 60,
+        };
+        assert_eq!(l.offset_max(), 450);
+        assert_eq!(l.browse_depth(), 500);
     }
 
     #[test]

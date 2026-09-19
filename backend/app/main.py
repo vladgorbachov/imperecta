@@ -12,7 +12,6 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.common.public_cache import PublicETagMiddleware
 from app.config import Settings
 from app.database import engine
 from app.modules.admin.api_alerts import router as admin_alerts_router
@@ -134,11 +133,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["ETag", "Cache-Control"],
 )
 # ETag/304 for edge-cacheable public GETs (registered after CORS so CORS
 # headers still wrap the 304).
-app.add_middleware(PublicETagMiddleware)
 
 for router in [
     admin_router,

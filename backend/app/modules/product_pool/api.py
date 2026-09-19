@@ -1,19 +1,21 @@
-"""Public API for the global product pool.
+"""API for the global product pool — logged-in users only (WP2).
 
-Read routes are anonymous + edge-cacheable (app.common.public_cache);
-only the CSV export stays behind a login.
+Counsel §2.2/§3.8: the pool is served in bounded pages to authenticated
+users; nothing is anonymous, nothing is cached at the edge, nothing is
+exported. Every route: `CurrentUser` + the per-user hourly budget
+(`app.common.rate_limit`); page size and depth are capped in the query
+schema; unfiltered browsing goes through the per-source cap in the
+service.
 """
 
-import csv
-import io
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.common.deps import CurrentUser, DbSession
-from app.common.public_cache import OptionalUser, PublicCache
+from app.common.rate_limit import user_rate_limit
+from app.config import Settings
 from app.modules.product_pool.schemas import (
     PoolCategoryItem,
     PoolCategorySummary,
@@ -24,12 +26,21 @@ from app.modules.product_pool.schemas import (
 )
 from app.modules.product_pool.service import ProductPoolService
 
+_settings = Settings()
+PAGE_SIZE_MAX = _settings.pool_page_size_max
+OFFSET_MAX = _settings.pool_page_size_max * (_settings.pool_page_depth_max - 1)
+PoolBudget = Annotated[
+    None, Depends(user_rate_limit("pool", lambda: Settings().pool_rate_limit_per_hour))
+]
+
 router = APIRouter(prefix="/pool", tags=["product-pool"])
+
+
 @router.get("/products", response_model=PoolProductsResponse)
 async def list_pool_products(
-    current_user: OptionalUser,
+    current_user: CurrentUser,
     db: DbSession,
-    _cache: PublicCache,
+    _budget: PoolBudget,
     search: str | None = Query(None, min_length=2, description="Search by title"),
     marketplace_id: UUID | None = Query(None, description="Filter by marketplace UUID"),
     category: str | None = Query(None, description="Filter by marketplace domain/name"),
@@ -37,8 +48,8 @@ async def list_pool_products(
         "recent",
         description="recent|name_asc|name_desc|price_asc|price_desc|trending|gainers|losers|volatile",
     ),
-    limit: int = Query(20, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=PAGE_SIZE_MAX),
+    offset: int = Query(0, ge=0, le=OFFSET_MAX),
     cursor: str | None = Query(
         None,
         description="Keyset cursor from next_cursor/prev_cursor; overrides offset.",
@@ -70,83 +81,15 @@ async def list_pool_products(
     )
 
 
-_EXPORT_COLUMNS = [
-    "title",
-    "marketplace",
-    "country",
-    "price",
-    "currency",
-    "price_eur",
-    "change_24h_pct",
-    "in_stock",
-    "last_checked_at",
-    "url",
-]
-
-
-@router.get("/products/export.csv")
-async def export_pool_products_csv(
-    current_user: CurrentUser,
-    db: DbSession,
-    search: str | None = Query(None, min_length=2),
-    marketplace_id: UUID | None = Query(None),
-    category: str | None = Query(None),
-    sort: str = Query("recent"),
-) -> StreamingResponse:
-    """Stream the FULL filtered pool as CSV (P5) — not just one page."""
-    service = ProductPoolService(db)
-
-    async def _generate():
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(_EXPORT_COLUMNS)
-        yield buffer.getvalue()
-        buffer.seek(0)
-        buffer.truncate(0)
-        async for item in service.iter_export_rows(
-            sort=sort,
-            search=search,
-            marketplace_id=marketplace_id,
-            category=category,
-        ):
-            writer.writerow(
-                [
-                    item.get("title") or "",
-                    item.get("marketplace_name") or "",
-                    item.get("country_code") or "",
-                    item.get("price") if item.get("price") is not None else "",
-                    item.get("currency") or "",
-                    item.get("price_eur") if item.get("price_eur") is not None else "",
-                    item.get("price_change_pct")
-                    if item.get("price_change_pct") is not None
-                    else "",
-                    item.get("in_stock") if item.get("in_stock") is not None else "",
-                    item.get("last_checked_at").isoformat()
-                    if item.get("last_checked_at")
-                    else "",
-                    item.get("url") or "",
-                ]
-            )
-            yield buffer.getvalue()
-            buffer.seek(0)
-            buffer.truncate(0)
-
-    return StreamingResponse(
-        _generate(),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="imperecta_pool.csv"'},
-    )
-
-
 @router.get("/products/{listing_id}", response_model=PoolProductDetail)
 async def get_pool_product(
     listing_id: UUID,
-    current_user: OptionalUser,
+    current_user: CurrentUser,
     db: DbSession,
-    _cache: PublicCache,
+    _budget: PoolBudget,
     display_currency: str = Query("local", description="local|EUR|USD"),
 ) -> PoolProductDetail:
-    """One product card by listing id (P2); 404 for hidden/blocked listings."""
+    """One product card by listing id (P2); 404 for hidden listings."""
     service = ProductPoolService(db)
     item = await service.get_product_detail(
         listing_id,
@@ -163,9 +106,9 @@ async def get_pool_product(
 )
 async def get_pool_product_price_history(
     listing_id: UUID,
-    current_user: OptionalUser,
+    current_user: CurrentUser,
     db: DbSession,
-    _cache: PublicCache,
+    _budget: PoolBudget,
     period: Literal["7d", "30d", "90d"] = Query("30d"),
     bucket: Literal["day"] = Query("day"),
 ) -> PriceHistoryResponse:
@@ -183,29 +126,27 @@ async def get_pool_product_price_history(
 
 @router.get("/categories", response_model=list[PoolCategoryItem])
 async def pool_categories(
-    current_user: OptionalUser, db: DbSession, _cache: PublicCache
+    current_user: CurrentUser, db: DbSession, _budget: PoolBudget
 ) -> list[PoolCategoryItem]:
     service = ProductPoolService(db)
-    rows = await service.get_categories(
-    )
+    rows = await service.get_categories()
     return [PoolCategoryItem(**row) for row in rows]
 
 
 @router.get("/marketplace-stats", response_model=list[PoolCategorySummary])
 async def pool_marketplace_stats(
-    current_user: OptionalUser,
+    current_user: CurrentUser,
     db: DbSession,
-    _cache: PublicCache,
+    _budget: PoolBudget,
 ) -> list[PoolCategorySummary]:
     service = ProductPoolService(db)
-    rows = await service.get_marketplace_stats(
-    )
+    rows = await service.get_marketplace_stats()
     return [PoolCategorySummary(**row) for row in rows]
 
 
 @router.get("/stats", response_model=PoolStatsResponse)
 async def pool_stats(
-    current_user: OptionalUser, db: DbSession, _cache: PublicCache
+    current_user: CurrentUser, db: DbSession, _budget: PoolBudget
 ) -> PoolStatsResponse:
     _ = current_user
     service = ProductPoolService(db)

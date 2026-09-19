@@ -41,13 +41,18 @@ async def auth_headers_b(client):
 @pytest.mark.asyncio
 async def test_unauthenticated_cannot_access_protected_endpoints(client):
     """Unauthenticated user cannot access protected endpoints."""
-    # /api/pool/* reads became anonymous + edge-cacheable on 2026-09-19
-    # (app.common.public_cache); the CSV export is the pool route that
-    # still needs a login.
+    # Legal clean-up WP2 (2026-09-19): every pool, markets and news read is
+    # for logged-in users only — nothing anonymous, nothing edge-cached.
     endpoints = [
         ("GET", "/api/users/me"),
         ("GET", "/api/markets/preferences"),
-        ("GET", "/api/pool/products/export.csv"),
+        ("GET", "/api/pool/products"),
+        ("GET", "/api/pool/stats"),
+        ("GET", "/api/pool/categories"),
+        ("GET", "/api/pool/marketplace-stats"),
+        ("GET", "/api/markets/dashboard-kpi"),
+        ("GET", "/api/markets/geo-coverage"),
+        ("GET", "/api/news"),
     ]
     for method, path in endpoints:
         if method == "GET":
@@ -192,12 +197,12 @@ async def test_markets_overview_limit_bounds(client, auth_headers):
         headers=auth_headers,
         params={"limit": 999999},
     )
-    # The bound is enforced by validation now (le=500), not by clamping.
+    # The bound is enforced by validation (le=50 since WP2), not by clamping.
     assert resp.status_code == 422
     resp = await client.get(
         "/api/pool/products",
         headers=auth_headers,
-        params={"limit": 500},
+        params={"limit": 50},
     )
     assert resp.status_code == 200
     assert len(resp.json().get("items", [])) <= 500

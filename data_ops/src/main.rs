@@ -8,15 +8,15 @@
 //!   GET /v1/pool/search, GET /v1/pool/products
 //!   POST /v1/pool/products/refresh            (live catch-up for a page)
 //!
-//! Reads are anonymous and edge-cacheable (edge.rs): the data is the same
-//! for every viewer, so the CDN serves 5-minute snapshots. JWT validation
-//! (`require_jwt`) stays available for any future non-public route.
+//! Every `/v1/*` read is for a logged-in user (access.rs: JWT + hourly
+//! budget) and comes back `private, no-store` — the pool is never anonymous
+//! and never cached at the edge (legal clean-up WP2, counsel §3.8/§3.18).
 //!
 //! Read-only by design: the data_firewall gate governs writes; reads are
 //! plain operational SELECTs on indexed keys (ix_product_match_group,
 //! idx_listing_url_hash-family).
 
-mod edge;
+mod access;
 mod pool_products;
 mod search_index;
 
@@ -24,13 +24,12 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, State},
-    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
-    middleware::from_fn,
+    http::{header, HeaderValue, Method, StatusCode},
+    middleware::from_fn_with_state,
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{
@@ -45,14 +44,16 @@ pub struct AppState {
     pub pool: PgPool,
     pub jwt_secret: Arc<String>,
     pub index: Arc<search_index::SearchIndex>,
+    pub limiter: Arc<access::RateLimiter>,
+    pub limits: pool_products::PoolLimits,
+    pub browse: Arc<pool_products::BrowseCache>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Claims {
+    pub sub: String,
     #[allow(dead_code)]
-    sub: String,
-    #[allow(dead_code)]
-    exp: usize,
+    pub exp: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,24 +113,6 @@ impl From<sqlx::Error> for ApiError {
     fn from(e: sqlx::Error) -> Self {
         ApiError::Internal(e.to_string())
     }
-}
-
-#[allow(dead_code)]
-pub fn require_jwt(state: &AppState, headers: &HeaderMap) -> Result<Claims, ApiError> {
-    let raw = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or(ApiError::Unauthorized("missing bearer token"))?;
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.validate_exp = true;
-    decode::<Claims>(
-        raw,
-        &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
-        &validation,
-    )
-    .map(|data| data.claims)
-    .map_err(|_| ApiError::Unauthorized("invalid token"))
 }
 
 const OFFERS_SQL: &str = r#"
@@ -346,8 +329,8 @@ async fn pool_search(
     if q.len() < 2 {
         return Err(ApiError::NotFound("query too short (min 2 chars)"));
     }
-    let offset = params.offset.unwrap_or(0).clamp(0, 9_900);
-    let limit = params.limit.unwrap_or(20).clamp(1, 100);
+    let offset = params.offset.unwrap_or(0).clamp(0, state.limits.offset_max());
+    let limit = params.limit.unwrap_or(20).clamp(1, state.limits.page_size_max);
 
     // Warm path: the in-memory name index replaces the cold trgm bitmap.
     // 500 matched products cap: a search PAGE never needs more, and the
@@ -423,6 +406,14 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
+/// Every response is per-user data now: never a shared-cache candidate.
+fn private_no_store_layer() -> tower_http::set_header::SetResponseHeaderLayer<HeaderValue> {
+    tower_http::set_header::SetResponseHeaderLayer::overriding(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    )
+}
+
 fn normalize_db_url(raw: &str) -> String {
     // Accept SQLAlchemy-style URLs from shared env (postgresql+asyncpg://...).
     raw.replacen("postgresql+asyncpg://", "postgresql://", 1)
@@ -493,12 +484,20 @@ async fn main() {
         .allow_headers([
             header::AUTHORIZATION,
             header::CONTENT_TYPE,
-            header::IF_NONE_MATCH,
-        ])
-        .expose_headers([header::ETAG, header::CACHE_CONTROL]);
+        ]);
 
     let index = Arc::new(search_index::SearchIndex::new());
     search_index::spawn_refresher(index.clone(), pool.clone());
+
+    let limits = pool_products::PoolLimits::from_env();
+    let state = AppState {
+        pool,
+        jwt_secret: Arc::new(jwt_secret),
+        index,
+        limiter: Arc::new(access::RateLimiter::new(limits.rate_limit_per_hour)),
+        limits,
+        browse: Arc::new(pool_products::BrowseCache::default()),
+    };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -510,13 +509,10 @@ async fn main() {
             post(pool_products::pool_products_refresh),
         )
         .route("/v1/listings/:listing_id/comparison", get(listing_comparison))
-        .layer(from_fn(edge::public_cache_layer))
+        .layer(from_fn_with_state(state.clone(), access::access_layer))
+        .layer(private_no_store_layer())
         .layer(cors)
-        .with_state(AppState {
-            pool,
-            jwt_secret: Arc::new(jwt_secret),
-            index,
-        });
+        .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!(%addr, "data-ops listening");
