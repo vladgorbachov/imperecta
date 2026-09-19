@@ -77,6 +77,14 @@ class SubfileSelection:
     locale: str | None = None
 
 
+# Storefront languages never elected while another exists (WP11.4).
+DEPRIORITISED_LOCALES = ("ru",)
+
+
+def is_deprioritised_locale(locale: str) -> bool:
+    return any(locale == d or locale.startswith((f"{d}-", f"{d}_")) for d in DEPRIORITISED_LOCALES)
+
+
 def url_locale_segment(url: str) -> str | None:
     """First path segment when it reads as a locale code ("lt", "en-us")."""
     if _hp._use_rust():
@@ -134,14 +142,17 @@ def select_sitemap_subfiles(
     chosen: str | None = None
     if whole_tree:
         if len(locales) >= 2:
+            # A deprioritised storefront language (ru) is never elected
+            # while any other language variant exists (WP11.4).
+            eligible = [loc for loc in locales if not is_deprioritised_locale(loc)] or locales
             hint_l = (country_hint or "").lower() or None
-            if canonical_l in locales:
+            if canonical_l in eligible:
                 chosen = canonical_l
-            elif hint_l in locales:
+            elif hint_l in eligible:
                 chosen = hint_l
             else:
-                chosen = locales[0]
-    elif canonical_l is not None and any(l != canonical_l for l in locales):
+                chosen = eligible[0]
+    elif canonical_l is not None and any(loc != canonical_l for loc in locales):
         chosen = canonical_l
     kept: list[str] = []
     skipped_locale = 0
@@ -208,6 +219,7 @@ __all__ = [
     "canonical_locale_sync",
     "country_language_hint",
     "dominant_locale",
+    "is_deprioritised_locale",
     "is_noise_sitemap",
     "select_sitemap_subfiles",
     "url_locale_segment",

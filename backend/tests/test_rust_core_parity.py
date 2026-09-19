@@ -315,6 +315,7 @@ class TestSitemapParity:
         [
             ("lt", None, True), (None, "LV", True), (None, "et", True), ("xx", None, True),
             ("lt", None, False), ("ru", "lt", False), (None, "ru", False), (None, None, False),
+            (None, "ru", True), ("ru", None, True),
         ],
     )
     def test_select_sitemap_subfiles(self, canonical, hint, whole, monkeypatch):

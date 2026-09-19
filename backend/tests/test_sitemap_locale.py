@@ -53,10 +53,16 @@ class TestPrimitives:
         assert sel.skipped_noise == 2 and sel.skipped_locale == 2 and sel.locale == "lt"
 
     def test_whole_tree_country_hint_then_first(self, engine):
-        assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "ru", whole_tree=True).locale == "ru"
+        # ru is never elected while another language exists (WP11.4)
+        assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "ru", whole_tree=True).locale == "lt"
         assert sl.select_sitemap_subfiles(PIGU_INDEX, None, "et", whole_tree=True).locale == "lt"
-        # a canonical the index lacks falls through to the hint
-        assert sl.select_sitemap_subfiles(PIGU_INDEX, "en", "ru", whole_tree=True).locale == "ru"
+        # a canonical the index lacks falls through to the hint, a ru hint to the first eligible
+        assert sl.select_sitemap_subfiles(PIGU_INDEX, "en", "ru", whole_tree=True).locale == "lt"
+        both = ["https://s.example/lv/a.xml", "https://s.example/ru/a.xml", "https://s.example/et/a.xml"]
+        assert sl.select_sitemap_subfiles(both, "ru", None, whole_tree=True).locale == "lv"
+        # ru-only trees stay ru: that is the shop's data
+        ru_only = ["https://s.example/ru/a.xml", "https://s.example/ru-ua/b.xml"]
+        assert sl.select_sitemap_subfiles(ru_only, None, None, whole_tree=True).locale == "ru"
 
     def test_whole_tree_single_locale_untouched(self, engine):
         files = ["https://s.example/lt/a.xml", "https://s.example/lt/b.xml", "https://s.example/c.xml"]

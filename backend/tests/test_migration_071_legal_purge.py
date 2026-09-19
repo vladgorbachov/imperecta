@@ -202,3 +202,75 @@ def test_purge_marketplace_routine_removes_everything_and_keeps_shared_products(
             conn.execute(
                 text("DELETE FROM dim_product WHERE id IN (:a, :b)"), {"a": p_own, "b": p_shared}
             )
+
+
+@pytest.mark.integration
+def test_072_users_language_check_and_ru_twins(migrated_engine) -> None:
+    """072: `ru` is not a user language; a /ru/ listing whose local-language
+    twin exists in the same marketplace is deactivated, a /ru/ listing
+    without a twin stays active."""
+    tag = uuid4().hex[:8]
+    mp = uuid4()
+    p1, p2, p3 = uuid4(), uuid4(), uuid4()
+    l_local, l_ru_twin, l_ru_alone = uuid4(), uuid4(), uuid4()
+    with migrated_engine.connect() as conn:
+        ck = conn.execute(
+            text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_users_language_supported'")
+        ).scalar_one()
+        assert "'en'" in ck and "'ru'" not in ck
+    with migrated_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO dim_marketplace (id, marketplace_code, name, source_type, "
+                "country_code, domain, base_url, currency_code) VALUES "
+                "(:id, :code, :code, 'marketplace', 'MD', :domain, :url, 'MDL')"
+            ),
+            {"id": mp, "code": f"ruvar_{tag}", "domain": f"ruvar-{tag}.md", "url": f"https://ruvar-{tag}.md"},
+        )
+        for pid in (p1, p2, p3):
+            conn.execute(
+                text("INSERT INTO dim_product (id, name, name_normalized, is_active) VALUES (:id, :n, :n, true)"),
+                {"id": pid, "n": f"p {pid}"},
+            )
+        rows = [
+            (l_local, p1, f"https://ruvar-{tag}.md/acumulator-x.html"),
+            (l_ru_twin, p2, f"https://ruvar-{tag}.md/ru/acumulator-x.html"),
+            (l_ru_alone, p3, f"https://ruvar-{tag}.md/ru/only-here.html"),
+        ]
+        for lid, pid, url in rows:
+            conn.execute(
+                text(
+                    "INSERT INTO fact_listing (id, product_id, marketplace_id, external_url, url_hash, is_active) "
+                    "VALUES (:id, :pid, :mp, :url, encode(sha256(convert_to(lower(rtrim(btrim(:url), '/')), 'UTF8')), 'hex'), true)"
+                ),
+                {"id": lid, "pid": pid, "mp": mp, "url": url},
+            )
+    try:
+        # replay the migration's twin step on this data (idempotent statement)
+        proc = subprocess.run(
+            [sys.executable, "-m", "alembic", "downgrade", "071_legal_purge_ru_by_kz"],
+            cwd=BACKEND_ROOT, env={**os.environ}, capture_output=True, text=True, timeout=600,
+        )
+        assert proc.returncode == 0, proc.stderr
+        proc = subprocess.run(
+            _ALEMBIC_UPGRADE_HEAD, cwd=BACKEND_ROOT, env={**os.environ},
+            capture_output=True, text=True, timeout=600,
+        )
+        assert proc.returncode == 0, proc.stderr
+        with migrated_engine.connect() as conn:
+            active = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    text("SELECT id, is_active FROM fact_listing WHERE id IN (:a, :b, :c)"),
+                    {"a": l_local, "b": l_ru_twin, "c": l_ru_alone},
+                )
+            }
+        assert active[l_local] is True
+        assert active[l_ru_twin] is False
+        assert active[l_ru_alone] is True
+    finally:
+        with migrated_engine.begin() as conn:
+            conn.execute(text("SELECT maintenance.purge_marketplace(:id, false)"), {"id": mp})
+            conn.execute(
+                text("DELETE FROM dim_product WHERE id IN (:a, :b, :c)"), {"a": p1, "b": p2, "c": p3}
+            )

@@ -10,7 +10,8 @@ ai_tone values mirror the ORM CheckConstraint ``ck_users_ai_tone``.
 
 from typing import Final
 
-SUPPORTED_LANGUAGES: Final[list[str]] = ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"]
+# No Russian UI locale (legal clean-up 2026-09-19, WP11).
+SUPPORTED_LANGUAGES: Final[list[str]] = ["en", "ar", "es", "zh", "fr", "ro", "uk"]
 ALLOWED_LANGUAGE_CODES: Final[frozenset[str]] = frozenset(SUPPORTED_LANGUAGES)
 AI_TONE_VALUES: Final[frozenset[str]] = frozenset({"concise", "balanced", "detailed"})
 
