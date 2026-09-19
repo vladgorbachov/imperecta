@@ -35,11 +35,14 @@ from app.database import get_db
 from app.models.core import User
 
 # 5-minute snapshots at the edge, served stale for a further 10 minutes
-# while the CDN refreshes them in the background.
+# while the CDN refreshes them in the background. The browser keeps a copy
+# for only a minute: an explicit max-age stops the CDN from stamping its
+# 4-hour zone default, and ETag/304 makes the revalidation free.
+PUBLIC_BROWSER_MAXAGE_SEC = 60
 PUBLIC_S_MAXAGE_SEC = 300
 PUBLIC_STALE_WHILE_REVALIDATE_SEC = 600
 PUBLIC_CACHE_CONTROL = (
-    f"public, s-maxage={PUBLIC_S_MAXAGE_SEC}, "
+    f"public, max-age={PUBLIC_BROWSER_MAXAGE_SEC}, s-maxage={PUBLIC_S_MAXAGE_SEC}, "
     f"stale-while-revalidate={PUBLIC_STALE_WHILE_REVALIDATE_SEC}"
 )
 PRIVATE_CACHE_CONTROL = "private, no-store"

@@ -23,6 +23,9 @@ use axum::{
     response::Response,
 };
 
+/// Browser copy lives a minute (explicit max-age keeps the CDN from
+/// stamping its 4-hour zone default; ETag/304 makes revalidation free).
+pub const PUBLIC_BROWSER_MAXAGE_SEC: u32 = 60;
 pub const PUBLIC_S_MAXAGE_SEC: u32 = 300;
 pub const PUBLIC_STALE_WHILE_REVALIDATE_SEC: u32 = 600;
 pub const PRIVATE_CACHE_CONTROL: &str = "private, no-store";
@@ -32,7 +35,8 @@ const ETAG_BODY_CAP: usize = 8 * 1024 * 1024;
 
 pub fn public_cache_control() -> String {
     format!(
-        "public, s-maxage={PUBLIC_S_MAXAGE_SEC}, stale-while-revalidate={PUBLIC_STALE_WHILE_REVALIDATE_SEC}"
+        "public, max-age={PUBLIC_BROWSER_MAXAGE_SEC}, s-maxage={PUBLIC_S_MAXAGE_SEC}, \
+         stale-while-revalidate={PUBLIC_STALE_WHILE_REVALIDATE_SEC}"
     )
 }
 
