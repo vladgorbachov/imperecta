@@ -1653,3 +1653,15 @@ flowchart TD
 - data-ops (`data_ops/src/access.rs`, `pool_products.rs`): JWT на всех `/v1/*`, GCRA-бюджет на пользователя,
   те же лимиты через env `POOL_*`, тот же `cap_per_source` (parity-векторы в тестах обоих языков),
   `Cache-Control: private, no-store` на всём.
+
+## 15. Legal clean-up 2026-09-19 — WP11 (backend)
+
+- `common/validation.py`: `SUPPORTED_LANGUAGES = ["en","ar","es","zh","fr","ro","uk"]` — `ru` (и `ru-*`) отклоняется;
+  миграция 072: `users.language='ru'` → `'en'` (0 строк в проде) + CHECK `ck_users_language_supported`.
+- Правило локали источников (§11.4): `scraper/locale_selection.select_locale_url` никогда не выбирает `ru`/`ru-*`
+  вариант, пока есть любой другой (в т.ч. если `x-default` указывает на ru); `sitemap_locale`/`rust_core::sitemap`
+  при выборе дерева сайтмапа не избирают `ru`, пока есть другая локаль. Магазины только на русском — как были.
+- Миграция 072, вторая часть: `/ru/`-листинги, у которых в том же магазине есть двойник без `/ru` или с `/ro/`
+  (по `url_hash`), деактивированы (история сохранена): на 19.09 — 52 545 из 162 947 (darwin 16 212, ultra 36 333).
+  Остальные `/ru/`-строки (pandashop, allo, большая часть darwin) активны — наличие локальной страницы известно
+  только со страницы (canonical/hreflang), применяется при инжесте.

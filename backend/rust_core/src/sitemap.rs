@@ -302,6 +302,15 @@ fn url_path(url: &str) -> &str {
 static LOCALE_SEGMENT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-z]{2}(?:[-_][a-z]{2})?$").unwrap());
 
+/// Storefront languages never elected while another exists (WP11.4).
+const DEPRIORITISED_LOCALES: [&str; 1] = ["ru"];
+
+pub fn is_deprioritised_locale(locale: &str) -> bool {
+    DEPRIORITISED_LOCALES
+        .iter()
+        .any(|d| locale == *d || locale.starts_with(&format!("{d}-")) || locale.starts_with(&format!("{d}_")))
+}
+
 /// First path segment when it reads as a locale code ("lt", "ru", "en-us"),
 /// lowercased. Multi-language shops mount one catalog per locale under such
 /// a prefix (pigu.lt: /lt/..., /ru/..., /en/...) and ship one sitemap tree
@@ -387,11 +396,21 @@ pub fn select_sitemap_subfiles(
         if locales.len() < 2 {
             None
         } else {
+            // A deprioritised storefront language (ru) is never elected
+            // while any other language variant exists (legal clean-up
+            // WP11.4): canonical and hint are honoured only when they are
+            // not deprioritised, and "first in index order" skips it.
+            let eligible: Vec<String> = locales
+                .iter()
+                .filter(|l| !is_deprioritised_locale(l))
+                .cloned()
+                .collect();
+            let pool = if eligible.is_empty() { &locales } else { &eligible };
             let hint = country_hint.map(|c| c.to_lowercase());
             canonical
-                .filter(|c| locales.contains(c))
-                .or_else(|| hint.filter(|h| locales.contains(h)))
-                .or_else(|| locales.first().cloned())
+                .filter(|c| pool.contains(c))
+                .or_else(|| hint.filter(|h| pool.contains(h)))
+                .or_else(|| pool.first().cloned())
         }
     } else {
         canonical.filter(|c| locales.iter().any(|l| l != c))
@@ -522,14 +541,26 @@ mod tests {
         assert_eq!((sel.skipped_noise, sel.skipped_locale), (2, 1));
         assert_eq!(sel.locale.as_deref(), Some("lt"));
 
-        // Whole tree, no pool yet: the country hint decides; else the first locale in index order.
+        // Whole tree, no pool yet: the country hint decides; else the first
+        // locale in index order — but never the deprioritised ru variant
+        // while another language exists (WP11.4).
         let sel = select_sitemap_subfiles(&files, None, Some("RU"), true);
-        assert_eq!(sel.locale.as_deref(), Some("ru"));
+        assert_eq!(sel.locale.as_deref(), Some("lt"));
         assert_eq!(sel.skipped_locale, 1);
         let sel = select_sitemap_subfiles(&files, None, Some("et"), true);
         assert_eq!(sel.locale.as_deref(), Some("lt"));
-        // Whole tree: a canonical the index lacks falls through to the hint.
+        // Whole tree: a canonical the index lacks falls through to the hint,
+        // and a ru hint falls through to the first eligible locale.
         let sel = select_sitemap_subfiles(&files, Some("en"), Some("ru"), true);
+        assert_eq!(sel.locale.as_deref(), Some("lt"));
+        // ru alone (with unprefixed files) is not an election at all.
+        let ru_files = v(&["https://s.example/ru/a.xml", "https://s.example/b.xml"]);
+        let sel = select_sitemap_subfiles(&ru_files, None, None, true);
+        assert_eq!(sel.locale, None);
+        assert_eq!(sel.kept.len(), 2);
+        // ru + ru-only sibling: the pool of eligible locales is empty → normal election.
+        let ru_two = v(&["https://s.example/ru/a.xml", "https://s.example/ru-ua/b.xml"]);
+        let sel = select_sitemap_subfiles(&ru_two, None, None, true);
         assert_eq!(sel.locale.as_deref(), Some("ru"));
         // Single-locale whole trees are never touched, whatever the pool says.
         let single = v(&["https://s.example/lt/a.xml", "https://s.example/lt/b.xml"]);

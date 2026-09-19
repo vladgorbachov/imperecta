@@ -84,7 +84,7 @@ async def test_me_returns_user_profile(client, auth_headers):
     assert "email" in data
     assert "name" in data
     assert "language" in data
-    assert data["language"] in ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"]
+    assert data["language"] in ["en", "ar", "es", "zh", "fr", "ro", "uk"]
 
 
 @pytest.mark.asyncio

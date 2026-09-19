@@ -87,6 +87,26 @@ def test_select_locale_url_chain() -> None:
     )
 
 
+def test_select_locale_url_never_picks_ru_while_another_variant_exists() -> None:
+    """WP11.4: the ru storefront variant loses to any other language, in
+    every step of the chain — even when x-default points at it."""
+    alternates = {"ru": "https://shop.md/ru/p/1", "ro": "https://shop.md/ro/p/1"}
+    assert select_locale_url("https://shop.md/ru/p/1", alternates, None) == "https://shop.md/ro/p/1"
+    with_default = {
+        "x-default": "https://shop.md/ru/p/1",
+        "ru": "https://shop.md/ru/p/1",
+        "ro": "https://shop.md/ro/p/1",
+    }
+    assert select_locale_url("https://shop.md/ru/p/1", with_default, None) == "https://shop.md/ro/p/1"
+    # local preference still beats "first alternate" among the eligible ones
+    three = {"ru-md": "https://shop.md/ru/p/1", "uk": "https://shop.md/uk/p/1", "ro": "https://shop.md/ro/p/1"}
+    assert select_locale_url("https://shop.md/ru/p/1", three, "ro") == "https://shop.md/ro/p/1"
+    # a shop that exists only in Russian keeps its URL
+    ru_only = {"ru": "https://shop.md/ru/p/1", "x-default": "https://shop.md/ru/p/1"}
+    assert select_locale_url("https://shop.md/ru/p/1", ru_only, "ro") == "https://shop.md/ru/p/1"
+    assert select_locale_url("https://shop.md/ru/p/1", None, "ro") == "https://shop.md/ru/p/1"
+
+
 def test_sitemap_parses_hreflang_alternates() -> None:
     xml = """<?xml version="1.0" encoding="UTF-8"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"

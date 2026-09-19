@@ -171,7 +171,7 @@ def test_user_update_uses_common_validator() -> None:
 
     from app.modules.users.schemas import UserUpdate
 
-    UserUpdate(language="ru")
+    UserUpdate(language="uk")
     UserUpdate(ai_tone="balanced")
     with pytest.raises(ValidationError):
         UserUpdate(language="xx")

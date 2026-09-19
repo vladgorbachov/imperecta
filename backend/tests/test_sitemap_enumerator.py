@@ -300,7 +300,9 @@ class TestMultiLocaleTree:
 
     async def test_whole_tree_walk_elects_from_pool_prefix(self):
         """A flat/whole-tree walk with no coordinator locale elects on the
-        index: the pool's prefix breaks the tie when the index has it."""
+        index: the pool's prefix breaks the tie when the index has it — but
+        never towards the ru variant while another language exists
+        (WP11.4), so a ru-prefixed pool still walks the lt tree."""
         with (
             patch.object(sitemap_enumerator, "write_pool_dtos_sync",
                          lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
@@ -311,7 +313,7 @@ class TestMultiLocaleTree:
             result = await sitemap_enumerator.enumerate_sitemap_full(
                 _marketplace(country_code="LT"), self._pool(), whole_tree=True
             )
-        assert result.locale == "ru"
+        assert result.locale == "lt"
         assert result.subfiles_skipped_locale == 1 and result.subfiles_skipped_noise == 2
         assert result.inserted == 2
 

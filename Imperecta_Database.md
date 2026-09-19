@@ -1442,3 +1442,10 @@ RU/BY/KZ удалены из продукта полностью, со всем�
   (тест `tests/test_migration_071_legal_purge.py`).
 - Redis-двойник: Celery-таск `purge_marketplace_state(codes)` (`workers/maintenance_tasks.py`) —
   `harvest:cursor:*`, `harvest:listmode:*`, член `harvest:rotation`, `enumrun:{code}:*`, поля `enum:budget_retry`.
+
+## 13. Legal clean-up 2026-09-19 — WP11 (миграция 072)
+
+`072_ru_locale_and_variant_twins`: `UPDATE users SET language='en' WHERE language='ru'`, CHECK
+`ck_users_language_supported` (список = `common/validation.SUPPORTED_LANGUAGES`); деактивация активных
+`/ru/`-листингов, у которых есть двойник в том же магазине (`url_hash` URL без `/ru` или с `/ro/`), счётчик в
+`RAISE NOTICE`. Тест: `tests/test_migration_071_legal_purge.py::test_072_users_language_check_and_ru_twins`.

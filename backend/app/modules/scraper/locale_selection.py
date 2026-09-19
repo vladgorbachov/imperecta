@@ -8,6 +8,10 @@ from bs4 import BeautifulSoup
 
 # English-first preference for locale selection (not a URL path hardcode).
 ENGLISH_HREFLANG_PREFIX = "en"
+# Storefront variants never chosen while any other language variant of the
+# same page exists (legal clean-up WP11.4). A shop that exists only in
+# Russian keeps its URLs — that is the shop's data, not our interface.
+DEPRIORITISED_HREFLANG_PREFIXES = ("ru",)
 
 
 def _normalize_hreflang(tag: str) -> str:
@@ -18,6 +22,14 @@ def _is_english_hreflang(hreflang: str) -> bool:
     normalized = _normalize_hreflang(hreflang)
     return normalized == ENGLISH_HREFLANG_PREFIX or normalized.startswith(
         f"{ENGLISH_HREFLANG_PREFIX}-",
+    )
+
+
+def _is_deprioritised_hreflang(hreflang: str) -> bool:
+    normalized = _normalize_hreflang(hreflang)
+    return any(
+        normalized == p or normalized.startswith(f"{p}-")
+        for p in DEPRIORITISED_HREFLANG_PREFIXES
     )
 
 
@@ -35,11 +47,30 @@ def select_locale_url(
     3. ANY — ``x-default`` alternate, else the first alternate value, else
        ``raw_url`` unchanged.
 
+    Deprioritised variants (``ru``) take part only when nothing else exists:
+    they are dropped from the alternates first, and an ``x-default`` that
+    points at such a variant is skipped too.
+
     ``marketplace_locale`` comes from ``DimMarketplace.locale`` (per-shop config).
     English preference is structural (hreflang tags), not a hardcoded URL path.
     """
     if not alternates:
         return raw_url
+
+    preferred = {
+        tag: url
+        for tag, url in alternates.items()
+        if url and not _is_deprioritised_hreflang(tag)
+    }
+    deprioritised_urls = {
+        url for tag, url in alternates.items() if url and _is_deprioritised_hreflang(tag)
+    }
+    if preferred:
+        x_default = preferred.get("x-default")
+        if x_default in deprioritised_urls:
+            preferred.pop("x-default", None)
+        if preferred:
+            alternates = preferred
 
     for hreflang, url in alternates.items():
         if _is_english_hreflang(hreflang) and url:
