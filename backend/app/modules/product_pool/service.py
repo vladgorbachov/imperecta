@@ -6,7 +6,24 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, asc, case, desc, func, nullsfirst, nullslast, or_, select, text
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    MetaData,
+    Numeric,
+    Table,
+    and_,
+    asc,
+    desc,
+    func,
+    nullsfirst,
+    nullslast,
+    or_,
+    select,
+    text,
+)
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dimensions import DimBrand, DimCategory, DimDate, DimMarketplace, DimProduct
@@ -123,6 +140,17 @@ _POOL_STATS_STMT = text(
            listings_with_price, last_updated
     FROM mv_pool_stats
     """
+)
+
+# Lightweight Core reflection of the materialized view (migration 066): the
+# MV is not an ORM entity and must not join the model metadata.
+_MV_MARKETPLACE_STATS = Table(
+    "mv_marketplace_stats",
+    MetaData(),
+    Column("marketplace_id", PG_UUID(as_uuid=True), primary_key=True),
+    Column("listing_count", BigInteger),
+    Column("avg_price_eur", Numeric),
+    Column("refreshed_at", DateTime(timezone=True)),
 )
 
 
@@ -720,25 +748,28 @@ class ProductPoolService:
         ]
 
     async def get_marketplace_stats(self, *, include_blocked_countries: bool = False) -> list[dict]:
-        """Per-marketplace listing counts and average price (EUR) when available."""
+        """Per-marketplace listing counts and average price (EUR) when available.
+
+        Reads mv_marketplace_stats (pg_cron, every 10 min — migration 066)
+        instead of aggregating all of fact_listing per request, which hit
+        statement_timeout on the shared instance.
+        """
+        listing_count = func.coalesce(_MV_MARKETPLACE_STATS.c.listing_count, 0).label(
+            "listing_count"
+        )
         stmt = (
             select(
                 DimMarketplace.id.label("marketplace_id"),
                 DimMarketplace.name.label("marketplace_name"),
                 DimMarketplace.domain.label("marketplace_domain"),
                 DimMarketplace.country_code,
-                func.sum(
-                    case((FactListing.is_active.is_(True), 1), else_=0),
-                ).label("listing_count"),
-                func.avg(FactListing.last_price_eur).filter(FactListing.is_active.is_(True)).label("avg_price_eur"),
+                listing_count,
+                _MV_MARKETPLACE_STATS.c.avg_price_eur.label("avg_price_eur"),
             )
             .select_from(DimMarketplace)
-            .outerjoin(FactListing, FactListing.marketplace_id == DimMarketplace.id)
-            .group_by(
-                DimMarketplace.id,
-                DimMarketplace.name,
-                DimMarketplace.domain,
-                DimMarketplace.country_code,
+            .outerjoin(
+                _MV_MARKETPLACE_STATS,
+                _MV_MARKETPLACE_STATS.c.marketplace_id == DimMarketplace.id,
             )
             .where(DimMarketplace.is_active.is_(True))
             .order_by(desc("listing_count"), asc(DimMarketplace.name))

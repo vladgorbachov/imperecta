@@ -172,18 +172,26 @@ def harvest_list_pages(
 
 def _shops_with_categories_sync() -> list[str]:
     """Active marketplace codes that have discovered category pages."""
+    from sqlalchemy import case
     from sqlalchemy import func as sa_func
 
     from app.database import sync_session_factory
 
+    # jsonb_array_length() raises on non-array JSON and Postgres does not
+    # short-circuit AND predicates, so a single legacy '{}' row used to fail
+    # the whole query for EVERY shop (2026-09-19 incident: harvest down 22h).
+    # CASE guarantees evaluation order; non-array rows count as empty.
+    cat_urls = DimMarketplace.discovered_category_urls
+    safe_length = case(
+        (sa_func.jsonb_typeof(cat_urls) == "array", sa_func.jsonb_array_length(cat_urls)),
+        else_=0,
+    )
     db = sync_session_factory()
     try:
         rows = db.execute(
             select(DimMarketplace.marketplace_code)
             .where(DimMarketplace.is_active)
-            .where(
-                sa_func.jsonb_array_length(DimMarketplace.discovered_category_urls) > 0
-            )
+            .where(safe_length > 0)
         ).all()
         return [r[0] for r in rows]
     finally:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import hashlib
 import logging
+import threading
 import weakref
 from enum import Enum
 from typing import ClassVar, Protocol
@@ -267,9 +269,56 @@ class ProxyProviderBackend:
 # accretes memory and the container has no headroom for it.
 RENDER_PAGES_PER_BROWSER = 12
 
-# At most ONE in-flight render per event loop: a second concurrent Chromium
+# One long-lived event loop per PROCESS for all Playwright work. Celery tasks
+# execute coroutines on one-shot asyncio.run() loops, so keying browser reuse
+# on the CALLER's loop meant a fresh Chromium launch on every fetch — and,
+# because the success path never closes the holder, an orphaned Chromium+Node
+# pair leaked per completed render (2026-09-19 incident: fork_exec
+# BlockingIOError storms once the container process table filled). Pinning all
+# renders to this thread makes the holder cache, the RENDER_PAGES_PER_BROWSER
+# rotation and the one-render-at-a-time semaphore hold process-wide.
+_render_loop_lock = threading.Lock()
+_render_loop_singleton: asyncio.AbstractEventLoop | None = None
+
+
+def _shutdown_render_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Best-effort browser close when a worker child exits/recycles."""
+
+    async def _close_holder() -> None:
+        holder = _loop_browsers.get(loop)
+        if holder is not None:
+            await holder.close()
+
+    try:
+        asyncio.run_coroutine_threadsafe(_close_holder(), loop).result(timeout=10)
+    except Exception:
+        pass
+    try:
+        loop.call_soon_threadsafe(loop.stop)
+    except Exception:
+        pass
+
+
+def _get_render_loop() -> asyncio.AbstractEventLoop:
+    global _render_loop_singleton
+    with _render_loop_lock:
+        loop = _render_loop_singleton
+        if loop is None or loop.is_closed():
+            loop = asyncio.new_event_loop()
+            threading.Thread(
+                target=loop.run_forever,
+                name="playwright-render-loop",
+                daemon=True,
+            ).start()
+            atexit.register(_shutdown_render_loop, loop)
+            _render_loop_singleton = loop
+        return loop
+
+
+# At most ONE in-flight render per process: a second concurrent Chromium
 # page is exactly the peak that OOM-killed the worker. Direct/proxy fetches
-# are unaffected.
+# are unaffected. (The semaphore lives on the render loop, so it is a real
+# process-wide limit, not per-caller-loop.)
 _loop_render_semaphores: (
     "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]"
 ) = weakref.WeakKeyDictionary()
@@ -351,6 +400,17 @@ class BrowserRenderBackend:
         accept_language: str | None = None,
     ) -> tuple[str | None, str | None]:
         del render_js, deadline_monotonic
+        future = asyncio.run_coroutine_threadsafe(
+            self._fetch_on_render_loop(url, accept_language),
+            _get_render_loop(),
+        )
+        return await asyncio.wrap_future(future)
+
+    async def _fetch_on_render_loop(
+        self,
+        url: str,
+        accept_language: str | None,
+    ) -> tuple[str | None, str | None]:
         async with _render_semaphore():
             return await self._fetch_locked(url, accept_language)
 

@@ -200,3 +200,25 @@ def test_harvest_tick_scheduled():
 
     entry = celery_app.conf.beat_schedule.get("harvest-lists")
     assert entry and entry["task"] == "harvest_tick"
+
+
+def test_shops_with_categories_guards_non_array_jsonb():
+    """2026-09-19 incident: one legacy '{}' row made jsonb_array_length raise
+    and took harvest down for EVERY shop. The query must gate the length
+    call behind jsonb_typeof so non-array rows count as empty."""
+    from unittest.mock import MagicMock
+    from unittest.mock import patch as _patch
+
+    from sqlalchemy.dialects import postgresql
+
+    from app.workers import harvest_tasks as ht
+
+    db = MagicMock()
+    db.execute.return_value.all.return_value = [("shop_a",)]
+    with _patch("app.database.sync_session_factory", return_value=db):
+        assert ht._shops_with_categories_sync() == ["shop_a"]
+    stmt = db.execute.call_args.args[0]
+    sql = str(stmt.compile(dialect=postgresql.dialect()))
+    assert "jsonb_typeof(dim_marketplace.discovered_category_urls) = " in sql
+    assert "CASE WHEN" in sql and "jsonb_array_length" in sql
+    db.close.assert_called_once()

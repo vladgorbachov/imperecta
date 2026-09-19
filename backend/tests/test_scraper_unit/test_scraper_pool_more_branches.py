@@ -155,6 +155,27 @@ async def test_browser_render_goto_timeout_message(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_browser_render_runs_on_persistent_render_loop(monkeypatch):
+    """Chromium-leak regression (2026-09-19): renders must share ONE long-lived
+    loop per process, never the caller's one-shot asyncio.run() loop."""
+    import asyncio
+
+    seen_loops = []
+
+    async def fake_shared_browser():
+        seen_loops.append(asyncio.get_running_loop())
+        raise RuntimeError("stop before launching a browser")
+
+    monkeypatch.setattr(fb, "_shared_browser", fake_shared_browser)
+    backend = BrowserRenderBackend()
+    assert await backend.fetch("https://x.com/a") == (None, "fetch_failed")
+    assert await backend.fetch("https://x.com/b") == (None, "fetch_failed")
+    assert seen_loops[0] is seen_loops[1]
+    assert seen_loops[0] is not asyncio.get_running_loop()
+    assert seen_loops[0] is fb._get_render_loop()
+
+
+@pytest.mark.asyncio
 async def test_fetch_layer_retries_backoff(monkeypatch):
     import app.modules.scraper.scraper_pool as sp
 

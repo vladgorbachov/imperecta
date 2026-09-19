@@ -217,6 +217,29 @@ def test_get_pool_stats_reads_preaggregated_view() -> None:
     assert "func.count" not in source
 
 
+def test_get_marketplace_stats_reads_preaggregated_view() -> None:
+    """Per-marketplace stats must come from mv_marketplace_stats (066), not a
+    live LEFT JOIN + GROUP BY over fact_listing (statement_timeout at 2.5M)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy.dialects import postgresql
+
+    fake_result = MagicMock()
+    fake_result.all.return_value = []
+    fake_db = AsyncMock()
+    fake_db.execute = AsyncMock(return_value=fake_result)
+    svc = ProductPoolService.__new__(ProductPoolService)
+    svc.db = fake_db
+
+    assert asyncio.run(svc.get_marketplace_stats()) == []
+    stmt = fake_db.execute.call_args.args[0]
+    sql = str(stmt.compile(dialect=postgresql.dialect()))
+    assert "mv_marketplace_stats" in sql
+    assert "fact_listing" not in sql
+    assert "GROUP BY" not in sql
+
+
 def test_get_pool_stats_empty_view_returns_zeros() -> None:
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
