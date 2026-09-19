@@ -9,6 +9,7 @@ import { getReturnPath } from "@/lib/routes";
 import { useTranslation } from "react-i18next";
 import { User, Mail, Lock, Eye, EyeOff, Globe, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
+import { isSupportedLanguage } from "@/i18n";
 import { useSignupCountries } from "@/hooks/useSignupCountries";
 import { useLegalDocuments } from "@/hooks/useLegalDocuments";
 import { LegalConsentFields } from "@/components/auth/LegalConsentFields";
@@ -148,7 +149,7 @@ export function RegisterPage() {
     setLoading(true);
     try {
       const raw = (i18n.language ?? "en").split("-")[0];
-      const lang = ["en", "ar", "es", "zh", "ru", "fr"].includes(raw) ? raw : "en";
+      const lang = isSupportedLanguage(raw) ? raw : "en";
       await register({
         email,
         password,

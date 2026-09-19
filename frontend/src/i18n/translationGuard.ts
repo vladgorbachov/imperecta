@@ -16,21 +16,6 @@ export interface TranslationCoverageResult {
 
 export type TranslationResourceMap = Record<string, Record<string, unknown>>;
 
-const DEFAULT_ADMIN_ONLY_LANGUAGE_CODES = new Set(["ru"]);
-
-/**
- * Returns language options available for the current user role.
- * Admin-only language codes are configurable for future policy changes.
- */
-export function getLanguagesForUser(
-  supportedLanguages: readonly LanguageDescriptor[],
-  isAdmin: boolean,
-  adminOnlyLanguageCodes: ReadonlySet<string> = DEFAULT_ADMIN_ONLY_LANGUAGE_CODES,
-): LanguageDescriptor[] {
-  if (isAdmin) return [...supportedLanguages];
-  return supportedLanguages.filter((language) => !adminOnlyLanguageCodes.has(language.code));
-}
-
 /**
  * Flattens nested translation dictionaries to dot-based key paths.
  * Supports flat files as well as nested structures.

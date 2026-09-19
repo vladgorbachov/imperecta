@@ -145,7 +145,6 @@
   "auth.codeGenerated": "代码已生成",
   "auth.codeError": "生成代码失败",
   "auth.language": "语言",
-  "auth.languageRu": "Русский",
   "auth.languageEn": "English",
   "auth.country": "国家",
   "auth.countryPlaceholder": "选择您的国家",

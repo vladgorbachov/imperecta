@@ -392,12 +392,8 @@ Built against the WP6 consent contract from the backend session
 - `POST /users/me/consents {document, version}` → 201; `GET /users/me/consents`
   → `{items:[{document, version, accepted_at}]}` (Settings → Consents card).
 
-OPEN QUESTION (blocks nothing today, matters when WP6 lands): after a 409 on
-`/auth/login` the client holds no token, so it cannot call
-`POST /users/me/consents`. The frontend handles both possibilities:
-(a) if a session exists (409 raised after tokens were issued) it POSTs each
-consent then refetches `/users/me`; (b) otherwise it resubmits
-`POST /auth/login` with an extra `consents: [{document, version}]` array.
-Please either accept `consents` on login (b) or state which route issues the
-409 so (a) applies — the FE will not need a redeploy either way as long as
-one of the two is honoured.
+RESOLVED (backend, 2026-09-19): variant (b). `409 consent_required` is
+returned only by `POST /auth/login` before any token is issued; the frontend
+resubmits the same credentials with `consents: [{document, version}]` and
+the login writes the consent rows and issues tokens in one call.
+`POST /users/me/consents` remains for mid-session re-consent only.

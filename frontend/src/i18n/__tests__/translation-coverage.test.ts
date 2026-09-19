@@ -10,8 +10,9 @@ const FRONTEND_ROOT = path.resolve(process.cwd());
 const LOCALES_ROOT = path.join(FRONTEND_ROOT, "public", "locales");
 const SOURCE_ROOT = path.join(FRONTEND_ROOT, "src");
 
-const SUPPORTED_LANGUAGE_CODES = ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"] as const;
-const PUBLIC_LANGUAGE_CODES = SUPPORTED_LANGUAGE_CODES.filter((code) => code !== "ru");
+const SUPPORTED_LANGUAGE_CODES = ["en", "ar", "es", "zh", "fr", "ro", "uk"] as const;
+/* Every supported language is public (WP11: no role-gated locales). */
+const PUBLIC_LANGUAGE_CODES = [...SUPPORTED_LANGUAGE_CODES];
 const TARGET_SOURCE_DIRS = ["pages", "components", "hooks", "lib"];
 
 interface KeyUsage {

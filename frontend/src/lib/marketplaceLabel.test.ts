@@ -32,7 +32,7 @@ describe("formatMarketplaceLabel", () => {
         name: "Barbora",
         domain: "barbora.lt",
         countryCode: "LT",
-        locale: "ru",
+        locale: "uk",
       }),
     ).toBe("Barbora (LT)");
   });

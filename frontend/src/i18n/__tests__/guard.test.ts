@@ -3,29 +3,11 @@ import {
   assertTranslationKey,
   findMissingLanguagesForKey,
   flattenTranslationKeys,
-  getLanguagesForUser,
   validateTranslationCoverage,
-  type LanguageDescriptor,
   type TranslationResourceMap,
 } from "../translationGuard";
 
-const LANGUAGES: readonly LanguageDescriptor[] = [
-  { code: "en", name: "English", flag: "🇬🇧", dir: "ltr" },
-  { code: "ru", name: "Русский", flag: "🇷🇺", dir: "ltr" },
-  { code: "fr", name: "Français", flag: "🇫🇷", dir: "ltr" },
-] as const;
-
 describe("translationGuard", () => {
-  it("filters admin-only languages for non-admin users", () => {
-    const publicLanguages = getLanguagesForUser(LANGUAGES, false);
-    expect(publicLanguages.map((item) => item.code)).toEqual(["en", "fr"]);
-  });
-
-  it("keeps full language list for admin users", () => {
-    const adminLanguages = getLanguagesForUser(LANGUAGES, true);
-    expect(adminLanguages.map((item) => item.code)).toEqual(["en", "ru", "fr"]);
-  });
-
   it("flattens nested translation dictionaries", () => {
     const keys = flattenTranslationKeys({
       dashboard: {

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import i18n, { enforceLanguagePolicy } from "@/i18n";
+import i18n, { isSupportedLanguage } from "@/i18n";
 import { authApi, type ConsentAcceptance, type RegisterPayload } from "@/api/auth";
 import { setAuthCookie } from "@/lib/authCookie";
 import {
@@ -12,8 +12,10 @@ import {
 const LANGUAGE_STORAGE_KEY = "imperecta_language";
 
 function applyUserLanguage(language: string): void {
-  i18n.changeLanguage(language);
-  localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+  /* Profiles may still carry a retired locale code; fall back to English. */
+  const next = isSupportedLanguage(language) ? language : "en";
+  i18n.changeLanguage(next);
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, next);
 }
 
 export interface UserEntitlements {
@@ -130,7 +132,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       setAuthCookie(persistent);
       if (user.language) applyUserLanguage(user.language);
-      enforceLanguagePolicy(Boolean(user.is_superuser));
     }
     return {
       success: true,
@@ -201,7 +202,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!token) return null;
     try {
       const { data } = await authApi.getMe();
-      enforceLanguagePolicy(Boolean(data.is_superuser));
       set({ user: data });
       return data;
     } catch {
@@ -270,7 +270,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     const user = await get().fetchUser();
     if (user?.language) applyUserLanguage(user.language);
-    enforceLanguagePolicy(Boolean(user?.is_superuser));
     set({ isInitialized: true });
     return true;
   },
@@ -289,12 +288,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   updateLanguage: async (code: string) => {
-    const isAdmin = Boolean(get().user?.is_superuser);
-    const nextLanguage = !isAdmin && code === "ru" ? "en" : code;
+    const nextLanguage = isSupportedLanguage(code) ? code : "en";
     applyUserLanguage(nextLanguage);
     try {
       const { data } = await authApi.updateMe({ language: nextLanguage });
-      enforceLanguagePolicy(Boolean(data?.is_superuser));
       if (data) set({ user: data });
     } catch {
       // Local language change still applied
@@ -315,7 +312,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
     const user = await get().fetchUser();
     if (user?.language) applyUserLanguage(user.language);
-    enforceLanguagePolicy(Boolean(user?.is_superuser));
     set({ isInitialized: true });
   },
 }));

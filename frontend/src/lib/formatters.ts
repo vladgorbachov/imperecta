@@ -40,7 +40,7 @@ export function formatPriceNumber(amount: number, locale: string): string {
 
 /**
  * Formats a date using Intl.DateTimeFormat.
- * @example formatDate("2026-03-01", "ru") → "1 мар 2026"
+ * @example formatDate("2026-03-01", "fr") → "1 mars 2026"
  * @example formatDate("2026-03-01", "de") → "1. März 2026"
  */
 export function formatDate(date: string | Date, locale: string): string {
@@ -54,7 +54,7 @@ export function formatDate(date: string | Date, locale: string): string {
 
 /**
  * Formats a date with time using Intl.DateTimeFormat.
- * @example formatDateTime("2026-03-01T14:30:00", "ru") → "1 мар 2026 г., 14:30"
+ * @example formatDateTime("2026-03-01T14:30:00", "fr") → "1 mars 2026, 14:30"
  */
 export function formatDateTime(date: string | Date, locale: string): string {
   const d = typeof date === "string" ? new Date(date) : date;

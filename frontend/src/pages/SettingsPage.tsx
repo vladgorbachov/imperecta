@@ -73,7 +73,6 @@ export function SettingsPage() {
 
   const user = useAuthStore((s) => s.user);
   const u = user ?? userData;
-  const isAdmin = u?.is_superuser ?? false;
 
   useEffect(() => {
     if (u) {
@@ -356,7 +355,6 @@ export function SettingsPage() {
                     onChange={handleLanguageChange}
                     showFlags
                     compact={false}
-                    isAdmin={isAdmin}
                   />
                 </div>
                 <Button type="submit" disabled={updateMutation.isPending}>

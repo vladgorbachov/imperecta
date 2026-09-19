@@ -145,7 +145,6 @@
   "auth.codeGenerated": "تم إنشاء الرمز",
   "auth.codeError": "فشل إنشاء الرمز",
   "auth.language": "اللغة",
-  "auth.languageRu": "Русский",
   "auth.languageEn": "English",
   "auth.country": "الدولة",
   "auth.countryPlaceholder": "اختر دولتك",

@@ -75,7 +75,7 @@ import {
 
 const MARKET_OVERVIEW_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const USER_PLAN_OPTIONS = ["trial", "starter", "business", "pro", "enterprise"] as const;
-const USER_LANGUAGE_OPTIONS = ["en", "ar", "es", "zh", "ru", "fr", "ro", "uk"] as const;
+const USER_LANGUAGE_OPTIONS = ["en", "ar", "es", "zh", "fr", "ro", "uk"] as const;
 
 function renderAdminCountryOptions(
   countries: AdminCountryRef[],

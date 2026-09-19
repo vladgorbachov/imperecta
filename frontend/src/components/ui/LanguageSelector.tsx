@@ -20,8 +20,6 @@ interface LanguageSelectorProps {
   showFlags?: boolean;
   /** Compact: flag + code only (e.g. "🇬🇧 en") */
   compact?: boolean;
-  /** Show Russian only for admin users. */
-  isAdmin?: boolean;
 }
 
 export function LanguageSelector({
@@ -29,10 +27,9 @@ export function LanguageSelector({
   onChange,
   showFlags = true,
   compact = false,
-  isAdmin = false,
 }: LanguageSelectorProps) {
   const { i18n } = useTranslation();
-  const availableLanguages = getAvailableLanguages(isAdmin);
+  const availableLanguages = getAvailableLanguages();
 
   const rawLang = value ?? i18n.language ?? "en";
   const resolved = rawLang.includes("-") ? rawLang.split("-")[0] : rawLang;

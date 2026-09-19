@@ -3,7 +3,6 @@ import { initReactI18next } from "react-i18next";
 import HttpBackend from "i18next-http-backend";
 import LanguageDetector from "i18next-browser-languagedetector";
 import {
-  getLanguagesForUser,
   validateTranslationCoverage,
   type LanguageDescriptor,
   type TranslationResourceMap,
@@ -14,7 +13,6 @@ export const SUPPORTED_LANGUAGES = [
   { code: "ar", name: "العربية", flag: "🇸🇦", dir: "rtl" as const },
   { code: "es", name: "Español", flag: "🇪🇸", dir: "ltr" as const },
   { code: "zh", name: "中文", flag: "🇨🇳", dir: "ltr" as const },
-  { code: "ru", name: "Русский", flag: "🇷🇺", dir: "ltr" as const },
   { code: "fr", name: "Français", flag: "🇫🇷", dir: "ltr" as const },
   { code: "ro", name: "Română", flag: "🇷🇴", dir: "ltr" as const },
   { code: "uk", name: "Українська", flag: "🇺🇦", dir: "ltr" as const },
@@ -23,11 +21,10 @@ export const SUPPORTED_LANGUAGES = [
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]["code"];
 
 export const SUPPORTED_LANGUAGE_CODES = SUPPORTED_LANGUAGES.map((l) => l.code);
-export const PUBLIC_LANGUAGES = getLanguagesForUser(
-  SUPPORTED_LANGUAGES as readonly LanguageDescriptor[],
-  false,
-);
-export const PUBLIC_LANGUAGE_CODES = PUBLIC_LANGUAGES.map((language) => language.code);
+
+export function isSupportedLanguage(code: string): code is LanguageCode {
+  return (SUPPORTED_LANGUAGE_CODES as readonly string[]).includes(code);
+}
 
 const STORAGE_KEY = "imperecta_language";
 const IS_VITEST = Boolean(import.meta.env.VITEST);
@@ -72,39 +69,15 @@ i18n.on("languageChanged", (lng) => {
 });
 
 i18n.on("initialized", () => {
-  enforceLanguagePolicy(false);
   const lng = i18n.language;
   const dir = SUPPORTED_LANGUAGES.find((l) => l.code === lng)?.dir ?? "ltr";
   document.documentElement.dir = dir;
   document.documentElement.lang = lng;
 });
 
-/**
- * Enforce language access policy based on admin privileges.
- * Non-admin users cannot keep Russian UI.
- */
-export function enforceLanguagePolicy(isAdmin: boolean): void {
-  const persisted = localStorage.getItem(STORAGE_KEY) ?? "";
-  const activeLanguage = (persisted || i18n.resolvedLanguage || i18n.language || "").toLowerCase();
-  const isRussianLanguage = activeLanguage === "ru" || activeLanguage.startsWith("ru-");
-
-  if (!isAdmin && isRussianLanguage) {
-    if (!import.meta.env.VITEST) {
-      i18n.changeLanguage("en");
-    }
-    localStorage.setItem(STORAGE_KEY, "en");
-  }
-}
-
-/**
- * Returns locale options based on role policy.
- * Russian remains admin-only by business rule.
- */
-export function getAvailableLanguages(isAdmin: boolean): readonly LanguageDescriptor[] {
-  return getLanguagesForUser(
-    SUPPORTED_LANGUAGES as readonly LanguageDescriptor[],
-    isAdmin,
-  );
+/** Every supported language is public — no role-gated locales (WP11, 2026-09-19). */
+export function getAvailableLanguages(): readonly LanguageDescriptor[] {
+  return SUPPORTED_LANGUAGES as readonly LanguageDescriptor[];
 }
 
 async function loadLocaleResource(languageCode: string): Promise<Record<string, unknown>> {
@@ -117,17 +90,17 @@ async function loadLocaleResource(languageCode: string): Promise<Record<string, 
 
 /**
  * Development-only audit:
- * ensures every key from base language exists in all public languages.
+ * ensures every key from base language exists in every supported language.
  */
 export async function runTranslationCoverageAudit(): Promise<void> {
   if (!import.meta.env.DEV || import.meta.env.VITEST) return;
 
   const resources: TranslationResourceMap = {};
-  for (const languageCode of PUBLIC_LANGUAGE_CODES) {
+  for (const languageCode of SUPPORTED_LANGUAGE_CODES) {
     resources[languageCode] = await loadLocaleResource(languageCode);
   }
 
-  const coverage = validateTranslationCoverage(resources, "en", PUBLIC_LANGUAGE_CODES);
+  const coverage = validateTranslationCoverage(resources, "en", SUPPORTED_LANGUAGE_CODES);
   if (!coverage.hasMissingKeys) return;
 
   const diagnostics = Object.entries(coverage.missingByLanguage)

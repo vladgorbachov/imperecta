@@ -9,8 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginPage } from "./LoginPage";
 
 const loginMock = vi.fn();
-const acceptConsentMock = vi.fn();
-const authState = { login: loginMock, accessToken: null as string | null, fetchUser: vi.fn() };
+const authState = { login: loginMock, accessToken: null as string | null };
 
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: Object.assign(
@@ -21,7 +20,6 @@ vi.mock("@/stores/authStore", () => ({
 
 vi.mock("@/api/auth", () => ({
   authApi: {
-    acceptConsent: (...args: unknown[]) => acceptConsentMock(...args),
     getLegalDocuments: () => Promise.reject(new Error("not deployed")),
   },
 }));
@@ -84,7 +82,6 @@ describe("LoginPage — re-consent", () => {
         consents: [{ document: "terms", version: expect.any(String) }],
       }),
     );
-    expect(acceptConsentMock).not.toHaveBeenCalled();
   });
 
   it("keeps ordinary login errors on the form", async () => {

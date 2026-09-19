@@ -9,7 +9,7 @@ import { getReturnPath } from "@/lib/routes";
 import { useTranslation } from "react-i18next";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
-import { authApi, type ConsentAcceptance } from "@/api/auth";
+import type { ConsentAcceptance } from "@/api/auth";
 import { ConsentStep } from "@/components/auth/ConsentStep";
 import { requiredConsentsFromError } from "@/lib/consentErrors";
 import type { LegalDocument } from "@/lib/legalVersions";
@@ -95,25 +95,15 @@ export function LoginPage() {
     }
   };
 
-  /* Re-consent (WP6 §2). With a session already issued the acceptances are
-     recorded via POST /users/me/consents; without one (409 straight from
-     /auth/login) the same credentials are resubmitted with `consents`. */
+  /* Re-consent (WP6 §2): 409 consent_required comes only from /auth/login
+     before any token is issued, so the same credentials are resubmitted
+     with `consents` and the login writes the rows + issues tokens at once. */
   const submitWithConsents = async (consents: ConsentAcceptance[]) => {
     setLoading(true);
     try {
-      const hasSession = Boolean(useAuthStore.getState().accessToken);
-      let forcePasswordChange = false;
-      if (hasSession) {
-        for (const consent of consents) {
-          await authApi.acceptConsent(consent);
-        }
-        await useAuthStore.getState().fetchUser();
-      } else {
-        const result = await login({ email, password, remember_me: rememberMe, consents });
-        forcePasswordChange = result.forcePasswordChange ?? false;
-      }
+      const result = await login({ email, password, remember_me: rememberMe, consents });
       setRequiredConsents(null);
-      navigate(forcePasswordChange ? "/change-password" : returnPath, { replace: true });
+      navigate(result.forcePasswordChange ? "/change-password" : returnPath, { replace: true });
     } catch (err: unknown) {
       const message =
         err && typeof err === "object" && "response" in err

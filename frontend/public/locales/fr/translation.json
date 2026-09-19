@@ -145,7 +145,6 @@
   "auth.codeGenerated": "Code généré",
   "auth.codeError": "Échec de la génération du code",
   "auth.language": "Langue",
-  "auth.languageRu": "Русский",
   "auth.languageEn": "English",
   "auth.country": "Pays",
   "auth.countryPlaceholder": "Sélectionnez votre pays",
