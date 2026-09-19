@@ -756,22 +756,89 @@ async def test_proxy_daily_budget_cap_blocks_before_spending(monkeypatch):
     client_cls.assert_not_called()
 
 
-def test_daily_budget_exhausted_reads_today_usage(monkeypatch):
+def test_billing_cycle_renews_on_the_16th(monkeypatch):
+    import calendar
+    import time as _time
+
+    monkeypatch.setattr(limiter, "Settings", lambda: MagicMock(proxy_provider_billing_day=16))
+    sept19 = calendar.timegm(_time.strptime("2026-09-19", "%Y-%m-%d"))
+    start, end = limiter.billing_cycle(sept19)
+    assert (start.isoformat(), end.isoformat()) == ("2026-09-16", "2026-10-16")
+    sept3 = calendar.timegm(_time.strptime("2026-09-03", "%Y-%m-%d"))
+    start, end = limiter.billing_cycle(sept3)
+    assert (start.isoformat(), end.isoformat()) == ("2026-08-16", "2026-09-16")
+    # renewal day past a short month clamps to its last day
+    monkeypatch.setattr(limiter, "Settings", lambda: MagicMock(proxy_provider_billing_day=31))
+    feb10 = calendar.timegm(_time.strptime("2026-02-10", "%Y-%m-%d"))
+    start, end = limiter.billing_cycle(feb10)
+    assert (start.isoformat(), end.isoformat()) == ("2026-01-31", "2026-02-28")
+
+
+def test_cycle_budget_spreads_remaining_over_days_left(monkeypatch):
+    """Decodo $19 plan at the measured $0.95/1k = 20,000 requests per cycle;
+    cycle 2026-09-16..10-16. On the 19th (27 days left) after 4,891 spent on
+    the 18th and 0 today -> allowance (20000 - 4891) // 27 = 559."""
+    import calendar
+    import time as _time
+
     store = MagicMock()
     monkeypatch.setattr(limiter, "_get_redis", lambda: store)
-    monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 5000)
-    store.get.return_value = "4999"
-    assert limiter.daily_budget_exhausted_sync() is False
-    store.get.return_value = "5000"
-    assert limiter.daily_budget_exhausted_sync() is True
-    key = store.get.call_args.args[0]
-    assert key.startswith(limiter.PROXY_USAGE_KEY_PREFIX)
-    # 0 disables the guard; Redis trouble fails open.
+    monkeypatch.setattr(limiter, "proxy_provider_monthly_cap", lambda: 20_000)
+    monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 0)
+    monkeypatch.setattr(limiter, "Settings", lambda: MagicMock(proxy_provider_billing_day=16))
+    sept19 = calendar.timegm(_time.strptime("2026-09-19", "%Y-%m-%d"))
+    usage = {"20260918": "4891", "20260915": "99999"}  # the 15th is the previous cycle
+
+    def mget(keys):
+        return [usage.get(k.removeprefix(limiter.PROXY_USAGE_KEY_PREFIX)) for k in keys]
+
+    store.mget.side_effect = mget
+    status = limiter.budget_status_sync(sept19)
+    assert (status["cycle_start"], status["cycle_end"]) == ("2026-09-16", "2026-10-16")
+    assert status["days_left"] == 27
+    assert status["month_used"] == 4891
+    assert status["daily_allowance"] == (20_000 - 4_891) // 27 == 559
+    assert status["exhausted"] is False
+
+    usage["20260919"] = "559"
+    assert limiter.budget_status_sync(sept19)["exhausted"] is True
+    # cycle cap alone is decisive even mid-day
+    usage["20260919"] = "0"
+    usage["20260916"] = "30000"
+    assert limiter.budget_status_sync(sept19)["exhausted"] is True
+
+
+def test_daily_budget_guard_disabled_and_fail_open(monkeypatch):
+    store = MagicMock()
+    monkeypatch.setattr(limiter, "_get_redis", lambda: store)
+    monkeypatch.setattr(limiter, "Settings", lambda: MagicMock(proxy_provider_billing_day=16))
+    # No budget and no hard cap -> guard off, Redis never consulted.
+    monkeypatch.setattr(limiter, "proxy_provider_monthly_cap", lambda: 0)
     monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 0)
     assert limiter.daily_budget_exhausted_sync() is False
+    store.mget.assert_not_called()
+    # Hard daily cap works without a monthly budget.
     monkeypatch.setattr(limiter, "proxy_provider_daily_cap", lambda: 10)
-    store.get.side_effect = ConnectionError("redis down")
+    store.mget.return_value = ["10"]
+    assert limiter.daily_budget_exhausted_sync() is True
+    # Redis trouble fails open.
+    store.mget.side_effect = ConnectionError("redis down")
     assert limiter.daily_budget_exhausted_sync() is False
+
+
+def test_monthly_cap_derives_from_budget_and_price(monkeypatch):
+    monkeypatch.setattr(
+        limiter,
+        "Settings",
+        lambda: MagicMock(proxy_provider_monthly_budget_usd=19.0, proxy_cost_per_1k_usd=0.95),
+    )
+    assert limiter.proxy_provider_monthly_cap() == 20_000
+    monkeypatch.setattr(
+        limiter,
+        "Settings",
+        lambda: MagicMock(proxy_provider_monthly_budget_usd=0, proxy_cost_per_1k_usd=0.95),
+    )
+    assert limiter.proxy_provider_monthly_cap() == 0
 
 
 @pytest.mark.asyncio

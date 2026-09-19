@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.config import Settings
@@ -142,26 +143,114 @@ def _record_usage_sync() -> None:
 
 
 def proxy_provider_daily_cap() -> int:
-    """Fleet-wide paid fetches per UTC day; 0 disables the guard."""
+    """Optional hard per-day ceiling on top of the budget; 0 = budget only."""
     return int(Settings().proxy_provider_daily_cap or 0)
 
 
+def proxy_provider_monthly_cap() -> int:
+    """Requests the monthly budget buys at the configured per-1k price (0 = unlimited)."""
+    settings = Settings()
+    budget = float(settings.proxy_provider_monthly_budget_usd or 0)
+    cost = float(settings.proxy_cost_per_1k_usd or 0)
+    if budget <= 0 or cost <= 0:
+        return 0
+    return int(budget / cost * 1000)
+
+
+def billing_cycle(now: float | None = None) -> tuple[date, date]:
+    """[start, end) of the provider billing cycle containing `now` (UTC).
+
+    The cycle renews on proxy_provider_billing_day of each month (Decodo:
+    the 16th); a renewal day past the month's length clamps to its last day.
+    """
+    import calendar
+
+    today = datetime.fromtimestamp(now if now is not None else time.time(), tz=timezone.utc).date()
+    renew_day = int(Settings().proxy_provider_billing_day or 1)
+
+    def _renewal(year: int, month: int) -> date:
+        return date(year, month, min(renew_day, calendar.monthrange(year, month)[1]))
+
+    this_month = _renewal(today.year, today.month)
+    if today >= this_month:
+        start = this_month
+        ny, nm = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+        end = _renewal(ny, nm)
+    else:
+        py, pm = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
+        start = _renewal(py, pm)
+        end = this_month
+    return start, end
+
+
+def budget_status_sync(now: float | None = None) -> dict:
+    """Budget view for the guard and the admin report.
+
+    The budget is per BILLING CYCLE (unused balance is lost at renewal), so
+    the guard spreads what is left of the cycle evenly over the days that
+    remain: an overspent day (2026-09-18: 4,891 requests in one enumeration
+    burst) tightens the following ones instead of blowing the cycle. Keys:
+      monthly_cap, month_used, today_used, daily_allowance, exhausted,
+      cycle_start, cycle_end, days_left.
+    """
+    ts = now if now is not None else time.time()
+    today = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+    today_key = today.strftime("%Y%m%d")
+    monthly_cap = proxy_provider_monthly_cap()
+    hard_daily = proxy_provider_daily_cap()
+    cycle_start, cycle_end = billing_cycle(ts)
+    client = _get_redis()
+    day_count = (today - cycle_start).days + 1
+    month_keys = [
+        PROXY_USAGE_KEY_PREFIX + (cycle_start + timedelta(days=i)).strftime("%Y%m%d")
+        for i in range(day_count)
+    ]
+    values = client.mget(month_keys)
+    per_day = [int(v) if v else 0 for v in values]
+    today_used = per_day[-1]
+    month_used = sum(per_day)
+    month_used_before_today = month_used - today_used
+    days_left = (cycle_end - today).days
+
+    daily_allowance: int | None = None
+    if monthly_cap > 0:
+        remaining = max(monthly_cap - month_used_before_today, 0)
+        daily_allowance = remaining // days_left
+    if hard_daily > 0:
+        daily_allowance = (
+            hard_daily if daily_allowance is None else min(daily_allowance, hard_daily)
+        )
+
+    exhausted = False
+    if monthly_cap > 0 and month_used >= monthly_cap:
+        exhausted = True
+    if daily_allowance is not None and today_used >= daily_allowance:
+        exhausted = True
+    return {
+        "date": today_key,
+        "cycle_start": cycle_start.isoformat(),
+        "cycle_end": cycle_end.isoformat(),
+        "monthly_cap": monthly_cap or None,
+        "month_used": month_used,
+        "today_used": today_used,
+        "daily_allowance": daily_allowance,
+        "days_left": days_left,
+        "exhausted": exhausted,
+    }
+
+
 def daily_budget_exhausted_sync() -> bool:
-    """True once today's granted tokens reach the daily cap.
+    """True when today's paid fetches hit the budget-derived allowance.
 
     Spend guard for the proxy-mode shops (2026-09-19: the www-host fix put
     ~550k proxy_render listings onto the paid backend for real). Fail-open
     on Redis trouble — the RPS limiter's local fallback already throttles
     to 1 req/s per process, and accounting must never fail a fetch.
     """
-    cap = proxy_provider_daily_cap()
-    if cap <= 0:
+    if proxy_provider_monthly_cap() <= 0 and proxy_provider_daily_cap() <= 0:
         return False
     try:
-        client = _get_redis()
-        key = PROXY_USAGE_KEY_PREFIX + time.strftime("%Y%m%d", time.gmtime())
-        used = client.get(key)
-        return int(used or 0) >= cap
+        return bool(budget_status_sync()["exhausted"])
     except Exception:  # noqa: BLE001 - see docstring
         return False
 

@@ -41,9 +41,18 @@ class Settings(BaseSettings):
     # Provider-neutral proxy fetch configuration (Stage 2).
     proxy_provider: str = "decodo"
     proxy_provider_rps: int = 10
-    # Fleet-wide paid-fetch ceiling per UTC day (0 = unlimited). Spend guard:
-    # at ~$1.9/1k requests the default bounds the provider bill to ~$10/day.
-    proxy_provider_daily_cap: int = 5000
+    # Paid-fetch spend guard, numbers from the Decodo dashboard (2026-09-19):
+    # "Web Scraping API 19 plan" — $19 per billing cycle, unused balance is
+    # lost at renewal, cycle renews on the 16th (payment in 27 days on the
+    # 19th). Effective price from the same dashboard: $8.74 spent for 9,198
+    # successful requests = $0.95/1k (list: standard+JS $0.75, premium+JS
+    # $1.50). The limiter turns budget/price into a per-cycle request cap and
+    # spreads what is left evenly over the days remaining in the cycle.
+    proxy_provider_monthly_budget_usd: float = 19.0
+    proxy_cost_per_1k_usd: float = 0.95
+    proxy_provider_billing_day: int = 16
+    # Optional hard per-day ceiling on top of the budget (0 = budget only).
+    proxy_provider_daily_cap: int = 0
     proxy_provider_api_url: str | None = Field(
         default=None,
         validation_alias="PROXY_PROVIDER_API_URL",
