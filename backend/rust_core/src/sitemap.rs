@@ -285,6 +285,143 @@ pub fn category_like_url(url: &str) -> bool {
     is_category_path(path)
 }
 
+/// Path component of a URL ("/" when absent), query and fragment stripped.
+fn url_path(url: &str) -> &str {
+    let rest = match url.find("://") {
+        Some(i) => &url[i + 3..],
+        None => url,
+    };
+    let path = match rest.find('/') {
+        Some(p) => &rest[p..],
+        None => "/",
+    };
+    let end = path.find(['?', '#']).unwrap_or(path.len());
+    &path[..end]
+}
+
+static LOCALE_SEGMENT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-z]{2}(?:[-_][a-z]{2})?$").unwrap());
+
+/// First path segment when it reads as a locale code ("lt", "ru", "en-us"),
+/// lowercased. Multi-language shops mount one catalog per locale under such
+/// a prefix (pigu.lt: /lt/..., /ru/..., /en/...) and ship one sitemap tree
+/// per locale — the same offer under every prefix.
+pub fn url_locale_segment(url: &str) -> Option<String> {
+    let first = url_path(url).trim_start_matches('/').split('/').next().unwrap_or("");
+    let lowered = first.to_lowercase();
+    if LOCALE_SEGMENT_RE.is_match(&lowered) {
+        Some(lowered)
+    } else {
+        None
+    }
+}
+
+/// Sitemap files that carry the image / video extension entries restate
+/// product locs the product files already list (pigu.lt: 406
+/// `sitemap-products-images-N.xml` beside 406 `sitemap-products-N.xml`).
+const MEDIA_SITEMAP_TOKENS: [&str; 5] = ["image", "images", "img", "video", "videos"];
+
+pub fn is_media_sitemap(url: &str) -> bool {
+    let name = url_path(url).rsplit('/').next().unwrap_or("").to_lowercase();
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|token| MEDIA_SITEMAP_TOKENS.contains(&token))
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct SubfileSelection {
+    pub kept: Vec<String>,
+    pub skipped_media: usize,
+    pub skipped_locale: usize,
+    /// The locale the selection settled on (None = single-locale tree).
+    pub locale: Option<String>,
+}
+
+/// Choose which sub-sitemaps of one shop to walk.
+///
+/// Media files are always dropped. When the remaining files live under two
+/// or more locale prefixes, one locale wins — `canonical` (the pool's own
+/// prefix) first, then `country_hint` (the shop country's language), then
+/// the first locale in index order when `fallback_to_first` — and files of
+/// the other locales are dropped; files without a locale prefix are kept.
+/// With no way to choose (no canonical, no hint, no fallback) nothing is
+/// dropped for locale reasons: a 3-file shard seen in isolation must not
+/// elect its own locale.
+pub fn select_sitemap_subfiles(
+    urls: &[String],
+    canonical: Option<&str>,
+    country_hint: Option<&str>,
+    fallback_to_first: bool,
+) -> SubfileSelection {
+    let mut out = SubfileSelection::default();
+    let mut candidates: Vec<(&String, Option<String>)> = Vec::with_capacity(urls.len());
+    let mut locales: Vec<String> = Vec::new();
+    for url in urls {
+        if is_media_sitemap(url) {
+            out.skipped_media += 1;
+            continue;
+        }
+        let locale = url_locale_segment(url);
+        if let Some(l) = &locale {
+            if !locales.contains(l) {
+                locales.push(l.clone());
+            }
+        }
+        candidates.push((url, locale));
+    }
+    let chosen: Option<String> = if locales.len() < 2 {
+        None
+    } else {
+        let canonical = canonical.map(|c| c.to_lowercase());
+        let hint = country_hint.map(|c| c.to_lowercase());
+        canonical
+            .filter(|c| locales.contains(c))
+            .or_else(|| hint.filter(|h| locales.contains(h)))
+            .or_else(|| if fallback_to_first { locales.first().cloned() } else { None })
+    };
+    for (url, locale) in candidates {
+        match (&chosen, locale) {
+            (Some(want), Some(have)) if &have != want => out.skipped_locale += 1,
+            _ => out.kept.push(url.clone()),
+        }
+    }
+    out.locale = chosen;
+    out
+}
+
+/// The locale prefix shared by at least `min_share` of `urls` (a sample of
+/// the shop's own pool) — the canonical locale for `select_sitemap_subfiles`.
+pub fn dominant_locale(urls: &[String], min_share: f64) -> Option<String> {
+    if urls.is_empty() {
+        return None;
+    }
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for url in urls {
+        if let Some(locale) = url_locale_segment(url) {
+            match counts.iter_mut().find(|(l, _)| *l == locale) {
+                Some(entry) => entry.1 += 1,
+                None => counts.push((locale, 1)),
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .filter(|(_, n)| (*n as f64) >= min_share * (urls.len() as f64))
+        .map(|(l, _)| l)
+}
+
+/// Per-URL keep mask against a known canonical locale: URLs under another
+/// locale prefix are the same offers again and are dropped.
+pub fn locale_keep_mask(urls: &[String], canonical: &str) -> Vec<bool> {
+    let canonical = canonical.to_lowercase();
+    urls.iter()
+        .map(|u| match url_locale_segment(u) {
+            Some(l) => l == canonical,
+            None => true,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 pub fn alternates_map(entry: &UrlEntry) -> HashMap<String, String> {
     entry.alternates.iter().cloned().collect()
@@ -339,5 +476,69 @@ mod tests {
         assert!(!category_like_url("https://shop.example/c80196/strana-90098=675621/"));
         assert!(!category_like_url("https://shop.example/"));
         assert!(!category_like_url("https://shop.example/catalog/laptops?page=2"));
+    }
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn locale_segment_and_media_detection() {
+        assert_eq!(url_locale_segment("https://pigu.lt/lt/sitemap-products-5.xml").as_deref(), Some("lt"));
+        assert_eq!(url_locale_segment("https://pigu.lt/RU/x?y=1").as_deref(), Some("ru"));
+        assert_eq!(url_locale_segment("https://s.example/en-US/p/1").as_deref(), Some("en-us"));
+        assert_eq!(url_locale_segment("https://s.example/p/1"), None);
+        assert_eq!(url_locale_segment("https://s.example/sitemap.xml"), None);
+        assert_eq!(url_locale_segment("https://s.example"), None);
+        assert!(is_media_sitemap("https://pigu.lt/ru/sitemap-products-images-405.xml"));
+        assert!(is_media_sitemap("https://s.example/image_sitemap.xml"));
+        assert!(is_media_sitemap("https://s.example/sitemaps/video-1.xml"));
+        assert!(!is_media_sitemap("https://pigu.lt/lt/sitemap-products-5.xml"));
+        assert!(!is_media_sitemap("https://s.example/sitemap-imagery.xml"));
+    }
+
+    #[test]
+    fn subfile_selection_prefers_canonical_then_hint_then_first() {
+        let files = v(&[
+            "https://pigu.lt/lt/sitemap-products-1.xml",
+            "https://pigu.lt/lt/sitemap-products-images-1.xml",
+            "https://pigu.lt/ru/sitemap-products-1.xml",
+            "https://pigu.lt/ru/sitemap-products-images-1.xml",
+            "https://pigu.lt/sitemap-categories.xml",
+        ]);
+        let sel = select_sitemap_subfiles(&files, Some("lt"), None, false);
+        assert_eq!(sel.kept, v(&["https://pigu.lt/lt/sitemap-products-1.xml", "https://pigu.lt/sitemap-categories.xml"]));
+        assert_eq!((sel.skipped_media, sel.skipped_locale), (2, 1));
+        assert_eq!(sel.locale.as_deref(), Some("lt"));
+
+        // No pool yet: the country hint decides; else the first locale in index order.
+        let sel = select_sitemap_subfiles(&files, None, Some("RU"), false);
+        assert_eq!(sel.locale.as_deref(), Some("ru"));
+        assert_eq!(sel.skipped_locale, 1);
+        let sel = select_sitemap_subfiles(&files, None, Some("et"), true);
+        assert_eq!(sel.locale.as_deref(), Some("lt"));
+        // A shard seen in isolation with nothing to go on drops nothing for locale.
+        let sel = select_sitemap_subfiles(&files, None, None, false);
+        assert_eq!(sel.locale, None);
+        assert_eq!(sel.kept.len(), 3);
+        // Single-locale trees are never touched.
+        let single = v(&["https://s.example/lt/a.xml", "https://s.example/lt/b.xml"]);
+        let sel = select_sitemap_subfiles(&single, Some("ru"), None, true);
+        assert_eq!(sel.kept.len(), 2);
+        assert_eq!(sel.locale, None);
+    }
+
+    #[test]
+    fn dominant_locale_and_keep_mask() {
+        let pool = v(&[
+            "https://pigu.lt/lt/p/1", "https://pigu.lt/lt/p/2", "https://pigu.lt/lt/p/3",
+            "https://pigu.lt/lt/p/4", "https://pigu.lt/ru/p/1",
+        ]);
+        assert_eq!(dominant_locale(&pool, 0.8).as_deref(), Some("lt"));
+        assert_eq!(dominant_locale(&pool, 0.9), None);
+        assert_eq!(dominant_locale(&v(&["https://s.example/p/1", "https://s.example/p/2"]), 0.8), None);
+        assert_eq!(dominant_locale(&[], 0.8), None);
+        let urls = v(&["https://pigu.lt/lt/p/1", "https://pigu.lt/ru/p/1", "https://pigu.lt/p/1"]);
+        assert_eq!(locale_keep_mask(&urls, "LT"), vec![true, false, true]);
     }
 }

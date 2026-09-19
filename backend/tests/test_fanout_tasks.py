@@ -15,7 +15,7 @@ def test_enumerate_coordinator_shards_and_sets_pending(monkeypatch) -> None:
     shard_urls = [f"https://shop.example/sitemap-{i}.xml" for i in range(7)]
 
     async def fake_resolve(_code):
-        return mp, shard_urls
+        return mp, shard_urls, "lt"
 
     monkeypatch.setattr(ob, "_resolve_shards", fake_resolve)
 
@@ -42,6 +42,8 @@ def test_enumerate_coordinator_shards_and_sets_pending(monkeypatch) -> None:
     assert kwargs0["run_id"] == out["run_id"]
     # never max_urls // shards: a shard keeps all of its subfiles' URLs
     assert kwargs0["max_urls"] == ob.ENUMERATE_SHARD_MAX_URLS == 150_000
+    # the coordinator's locale choice travels with every shard
+    assert kwargs0["locale"] == "lt" and out["locale"] == "lt"
     assert opts0["priority"] == 8
     # pending counter registered for the finisher aggregation
     redis.set.assert_called_once()
@@ -52,7 +54,7 @@ def test_enumerate_coordinator_flat_sitemap_runs_inline(monkeypatch) -> None:
     mp = SimpleNamespace(id=uuid4(), catalog_size_estimate=None)
 
     async def fake_resolve(_code):
-        return mp, []  # no fan-out seam
+        return mp, [], None  # no fan-out seam
 
     inline_calls: list = []
 
@@ -66,6 +68,71 @@ def test_enumerate_coordinator_flat_sitemap_runs_inline(monkeypatch) -> None:
     out = ob.sitemap_enumerate_marketplace.run("shop_flat", max_urls=1000)
     assert out["status"] == "completed"
     assert inline_calls and inline_calls[0][0] == "shop_flat"
+    # a whole-tree walk may elect the locale from the index itself
+    assert inline_calls[0][2]["locale_fallback_to_first"] is True
+
+
+def test_resolve_shards_drops_media_and_other_locales(monkeypatch) -> None:
+    """pigu.lt index shape: lt/ru product trees + image twins + root files."""
+    import asyncio
+
+    from app.modules.scraper.scraper_pool import ScraperPool
+
+    mp = SimpleNamespace(id=uuid4(), base_url="https://pigu.lt", country_code="LT")
+    index = [
+        "https://pigu.lt/lt/sitemap-products-1.xml",
+        "https://pigu.lt/lt/sitemap-products-images-1.xml",
+        "https://pigu.lt/ru/sitemap-products-1.xml",
+        "https://pigu.lt/ru/sitemap-products-images-1.xml",
+        "https://pigu.lt/ru/sitemap-categories.xml",
+        "https://pigu.lt/sitemap-brands.xml",
+    ]
+
+    class _Db:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, *_a, **_k):
+            return SimpleNamespace(scalar_one_or_none=lambda: mp)
+
+    class _Engine:
+        async def dispose(self):
+            pass
+
+    monkeypatch.setattr(ob, "_make_session_factory", lambda: (_Engine(), lambda: _Db()))
+
+    async def fake_resolve_shards(self, _base):
+        return {"shards": index, "entry": "https://pigu.lt/sitemap.xml"}
+
+    monkeypatch.setattr(ScraperPool, "resolve_sitemap_shards", fake_resolve_shards)
+    monkeypatch.setattr(
+        "app.modules.discovery.sitemap_locale.canonical_locale_sync",
+        lambda _id, _cc=None: "lt",
+    )
+    marketplace, shards, locale = asyncio.run(ob._resolve_shards("pigu_lt"))
+    assert marketplace is mp
+    assert locale == "lt"
+    assert shards == [
+        "https://pigu.lt/lt/sitemap-products-1.xml",
+        "https://pigu.lt/sitemap-brands.xml",
+    ]
+
+
+def test_shard_task_passes_locale_through(monkeypatch) -> None:
+    calls: list = []
+
+    async def fake_enumerate(code, max_urls, **kw):
+        calls.append(kw)
+        return {"status": "completed", "product_like": 1, "_category_urls": []}
+
+    monkeypatch.setattr(ob, "_enumerate", fake_enumerate)
+    out = ob.sitemap_enumerate_shard.run("shop_x", ["https://s.example/a.xml"], locale="lt")
+    assert out["status"] == "completed"
+    assert calls[0]["canonical_locale"] == "lt"
+    assert calls[0]["explicit_sitemaps"] == ["https://s.example/a.xml"]
 
 
 def test_record_shard_done_aggregates_on_last(monkeypatch) -> None:

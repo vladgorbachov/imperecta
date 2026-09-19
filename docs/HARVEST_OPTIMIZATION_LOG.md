@@ -188,3 +188,67 @@ $0.30 покрывают pigu-группу. Но три дефекта экст�
 Python `test_detect_next_page_rejects_malformed_rel_next_and_finds_page_2`.
 Вердикт по п.7: для pigu-группы JSON-API не нужен; кандидаты на отдельное
 исследование — darwin.md, x-kom (после «после» по п.1-2).
+
+## Э — энумерация: шесть пунктов (2026-09-19)
+
+Отдельная программа по запросу Waldemar («разбить на много потоков, более
+эффективные алгоритмы, структуры, код»). Замеры «до» — прод, 19.09 утро.
+
+**До (источники: логи воркера, EXPLAIN ANALYZE через MCP, queue_peek):**
+- Один шард (3 подфайла, обрезан координатором до **10 000** URL:
+  `max_urls // shards` с полом 10k — `raw=10000` в каждой строке лога)
+  занимал **203–247 с** ≈ 45 пар/с.
+- `gate.exec_write` на строку dim_product — **5.7 мс**, из них сам INSERT
+  **1.8 мс**: остальное — чтение секрета из vault и `pg_attribute` на каждую
+  ячейку, `format()`+`EXECUTE` на каждую строку.
+- INSERT в fact_listing по случайному uuid4 — **7.1 мс/строку** (24 индекса,
+  3.1 GB, shared_buffers 512 MB → index hit ratio 86.5 %).
+- 9 индексов-дублей (`ix_fact_listing_*` рядом с `idx_listing_*`,
+  `idx_product_name` 377 MB с 0 сканов, `idx_product_attributes` 0 сканов).
+- Очередь: priority-8 (энумерация) **434 сообщения**, ни одно не получено
+  за сутки — воркер на 2 детях (`-c 2` в start command перекрывал
+  `CELERYD_CONCURRENCY=6`) всегда занят p2/p5.
+- Парсинг сайтмапов: ElementTree на Python, хеширование и классификация
+  50k URL в Python-циклах; весь tree скачивался целиком, потом писался.
+
+**Сделано (616322d, 74db81a, этот коммит):**
+1. Шард берёт всё, что перечисляют его подфайлы (`ENUMERATE_SHARD_MAX_URLS`
+   = 3 × 50k по протоколу); `max_urls` — пол на прогон, не потолок шарда.
+2. Отдельный Railway-сервис `celery worker-bulk` (`-Q bulk`, concurrency 3,
+   Dockerfile с rust core) — `task_routes` шлют энумерацию/discovery в
+   очередь `bulk`; у основного воркера снят `-c 2` → 6 детей (баннер
+   `concurrency: 6 (prefork)` в логе деплоя 09c5b0f7). Настройки выставлены
+   через Railway GraphQL (`serviceInstanceUpdate`), CLI их не умеет.
+3. `gate.exec_write_rows` (069): HMAC на каждую строку сохранён, секрет
+   читается раз на батч, типы колонок — раз на колонку, один
+   `INSERT … SELECT FROM jsonb_array_elements($1)`; отказ гейта по паре —
+   реджект пары, не падение батча.
+4. uuid7 для новых product/listing id: fact_listing **7.1 → 2.0 мс/строку**,
+   dim_product **1.8 → 0.35** (EXPLAIN ANALYZE, прод). 9 индексов-дублей
+   сняты (070 — зеркало, в проде уже применено).
+5. Rust `rust_core::sitemap`: quick-xml потоковый парсер, `url_hash(es)`,
+   `product_like_path`, `category_like_url`; `walk_sitemaps` — генератор с
+   prefetch=3: классификация/дедуп/запись документа N идут, пока качается
+   N+1; дедуп `= ANY(array)` чанками 20k вместо IN-списков.
+6. Дедуп-запрос — один параметр-массив на чанк (см. 5).
+
+**Найдено по пути (при инспекции застрявших p8-сообщений, только чтение):**
+432 из 434 — шарды pigu_lt старого прогона 08f200821aac; их подфайлы —
+`ru/sitemap-products-*` 406, `*-images-*` 812, `lt/sitemap-products-*` 57,
+служебные 16. Пул pigu — 1 045 288 листингов, **все под `/lt/`** (220_lv —
+все `/lv/`, kaup24 — все `/et/`). Прогон «как есть» удвоил бы пул pigu
+дублями `/ru/…` и сжёг ~1 200 платных запросов на image-сайтмапы.
+Фикс — `sitemap_locale` (Rust `url_locale_segment`, `is_media_sitemap`,
+`select_sitemap_subfiles`, `dominant_locale`, `locale_keep_mask` +
+Python-двойники и parity-тесты): image/video-сайтмапы не ходим никогда;
+на мультиязычном дереве координатор выбирает одну локаль — префикс пула
+(≥80 % сэмпла), иначе язык страны, иначе первая в индексе — и передаёт её
+шардам (`locale=`); шард без локали (старые сообщения) берёт префикс пула и
+никогда не выбирает локаль по своим трём файлам; внутри файла URL другой
+локали отбрасываются (`urls_skipped_locale` в итоге). Тесты:
+`test_sitemap_locale.py` (оба движка), `TestMultiLocaleTree`,
+`test_resolve_shards_drops_media_and_other_locales`.
+
+**После:** _после переноса 434 сообщений в `bulk` и первых шардов на
+bulk-воркере: длительность шарда при 150k, pairs/s, skipped_media /
+skipped_locale по pigu, категории ldlc/tsbohemia/euro._

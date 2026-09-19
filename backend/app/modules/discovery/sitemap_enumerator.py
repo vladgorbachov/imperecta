@@ -88,6 +88,11 @@ class EnumerateResult:
     # Sitemap <lastmod> coverage (harvest optimisation #6).
     lastmod_seen: int = 0
     lastmod_updated: int = 0
+    # Multi-locale / media filter (sitemap_locale): what the walk left out.
+    locale: str | None = None
+    subfiles_skipped_media: int = 0
+    subfiles_skipped_locale: int = 0
+    urls_skipped_locale: int = 0
 
 
 def _existing_hashes_sync(hashes: list[str]) -> dict[str, object]:
@@ -208,12 +213,21 @@ async def enumerate_sitemap_full(
     max_urls: int = ENUMERATE_MAX_URLS,
     explicit_sitemaps: list[str] | None = None,
     publish_categories: bool = True,
+    canonical_locale: str | None = None,
+    locale_fallback_to_first: bool = False,
 ) -> EnumerateResult:
     """Walk the full sitemap tree and gate-insert product URL skeletons.
 
     Category-like URLs met on the way are returned in the result and, when
     `publish_categories` is set, merged into discovered_category_urls right
     here (fan-out shards pass False and let the run finisher merge once).
+
+    Multi-locale shops (pigu.lt: one tree per storefront language) are
+    walked in ONE locale — `canonical_locale` when the caller resolved it,
+    else the pool's own prefix — and image/video sitemaps are skipped
+    (sitemap_locale). `locale_fallback_to_first` lets a whole-tree walk
+    elect the first locale in index order for a shop with no pool yet; a
+    shard seen in isolation leaves it False.
     """
     started = time.perf_counter()
     marketplace_id = marketplace.id
@@ -232,12 +246,42 @@ async def enumerate_sitemap_full(
             categories_added=counts.get("categories_added", 0),
             lastmod_seen=counts.get("lastmod_seen", 0),
             lastmod_updated=counts.get("lastmod_updated", 0),
+            locale=counts.get("locale"),
+            subfiles_skipped_media=counts.get("subfiles_skipped_media", 0),
+            subfiles_skipped_locale=counts.get("subfiles_skipped_locale", 0),
+            urls_skipped_locale=counts.get("urls_skipped_locale", 0),
         )
 
     from app.modules.discovery.sitemap_categories import collect_category_urls
+    from app.modules.discovery.sitemap_locale import (
+        canonical_locale_sync,
+        country_language_hint,
+        locale_keep_mask,
+        select_sitemap_subfiles,
+    )
     from app.modules.scraper.locale_selection import select_locale_url
 
     base_host = urlparse(marketplace.base_url).netloc.lower().removeprefix("www.")
+    if canonical_locale is None:
+        canonical_locale = await asyncio.to_thread(
+            canonical_locale_sync, marketplace_id, marketplace.country_code
+        )
+    country_hint = country_language_hint(marketplace.country_code)
+    skipped_media = skipped_locale_files = urls_skipped_locale = 0
+
+    def _select_subfiles(urls: list[str]) -> list[str]:
+        nonlocal canonical_locale, skipped_media, skipped_locale_files
+        selection = select_sitemap_subfiles(
+            urls, canonical_locale, country_hint, locale_fallback_to_first
+        )
+        skipped_media += selection.skipped_media
+        skipped_locale_files += selection.skipped_locale
+        if selection.locale and not canonical_locale:
+            # A whole-tree walk elected its locale from the index: the URL
+            # filter below follows the same choice.
+            canonical_locale = selection.locale
+        return selection.kept
+
     inserted = rejected = duplicates = 0
     raw_count = 0
     product_like_count = 0
@@ -269,14 +313,13 @@ async def enumerate_sitemap_full(
             marketplace.base_url,
             explicit_sitemaps=explicit_sitemaps,
             max_subfiles=max_subfiles,
+            subfile_selector=_select_subfiles,
         ):
             documents += 1
             entries = parsed.get("url_entries", [])
             raw_count += len(entries)
-            # --- classify: same-host product URLs + category-like pages ----
-            doc_urls: list[str] = []
-            doc_lastmod: dict[str, str] = {}
-            shard_is_product = _sitemap_shard_priority(shard_url) == 0
+            # --- locale: same-host URLs, one storefront language ------------
+            same_host: list[tuple[str, dict]] = []
             for entry in entries:
                 loc = str(entry.get("loc") or "")
                 if not loc:
@@ -284,9 +327,19 @@ async def enumerate_sitemap_full(
                 alternates = entry.get("alternates")
                 alt_map = alternates if isinstance(alternates, dict) else {}
                 selected = select_locale_url(loc, alt_map, marketplace.locale)
-                parsed_url = urlparse(selected)
-                if parsed_url.netloc.lower().removeprefix("www.") != base_host:
+                if urlparse(selected).netloc.lower().removeprefix("www.") != base_host:
                     continue
+                same_host.append((selected, entry))
+            if canonical_locale and same_host:
+                keep = locale_keep_mask([u for u, _ in same_host], canonical_locale)
+                urls_skipped_locale += keep.count(False)
+                same_host = [pair for pair, ok in zip(same_host, keep) if ok]
+            # --- classify: product URLs + category-like pages ---------------
+            doc_urls: list[str] = []
+            doc_lastmod: dict[str, str] = {}
+            shard_is_product = _sitemap_shard_priority(shard_url) == 0
+            for selected, entry in same_host:
+                parsed_url = urlparse(selected)
                 if entry.get("lastmod"):
                     doc_lastmod[selected] = str(entry["lastmod"])
                 if shard_is_product or _url_is_product_like(parsed_url.path):
@@ -382,11 +435,16 @@ async def enumerate_sitemap_full(
         categories_added=categories_added,
         lastmod_seen=lastmod_seen,
         lastmod_updated=lastmod_updated,
+        locale=canonical_locale,
+        subfiles_skipped_media=skipped_media,
+        subfiles_skipped_locale=skipped_locale_files,
+        urls_skipped_locale=urls_skipped_locale,
     )
     logger.info(
         "sitemap_enumerate_done marketplace_id=%s raw=%d product_like=%d "
         "inserted=%d duplicates=%d rejected=%d category_like=%d categories_added=%d "
-        "lastmod_seen=%d lastmod_updated=%d duration_ms=%d",
+        "lastmod_seen=%d lastmod_updated=%d locale=%s skipped_media=%d "
+        "skipped_locale_files=%d skipped_locale_urls=%d duration_ms=%d",
         marketplace_id,
         result.raw_urls,
         result.product_like,
@@ -397,6 +455,10 @@ async def enumerate_sitemap_full(
         categories_added,
         lastmod_seen,
         lastmod_updated,
+        canonical_locale,
+        skipped_media,
+        skipped_locale_files,
+        urls_skipped_locale,
         result.duration_ms,
     )
     return result

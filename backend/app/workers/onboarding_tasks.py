@@ -87,7 +87,18 @@ async def _load_marketplace(marketplace_code: str):
         await engine.dispose()
 
 
-async def _resolve_shards(marketplace_code: str) -> tuple[object, list[str]]:
+async def _resolve_shards(
+    marketplace_code: str,
+) -> tuple[object, list[str], str | None]:
+    """(marketplace, sub-sitemaps to shard, locale) — the first index level
+    with media files and other storefront languages already dropped
+    (sitemap_locale): pigu.lt's index carried 406 `ru/` product files and 812
+    image twins beside the 406 `lt/` files the pool is built from."""
+    from app.modules.discovery.sitemap_locale import (
+        canonical_locale_sync,
+        country_language_hint,
+        select_sitemap_subfiles,
+    )
     from app.modules.scraper.scraper_pool import ScraperPool
 
     engine, factory = _make_session_factory()
@@ -101,9 +112,31 @@ async def _resolve_shards(marketplace_code: str) -> tuple[object, list[str]]:
                 )
             ).scalar_one_or_none()
         if marketplace is None:
-            return None, []
+            return None, [], None
         resolved = await ScraperPool().resolve_sitemap_shards(marketplace.base_url)
-        return marketplace, list(resolved.get("shards") or [])
+        shards = list(resolved.get("shards") or [])
+        if not shards:
+            return marketplace, [], None
+        canonical = await asyncio.to_thread(
+            canonical_locale_sync, marketplace.id, marketplace.country_code
+        )
+        selection = select_sitemap_subfiles(
+            shards,
+            canonical,
+            country_language_hint(marketplace.country_code),
+            fallback_to_first=True,
+        )
+        if selection.skipped_media or selection.skipped_locale:
+            slog.info(
+                "sitemap_enumerate_subfiles_filtered",
+                marketplace_code=marketplace_code,
+                subfiles=len(shards),
+                kept=len(selection.kept),
+                skipped_media=selection.skipped_media,
+                skipped_locale=selection.skipped_locale,
+                locale=selection.locale or canonical,
+            )
+        return marketplace, selection.kept, selection.locale or canonical
     finally:
         await engine.dispose()
 
@@ -197,6 +230,8 @@ async def _enumerate(
     explicit_sitemaps: list[str] | None = None,
     write_estimate: bool = True,
     publish_categories: bool = True,
+    canonical_locale: str | None = None,
+    locale_fallback_to_first: bool = False,
 ) -> dict:
     from app.modules.scraper.scraper_pool import ScraperPool
 
@@ -221,6 +256,8 @@ async def _enumerate(
             max_urls=max_urls,
             explicit_sitemaps=explicit_sitemaps,
             publish_categories=publish_categories,
+            canonical_locale=canonical_locale,
+            locale_fallback_to_first=locale_fallback_to_first,
         )
         # Coverage denominator (roadmap item 2): persist the product-like URL
         # count as a LOWER-BOUND catalog estimate — raised, never shrunk, so
@@ -254,11 +291,19 @@ def sitemap_enumerate_marketplace(
     runs inline exactly as before.
     """
     try:
-        marketplace, shards = _run_async(_resolve_shards(marketplace_code))
+        marketplace, shards, locale = _run_async(_resolve_shards(marketplace_code))
         if marketplace is None:
             return {"status": "unknown_marketplace", "code": marketplace_code}
         if len(shards) < 2:
-            summary = _run_async(_enumerate(marketplace_code, max_urls))
+            # Whole-tree walk: it may elect the locale from the index itself.
+            summary = _run_async(
+                _enumerate(
+                    marketplace_code,
+                    max_urls,
+                    canonical_locale=locale,
+                    locale_fallback_to_first=True,
+                )
+            )
             summary.pop("_category_urls", None)
             slog.info("sitemap_enumerate_task_done", **summary)
             return summary
@@ -288,6 +333,7 @@ def sitemap_enumerate_marketplace(
                     "max_urls": per_shard_urls,
                     "run_id": run_id,
                     "shard_no": shard_no,
+                    "locale": locale,
                 },
                 priority=8,
             )
@@ -297,6 +343,7 @@ def sitemap_enumerate_marketplace(
             "shards": len(chunks),
             "subfiles": len(shards),
             "run_id": run_id,
+            "locale": locale,
         }
         slog.info("sitemap_enumerate_sharded", **summary)
         return summary
@@ -318,8 +365,14 @@ def sitemap_enumerate_shard(
     max_urls: int = ENUMERATE_MAX_URLS,
     run_id: str | None = None,
     shard_no: int = 0,
+    locale: str | None = None,
 ) -> dict:
-    """Enumerate ONE shard (subset of sub-sitemaps) of a shop's tree."""
+    """Enumerate ONE shard (subset of sub-sitemaps) of a shop's tree.
+
+    `locale` is the coordinator's choice; shards queued before it existed
+    (None) fall back to the pool's own prefix inside the enumerator and
+    never elect a locale from their own 3 files.
+    """
     try:
         summary = _run_async(
             _enumerate(
@@ -328,6 +381,7 @@ def sitemap_enumerate_shard(
                 explicit_sitemaps=shard_sitemaps,
                 write_estimate=False,
                 publish_categories=run_id is None,
+                canonical_locale=locale,
             )
         )
         shard_categories = summary.pop("_category_urls", [])

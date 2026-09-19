@@ -8,6 +8,7 @@ Data extraction: JSON-LD -> meta -> custom selectors -> auto-detect -> merge
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -766,6 +767,7 @@ class ScraperPool:
         explicit_sitemaps: list[str] | None = None,
         max_subfiles: int | None = None,
         prefetch: int = 3,
+        subfile_selector: Callable[[list[str]], list[str]] | None = None,
     ):
         """Stream (sitemap_url, parsed) per document with bounded prefetch.
 
@@ -775,7 +777,10 @@ class ScraperPool:
         (2026-09-19 enumeration optimisation #5). Nested indexes found in a
         document are queued behind the current pending list, product-named
         shards first. `prefetch` documents are in flight at once — the
-        host throttle still spaces same-host requests.
+        host throttle still spaces same-host requests. `subfile_selector`
+        sees every list of sub-sitemaps before it is queued (the explicit
+        list and each index document's children) and returns the ones to
+        walk — the multi-locale / media filter of sitemap_locale.
         """
         from urllib.parse import urljoin
 
@@ -784,6 +789,8 @@ class ScraperPool:
         subfile_cap = max_subfiles if max_subfiles is not None else SITEMAP_MAX_SUBFILES
         if explicit_sitemaps is not None:
             pending: list[str] = list(explicit_sitemaps)
+            if subfile_selector is not None:
+                pending = list(subfile_selector(pending))
         else:
             pending = []
             robots_url = urljoin(base_url, "/robots.txt")
@@ -834,7 +841,10 @@ class ScraperPool:
             if not content:
                 continue
             parsed = parse_sitemap_xml(content, base_url)
-            for nested in parsed["sitemaps"]:
+            children = list(parsed["sitemaps"])
+            if children and subfile_selector is not None:
+                children = list(subfile_selector(children))
+            for nested in children:
                 if nested not in visited and nested not in in_flight:
                     pending.append(nested)
             pending.sort(key=_sitemap_shard_priority)

@@ -239,6 +239,50 @@ fn category_like_url(url: &str) -> bool {
     sitemap::category_like_url(url)
 }
 
+/// sitemap_locale.url_locale_segment twin.
+#[pyfunction]
+fn url_locale_segment(url: &str) -> Option<String> {
+    sitemap::url_locale_segment(url)
+}
+
+/// sitemap_locale.is_media_sitemap twin.
+#[pyfunction]
+fn is_media_sitemap(url: &str) -> bool {
+    sitemap::is_media_sitemap(url)
+}
+
+/// sitemap_locale.select_sitemap_subfiles twin:
+/// {"kept": [...], "skipped_media": n, "skipped_locale": n, "locale": str|None}.
+#[pyfunction]
+#[pyo3(signature = (urls, canonical=None, country_hint=None, fallback_to_first=false))]
+fn select_sitemap_subfiles<'py>(
+    py: Python<'py>,
+    urls: Vec<String>,
+    canonical: Option<&str>,
+    country_hint: Option<&str>,
+    fallback_to_first: bool,
+) -> PyResult<Bound<'py, PyDict>> {
+    let sel = sitemap::select_sitemap_subfiles(&urls, canonical, country_hint, fallback_to_first);
+    let out = PyDict::new(py);
+    out.set_item("kept", PyList::new(py, &sel.kept)?)?;
+    out.set_item("skipped_media", sel.skipped_media)?;
+    out.set_item("skipped_locale", sel.skipped_locale)?;
+    out.set_item("locale", sel.locale)?;
+    Ok(out)
+}
+
+/// sitemap_locale.dominant_locale twin.
+#[pyfunction]
+fn dominant_locale(urls: Vec<String>, min_share: f64) -> Option<String> {
+    sitemap::dominant_locale(&urls, min_share)
+}
+
+/// sitemap_locale.locale_keep_mask twin.
+#[pyfunction]
+fn locale_keep_mask(urls: Vec<String>, canonical: &str) -> Vec<bool> {
+    sitemap::locale_keep_mask(&urls, canonical)
+}
+
 #[pymodule]
 fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_sitemap_xml, m)?)?;
@@ -246,6 +290,11 @@ fn imperecta_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(url_hashes, m)?)?;
     m.add_function(wrap_pyfunction!(product_like_path, m)?)?;
     m.add_function(wrap_pyfunction!(category_like_url, m)?)?;
+    m.add_function(wrap_pyfunction!(url_locale_segment, m)?)?;
+    m.add_function(wrap_pyfunction!(is_media_sitemap, m)?)?;
+    m.add_function(wrap_pyfunction!(select_sitemap_subfiles, m)?)?;
+    m.add_function(wrap_pyfunction!(dominant_locale, m)?)?;
+    m.add_function(wrap_pyfunction!(locale_keep_mask, m)?)?;
     m.add_function(wrap_pyfunction!(parse_price_text, m)?)?;
     m.add_function(wrap_pyfunction!(parse_currency_symbol, m)?)?;
     m.add_function(wrap_pyfunction!(parse_currency_code, m)?)?;

@@ -33,11 +33,12 @@ class TestShardPriority:
         }
 
 
-def _marketplace(base_url="https://shop.example"):
+def _marketplace(base_url="https://shop.example", country_code=None):
     return SimpleNamespace(
         id=uuid4(),
         base_url=base_url,
         locale=None,
+        country_code=country_code,
         marketplace_code="shop_example",
     )
 
@@ -55,8 +56,14 @@ def _pool_returning(urls, shard=NEUTRAL_SHARD):
     for url, sh in entries:
         by_shard.setdefault(sh, []).append(url)
 
-    async def walk(base_url, *, explicit_sitemaps=None, max_subfiles=None, prefetch=3):
-        for sh, locs in by_shard.items():
+    async def walk(
+        base_url, *, explicit_sitemaps=None, max_subfiles=None, prefetch=3, subfile_selector=None
+    ):
+        shards = list(by_shard)
+        if subfile_selector is not None:
+            shards = list(subfile_selector(shards))
+        for sh in shards:
+            locs = by_shard[sh]
             yield sh, {
                 "sitemaps": [],
                 "urls": list(locs),
@@ -242,3 +249,107 @@ async def test_walk_sitemaps_streams_documents_with_bounded_prefetch(monkeypatch
         "https://s.example/sitemap-blog.xml",
     ]
     assert out[1][1] == ["https://s.example/p/1"]
+
+
+@pytest.mark.asyncio
+class TestMultiLocaleTree:
+    """pigu.lt shape: one product tree per storefront language plus image
+    twins — only the pool's locale is walked, media files never are."""
+
+    LT = "https://shop.example/lt/sitemap-products-1.xml"
+    LT_IMG = "https://shop.example/lt/sitemap-products-images-1.xml"
+    RU = "https://shop.example/ru/sitemap-products-1.xml"
+    RU_IMG = "https://shop.example/ru/sitemap-products-images-1.xml"
+
+    def _pool(self):
+        return _pool_returning(
+            [
+                ("https://shop.example/lt/p/widget-123456", self.LT),
+                ("https://shop.example/lt/p/gadget-234567", self.LT),
+                ("https://shop.example/lt/p/widget-123456", self.LT_IMG),
+                ("https://shop.example/ru/p/widget-123456", self.RU),
+                ("https://shop.example/ru/p/gadget-234567", self.RU),
+                ("https://shop.example/ru/p/widget-123456", self.RU_IMG),
+            ]
+        )
+
+    async def test_pool_locale_wins_and_media_files_are_skipped(self):
+        written = []
+
+        def fake_write(dtos):
+            written.extend(dtos)
+            return PoolWriteResult(inserted=len(dtos), rejected=0)
+
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync", fake_write),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(country_code="LT"), self._pool(), canonical_locale="lt"
+            )
+        assert result.status == "completed"
+        assert result.locale == "lt"
+        assert result.subfiles_skipped_media == 2
+        assert result.subfiles_skipped_locale == 1
+        assert result.inserted == 2
+        assert {dto.fact_listing["external_url"] for dto in written} == {
+            "https://shop.example/lt/p/widget-123456",
+            "https://shop.example/lt/p/gadget-234567",
+        }
+
+    async def test_shard_without_locale_falls_back_to_pool_prefix(self):
+        """Shards queued before the coordinator carried a locale (the 434
+        stuck pigu messages) resolve it from the pool, never from their
+        own files."""
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+            patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
+                  return_value="lt"),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(country_code="LT"), self._pool(),
+                explicit_sitemaps=[self.RU, self.RU_IMG],
+            )
+        assert result.locale == "lt"
+        assert result.inserted == 2  # the stub pool still yields the lt files
+
+    async def test_mixed_locale_urls_inside_one_file_are_filtered(self):
+        urls = [
+            ("https://shop.example/lt/p/widget-123456", PRODUCT_SHARD),
+            ("https://shop.example/ru/p/widget-123456", PRODUCT_SHARD),
+            ("https://shop.example/en/p/widget-123456", PRODUCT_SHARD),
+            ("https://shop.example/p/plain-345678", PRODUCT_SHARD),
+        ]
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(), _pool_returning(urls), canonical_locale="lt"
+            )
+        assert result.urls_skipped_locale == 2
+        assert result.inserted == 2
+
+    async def test_no_locale_known_keeps_everything(self):
+        """A shop with no pool, no country hint and no index-level election
+        must not lose URLs to the filter."""
+        urls = [
+            ("https://shop.example/lt/p/widget-123456", PRODUCT_SHARD),
+            ("https://shop.example/ru/p/widget-123456", PRODUCT_SHARD),
+        ]
+        with (
+            patch.object(sitemap_enumerator, "write_pool_dtos_sync",
+                         lambda dtos: PoolWriteResult(inserted=len(dtos), rejected=0)),
+            patch.object(sitemap_enumerator, "_existing_hashes_sync", return_value={}),
+            patch("app.modules.discovery.sitemap_locale.canonical_locale_sync",
+                  return_value=None),
+        ):
+            result = await sitemap_enumerator.enumerate_sitemap_full(
+                _marketplace(), _pool_returning(urls)
+            )
+        assert result.locale is None
+        assert result.urls_skipped_locale == 0
+        assert result.inserted == 2

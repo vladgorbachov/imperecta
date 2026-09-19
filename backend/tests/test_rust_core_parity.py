@@ -293,3 +293,53 @@ class TestSitemapParity:
 
         monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
         assert ic.category_like_url(url) == sc.category_like(url), url
+
+    LOCALE_URLS = [
+        "https://pigu.lt/lt/sitemap-products-5.xml", "https://pigu.lt/RU/x?y=1",
+        "https://s.example/en-US/p/1", "https://s.example/p/1", "https://s.example/sitemap.xml",
+        "https://s.example", "https://pigu.lt/ru/sitemap-products-images-405.xml",
+        "https://s.example/image_sitemap.xml", "https://s.example/sitemaps/video-1.xml",
+        "https://s.example/sitemap-imagery.xml", "https://s.example/pt_BR/p/2", "x",
+    ]
+
+    @pytest.mark.parametrize("url", LOCALE_URLS)
+    def test_url_locale_segment_and_media(self, url, monkeypatch):
+        from app.modules.discovery import sitemap_locale as sl
+
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        assert ic.url_locale_segment(url) == sl.url_locale_segment(url), url
+        assert ic.is_media_sitemap(url) == sl.is_media_sitemap(url), url
+
+    @pytest.mark.parametrize(
+        ("canonical", "hint", "first"),
+        [("lt", None, False), (None, "RU", False), (None, "et", True), (None, None, False), ("xx", None, True)],
+    )
+    def test_select_sitemap_subfiles(self, canonical, hint, first, monkeypatch):
+        from app.modules.discovery import sitemap_locale as sl
+
+        files = [
+            "https://pigu.lt/lt/sitemap-products-1.xml",
+            "https://pigu.lt/lt/sitemap-products-images-1.xml",
+            "https://pigu.lt/ru/sitemap-products-1.xml",
+            "https://pigu.lt/ru/sitemap-products-images-1.xml",
+            "https://pigu.lt/sitemap-categories.xml",
+        ]
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        py = sl.select_sitemap_subfiles(files, canonical, hint, first)
+        rust = ic.select_sitemap_subfiles(files, canonical, hint, first)
+        assert rust["kept"] == py.kept
+        assert rust["skipped_media"] == py.skipped_media
+        assert rust["skipped_locale"] == py.skipped_locale
+        assert rust["locale"] == py.locale
+
+    def test_dominant_locale_and_keep_mask(self, monkeypatch):
+        from app.modules.discovery import sitemap_locale as sl
+
+        pool = ["https://pigu.lt/lt/p/1", "https://pigu.lt/lt/p/2", "https://pigu.lt/lt/p/3",
+                "https://pigu.lt/lt/p/4", "https://pigu.lt/ru/p/1"]
+        monkeypatch.setenv("EXTRACTOR_ENGINE", "python")
+        for share in (0.5, 0.8, 0.9):
+            assert ic.dominant_locale(pool, share) == sl.dominant_locale(pool, share)
+        assert ic.dominant_locale([], 0.8) == sl.dominant_locale([], 0.8) is None
+        urls = ["https://pigu.lt/lt/p/1", "https://pigu.lt/ru/p/1", "https://pigu.lt/p/1"]
+        assert ic.locale_keep_mask(urls, "LT") == sl.locale_keep_mask(urls, "LT") == [True, False, True]
